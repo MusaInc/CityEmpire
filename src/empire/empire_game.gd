@@ -98,8 +98,10 @@ func _ready() -> void:
 	rig.name = "Rig"
 	player.add_child(rig)
 	rig.set_player(player)
-	rig.apply_look(Shop.look({"face": "face_none", "gloves": "gloves_none", "head": "head_bare", "suit": "sky",
-		"top": "top_long", "pants": "pants_navy", "hero": "hero_ade", "hair": "hair_natural"}))
+	var look := Shop.look({"face": "face_none", "head": "head_bare", "suit": "sky", "top": "top_long",
+		"pants": "pants_navy", "hero": "hero_ade", "hair": "hair_natural"})
+	look["glove"] = look["skin"]  # bare hands (the hero model always wears gloves)
+	rig.apply_look(look)
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
 	add_child(camera)
@@ -510,7 +512,12 @@ func spot_prompt() -> Array:
 			if pid != "":
 				return ["STOCK %s" % String(EmpireData.product(pid)["name"]).to_upper(), true]
 			if not empire.carried.is_empty():
-				return ["NEEDS %s GOODS" % ("CHILLED" if s["fixture"] == "fridge" else String(s["fixture"]).to_upper()), false]
+				var cp: String = empire.carried.units.keys()[0]
+				var where := {"fridge": "A FRIDGE", "shelf": "A SHELF", "coffee": "THE COFFEE MACHINE",
+					"pickmix": "THE PICK & MIX"}.get(String(EmpireData.product(cp).get("fixture", "")), "ANOTHER SPOT") as String
+				if int(s["qty"]) >= int(s["cap"]) and b.can_hold(spot["slot"], cp):
+					return ["THIS SLOT IS FULL", false]
+				return ["%s GOES ON %s" % [String(EmpireData.product(cp)["name"]).to_upper(), where], false]
 			if s["product"] == "":
 				return ["EMPTY SLOT · bring stock", false]
 			return ["PRICE · %s %s" % [EmpireData.product(s["product"])["name"], EmpireData.money(b.price(s["product"]), true)], true]
@@ -714,7 +721,7 @@ func _update_carry_visual() -> void:
 			mi.position = Vector3(0, i * 0.33, 0)
 			mi.rotation.y = 0.08 * float(i % 2) - 0.04
 			carry_node.add_child(mi)
-		rig.set_meta("carry", n > 0)
+		rig.carrying = n > 0
 	carry_node.visible = n > 0 and driving == ""
 	if n > 0:
 		var yaw := rig.global_rotation.y if rig else player.global_rotation.y
@@ -1032,6 +1039,8 @@ func _demo_setup(kind: String) -> void:
 	for pid in order:
 		Stock.transfer(pal, b.backroom, pid, pal.qty(pid))
 	empire.restock_from_backroom(b, 2000)
+	if kind == "carry":
+		Stock.transfer(b.backroom, empire.carried, "cola", 48)
 	if kind == "staff":
 		for c in empire.candidates.duplicate():
 			if c["role"] in ["cashier", "stocker", "cleaner"]:

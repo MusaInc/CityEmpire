@@ -139,6 +139,14 @@ func rebuild() -> void:
 	mi.material_override = _mat("vc")
 	mi.visibility_range_end = 260.0
 	_static.add_child(mi)
+	if _glow != null:
+		var gi := MeshInstance3D.new()
+		gi.name = "Glow"
+		gi.mesh = _glow.commit()
+		gi.material_override = _mat("glow")
+		gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_static.add_child(gi)
+		_glow = null
 	_build_walk_grid()
 	refresh_goods()
 
@@ -780,12 +788,6 @@ var _glow: _Batch
 func _glow_quad(a: Vector3, b: Vector3, c: Color, ceiling := false) -> void:
 	if _glow == null:
 		_glow = _Batch.new()
-		var gi := MeshInstance3D.new()
-		gi.name = "Glow"
-		gi.material_override = _mat("glow")
-		gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_static.add_child(gi)
-		(func(): gi.mesh = _glow.commit(); _glow = null).call_deferred()
 	var lo := a.min(b)
 	var hi := a.max(b)
 	if ceiling or absf(hi.y - lo.y) < 0.001:

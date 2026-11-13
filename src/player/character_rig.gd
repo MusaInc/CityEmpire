@@ -145,6 +145,9 @@ var _bump_k := 0.0         # its strength 0..1
 var _stagger_t := 0.0      # knocked back off a wall on foot (s left)
 var _stagger_n := Vector3.ZERO
 var _press := 0.0          # leaning on a wall, hands flat on it 0..1
+## City Empire: both hands hold a stack of cases in front of the chest.
+var carrying := false
+var _carry := 0.0
 var _press_n := Vector3.ZERO
 var _guard_off := {}       # limb root bone -> [upper offset, ang vel, lower offset, ang vel]
 var _brace := 0.0          # arms coming up before an impact 0..1
@@ -1377,6 +1380,17 @@ func _update_animated(dt: float) -> void:
 			q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(ik[0], react_w)
 			q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(ik[1], react_w)
 		q["head"] = (q["head"] as Quaternion).slerp(_rx(-0.25), react_w * 0.6)  # chin tucks
+	_carry = move_toward(_carry, 1.0 if carrying and not ragdolling else 0.0, dt * 5.0)
+	if _carry > 0.01:
+		# Forearms under the box, hands either side of it, elbows in.
+		var cb := (bones["chest"] as Node3D).global_basis.orthonormalized()
+		var fw := Vector3(_facing.x, 0.0, _facing.z).normalized()
+		for sd in ["l", "r"]:
+			var sgn := -1.0 if sd == "l" else 1.0
+			var d := (fw * 0.78 + Vector3.DOWN * 0.6 - cb.x * sgn * 0.1).normalized()
+			var ik := _two_bone(cb, d, 0.44, Vector3(0.75 * sgn, -0.4, 0.3))
+			q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(ik[0], _carry)
+			q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(ik[1], _carry)
 	# Hip bob (running) – the pelvis rides up and down over the stance leg.
 	(bones["hips"] as Node3D).position.y = lerpf((bones["hips"] as Node3D).position.y,
 		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop, 1.0 - exp(-20.0 * dt))
