@@ -321,7 +321,9 @@ func _process(dt: float) -> void:
 		return
 	if state == "play" and not get_tree().paused:
 		var k := time_scale if driving == "" and floor == null else 1.0
+		var t0 := Time.get_ticks_usec()
 		empire.advance(dt * minutes_per_second * k)
+		_perf_sim += Time.get_ticks_usec() - t0
 	atmosphere.hour = empire.hour()
 	_stream_t -= dt
 	if _stream_t <= 0.0:
@@ -340,6 +342,41 @@ func _process(dt: float) -> void:
 		save_game()
 	_tutorial_step()
 	ui.update_hud()
+	if args.has("perf"):
+		_perf_sample(dt)
+
+
+var _perf_sim := 0
+var _perf := {}
+
+
+## `--perf=<seconds>`: averages over the run, printed at the end (and quit).
+func _perf_sample(dt: float) -> void:
+	if _perf.is_empty():
+		_perf = {"n": 0, "dt": 0.0, "proc": 0.0, "phys": 0.0, "draw": 0.0, "prim": 0.0, "obj": 0.0, "sim": 0, "floor": 0,
+			"cust": 0, "t": 0.0}
+	_perf["t"] = float(_perf["t"]) + dt
+	if float(_perf["t"]) < 3.0:
+		_perf_sim = 0
+		return  # (warm-up)
+	_perf["n"] = int(_perf["n"]) + 1
+	_perf["dt"] = float(_perf["dt"]) + dt
+	_perf["proc"] = float(_perf["proc"]) + Performance.get_monitor(Performance.TIME_PROCESS)
+	_perf["phys"] = float(_perf["phys"]) + Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+	_perf["draw"] = float(_perf["draw"]) + Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+	_perf["prim"] = float(_perf["prim"]) + Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)
+	_perf["obj"] = float(_perf["obj"]) + Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)
+	_perf["sim"] = int(_perf["sim"]) + _perf_sim
+	_perf_sim = 0
+	if floor:
+		_perf["cust"] = int(_perf["cust"]) + floor.customers.size()
+	if float(_perf["t"]) >= float(args["perf"]) + 3.0:
+		var n := maxf(float(_perf["n"]), 1.0)
+		print("PERF frames=%d fps=%.1f process=%.2fms physics=%.2fms draws=%.0f prims=%.0fk objects=%.0f sim=%.3fms customers=%.1f mem=%.0fMB" % [
+			int(n), n / float(_perf["dt"]), float(_perf["proc"]) / n * 1000.0, float(_perf["phys"]) / n * 1000.0,
+			float(_perf["draw"]) / n, float(_perf["prim"]) / n / 1000.0, float(_perf["obj"]) / n,
+			float(_perf["sim"]) / n / 1000.0, float(_perf["cust"]) / n, Performance.get_monitor(Performance.MEMORY_STATIC) / 1e6])
+		get_tree().quit()
 
 
 func _unhandled_input(e: InputEvent) -> void:
