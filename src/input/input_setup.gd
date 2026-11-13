@@ -12,13 +12,24 @@ const BINDINGS := {
 	"look_down": [KEY_DOWN, JOY_AXIS_RIGHT_Y, 1.0],
 	"look_left": [KEY_LEFT, JOY_AXIS_RIGHT_X, -1.0],
 	"look_right": [KEY_RIGHT, JOY_AXIS_RIGHT_X, 1.0],
-	"grapple": [KEY_SPACE, JOY_AXIS_TRIGGER_RIGHT, 1.0],
-	"jump": [KEY_SHIFT, JOY_BUTTON_A],
-	"respawn": [KEY_R, JOY_BUTTON_Y],
-	"gadget": [KEY_E, JOY_BUTTON_X],
-	"interact": [KEY_F, JOY_BUTTON_B],
+	"grapple": [KEY_F12, JOY_BUTTON_MISC1],  # (City Empire: no webs)
+	"jump": [KEY_SPACE, JOY_BUTTON_A],
+	"respawn": [KEY_F9, JOY_BUTTON_PADDLE1],
+	"gadget": [KEY_F11, JOY_BUTTON_PADDLE2],
+	"interact": [KEY_E, JOY_BUTTON_X],
+	"interact_alt": [KEY_F, JOY_BUTTON_Y],
 	"pause": [KEY_ESCAPE, JOY_BUTTON_START],
-	"toggle_debug": [KEY_F3, JOY_BUTTON_BACK],
+	"phone": [KEY_TAB, JOY_BUTTON_BACK],
+	"map": [KEY_M, JOY_BUTTON_DPAD_UP],
+	"toggle_debug": [KEY_F3, JOY_BUTTON_PADDLE3],
+	# Driving (Never Stop's DriveInput reads these).
+	"steer_left": [KEY_A, JOY_AXIS_LEFT_X, -1.0],
+	"steer_right": [KEY_D, JOY_AXIS_LEFT_X, 1.0],
+	"accelerate": [KEY_W, JOY_AXIS_TRIGGER_RIGHT, 1.0],
+	"brake": [KEY_S, JOY_AXIS_TRIGGER_LEFT, 1.0],
+	"handbrake": [KEY_SPACE, JOY_BUTTON_B],
+	"nitro": [KEY_F10, JOY_BUTTON_PADDLE4],
+	"speed_up": [KEY_T, JOY_BUTTON_RIGHT_SHOULDER],
 }
 
 
@@ -45,6 +56,4 @@ func _ready() -> void:
 		# a mouse-button grapple binding would fire the rope on every menu tap.
 		Input.emulate_mouse_from_touch = true
 	else:
-		var mouse := InputEventMouseButton.new()
-		mouse.button_index = MOUSE_BUTTON_LEFT
-		InputMap.action_add_event("grapple", mouse)
+		pass  # (City Empire: no mouse-button grapple)

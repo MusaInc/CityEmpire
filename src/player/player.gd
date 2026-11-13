@@ -82,6 +82,11 @@ var view: Node3D
 ## Optional autopilot (tests / attract mode): object with drive(player, dt) -> Dictionary.
 var bot: Object = null
 var input_enabled := true
+## City Empire: everyday movement. No webs (swing_enabled false), no wall
+## runs, ledge scrambles or long-reach webs; the body still trips, lands
+## and steps up kerbs exactly as in CitySwing.
+var swing_enabled := true
+var everyday := false
 ## Standing in a home (HomeSystem sets it): indoor walking (SwingPhysics Controls.indoors).
 var indoors := false
 ## A scripted move (HomeSystem: window grab/climb/vault) is placing the body:
@@ -257,7 +262,7 @@ func ray_target(from: Vector3, dir: Vector3, length: float) -> Dictionary:
 ## Fires the line at an exact, already validated world point. Re-firing while
 ## attached swaps to the new anchor (immediate reattachment).
 func fire_at(point: Vector3, touch_id := -1) -> void:
-	if stunned:
+	if stunned or not swing_enabled:
 		return
 	if line_state != Line.IDLE:
 		_let_go()
@@ -295,7 +300,7 @@ func _read_input(dt: float) -> Dictionary:
 	# Response curve: most of the stick's travel is a walk-to-jog range, so
 	# walking is easy to hold; only full deflection sprints.
 	# Indoors the curve is gentler: a small push already walks.
-	mv = mv.normalized() * pow(mv.length(), 1.5 if indoors else 2.8) if mv.length() > 0.001 else Vector2.ZERO
+	mv = mv.normalized() * pow(mv.length(), 1.5 if indoors or everyday else 2.8) if mv.length() > 0.001 else Vector2.ZERO
 	var basis := view.global_transform.basis if view else global_transform.basis
 	var fwd := -basis.z
 	fwd.y = 0.0
@@ -306,7 +311,7 @@ func _read_input(dt: float) -> Dictionary:
 	return {
 		"move": (right * mv.x + fwd * mv.y).limit_length(1.0),
 		"aim": -basis.z,
-		"grapple": Input.is_action_pressed("grapple"),
+		"grapple": swing_enabled and Input.is_action_pressed("grapple"),
 		"jump": Input.is_action_just_pressed("jump"),
 		"respawn": Input.is_action_just_pressed("respawn"),
 	}
@@ -328,7 +333,7 @@ func p_eff() -> SwingParams:
 
 func _update_reach(dt: float) -> void:
 	var want := 0.0
-	if controls.human and not is_on_floor() and not stunned:
+	if controls.human and not everyday and not is_on_floor() and not stunned:
 		var h := height_above_ground()
 		var fall := -s.velocity.y
 		want = REACH_MAX_EXTRA * clampf(0.45 * clampf((h - 45.0) / 180.0, 0.0, 1.0)
@@ -606,7 +611,7 @@ func _resolve_contacts(dt: float) -> void:
 		on_street = floor_street
 	# Players: a facade hit at speed (not a head-on knockout) becomes a wall
 	# run that keeps the momentum, as long as the stick isn't pulling away.
-	if controls.human and not stunned and not wall_run and _wr_cool <= 0.0 and wall_n != Vector3.ZERO \
+	if controls.human and not everyday and not stunned and not wall_run and _wr_cool <= 0.0 and wall_n != Vector3.ZERO \
 			and absf(wall_n.y) < 0.3 and worst_into >= params.wall_run_min_speed \
 			and not (worst_into >= params.wall_run_max_speed and wall_ratio >= params.wall_glance_ratio) \
 			and controls.move.length() > 0.3 \
@@ -929,7 +934,7 @@ func _end_wall_run(strong: bool) -> void:
 func _update_wall_run(dt: float, move: Vector3) -> void:
 	_wr_cool = maxf(_wr_cool - dt, 0.0)
 	wall_hold = maxf(wall_hold - dt, 0.0)
-	if not controls.human or stunned or line_state == Line.ATTACHED:
+	if not controls.human or everyday or stunned or line_state == Line.ATTACHED:
 		wall_run = false
 		return
 	var n := Vector3.ZERO

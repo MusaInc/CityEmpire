@@ -504,6 +504,9 @@ static func _parapeted(b: Dictionary) -> bool:
 
 
 static func _has_plinth(b: Dictionary, tier: int) -> bool:
+	# (City Empire: no plinth band across a ground-floor shop's doorway.)
+	if tier == 0 and bool(b.get("apt", {}).get("ground", false)):
+		return false
 	return tier == 0 and _on_ground(b, b["tiers"][0]) and not _glassy(b) and b["kind"] != "bridge"
 
 

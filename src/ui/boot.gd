@@ -28,17 +28,21 @@ func _build_view() -> void:
 	surface.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(surface)
 	var bg := ColorRect.new()
-	bg.color = Color("110D26")
+	bg.color = Color("0f1a22")
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	surface.add_child(bg)
-	var art := TextureRect.new()
-	art.texture = preload("res://assets/brand/splash.png")
-	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	surface.add_child(art)
+	# City Empire wordmark (type only: no CitySwing art).
+	var mark := Label.new()
+	mark.text = "CITY EMPIRE"
+	mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mark.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	mark.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mark.add_theme_font_override("font", preload("res://assets/fonts/outfit_black.ttf"))
+	mark.add_theme_font_size_override("font_size", 72)
+	mark.add_theme_color_override("font_color", Color("f3efe6"))
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	surface.add_child(mark)
 	var box := VBoxContainer.new()
 	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	box.offset_left = -160

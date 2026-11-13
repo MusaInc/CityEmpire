@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="SwingParams" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/physics/swing_params.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+run_speed = 5.6
+run_accel = 26.0
+player_run_speed = 6.4
+player_run_accel = 30.0
+ground_friction = 14.0
+jump_speed = 5.2
+wall_run_min_speed = 99.0
+wall_run_max_speed = 99.0
+ragdoll_impact_speed = 40.0
+ragdoll_fall_speed = 15.0

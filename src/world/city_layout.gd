@@ -93,6 +93,8 @@ var pieces: SetPieces
 var rail: RailNetwork
 ## The five homes (Apartments.place, after everything else is laid out).
 var apartments: Apartments
+## City Empire: shop units and wholesale warehouses cut into ground floors (Premises).
+var premises: Premises
 var roads: CityRoads
 ## The ground (see CityTerrain): the landform on a regular grid.
 var terrain := CityTerrain.new()
@@ -143,6 +145,7 @@ func generate(p_seed := 1207) -> CityLayout:
 	CityInfrastructure.public_spaces(self)
 	_place_plant()
 	apartments = Apartments.place(self)
+	premises = Premises.place(self)
 	# Last: plazas and parks on both shores, clear of the City Loop.
 	var rail_lines: Array = []
 	for ln in rail.lines:
@@ -254,6 +257,7 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 	_traffic()
 	CityInfrastructure.public_spaces(self)
 	_place_plant()
+	premises = Premises.place(self)
 	return self
 
 

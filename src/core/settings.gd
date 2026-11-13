@@ -28,6 +28,11 @@ const VERSION := 3  # bump to migrate saved settings to new defaults
 var haptics := true
 var show_perf := false
 var look_sensitivity := 1.0
+## Driving (Never Stop's DriveInput): pedal response and auto-accelerate.
+var steer_sensitivity := 1.0
+var accelerate := "pedal"
+var steer_mode := "stick"
+var right_mode := "buttons"
 var invert_y := false
 ## "assist": SWING fires at the reticle target. "tap": fire where you touch.
 var aim_mode := "assist"

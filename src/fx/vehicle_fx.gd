@@ -129,7 +129,7 @@ var _rng := RandomNumberGenerator.new()
 func _ready() -> void:
 	var st := get_node_or_null("/root/Settings")
 	if st:
-		debris_budget = st.preset()["debris"]
+		debris_budget = int(st.preset().get("debris", 32))
 	smoke = Pool.new(260, _mat(false, 0.85), self)
 	smoke.drag = 1.6
 	smoke.gravity = -0.6
