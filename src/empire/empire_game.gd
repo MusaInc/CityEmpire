@@ -294,7 +294,7 @@ func _play() -> void:
 	camera.snap()
 	player.input_enabled = driving == ""
 	ui.show_hud()
-	if empire.flags.get("intro_done", false) == false and not args.has("shot") and not args.has("autoplay"):
+	if empire.flags.get("intro_done", false) == false and not args.has("shot") and not args.has("autoplay") and not args.has("perf"):
 		ui.intro()
 	if not DisplayServer.is_touchscreen_available() and not args.has("touch") and not args.has("shot"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
