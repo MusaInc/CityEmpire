@@ -1,0 +1,11 @@
+{
+  "_doc": "Vehicles you can own. body = assets/vehicles/<body>.glb (Never Stop's fleet). cargo = cases carried.",
+  "models": {
+    "hatch":  {"name": "Kestrel Hatch",    "body": "kestrel",   "base": "kestrel", "cargo": 8,  "price": 0,     "top_speed": 34.0, "paint": "#c9c6bd"},
+    "van":    {"name": "Courier Van",      "body": "civ_van",   "base": "civ",     "cargo": 30, "price": 6500,  "top_speed": 30.0, "paint": "#e9e6df"},
+    "box":    {"name": "Box Truck",        "body": "civ_box",   "base": "civ",     "cargo": 80, "price": 19000, "top_speed": 26.0, "paint": "#e9e6df"},
+    "saloon": {"name": "Marlin Saloon",    "body": "marlin",    "base": "marlin",  "cargo": 10, "price": 9500,  "top_speed": 44.0, "paint": "#1a3a7a"}
+  },
+  "service_cost": 80,
+  "wear_per_km": 0.004
+}

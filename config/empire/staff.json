@@ -1,0 +1,20 @@
+{
+  "_doc": "Employee roles. wage = pounds per hour at skill 3 (scaled 0.8..1.25 by skill 1..5). rate = work per hour at skill 3.",
+  "roles": {
+    "cashier":  {"name": "Cashier",        "wage": 9.5, "desc": "Serves the till: customers never wait for you.", "rate": 40},
+    "stocker":  {"name": "Shelf Stacker",  "wage": 9.0, "desc": "Fills shelves from the back room.", "rate": 90},
+    "cleaner":  {"name": "Cleaner",        "wage": 8.5,  "desc": "Keeps the floor spotless.", "rate": 0.35},
+    "manager":  {"name": "Store Manager",  "wage": 14.0, "desc": "Runs the shop when you're away: re-orders stock (delivered), opens and closes, tells you when something's wrong.", "rate": 1},
+    "driver":   {"name": "Delivery Driver","wage": 11.0, "desc": "Collects wholesale orders in a company van: no delivery fee.", "rate": 1}
+  },
+  "traits": {
+    "punctual": {"name": "Punctual",  "effect": "Never late."},
+    "friendly": {"name": "Friendly",  "effect": "+ reputation from every sale they make.", "rep": 0.1},
+    "speedy":   {"name": "Speedy",    "effect": "Works 20% faster.", "speed": 0.2},
+    "careless": {"name": "Careless",  "effect": "Works 15% slower, cheaper.", "speed": -0.15, "wage": -0.1},
+    "honest":   {"name": "Honest",    "effect": "Till always balances."},
+    "ambitious":{"name": "Ambitious", "effect": "Gains skill faster, wants raises.", "growth": 1.0}
+  },
+  "first_names": ["Amara","Ben","Chloe","Dev","Elif","Femi","Grace","Hassan","Isla","Jamal","Kasia","Leo","Maya","Nadia","Owen","Priya","Quinn","Rosa","Sami","Tom","Uma","Viktor","Wren","Yusuf","Zara","Kofi","Ines","Ravi","Sofia","Callum"],
+  "last_names": ["Adeyemi","Brooks","Chen","Doyle","Evans","Farah","Green","Hughes","Iqbal","Jones","Khan","Lewis","Mensah","Novak","Okafor","Patel","Quaye","Rossi","Shah","Taylor","Usman","Vance","Walsh","Young","Zielinski"]
+}

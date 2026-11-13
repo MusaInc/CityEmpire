@@ -1,0 +1,36 @@
+{
+  "_doc": "Industry definitions. A business type lists the fixtures it uses, the product categories it may sell, staff roles, hours and its upgrade tree. Only types with playable=true can be opened; the others are planned on the same architecture.",
+  "types": {
+    "convenience": {
+      "name": "Convenience Shop", "playable": true,
+      "categories": ["snacks", "sweets", "drinks", "groceries", "household", "hot"],
+      "open": 7, "close": 22,
+      "roles": ["cashier", "stocker", "cleaner", "manager", "driver"],
+      "base_fixtures": {"shelf": 3, "fridge": 1, "till": 1},
+      "slot_units": {"shelf": 30, "fridge": 24, "coffee": 60, "pickmix": 80},
+      "slots_per": {"shelf": 6, "fridge": 4, "coffee": 1, "pickmix": 1},
+      "backroom_cases": 24,
+      "utilities": 4.0,
+      "upgrades": ["shelf_2", "fridge_2", "lighting", "signage", "floor", "second_till", "coffee", "pick_mix", "security", "backroom"]
+    },
+    "supermarket": {
+      "name": "Mini Supermarket", "playable": false, "planned": "Bigger premises, trolleys, aisles, self-checkout. Same stock and staff systems."
+    },
+    "takeaway": {"name": "Takeaway", "playable": false, "planned": "Cook-to-order menu from raw ingredients, delivery riders."},
+    "car_wash": {"name": "Car Wash", "playable": false, "planned": "Bays, queue of vehicles from traffic, wash stations."},
+    "warehouse": {"name": "Warehouse", "playable": false, "planned": "Bulk storage, cheaper pallet buying, auto-supply shops with vans."}
+  },
+  "upgrades": {
+    "shelf_2":     {"name": "Extra Shelving",   "cost": 420,  "desc": "Another 6-slot shelf unit.", "adds": {"shelf": 1}, "utilities": 0.0},
+    "fridge_2":    {"name": "Second Drinks Fridge", "cost": 780, "desc": "Four more chilled slots.", "adds": {"fridge": 1}, "utilities": 3.0},
+    "lighting":    {"name": "LED Lighting",     "cost": 350,  "desc": "Brighter, warmer shop. +8% shopper conversion.", "quality": 0.08, "utilities": -1.0},
+    "signage":     {"name": "Illuminated Sign", "cost": 600,  "desc": "People notice you. +18% footfall.", "footfall": 0.18, "utilities": 1.0},
+    "floor":       {"name": "New Flooring",     "cost": 900,  "desc": "Clean modern floor. Gets dirty 30% slower, +6% conversion.", "quality": 0.06, "dirt": -0.3},
+    "second_till": {"name": "Second Till",      "cost": 1100, "desc": "Two queues: half the waiting.", "adds": {"till": 1}, "utilities": 0.5},
+    "coffee":      {"name": "Coffee Machine",   "cost": 1400, "desc": "Sell fresh coffee (made in store, big margin).", "adds": {"coffee": 1}, "utilities": 2.0},
+    "pick_mix":    {"name": "Pick & Mix Wall",  "cost": 950,  "desc": "Customers fill their own sweet bags.", "adds": {"pickmix": 1}},
+    "security":    {"name": "CCTV",             "cost": 500,  "desc": "Shoplifting drops from 3% to 0.5% of shelf stock walking out.", "theft": 0.005},
+    "backroom":    {"name": "Stockroom Racking","cost": 650,  "desc": "Back room holds 24 more cases.", "backroom": 24}
+  },
+  "theft_base": 0.03
+}

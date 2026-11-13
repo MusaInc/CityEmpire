@@ -1,0 +1,33 @@
+{
+  "_doc": "Milestones. stat >= value completes one. Chapters group them; rewards are cash bonuses or reputation.",
+  "chapters": [
+    {"id": "early", "name": "Early Career", "goals": [
+      {"id": "rent_shop",   "text": "Rent your first shop",              "stat": "businesses", "value": 1},
+      {"id": "first_stock", "text": "Buy stock at a wholesaler",          "stat": "cases_bought", "value": 1},
+      {"id": "first_shelf", "text": "Stock a shelf",                      "stat": "units_shelved", "value": 1},
+      {"id": "first_sale",  "text": "Make your first sale",               "stat": "sales", "value": 1},
+      {"id": "first_day",   "text": "Finish a day in profit",             "stat": "profitable_days", "value": 1},
+      {"id": "first_upgr",  "text": "Buy a shop upgrade",                 "stat": "upgrades", "value": 1},
+      {"id": "first_hire",  "text": "Hire your first employee",           "stat": "staff", "value": 1}
+    ]},
+    {"id": "growing", "name": "Growing Business", "goals": [
+      {"id": "rev_2k",      "text": "Take £2,000 in sales",               "stat": "revenue", "value": 2000},
+      {"id": "streak3",     "text": "Three profitable days",              "stat": "profitable_days", "value": 3},
+      {"id": "manager",     "text": "Hire a store manager",               "stat": "managers", "value": 1},
+      {"id": "van",         "text": "Buy a delivery van",                 "stat": "vans", "value": 1},
+      {"id": "second_shop", "text": "Open a second shop",                 "stat": "businesses", "value": 2}
+    ]},
+    {"id": "expansion", "name": "Expansion", "goals": [
+      {"id": "three_shops", "text": "Run three shops",                    "stat": "businesses", "value": 3},
+      {"id": "east_shop",   "text": "Open on the Commercial Island",      "stat": "east_businesses", "value": 1},
+      {"id": "property",    "text": "Buy a property",                     "stat": "properties", "value": 1},
+      {"id": "rev_25k",     "text": "Take £25,000 in sales",              "stat": "revenue", "value": 25000}
+    ]},
+    {"id": "empire", "name": "Business Empire", "goals": [
+      {"id": "net_100k",    "text": "Net worth £100,000",                 "stat": "net_worth", "value": 100000},
+      {"id": "five_shops",  "text": "Run five businesses",                "stat": "businesses", "value": 5},
+      {"id": "both_isles",  "text": "Own premises on both islands",      "stat": "owned_both", "value": 1},
+      {"id": "staff_15",    "text": "Employ 15 people",                   "stat": "staff", "value": 15}
+    ]}
+  ]
+}
