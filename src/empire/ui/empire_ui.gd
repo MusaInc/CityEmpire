@@ -26,6 +26,8 @@ var _prompt_l: Label
 var _prompt_key: Label
 var _carry: Label
 var _strip: Label
+var _strip_panel: PanelContainer
+var _weather_l: Label
 var _drive: Label
 var _toasts: VBoxContainer
 var _floats: Control
@@ -81,20 +83,20 @@ func _build_hud() -> void:
 	mv.add_child(_money)
 	mv.add_child(_company)
 	# Clock (top centre).
-	var c := _hud_panel(Vector2(0, 16), Vector2(190, 56))
-	_anchor(c, 0.5, 0.0, Vector2(-95, 16), Vector2(190, 56))
+	var c := _hud_panel(Vector2(0, 16), Vector2(270, 56))
+	_anchor(c, 0.5, 0.0, Vector2(-135, 16), Vector2(270, 56))
 	var ch := S.hbox(10)
 	c.add_child(ch)
 	_clock = S.label("Mon 07:30", 24, S.PAPER, "bold")
 	_speed = S.label("", 18, S.AMBER, "black")
 	ch.add_child(_clock)
 	ch.add_child(_speed)
-	_strip = S.label("", 16, S.PAPER)
-	_anchor(_strip, 0.5, 0.0, Vector2(-400, 80), Vector2(800, 26))
-	_strip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_strip.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
-	_strip.add_theme_constant_override("outline_size", 6)
-	hud.add_child(_strip)
+	_weather_l = S.label("", 16, S.MUTED, "bold")
+	ch.add_child(_weather_l)
+	# The shop you're in (under the money).
+	_strip_panel = _hud_panel(Vector2(18, 104), Vector2(250, 50))
+	_strip = S.label("", 15, S.PAPER)
+	_strip_panel.add_child(_strip)
 	# Objective (top right).
 	var o := _hud_panel(Vector2(0, 16), Vector2(360, 82))
 	_anchor(o, 1.0, 0.0, Vector2(-442, 16), Vector2(360, 82))
@@ -209,6 +211,7 @@ func update_hud() -> void:
 	_company.text = "Company %s" % EmpireData.money(e.company_cash)
 	_company.add_theme_color_override("font_color", S.RED if e.company_cash < 0.0 else S.MUTED)
 	_clock.text = "%s %s" % [e.weekday(), e.clock_text()]
+	_weather_l.text = String(CityLife.weather_def(e.weather).get("name", ""))
 	_speed.text = "×%d" % int(game.time_scale) if game.time_scale > 1.0 and game.floor == null and game.driving == "" else ""
 	var ob := game.objective()
 	_obj.text = String(ob[0])
@@ -255,11 +258,13 @@ func update_hud() -> void:
 			cap += int(s["cap"])
 		var fill := float(b.shelf_units()) / maxf(cap, 1)
 		var trading := b.open and b.within_hours(e.hour())
-		_strip.text = "%s  ·  %s  ·  ★ %d  ·  shelves %d%%  ·  queue %d  ·  today %s" % [b.name.to_upper(),
+		_strip.text = "%s · %s\n★ %d  ·  shelves %d%%  ·  queue %d  ·  today %s" % [b.name.to_upper(),
 			"OPEN" if trading else "CLOSED", int(b.reputation), int(fill * 100.0),
 			game.floor.queue_length() if game.floor else 0, EmpireData.money(float(b.today["revenue"]))]
+		_strip_panel.visible = true
 	else:
 		_strip.text = ""
+		_strip_panel.visible = false
 	if game.driving != "":
 		var car: Car = game.cars[game.driving]
 		var v := e.vehicle(game.driving)
@@ -455,10 +460,10 @@ func _confirm_new() -> void:
 
 
 func intro() -> void:
-	var v := _open("Welcome to the city", 760, 430)
+	var v := _open("Welcome to the city", 760, 460)
 	var txt := S.label("You've got %s in savings and an old hatchback.\n\nThe little shop on the quay is going cheap. Rent it, " % EmpireData.money(game.empire.personal_cash) \
 		+ "drive to the cash & carry for stock, carry it in, fill the shelves and serve your first customers.\n\n" \
-		+ "Start as the worker. Become the owner. Build the empire.", 19, S.PAPER)
+		+ "The QuikSave chain wants every corner of this city. Grow, hire, buy them out – and drive them out.", 19, S.PAPER)
 	txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	txt.custom_minimum_size = Vector2(700, 0)
 	v.add_child(txt)
@@ -899,8 +904,8 @@ func open_phone(tab := "businesses") -> void:
 	var e := game.empire
 	var v := _open("Phone", 1000, 640)
 	var tabs := S.hbox(8)
-	for t in [["businesses", "Businesses"], ["map", "Map"], ["bank", "Bank"], ["vehicles", "Vehicles"], ["property", "Property"],
-			["goals", "Goals"], ["game", "Game"]]:
+	for t in [["businesses", "Businesses"], ["city", "City"], ["map", "Map"], ["bank", "Bank"], ["vehicles", "Vehicles"],
+			["property", "Property"], ["goals", "Goals"], ["game", "Game"]]:
 		tabs.add_child(S.button(t[1], func(): open_phone(t[0]), t[0] == tab))
 	v.add_child(tabs)
 	match tab:
@@ -937,6 +942,8 @@ func open_phone(tab := "businesses") -> void:
 						game.set_gps(Premises.door_point(u), String(u["shop_name"]))
 						close_panel(true), false, 70)]))
 			v.add_child(_scroll(list, 470))
+		"city":
+			_city_tab(v)
 		"map":
 			var m := EmpireMap.new()
 			m.game = game
@@ -951,6 +958,11 @@ func open_phone(tab := "businesses") -> void:
 			g.add_child(_stat("Stock value", EmpireData.money(e.stock_value())))
 			g.add_child(_stat("Net worth", EmpireData.money(e.net_worth()), S.GREEN))
 			v.add_child(g)
+			if e.day_reports.size() >= 2:
+				var chart := _NetChart.new()
+				chart.reports = e.day_reports
+				chart.custom_minimum_size = Vector2(940, 110)
+				v.add_child(chart)
 			var h := S.hbox(10)
 			for amt: float in [100.0, 500.0, 2000.0]:
 				h.add_child(S.button("Put %s in" % EmpireData.money(amt), func():
@@ -989,7 +1001,7 @@ func open_phone(tab := "businesses") -> void:
 				led.add_child(_row([_fixed("Day %d %02d:%02d" % [int(x["day"]), int(x["min"]) / 60, int(x["min"]) % 60], 130, 14, S.MUTED),
 					_fixed("Company" if x["acct"] == "company" else "Savings", 90, 14, S.MUTED), _fixed(String(x["memo"]), 420, 15),
 					_fixed(EmpireData.money(float(x["amount"]), true), 110, 16, S.GREEN if float(x["amount"]) > 0 else S.PAPER, "bold")]))
-			v.add_child(_scroll(led, 260))
+			v.add_child(_scroll(led, 150 if e.day_reports.size() >= 2 else 260))
 		"vehicles":
 			var list2 := S.vbox(6)
 			for veh in e.vehicles:
@@ -1051,6 +1063,8 @@ func open_phone(tab := "businesses") -> void:
 			v.add_child(_scroll(lp, 470))
 		"goals":
 			var list3 := S.vbox(6)
+			if e.flags.get("won", false):
+				list3.add_child(S.label("EMPIRE COMPLETE · day %d" % int(e.flags.get("won_day", e.day)), 18, S.GREEN, "black"))
 			for ch in EmpireData.chapters():
 				list3.add_child(S.label(String(ch["name"]).to_upper(), 15, S.AMBER, "black"))
 				for gl in ch["goals"]:
@@ -1083,7 +1097,7 @@ static func _short(x: float) -> String:
 
 
 func _settings_panel() -> void:
-	var v := _open("Settings", 640, 420)
+	var v := _open("Settings", 680, 520)
 	var q := S.hbox(10)
 	q.add_child(S.label("Graphics", 18, S.MUTED))
 	for i in 3:
@@ -1108,6 +1122,18 @@ func _settings_panel() -> void:
 		Settings.save()
 		_settings_panel()))
 	v.add_child(hp)
+	for pair in [["Music", "music_volume"], ["Sound", "sfx_volume"]]:
+		var vh := S.hbox(10)
+		vh.add_child(_fixed(pair[0], 150, 18, S.MUTED))
+		for lv: float in [0.0, 0.3, 0.6, 1.0]:
+			var key: String = pair[1]
+			vh.add_child(S.button(["Off", "Low", "Mid", "High"][[0.0, 0.3, 0.6, 1.0].find(lv)], func():
+				Settings.set(key, lv)
+				Settings.save()
+				if game and game.audio:
+					game.audio.apply_volumes()
+				_settings_panel(), is_equal_approx(float(Settings.get(key)), lv), 90))
+		v.add_child(vh)
 	v.add_child(S.label("City Empire saves on this device only. No accounts, no ads, no tracking.", 15, S.MUTED))
 
 
@@ -1125,7 +1151,7 @@ func day_report(r: Dictionary) -> void:
 			tops.append(String(EmpireData.product(pid).get("name", pid)))
 		list.add_child(_row([_fixed(String(br["name"]), 200, 19, S.PAPER, "bold"),
 			_fixed("takings %s" % EmpireData.money(float(br["revenue"])), 150),
-			_fixed("costs %s" % EmpireData.money(float(br["cogs"]) + float(br["wages"]) + float(br["rent"]) + float(br["utilities"]) + float(br["fees"]) + float(br["theft"])), 150, 16, S.MUTED),
+			_fixed("costs %s" % EmpireData.money(float(br["cogs"]) + float(br["wages"]) + float(br["rent"]) + float(br["utilities"]) + float(br["fees"]) + float(br["theft"]) + float(br.get("other", 0.0))), 150, 16, S.MUTED),
 			_fixed(("profit " if pr >= 0 else "loss ") + EmpireData.money(absf(pr)), 160, 19, S.GREEN if pr >= 0 else S.RED, "black"),
 			_fixed("best: " + ", ".join(tops), 240, 14, S.MUTED)]))
 	v.add_child(_scroll(list, 280))
@@ -1134,4 +1160,158 @@ func day_report(r: Dictionary) -> void:
 		S.GREEN if tot >= 0 else S.RED, "black"))
 	if float(r.get("personal", 0.0)) > 0.0:
 		v.add_child(S.label("Rent from tenants: %s" % EmpireData.money(float(r["personal"]), true), 17, S.MUTED))
+	var e := game.empire
+	var today := CityLife.weather_def(e.weather)
+	var fc := CityLife.weather_def(e.forecast)
+	var ev_txt := ""
+	for ev in e.events:
+		if int(ev.get("until", 0)) >= e.day and not ev.get("kind") in ["burglary", "viral"]:
+			ev_txt = "  ·  " + String(ev.get("text", ""))
+	var fl := S.label("Today: %s (then %s)%s" % [today.get("name", ""), fc.get("name", ""), ev_txt], 16, S.AMBER)
+	fl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	fl.custom_minimum_size.x = 840
+	v.add_child(fl)
 	v.add_child(S.button("NEXT DAY", close_panel.bind(true), true, 200))
+
+
+# ----------------------------------------------------------------- city
+func _city_tab(v: VBoxContainer) -> void:
+	var e := game.empire
+	var g := GridContainer.new()
+	g.columns = 3
+	g.add_theme_constant_override("h_separation", 40)
+	var wd := CityLife.weather_def(e.weather)
+	var fd := CityLife.weather_def(e.forecast)
+	g.add_child(_stat("Today", String(wd.get("name", "")), S.AMBER))
+	g.add_child(_stat("Tomorrow", String(fd.get("name", "")), S.MUTED))
+	var rc := CityLife.rival_cfg()
+	g.add_child(_stat(String(rc.get("name", "QuikSave")) + " stores", "gone" if e.flags.get("rival_gone", false) else str(e.rivals.size()),
+		S.GREEN if e.flags.get("rival_gone", false) else S.RED))
+	v.add_child(g)
+	var tip := String(CityLife._weather_tip(e.weather))
+	if tip != "":
+		v.add_child(S.label(tip, 16, S.MUTED))
+	var list := S.vbox(6)
+	if not e.rivals.is_empty():
+		list.add_child(S.label("RIVALS · buy a store out and its regulars become yours", 14, S.RED, "black"))
+		for r in e.rivals:
+			var u: Dictionary = game.unit_by_id.get(r["unit"], {})
+			if u.is_empty():
+				continue
+			var near := 0
+			for b: Business in e.businesses:
+				if CityLife._dist(r["pos"], b.premises.get("pos", [])) < float(EmpireData.economy().get("competition_radius", 140.0)):
+					near += 1
+			list.add_child(_row([_fixed(String(r["name"]), 290, 17, S.PAPER, "bold"),
+				_fixed("near %d of yours" % near if near > 0 else "no shop of yours nearby", 200, 15, S.AMBER if near > 0 else S.MUTED),
+				_fixed(EmpireData.money(CityLife.rival_price(r)), 110, 17, S.PAPER, "bold"),
+				S.button("Buy out", func(): open_rival(u), true, 120),
+				S.button("GPS", func():
+					game.set_gps(Premises.door_point(u), String(r["name"]))
+					close_panel(true), false, 70)]))
+	list.add_child(S.label("NEWS", 14, S.AMBER, "black"))
+	var ns: Array = e.news.duplicate()
+	ns.reverse()
+	for n in ns:
+		var col: Color = {"good": S.GREEN, "warn": S.AMBER, "bad": S.RED}.get(String(n.get("kind", "")), S.MUTED)
+		var l := S.label(String(n.get("text", "")), 16, S.PAPER)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size.x = 760
+		list.add_child(_row([_fixed("Day %d" % int(n.get("day", 0)), 70, 14, col, "bold"), l]))
+	v.add_child(_scroll(list, 400))
+
+
+func open_rival(u: Dictionary) -> void:
+	var e := game.empire
+	var r := CityLife.rival_at(e, u["id"])
+	if r.is_empty():
+		return
+	var rc := CityLife.rival_cfg()
+	var v := _open(String(r["name"]), 760, 440)
+	var d := EmpireData.district(r["district"])
+	v.add_child(S.label("A %s store since day %d  ·  %s  ·  %d m²" % [rc.get("name", "QuikSave"), int(r.get("opened", 1)), d.get("name", ""), int(u.get("size", 0))], 17, S.MUTED))
+	var txt := S.label("Every %s store takes shoppers from shops within %d m. Buy it out and you get the freehold, the fitted shop (empty shelves) and its regulars: it opens as yours at ★ 60.\n\nAfter %d buy-outs the chain stops expanding. Buy every last store and they leave the city." % [
+		rc.get("name", "QuikSave"), int(EmpireData.economy().get("competition_radius", 140.0)), int(rc.get("retreat_after", 3))], 17, S.PAPER)
+	txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	txt.custom_minimum_size.x = 700
+	v.add_child(txt)
+	var price := CityLife.rival_price(r)
+	v.add_child(S.label("Price %s  ·  you have %s + company %s" % [EmpireData.money(price), EmpireData.money(e.personal_cash), EmpireData.money(e.company_cash)], 18, S.AMBER, "bold"))
+	var h := S.hbox(12)
+	var buy := S.button("BUY OUT · %s" % EmpireData.money(price), func():
+		var err := game.buy_out_rival(u)
+		if err != "":
+			toast(err, "bad")
+		else:
+			close_panel(true), true, 320)
+	buy.disabled = not e.can_afford(price)
+	h.add_child(buy)
+	h.add_child(S.button("Not now", close_panel.bind(true), false, 160))
+	v.add_child(h)
+
+
+## Shown once, when every goal is done.
+func victory() -> void:
+	var e := game.empire
+	var v := _open("City Tycoon", 820, 520)
+	var t := S.label("You built the empire.", 34, S.GREEN, "black")
+	v.add_child(t)
+	var txt := S.label("From one rented corner shop and an old hatchback to the biggest name in the city. %s is gone, and every street knows your shops." % CityLife.rival_cfg().get("name", "QuikSave"), 18, S.PAPER)
+	txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	txt.custom_minimum_size.x = 760
+	v.add_child(txt)
+	var g := GridContainer.new()
+	g.columns = 3
+	g.add_theme_constant_override("h_separation", 40)
+	g.add_theme_constant_override("v_separation", 10)
+	g.add_child(_stat("Days", str(e.day)))
+	g.add_child(_stat("Net worth", EmpireData.money(e.net_worth()), S.GREEN))
+	g.add_child(_stat("Businesses", str(e.businesses.size())))
+	g.add_child(_stat("Total takings", EmpireData.money(float(e.stats.get("revenue", 0.0)))))
+	g.add_child(_stat("Customers served", str(int(e.stats.get("sales", 0)))))
+	g.add_child(_stat("Staff", str(int(e.stat("staff")))))
+	v.add_child(g)
+	v.add_child(S.label("The city keeps running: play on as long as you like.", 16, S.MUTED))
+	v.add_child(S.button("KEEP PLAYING", close_panel.bind(true), true, 260))
+
+
+## Net worth over the last days (Bank tab).
+class _NetChart extends Control:
+	var reports: Array = []
+
+	func _draw() -> void:
+		var n := reports.size()
+		if n < 2:
+			return
+		var lo := INF
+		var hi := -INF
+		for r in reports:
+			lo = minf(lo, float(r.get("net_worth", 0.0)))
+			hi = maxf(hi, float(r.get("net_worth", 0.0)))
+		if hi - lo < 1.0:
+			hi = lo + 1.0
+		var w := size.x
+		var h := size.y
+		draw_rect(Rect2(Vector2.ZERO, size), Color(1, 1, 1, 0.04))
+		var pts := PackedVector2Array()
+		for i in n:
+			var x := 10.0 + (w - 20.0) * float(i) / float(n - 1)
+			var y := h - 18.0 - (h - 36.0) * (float(reports[i].get("net_worth", 0.0)) - lo) / (hi - lo)
+			pts.append(Vector2(x, y))
+		var fill := pts.duplicate()
+		fill.append(Vector2(pts[-1].x, h - 18.0))
+		fill.append(Vector2(pts[0].x, h - 18.0))
+		draw_colored_polygon(fill, Color("#39c27f", 0.14))
+		draw_polyline(pts, Color("#39c27f"), 2.5, true)
+		var f := ThemeDB.fallback_font
+		draw_string(f, Vector2(10, 14), "Net worth, last %d days: %s → %s" % [n, EmpireData.money(float(reports[0].get("net_worth", 0.0))),
+			EmpireData.money(float(reports[-1].get("net_worth", 0.0)))], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#9fb0ba"))
+		# Profit bars along the bottom.
+		var pm := 1.0
+		for r in reports:
+			pm = maxf(pm, absf(float(r.get("profit", 0.0))))
+		for i in n:
+			var p := float(reports[i].get("profit", 0.0))
+			var x2 := 10.0 + (w - 20.0) * float(i) / float(n - 1)
+			var bh := 12.0 * absf(p) / pm
+			draw_rect(Rect2(x2 - 2.0, h - 6.0 - (bh if p > 0 else 0.0), 4.0, maxf(bh, 1.0)), Color("#39c27f") if p >= 0 else Color("#ec5a4a"))

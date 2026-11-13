@@ -64,6 +64,7 @@ func _ready() -> void:
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
 	Settings.time_of_day = "empire"   # the Empire's clock drives the sun
+	Settings.weather = "empire"       # and its daily weather the sky (CityLife)
 	Settings.apply()
 	minutes_per_second = float(EmpireData.economy().get("minutes_per_real_second", 1.0))
 	sfx = Sfx.new()
@@ -156,6 +157,8 @@ func _after_start() -> void:
 	if args.has("goto"):
 		var g := String(args["goto"])
 		var u: Dictionary = starter_unit() if g == "start" else (wholesaler(g.get_slice(":", 1)) if g.begins_with("wholesale") else unit_by_id.get(g, {}))
+		if g == "rival" and not empire.rivals.is_empty():
+			u = unit_by_id.get(empire.rivals[0]["unit"], {})
 		if not u.is_empty():
 			var inside := args.has("inside")
 			var p := Premises.door_point(u) + Premises.outward(u) * (-2.5 if inside else 3.0) + Vector3.UP * 1.0
@@ -205,6 +208,21 @@ func _after_start() -> void:
 			var from := o + Vector3(float(v[0]), float(v[1]), float(v[2]))
 			var to := o + Vector3(float(v[3]), float(v[4]), float(v[5]))
 			return [Transform3D(Basis.looking_at(to - from, Vector3.UP if absf((to - from).normalized().y) < 0.99 else Vector3.FORWARD), from), 62.0]
+	if args.has("days"):
+		# Captures: run the economy forward (news, rivals, a net-worth history).
+		for i in int(args["days"]):
+			empire.advance(1440.0)
+		ui.close_panel(true)
+	if args.has("panel"):
+		var pn := String(args["panel"])
+		if pn == "victory":
+			ui.victory()
+		elif pn == "rival" and not empire.rivals.is_empty():
+			ui.open_rival(unit_by_id[empire.rivals[0]["unit"]])
+		elif pn == "report":
+			empire.advance(1440.0 - empire.minute + 1.0)
+		else:
+			ui.open_phone(pn)
 	if args.has("shot"):
 		_capture(String(args["shot"]), float(args.get("shot-at", "4")))
 	if args.has("selftest"):
@@ -218,9 +236,12 @@ func _after_start() -> void:
 # ---------------------------------------------------------------- game
 func new_game() -> void:
 	empire = Empire.new()
+	empire.market = _market()
+	var start := starter_unit()
+	empire.flags["start_unit"] = start["id"]
 	empire.new_game(int(args.get("seed", "1")))
 	_connect_empire()
-	var start := starter_unit()
+	_sync_rivals()
 	var out := Premises.outward(start)
 	var along := Premises.along_dir(start)
 	var door := Premises.door_point(start)
@@ -231,8 +252,44 @@ func new_game() -> void:
 	v["yaw"] = atan2(-along.x, -along.z)
 	_spawn_cars()
 	_teleport(door + out * 3.2 + Vector3.UP * 1.0, atan2(-out.x, -out.z) + PI)
-	empire.flags["start_unit"] = start["id"]
 	_tutorial = 0
+
+
+## The city's shop units as the economy sees them (CityLife's market).
+func _market() -> Array:
+	var m: Array = []
+	for u in units:
+		if u["kind"] == "shop":
+			m.append(Premises.record(u))
+	return m
+
+
+var _rival_sig := ""
+
+
+## Rebuilds the interiors of units whose rival status changed.
+func _sync_rivals() -> void:
+	var ids: Array = []
+	for r in empire.rivals:
+		ids.append(String(r["unit"]))
+	ids.sort()
+	var sig := ",".join(ids)
+	if sig == _rival_sig:
+		return
+	var old := _rival_sig.split(",", false)
+	_rival_sig = sig
+	for id in interiors.keys():
+		if (id in ids) != (id in old):
+			rebuild_interior(id)
+
+
+## Today's sky follows the Empire's weather.
+func _sync_weather() -> void:
+	if args.has("weather"):
+		return
+	var sky := String(CityLife.weather_def(empire.weather).get("sky", "clear"))
+	if atmosphere.weather != sky:
+		atmosphere.set_weather(sky, state != "play")
 
 
 ## The cheapest shop on Westbank: the one you can just afford.
@@ -261,6 +318,10 @@ func _connect_empire() -> void:
 		save_game())
 	empire.sold.connect(func(_b, amt): pass)
 	empire.goal_done.connect(func(_g): Sfx.play("chime", -4.0))
+	empire.won.connect(func():
+		Sfx.play("chime", -2.0)
+		save_game()
+		ui.victory())
 
 
 func _title(_has_save: bool) -> void:
@@ -328,6 +389,8 @@ func _process(dt: float) -> void:
 	_stream_t -= dt
 	if _stream_t <= 0.0:
 		_stream_t = 0.4
+		_sync_weather()
+		_sync_rivals()
 		_stream_interiors()
 		_update_live_floor()
 	if state != "play":
@@ -413,7 +476,7 @@ func _stream_interiors() -> void:
 func _build_interior(u: Dictionary) -> ShopInterior:
 	var si := ShopInterior.new()
 	var b := empire.business_at(u["id"])
-	si.setup(u, b, layout.ground_y)
+	si.setup(u, b, layout.ground_y, CityLife.rival_at(empire, u["id"]) if b == null else {})
 	add_child(si)
 	interiors[u["id"]] = si
 	if u["kind"] == "wholesale":
@@ -437,6 +500,10 @@ func _refresh_signs(unit_id: String) -> void:
 	if si == null:
 		return
 	var b := empire.business_at(unit_id)
+	if not si.rival.is_empty():
+		var h := empire.hour()
+		si.update_signs(h >= 7.0 and h < 23.0)
+		return
 	si.update_signs(b != null and b.open and b.within_hours(empire.hour()))
 
 
@@ -593,6 +660,9 @@ func spot_prompt() -> Array:
 			return ["PICK UP (%d case%s waiting)" % [pal.cases_used(), "" if pal.cases_used() == 1 else "s"], true]
 		"letboard":
 			var u: Dictionary = unit_by_id[spot["unit"]]
+			var rv := CityLife.rival_at(empire, u["id"])
+			if not rv.is_empty():
+				return ["%s · BUY OUT %s" % [String(CityLife.rival_cfg().get("name", "QuikSave")).to_upper(), EmpireData.money(CityLife.rival_price(rv))], true]
 			return ["TO LET · %s/day" % EmpireData.money(float(u["rent"])), true]
 		"home_lift":
 			var home := home_by_id(spot["home"])
@@ -696,7 +766,10 @@ func act() -> void:
 				Sfx.play("pickup", -6.0)
 			si.refresh_goods(pal)
 		"letboard":
-			ui.open_property(unit_by_id[spot["unit"]])
+			if CityLife.is_rival(empire, spot["unit"]):
+				ui.open_rival(unit_by_id[spot["unit"]])
+			else:
+				ui.open_property(unit_by_id[spot["unit"]])
 		"home_lift":
 			if empire.owns_property(spot["home"]):
 				var h: Dictionary = home_by_id(spot["home"])["h"]
@@ -924,6 +997,18 @@ func buy_vehicle(model: String) -> String:
 
 
 # -------------------------------------------------------------- business
+func buy_out_rival(u: Dictionary) -> String:
+	var err: Array = []
+	var b := CityLife.buy_out(empire, Premises.record(u), err)
+	if b == null:
+		return err[0] if not err.is_empty() else "Can't buy it"
+	_sync_rivals()
+	rebuild_interior(u["id"])
+	Sfx.play("cash", -2.0)
+	save_game()
+	return ""
+
+
 func rent_unit(u: Dictionary, buy := false) -> String:
 	var b := empire.buy_premises(Premises.record(u)) if buy else empire.rent_premises(Premises.record(u))
 	if b == null:
@@ -1127,7 +1212,11 @@ func load_game() -> bool:
 		new_game()
 		return false
 	empire = Empire.from_dict(d["empire"])
+	empire.market = _market()
+	if not empire.flags.has("start_unit"):
+		empire.flags["start_unit"] = starter_unit()["id"]
 	_connect_empire()
+	_rival_sig = "?"
 	_spawn_cars()
 	var pp: Array = d.get("player", [])
 	if pp.size() >= 4:

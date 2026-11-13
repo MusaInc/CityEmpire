@@ -26,6 +26,13 @@ const FRIDGE_LEVELS := [0.3, 0.72, 1.14, 1.56]
 
 var unit: Dictionary
 var biz: Business
+## A QuikSave store (CityLife rival record): drawn fully stocked in the
+## chain's red, with no interaction spots (it isn't yours).
+var rival := {}
+## The shop's brand colour: fascia, shelf headers, counter front, wall band.
+var brand := Color(0.15, 0.4, 0.3)
+const BRANDS := [Color(0.13, 0.42, 0.36), Color(0.16, 0.27, 0.5), Color(0.42, 0.2, 0.42), Color(0.2, 0.42, 0.2),
+	Color(0.55, 0.32, 0.12), Color(0.1, 0.38, 0.52)]
 var kind := "shop"        # "shop" | "wholesale"
 var W := 10.0
 var H := 4.2
@@ -66,10 +73,15 @@ static var _shape_meshes := {}
 var lift := 0.0
 
 
-func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable()) -> void:
+func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival := {}) -> void:
 	unit = p_unit
 	biz = p_biz
 	kind = String(unit.get("kind", "shop"))
+	rival = p_rival
+	brand = BRANDS[absi(String(unit.get("id", "")).hash()) % BRANDS.size()]
+	if not rival.is_empty() and biz == null:
+		brand = Color(CityLife.rival_cfg().get("colour", "#d8262f"))
+		biz = rival_display(unit)
 	var sz := Premises.room_size(unit)
 	W = sz.x
 	H = sz.y
@@ -93,6 +105,30 @@ func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable()) -> void
 	transform.origin.y += lift
 	name = "Interior_" + String(unit.get("id", "unit"))
 	rebuild()
+
+
+## A fully stocked, fitted-out stand-in Business for drawing a rival store.
+static func rival_display(u: Dictionary) -> Business:
+	var b := Business.new("rival_" + String(u.get("id", "")), "convenience")
+	b.setup_new(Premises.record(u), 1)
+	for up in ["shelf_2", "fridge_2", "lighting", "signage", "floor"]:
+		b.apply_upgrade(up)
+	b.name = String(CityLife.rival_cfg().get("name", "QuikSave"))
+	var shelf: Array = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == "shelf")
+	var cold: Array = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == "fridge")
+	var si := 0
+	var ci := 0
+	for s: Dictionary in b.slots:
+		var pool: Array = cold if s["fixture"] == "fridge" else shelf
+		if s["fixture"] in ["shelf", "fridge"] and not pool.is_empty():
+			var k := ci if s["fixture"] == "fridge" else si
+			s["product"] = pool[k % pool.size()]
+			s["qty"] = int(s["cap"])
+			if s["fixture"] == "fridge":
+				ci += 1
+			else:
+				si += 1
+	return b
 
 
 ## Room coords (x, depth, y) → local node coords.
@@ -153,7 +189,7 @@ func rebuild() -> void:
 
 # ------------------------------------------------------------- shop
 func _build_shop(st: _Batch) -> void:
-	var wall := Color(0.86, 0.85, 0.8)
+	var wall := Color(0.8, 0.77, 0.71)
 	var trim := Color(0.18, 0.2, 0.22)
 	var floor_style := 1 if biz and biz.has_upgrade("floor") else 0
 	_floor(Color(0.86, 0.85, 0.82) if floor_style == 1 else Color(0.72, 0.7, 0.66), floor_style)
@@ -175,6 +211,7 @@ func _build_shop(st: _Batch) -> void:
 	var cd0 := 1.3
 	var cd1 := 1.3 + 1.25 * tills + 0.4
 	st.box(R(cx0, cd0, 0.0), R(cx1, cd1, 0.98), Color(0.32, 0.22, 0.15))
+	st.box(R(cx0 - 0.02, cd0 + 0.08, 0.12), R(cx0, cd1 - 0.08, 0.86), brand)  # branded counter front
 	st.box(R(cx0 - 0.05, cd0 - 0.05, 0.98), R(cx1 + 0.05, cd1 + 0.05, 1.04), Color(0.9, 0.89, 0.86))
 	_solid(R(cx0, cd0, 0.0), R(cx1, cd1, 1.04))
 	for i in tills:
@@ -192,6 +229,7 @@ func _build_shop(st: _Batch) -> void:
 	st.box(R(W - 0.4, cd0, 0.9), R(W - 0.05, cd1, 2.2), Color(0.25, 0.27, 0.3))
 	# Fixtures.
 	_place_fixtures(st, part_d)
+	_decor(st, part_d, cx0, cd0, cd1)
 	# Back room: racking, office desk, mop.
 	_backroom(st, part_d, dw0, dw1)
 	door_in = R((door.x + door.y) * 0.5, 0.9, 0.0)
@@ -199,12 +237,12 @@ func _build_shop(st: _Batch) -> void:
 	spots.append({"kind": "door", "pos": R((door.x + door.y) * 0.5, 0.55, 0.0), "label": "OPEN / CLOSE"})
 	# Ceiling lights.
 	var bright := 1.25 if biz and biz.has_upgrade("lighting") else 0.85
-	var tint := Color(1.0, 0.95, 0.86) if biz and biz.has_upgrade("lighting") else Color(0.92, 0.95, 1.0)
+	var tint := Color(1.0, 0.93, 0.82) if biz and biz.has_upgrade("lighting") else Color(1.0, 0.97, 0.92)
 	for ix in 2:
 		for iz in 2:
 			var px := W * (0.28 + 0.44 * ix)
 			var pd := part_d * (0.28 + 0.44 * iz)
-			_glow_quad(R(px - 0.6, pd - 0.25, H - 0.02), R(px + 0.6, pd + 0.25, H - 0.02), tint * 1.4, true)
+			_glow_quad(R(px - 0.6, pd - 0.25, H - 0.02), R(px + 0.6, pd + 0.25, H - 0.02), tint * 0.95, true)
 	_light(R(W * 0.35, part_d * 0.4, H - 0.4), tint, bright, maxf(W, D) * 0.9)
 	_light(R(W * 0.68, part_d * 0.7, H - 0.4), tint, bright, maxf(W, D) * 0.9)
 	_light(R(W * 0.5, D - 1.5, H - 0.4), Color(1.0, 0.9, 0.75), 0.5, 5.0)
@@ -220,12 +258,82 @@ func _build_shop(st: _Batch) -> void:
 	spots.append({"kind": "clean", "pos": R(W * 0.4, part_d * 0.55, 0.0), "label": "CLEAN"})
 
 
+## Dressing: a brand band round the walls, posters, an entrance mat, a
+## basket stack and a newspaper stand by the door, a plant, PAY HERE sign.
+func _decor(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float) -> void:
+	var band := brand.lightened(0.05)
+	# Band at 2.4 m on both side walls and the partition.
+	st.box(R(0.03, 0.3, 2.35), R(0.06, part_d, 2.6), band)
+	st.box(R(W - 0.06, 0.3, 2.35), R(W - 0.03, part_d, 2.6), band)
+	st.box(R(0.0, part_d - 0.03, 2.35), R(W, part_d, 2.6), band)
+	# Dado: a darker lower wall that hides scuffs.
+	st.box(R(0.03, 0.3, 0.12), R(0.05, part_d, 0.95), Color(0.62, 0.6, 0.56))
+	st.box(R(W - 0.05, 0.3, 0.12), R(W - 0.03, part_d, 0.95), Color(0.62, 0.6, 0.56))
+	# Posters high on the left wall (above the shelving).
+	var pd := 1.6
+	var pcols := [Color(0.95, 0.75, 0.2), Color(0.9, 0.35, 0.3), Color(0.35, 0.65, 0.95)]
+	var i := 0
+	while pd + 1.0 < part_d - 0.5 and i < 3:
+		st.box(R(0.06, pd, 2.75), R(0.08, pd + 0.9, 3.55), Color(0.96, 0.95, 0.92))
+		st.box(R(0.08, pd + 0.06, 2.95), R(0.09, pd + 0.84, 3.49), pcols[i % pcols.size()])
+		st.box(R(0.08, pd + 0.1, 2.8), R(0.09, pd + 0.8, 2.88), brand)
+		pd += 2.2
+		i += 1
+	# Entrance mat.
+	var mid := (door.x + door.y) * 0.5
+	st.box(R(mid - 0.9, 0.32, 0.0), R(mid + 0.9, 1.4, 0.018), Color(0.14, 0.14, 0.15))
+	st.box(R(mid - 0.75, 0.42, 0.018), R(mid + 0.75, 1.3, 0.022), brand.darkened(0.35))
+	# Basket stack (front-left corner).
+	for k in 5:
+		var y := 0.0 + k * 0.09
+		st.box(R(0.25, 0.45, y), R(0.7, 0.85, y + 0.07), Color(0.85, 0.15, 0.15) if rival.is_empty() else Color(0.95, 0.95, 0.95))
+	_solid(R(0.2, 0.4, 0.0), R(0.75, 0.9, 0.5))
+	# Newspaper stand (left of the door).
+	var nx := door.x - 1.1
+	if nx > 1.0:
+		st.box(R(nx, 0.45, 0.0), R(nx + 0.7, 0.85, 0.7), Color(0.25, 0.27, 0.3))
+		for j in 3:
+			st.box(R(nx + 0.05 + j * 0.22, 0.5, 0.7), R(nx + 0.24 + j * 0.22, 0.8, 0.74),
+				[Color(0.92, 0.92, 0.9), Color(0.95, 0.85, 0.5), Color(0.85, 0.9, 0.95)][j])
+		_solid(R(nx, 0.45, 0.0), R(nx + 0.7, 0.85, 0.75))
+	# A plant in the front-right window corner.
+	var px := W - 0.55
+	st.box(R(px - 0.2, 0.4, 0.0), R(px + 0.2, 0.8, 0.42), Color(0.55, 0.32, 0.2))
+	st.box(R(px - 0.32, 0.28, 0.42), R(px + 0.32, 0.92, 1.05), Color(0.2, 0.45, 0.22))
+	st.box(R(px - 0.2, 0.4, 1.05), R(px + 0.2, 0.8, 1.35), Color(0.25, 0.52, 0.25))
+	_solid(R(px - 0.32, 0.28, 0.0), R(px + 0.32, 0.92, 1.0))
+	# PAY HERE board hanging over the counter.
+	var hd := (cd0 + cd1) * 0.5
+	st.box(R(cx0 - 0.1, hd - 0.7, 2.75), R(cx0 - 0.04, hd + 0.7, 3.15), brand)
+	for e: float in [-0.5, 0.5]:
+		st.box(R(cx0 - 0.08, hd + e - 0.01, 3.15), R(cx0 - 0.06, hd + e + 0.01, H), Color(0.3, 0.3, 0.32))
+	var lab := Label3D.new()
+	lab.text = "PAY HERE"
+	lab.font_size = 56
+	lab.pixel_size = 0.004
+	lab.outline_size = 0
+	lab.shaded = false
+	lab.modulate = Color(1, 1, 1)
+	lab.position = R(cx0 - 0.115, hd, 2.95)
+	lab.rotation.y = -PI * 0.5
+	_static.add_child(lab)
+
+
 func _shell(st: _Batch, wall: Color, trim: Color) -> void:
 	# Side and back walls (inner faces), ceiling.
 	_wall_box(st, -0.05, 0.02, 0.0, D, 0.0, H, wall)
 	_wall_box(st, W - 0.02, W + 0.05, 0.0, D, 0.0, H, wall)
 	_wall_box(st, 0.0, W, D - 0.02, D + 0.05, 0.0, H, wall.darkened(0.06))
-	st.box(R(0.0, 0.0, H - 0.01), R(W, D, H + 0.05), Color(0.93, 0.93, 0.92))
+	st.box(R(0.0, 0.0, H - 0.01), R(W, D, H + 0.05), Color(0.78, 0.78, 0.76))
+	# Suspended-ceiling grid.
+	var gx := 1.2
+	while gx < W:
+		st.box(R(gx - 0.015, 0.3, H - 0.035), R(gx + 0.015, D, H - 0.01), Color(0.55, 0.56, 0.57))
+		gx += 1.2
+	var gz := 1.5
+	while gz < D:
+		st.box(R(0.0, gz - 0.015, H - 0.035), R(W, gz + 0.015, H - 0.01), Color(0.55, 0.56, 0.57))
+		gz += 1.2
 	# Skirting.
 	st.box(R(0.02, 0.0, 0.0), R(0.05, D, 0.12), trim)
 	st.box(R(W - 0.05, 0.0, 0.0), R(W - 0.02, D, 0.12), trim)
@@ -258,7 +366,9 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 	_static.add_child(gi)
 	# Fascia outside above the opening, with the shop's name.
 	var fy := oh + 0.15
-	st.box(R(ox.x - 0.3, -0.32, fy), R(ox.y + 0.3, -0.02, fy + 0.75), Color(0.1, 0.12, 0.16))
+	st.box(R(ox.x - 0.3, -0.32, fy), R(ox.y + 0.3, -0.02, fy + 0.75), Color(0.1, 0.12, 0.16) if biz == null else brand.darkened(0.25))
+	if biz != null:
+		st.box(R(ox.x - 0.3, -0.34, fy - 0.06), R(ox.y + 0.3, -0.02, fy), brand.lightened(0.35))  # trim line
 	_sign = Label3D.new()
 	_sign.text = _sign_text()
 	_sign.font_size = 96
@@ -272,6 +382,8 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 	_sign.width = (ox.y - ox.x) / 0.0045
 	_sign.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_static.add_child(_sign)
+	if not rival.is_empty():
+		_sign.modulate = Color(1.0, 1.0, 1.0)
 	var lit := biz != null and biz.has_upgrade("signage")
 	if lit:
 		_sign_light = OmniLight3D.new()
@@ -301,7 +413,10 @@ func update_signs(trading: bool) -> void:
 	if _sign:
 		_sign.text = _sign_text()
 	if _open_sign:
-		if biz == null:
+		if not rival.is_empty():
+			_open_sign.text = "OPEN" if trading else "CLOSED"
+			_open_sign.modulate = Color(1.0, 0.95, 0.9)
+		elif biz == null:
 			_open_sign.text = "TO LET\n%s / day" % EmpireData.money(float(unit.get("rent", 0)))
 			_open_sign.modulate = Color(1.0, 0.85, 0.3)
 		else:
@@ -402,7 +517,7 @@ func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 				var p1 := o + al * e + Vector3.UP * tall
 				st.box(p0.min(p1) - Vector3(0.025, 0, 0.025) * al.abs(), p0.max(p1) + Vector3(0.025, 0, 0.025) * al.abs(), body_col)
 			# Category header board.
-			st.box(back0 + Vector3.UP * (tall - 0.02) + out * 0.02, back0 + al * BAY + out * 0.06 + Vector3.UP * (tall + 0.22), Color(0.15, 0.4, 0.3))
+			st.box(back0 + Vector3.UP * (tall - 0.02) + out * 0.02, back0 + al * BAY + out * 0.06 + Vector3.UP * (tall + 0.22), brand)
 	_solid(Vector3(lo.x, 0.0, lo.z), Vector3(hi.x, tall, hi.z))
 	placed.append({"kind": k, "unit": u, "origin": o, "along": al, "out": out})
 	# Slots of this fixture.
@@ -955,6 +1070,8 @@ func _nearest_free(c: Vector2i) -> Vector2i:
 ## World-space interaction spots.
 func world_spots() -> Array:
 	var out: Array = []
+	if not rival.is_empty():
+		return out
 	for s in spots:
 		var d: Dictionary = s.duplicate()
 		d["world"] = to_world(s["pos"])

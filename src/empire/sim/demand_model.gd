@@ -18,11 +18,11 @@ extends RefCounted
 ##    small markup loses few sales, a big one loses most (test_economy).
 
 
-static func arrivals_per_hour(b: Business, hour: float, competitors := 0) -> float:
+static func arrivals_per_hour(b: Business, hour: float, competitors := 0, k := 1.0) -> float:
 	var d := b.district()
 	var rep := 0.5 + b.reputation / 100.0
 	var comp := pow(float(EmpireData.economy().get("competition_factor", 0.75)), float(competitors))
-	return float(d.get("footfall", 6.0)) * EmpireData.hour_curve(hour) * rep * (1.0 + b.footfall_bonus()) * comp
+	return float(d.get("footfall", 6.0)) * float(EmpireData.economy().get("footfall_scale", 1.0)) * EmpireData.hour_curve(hour) * rep * (1.0 + b.footfall_bonus()) * comp * k
 
 
 ## Multiplier on what shoppers will pay: upgrades (lighting, floor) and a clean shop.
@@ -30,11 +30,13 @@ static func appeal(b: Business) -> float:
 	return (1.0 + b.quality_bonus()) * (0.82 + 0.18 * clampf(b.cleanliness, 0.0, 1.0))
 
 
-static func make_shopper(b: Business, rng: RandomNumberGenerator) -> Dictionary:
+static func make_shopper(b: Business, rng: RandomNumberGenerator, mix_k := {}) -> Dictionary:
 	var d := b.district()
 	var bk: Dictionary = EmpireData.economy().get("basket", {})
 	var n := rng.randi_range(int(bk.get("min", 1)), int(bk.get("max", 3)))
-	var mix: Dictionary = d.get("mix", {})
+	var mix: Dictionary = (d.get("mix", {}) as Dictionary).duplicate()
+	for c in mix_k:
+		mix[c] = float(mix.get(c, 0.5)) * float(mix_k[c])
 	var allowed: Array = b.type_def().get("categories", [])
 	var wants: Array = []
 	for i in n:

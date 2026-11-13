@@ -65,10 +65,18 @@ func _draw() -> void:
 		elif b:
 			col = EmpireStyle.GREEN
 			label = b.name
+		var rv := CityLife.rival_at(game.empire, u["id"])
+		if not rv.is_empty():
+			col = Color(CityLife.rival_cfg().get("colour", "#d8262f"))
+			label = String(rv["name"])
 		var w := Vector2(float(u["pos"][0]), float(u["pos"][2]))
 		var s := _to_screen(w)
-		draw_circle(s, 7.0 if b or u["kind"] == "wholesale" else 4.5, col)
-		if b or u["kind"] == "wholesale":
+		var big: bool = b != null or u["kind"] == "wholesale" or not rv.is_empty()
+		if not rv.is_empty():
+			draw_rect(Rect2(s - Vector2(6, 6), Vector2(12, 12)), col)
+		else:
+			draw_circle(s, 7.0 if big else 4.5, col)
+		if big:
 			draw_string(f, s + Vector2(10, 5), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.9))
 		_markers.append([s, Premises.door_point(u), label])
 	for vid in game.cars:
@@ -81,6 +89,7 @@ func _draw() -> void:
 	var tri := PackedVector2Array([sp + Vector2(0, -11).rotated(-yaw), sp + Vector2(7, 7).rotated(-yaw), sp + Vector2(-7, 7).rotated(-yaw)])
 	draw_colored_polygon(tri, EmpireStyle.RED)
 	draw_string(f, Vector2(14, size.y - 14), "Westbank — industrial & residential", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, EmpireStyle.MUTED)
+	draw_string(f, Vector2(size.x * 0.5 - 170, size.y - 14), "● yours   ● to let   ● wholesale   ■ QuikSave", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, EmpireStyle.MUTED)
 	draw_string(f, Vector2(size.x - 300, size.y - 14), "Commercial Island", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, EmpireStyle.MUTED)
 	var t := game.gps_target()
 	if t != Vector3.INF:

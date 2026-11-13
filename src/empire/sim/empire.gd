@@ -21,8 +21,9 @@ signal sold(biz_id: String, amount: float)
 signal day_ended(report: Dictionary)
 signal goal_done(goal: Dictionary)
 signal changed
+signal won
 
-const VERSION := 2
+const VERSION := 3
 
 var seed := 1
 var day := 1
@@ -46,6 +47,15 @@ var ledger: Array = []          # recent money movements, newest last
 var log: Array = []             # notifications, newest last
 var day_reports: Array = []     # company-wide day summaries (last 30)
 var flags := {}                 # one-off tutorial / notice flags
+## City life (CityLife): today's weather, tomorrow's forecast, running
+## events, the rival chain's stores and the news feed.
+var weather := "sunny"
+var forecast := "cloudy"
+var events: Array = []
+var rivals: Array = []
+var news: Array = []
+## The city's shop units (set by the game from Premises; not saved).
+var market: Array = []
 
 var rng := RandomNumberGenerator.new()
 var _id_n := 0
@@ -63,9 +73,10 @@ func new_game(p_seed := 1) -> void:
 	company_cash = float(st.get("company_cash", 0.0))
 	stats = {"cases_bought": 0, "units_bought": 0, "units_sold": 0, "units_stolen": 0, "units_shelved": 0,
 		"sales": 0, "revenue": 0.0, "profitable_days": 0, "upgrades": 0, "hires": 0, "km": 0.0,
-		"spent_stock": 0.0, "days": 0}
+		"spent_stock": 0.0, "days": 0, "rivals_bought": 0, "inspections_passed": 0, "best_day": 0.0}
 	candidates = Staff.candidates(day, seed)
 	add_vehicle("hatch", Vector3.ZERO, 0.0)
+	CityLife.start(self)
 
 
 # ----------------------------------------------------------------- time
@@ -103,12 +114,13 @@ func _minute_tick() -> void:
 		_deliver_orders()
 	if int(minute) == 21 * 60 + 5:
 		_manager_reorders()
+	CityLife.minute(self)
 	for b: Business in businesses:
 		_staff_work(b, h)
 		if b.trading(h):
 			# Arrivals this minute: whole part + a random draw on the
 			# fraction (mean exact, and they don't come like clockwork).
-			var lam := DemandModel.arrivals_per_hour(b, h, competitors_near(b)) / 60.0
+			var lam := DemandModel.arrivals_per_hour(b, h, competitors_near(b), CityLife.footfall_k(self, b)) / 60.0
 			var n := int(lam) + (1 if rng.randf() < lam - floorf(lam) else 0)
 			if b.live:
 				b.pending_arrivals += n
@@ -122,7 +134,7 @@ func _minute_tick() -> void:
 # ------------------------------------------------------------- shoppers
 ## A shopper in a shop nobody is watching: browse, take, queue, pay.
 func visit_offscreen(b: Business) -> void:
-	var shopper := DemandModel.make_shopper(b, rng)
+	var shopper := DemandModel.make_shopper(b, rng, CityLife.mix_k(self))
 	var basket := Stock.new(0, "basket")
 	b.today["customers"] = int(b.today["customers"]) + 1
 	var mood := 0.0
@@ -247,6 +259,8 @@ func _staff_work(b: Business, h: float) -> void:
 	if not b.within_hours(h) or not b.open:
 		return
 	for e: Dictionary in b.staff:
+		if e.get("off", false):
+			continue
 		match String(e["role"]):
 			"stocker":
 				var budget := float(EmpireData.role("stocker").get("rate", 90)) * Staff.speed(e) / 60.0
@@ -391,7 +405,7 @@ func _note(text: String, kind := "info") -> void:
 func buy_wholesale(wholesaler: String, order: Dictionary, price_k := 1.0) -> String:
 	var cost := 0.0
 	for pid in order:
-		cost += float(EmpireData.product(pid).get("case_cost", 0.0)) * float(order[pid]) * price_k
+		cost += case_price(pid) * float(order[pid]) * price_k
 	if cost <= 0.0:
 		return "Nothing in the basket"
 	if not pay(cost, "stock", "Wholesale: %d lines" % order.size()):
@@ -402,12 +416,17 @@ func buy_wholesale(wholesaler: String, order: Dictionary, price_k := 1.0) -> Str
 		pallets[wholesaler] = pal
 	for pid in order:
 		var units := int(order[pid]) * EmpireData.case_qty(pid)
-		_receive(pal, pid, units, float(EmpireData.product(pid).get("case_cost", 0.0)) * price_k / EmpireData.case_qty(pid))
+		_receive(pal, pid, units, case_price(pid) * price_k / EmpireData.case_qty(pid))
 		stats["cases_bought"] = int(stats["cases_bought"]) + int(order[pid])
 	stats["spent_stock"] = float(stats["spent_stock"]) + cost
 	_check_goals()
 	changed.emit()
 	return ""
+
+
+## Today's wholesale price of one case (deals and shortages from CityLife).
+func case_price(pid: String) -> float:
+	return float(EmpireData.product(pid).get("case_cost", 0.0)) * CityLife.price_k(self, pid)
 
 
 ## Goods entering the economy at `unit_price`: updates the average cost.
@@ -453,14 +472,17 @@ func order_delivery(b: Business, order: Dictionary, by_manager := false) -> Stri
 		var c := int(order[pid])
 		if c <= 0:
 			continue
-		cost += float(EmpireData.product(pid).get("case_cost", 0.0)) * float(c)
+		cost += case_price(pid) * float(c)
 		units[pid] = c * EmpireData.case_qty(pid)
 	if units.is_empty():
 		return "Nothing to order"
 	var fee := delivery_fee(b)
 	if not pay(cost + fee, "stock", "Delivery order%s" % (" (manager)" if by_manager else ""), b.id):
 		return "Not enough money (%s)" % EmpireData.money(cost + fee, true)
-	b.orders.append({"units": units, "cost": cost, "fee": fee, "due": day + (1 if minute >= 360.0 else 0)})
+	var unit_prices := {}
+	for pid in units:
+		unit_prices[pid] = case_price(pid) / EmpireData.case_qty(pid)
+	b.orders.append({"units": units, "cost": cost, "fee": fee, "due": day + (1 if minute >= 360.0 else 0), "unit_prices": unit_prices})
 	stats["spent_stock"] = float(stats["spent_stock"]) + cost
 	b.today["fees"] = float(b.today["fees"]) + fee
 	changed.emit()
@@ -485,7 +507,7 @@ func _deliver_orders() -> void:
 					var room := b.backroom.room_for(pid)
 					if room < units:
 						b.backroom.case_capacity += Stock.cases_for(pid, units - room)  # stacked in the aisle
-					var cost := float(EmpireData.product(pid).get("case_cost", 0.0)) / EmpireData.case_qty(pid)
+					var cost := float(o.get("unit_prices", {}).get(pid, EmpireData.unit_cost(pid)))
 					_receive(b.backroom, pid, units, cost)
 				_note("Delivery arrived at %s" % b.name, "info")
 			else:
@@ -519,7 +541,7 @@ func _manager_reorders() -> void:
 				var cases := int(ceil(float(cap * 2 - have) / float(EmpireData.case_qty(pid))))
 				var room := b.backroom.room_for(pid) / maxi(EmpireData.case_qty(pid), 1)
 				cases = mini(cases, maxi(room, 1))
-				var c := float(EmpireData.product(pid).get("case_cost", 0.0)) * cases
+				var c := case_price(pid) * cases
 				if c <= budget and cases > 0:
 					order[pid] = cases
 					budget -= c
@@ -553,7 +575,7 @@ func business_at(premises_id: String) -> Business:
 
 ## Rent: three days up front as a deposit (kept) + the daily rent from then on.
 func rent_premises(premises: Dictionary, type_id := "convenience") -> Business:
-	if business_at(premises.get("id", "")) != null:
+	if business_at(premises.get("id", "")) != null or CityLife.is_rival(self, premises.get("id", "")):
 		return null
 	var deposit := float(premises.get("rent", 0.0)) * 3.0
 	if not pay(deposit, "rent", "Deposit: %s" % premises.get("name", "")):
@@ -566,6 +588,8 @@ func rent_premises(premises: Dictionary, type_id := "convenience") -> Business:
 func buy_premises(premises: Dictionary, type_id := "convenience") -> Business:
 	var existing := business_at(premises.get("id", ""))
 	var price := float(premises.get("price", 0.0))
+	if CityLife.is_rival(self, premises.get("id", "")):
+		return null
 	if existing and existing.owned:
 		return null
 	if not pay(price, "property", "Bought %s" % premises.get("name", "")):
@@ -612,7 +636,7 @@ func competitors_near(b: Business) -> int:
 		return 0
 	var me := Vector3(p[0], p[1], p[2])
 	var r := float(EmpireData.economy().get("competition_radius", 140.0))
-	var n := int(b.premises.get("rivals", 0))
+	var n := int(b.premises.get("rivals", 0)) + CityLife.rivals_near(self, b)
 	for o: Business in businesses:
 		if o == b:
 			continue
@@ -765,10 +789,11 @@ func end_day() -> void:
 		_book("company", -float(t["rent"]), "rent", "Rent: %s" % b.name, b.id)
 		_book("company", -float(t["utilities"]), "utilities", "Utilities: %s" % b.name, b.id)
 		var gross := float(t["revenue"]) - float(t["cogs"])
-		var profit := gross - costs - float(t["fees"]) - stolen_cost
+		var other := float(t.get("other", 0.0))
+		var profit := gross - costs - float(t["fees"]) - stolen_cost - other
 		var rep := {"day": day, "biz": b.id, "name": b.name, "revenue": t["revenue"], "cogs": t["cogs"],
 			"gross": gross, "wages": t["wages"], "rent": t["rent"], "utilities": t["utilities"], "fees": t["fees"],
-			"theft": stolen_cost, "profit": profit, "customers": t["customers"], "served": t["served"],
+			"theft": stolen_cost, "other": other, "profit": profit, "customers": t["customers"], "served": t["served"],
 			"stockouts": t["stockouts"], "not_stocked": t["not_stocked"], "too_expensive": t["too_expensive"],
 			"walked_out": t["walked_out"], "reputation": b.reputation, "units": t["units"],
 			"top": _top_products(t["by_product"])}
@@ -806,12 +831,17 @@ func end_day() -> void:
 	if not businesses.is_empty() and float(report["profit"]) > 0.0:
 		stats["profitable_days"] = int(stats["profitable_days"]) + 1
 	stats["days"] = int(stats["days"]) + 1
+	if float(report["profit"]) > float(stats.get("best_day", 0.0)):
+		stats["best_day"] = float(report["profit"])
 	day_reports.append({"day": day, "revenue": report["revenue"], "profit": report["profit"],
 		"company": company_cash, "personal": personal_cash, "net_worth": net_worth()})
 	if day_reports.size() > 30:
 		day_reports = day_reports.slice(day_reports.size() - 30)
 	day += 1
 	candidates = Staff.candidates(day, seed)
+	report["weather"] = weather
+	CityLife.new_day(self)
+	report["tomorrow"] = weather
 	_check_goals()
 	day_ended.emit(report)
 	changed.emit()
@@ -869,6 +899,8 @@ func stat(key: String) -> float:
 			return float(properties.size() + businesses.filter(func(b): return b.owned).size())
 		"net_worth":
 			return net_worth()
+		"rival_gone":
+			return 1.0 if flags.get("rival_gone", false) else 0.0
 		"owned_both":
 			var w := businesses.any(func(b): return b.owned and b.island() == "west")
 			var e := businesses.any(func(b): return b.owned and b.island() == "east")
@@ -885,6 +917,18 @@ func _check_goals() -> void:
 				goals_done.append(g["id"])
 				_note("Goal complete: %s" % g["text"], "good")
 				goal_done.emit(g)
+	if not flags.get("won", false) and all_goals_done():
+		flags["won"] = true
+		flags["won_day"] = day
+		won.emit()
+
+
+func all_goals_done() -> bool:
+	for ch in EmpireData.chapters():
+		for g in ch["goals"]:
+			if not goals_done.has(g["id"]):
+				return false
+	return true
 
 
 ## The chapter you're in and its next open goals (for the HUD objective).
@@ -918,7 +962,8 @@ func to_dict() -> Dictionary:
 		"stats": stats.duplicate(), "goals_done": goals_done.duplicate(), "candidates": candidates.duplicate(true),
 		"ledger": ledger.duplicate(true), "log": log.duplicate(true), "day_reports": day_reports.duplicate(true),
 		"flags": flags.duplicate(), "id_n": _id_n, "rng_state": str(rng.state),
-		"hour_served": _hour_served.duplicate(), "carry": _carry_minutes}
+		"hour_served": _hour_served.duplicate(), "carry": _carry_minutes, "weather": weather, "forecast": forecast,
+		"events": events.duplicate(true), "rivals": rivals.duplicate(true), "news": news.duplicate(true)}
 
 
 static func from_dict(src: Dictionary) -> Empire:
@@ -962,6 +1007,11 @@ static func from_dict(src: Dictionary) -> Empire:
 	e.day_reports = d.get("day_reports", [])
 	e.flags = d.get("flags", {})
 	e._id_n = int(d.get("id_n", 100))
+	e.weather = String(d.get("weather", "cloudy"))
+	e.forecast = String(d.get("forecast", "cloudy"))
+	e.events = d.get("events", [])
+	e.rivals = d.get("rivals", [])
+	e.news = d.get("news", [])
 	if e.candidates.is_empty():
 		e.candidates = Staff.candidates(e.day, e.seed)
 	return e
@@ -979,5 +1029,12 @@ static func migrate(d: Dictionary) -> Dictionary:
 		if not d.has("flags"):
 			d["flags"] = {}
 		v = 2
+	if v < 3:
+		# v3 added city life (weather, events, the rival chain). Older games
+		# start with fair weather and no rivals (they arrive on schedule).
+		for k in ["events", "rivals", "news"]:
+			if not d.has(k):
+				d[k] = []
+		v = 3
 	d["version"] = v
 	return d

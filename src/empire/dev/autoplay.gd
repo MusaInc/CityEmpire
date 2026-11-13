@@ -233,5 +233,23 @@ func _run() -> void:
 	game._end_floor()
 	e2.advance(1440.0 - e2.minute + 1.0)
 	check(b2.history.size() >= 1, "day report written (profit %.2f)" % (float(b2.history[-1]["profit"]) if not b2.history.is_empty() else 0.0))
+	# 12 — city life: weather drives the sky, a rival store can be bought out.
+	game._sync_weather()
+	check(game.atmosphere.weather == String(CityLife.weather_def(e2.weather)["sky"]), "the sky follows today's weather (%s → %s)" % [e2.weather, game.atmosphere.weather])
+	check(not e2.rivals.is_empty(), "QuikSave has stores in the city (%d)" % e2.rivals.size())
+	var rv: Dictionary = e2.rivals[0]
+	var ru: Dictionary = game.unit_by_id[rv["unit"]]
+	await stand_at(Premises.door_point(ru) + Premises.outward(ru) * 1.5)
+	await frames(40)
+	var rsi: ShopInterior = game.interiors.get(rv["unit"])
+	check(rsi != null and not rsi.rival.is_empty() and rsi.world_spots().is_empty(), "the rival store is drawn as QuikSave (no spots)")
+	game._update_spot()
+	check(game.spot.get("kind") == "letboard" and String(game.spot_prompt()[0]).begins_with("QUIKSAVE"), "BUY OUT prompt at its door (%s)" % game.spot_prompt()[0])
+	e2.personal_cash += CityLife.rival_price(rv)
+	check(game.buy_out_rival(ru) == "", "bought it out")
+	var nb := e2.business_at(rv["unit"])
+	await frames(40)
+	var nsi: ShopInterior = game.interiors.get(rv["unit"])
+	check(nb != null and nb.owned and nsi != null and nsi.rival.is_empty() and nsi.biz == nb, "it's ours now, interior rebuilt as our shop")
 	print("AUTOPLAY DONE %d/%d passed" % [checks - fails, checks])
 	get_tree().quit(fails)

@@ -287,7 +287,7 @@ func tills() -> int:
 
 # ------------------------------------------------------------ staff
 func staff_with(role: String) -> Array:
-	return staff.filter(func(e): return e["role"] == role)
+	return staff.filter(func(e): return e["role"] == role and not e.get("off", false))
 
 
 func has_role(role: String) -> bool:
@@ -297,7 +297,8 @@ func has_role(role: String) -> bool:
 func wages_per_hour() -> float:
 	var w := 0.0
 	for e in staff:
-		w += float(e["wage"])
+		if not e.get("off", false):
+			w += float(e["wage"])
 	return w
 
 

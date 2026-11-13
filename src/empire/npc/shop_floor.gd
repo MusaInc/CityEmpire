@@ -92,7 +92,7 @@ func _process(dt: float) -> void:
 
 # ------------------------------------------------------------ customers
 func _spawn_customer() -> void:
-	var shopper := DemandModel.make_shopper(biz, _rng)
+	var shopper := DemandModel.make_shopper(biz, _rng, CityLife.mix_k(empire))
 	biz.today["customers"] = int(biz.today["customers"]) + 1
 	var p := ShopPerson.new(int(shopper["seed"]))
 	p.position = room.door_out + Vector3(_rng.randf_range(-1.2, 1.2), 0.0, _rng.randf_range(0.0, 1.5))
@@ -339,6 +339,8 @@ func sync_staff() -> void:
 	var ids := {}
 	var till_n := 0
 	for e in biz.staff:
+		if e.get("off", false):
+			continue
 		ids[e["id"]] = true
 		if not staff_people.has(e["id"]):
 			var p := ShopPerson.new(int(e.get("look", 7)), true)

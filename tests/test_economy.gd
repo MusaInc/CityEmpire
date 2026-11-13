@@ -202,7 +202,7 @@ func test_full_day_offscreen_conserves_stock_and_books_balance(t) -> void:
 	var profit: float = float(rep["revenue"]) - float(rep["cogs"]) - float(rep["wages"]) - float(rep["rent"]) \
 		- float(rep["utilities"]) - float(rep["fees"]) - float(rep["theft"])
 	t.check(absf(profit - float(rep["profit"])) < 0.01, "report profit = revenue − COGS − costs")
-	t.check(float(rep["wages"]) > 100.0, "a full shift of wages was paid (%.2f)" % float(rep["wages"]))
+	t.check(float(rep["wages"]) > 60.0, "a full shift of wages was paid (%.2f)" % float(rep["wages"]))
 
 
 func test_unattended_shop_without_staff_does_not_trade(t) -> void:
@@ -271,7 +271,7 @@ func test_staff_wages_skill_and_effects(t) -> void:
 	var e := _game()
 	var b := _running_shop(e, false)
 	var st: Dictionary = e.candidates.filter(func(x): return x["role"] == "stocker")[0]
-	t.check(st["wage"] >= 8.0 and st["wage"] <= 14.0, "stocker wage in range (%.2f)" % st["wage"])
+	t.check(st["wage"] >= 4.0 and st["wage"] <= 10.0, "stocker wage in range (%.2f)" % st["wage"])
 	t.check(e.hire(b, st), "hired the stocker")
 	t.check(not e.hire(b, st), "can't hire the same person twice")
 	# Empty the shelves into the back room; the stocker puts it back.

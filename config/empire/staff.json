@@ -1,11 +1,11 @@
 {
   "_doc": "Employee roles. wage = pounds per hour at skill 3 (scaled 0.8..1.25 by skill 1..5). rate = work per hour at skill 3.",
   "roles": {
-    "cashier":  {"name": "Cashier",        "wage": 9.5, "desc": "Serves the till: customers never wait for you.", "rate": 40},
-    "stocker":  {"name": "Shelf Stacker",  "wage": 9.0, "desc": "Fills shelves from the back room.", "rate": 90},
-    "cleaner":  {"name": "Cleaner",        "wage": 8.5,  "desc": "Keeps the floor spotless.", "rate": 0.35},
-    "manager":  {"name": "Store Manager",  "wage": 14.0, "desc": "Runs the shop when you're away: re-orders stock (delivered), opens and closes, tells you when something's wrong.", "rate": 1},
-    "driver":   {"name": "Delivery Driver","wage": 11.0, "desc": "Collects wholesale orders in a company van: no delivery fee.", "rate": 1}
+    "cashier":  {"name": "Cashier",        "wage": 6.5, "desc": "Serves the till: customers never wait for you.", "rate": 40},
+    "stocker":  {"name": "Shelf Stacker",  "wage": 6.0, "desc": "Fills shelves from the back room.", "rate": 90},
+    "cleaner":  {"name": "Cleaner",        "wage": 5.5,  "desc": "Keeps the floor spotless.", "rate": 0.35},
+    "manager":  {"name": "Store Manager",  "wage": 9.5, "desc": "Runs the shop when you're away: re-orders stock (delivered), opens and closes, tells you when something's wrong.", "rate": 1},
+    "driver":   {"name": "Delivery Driver","wage": 7.5, "desc": "Collects wholesale orders in a company van: no delivery fee.", "rate": 1}
   },
   "traits": {
     "punctual": {"name": "Punctual",  "effect": "Never late."},
