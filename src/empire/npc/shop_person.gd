@@ -6,9 +6,9 @@ extends Node3D
 ## A Label3D over the head shows moods ("!" too dear, "?" out of stock, "£"
 ## paying) for a moment.
 
-const MODEL := "res://assets/models/pedestrian.glb"
-static var _mesh: Mesh
-static var _mats := {}
+const MODEL := "res://assets/models/pedestrians.glb"
+static var _meshes: Array = []
+static var _mat: ShaderMaterial
 
 var speed := 1.25
 var path := PackedVector3Array()   # parent-space points
@@ -25,39 +25,39 @@ var face_goal := Vector3.INF       # look at this (parent space) when standing
 var blocked_by: Callable           # (pos) -> bool : someone's in the way
 
 
-static func base_mesh() -> Mesh:
-	if _mesh:
-		return _mesh
+## The four body types (person_0..3), sharing the npc shader material.
+static func meshes() -> Array:
+	if not _meshes.is_empty():
+		return _meshes
 	var scene: PackedScene = load(MODEL)
 	if scene == null:
-		return null
+		return _meshes
 	var inst := scene.instantiate()
-	var found: MeshInstance3D = null
-	for n in inst.find_children("*", "MeshInstance3D", true, false):
-		found = n
-		break
-	if found:
-		_mesh = found.mesh.duplicate()
-		var sh: Shader = load("res://src/empire/npc/npc.gdshader")
-		for i in _mesh.get_surface_count():
-			var src := _mesh.surface_get_material(i)
-			var nm := String(src.resource_name) if src else ""
-			var part: int = {"skin": 1, "pants": 2, "hair": 3, "shirt": 4}.get(nm, 0)
-			if not _mats.has(part):
-				var sm := ShaderMaterial.new()
-				sm.shader = sh
-				sm.set_shader_parameter("part", part)
-				_mats[part] = sm
-			_mesh.surface_set_material(i, _mats[part])
+	var mis := inst.find_children("*", "MeshInstance3D", true, false)
+	mis.sort_custom(func(a, b): return String(a.name) < String(b.name))
+	_mat = ShaderMaterial.new()
+	_mat.shader = load("res://src/empire/npc/npc.gdshader")
+	for mi in mis:
+		var m: Mesh = (mi as MeshInstance3D).mesh.duplicate()
+		m.surface_set_material(0, _mat)
+		_meshes.append(m)
 	inst.free()
-	return _mesh
+	return _meshes
+
+
+static func base_mesh() -> Mesh:
+	var ms := meshes()
+	return ms[0] if not ms.is_empty() else null
 
 
 func _init(seed := 0, staff := false) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
 	_mi = MeshInstance3D.new()
-	_mi.mesh = base_mesh()
+	var ms := meshes()
+	# Staff: the plain body (the apron goes over its top); shoppers any of them.
+	if not ms.is_empty():
+		_mi.mesh = ms[0] if staff else ms[rng.randi() % ms.size()]
 	_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var s := rng.randf_range(0.94, 1.06)
 	_mi.scale = Vector3(s, s * rng.randf_range(0.95, 1.06), s)
@@ -71,8 +71,15 @@ func _init(seed := 0, staff := false) -> void:
 	_mi.set_instance_shader_parameter("skin", skins[rng.randi() % skins.size()])
 	_mi.set_instance_shader_parameter("hair", hairs[rng.randi() % hairs.size()])
 	_mi.set_instance_shader_parameter("trousers", pants[rng.randi() % pants.size()])
-	_mi.set_instance_shader_parameter("shirt", Color.from_hsv(rng.randf(), rng.randf_range(0.2, 0.7), rng.randf_range(0.35, 0.9)))
+	# Tops from a clothing palette (random hues could land on skin tones).
+	var tops := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.12, 0.12), Color(0.16, 0.28, 0.5),
+		Color(0.36, 0.42, 0.3), Color(0.45, 0.45, 0.48), Color(0.62, 0.36, 0.5), Color(0.2, 0.45, 0.48), Color(0.5, 0.2, 0.55),
+		Color(0.85, 0.7, 0.2), Color(0.25, 0.55, 0.75), Color(0.9, 0.45, 0.35)]
+	_mi.set_instance_shader_parameter("shirt", Color(0.92, 0.92, 0.9) if staff else tops[rng.randi() % tops.size()])
 	_mi.set_instance_shader_parameter("apron", 1.0 if staff else 0.0)
+	var accents := [Color(0.45, 0.28, 0.16), Color(0.12, 0.12, 0.14), Color(0.62, 0.15, 0.18), Color(0.85, 0.75, 0.55),
+		Color(0.2, 0.32, 0.55)]
+	_mi.set_instance_shader_parameter("accent", accents[rng.randi() % accents.size()])
 	speed = rng.randf_range(1.05, 1.4) * (1.15 if staff else 1.0)
 	_bubble = Label3D.new()
 	_bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED

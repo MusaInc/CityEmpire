@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cg4h620fbrbjf"
-path="res://.godot/imported/pedestrian.glb-be18999173a455fc8b21994ca04a797d.scn"
+uid="uid://bt86mt72vd4gu"
+path="res://.godot/imported/pedestrians.glb-66e476fd70f5e3b0551da67a26af227a.scn"
 
 [deps]
 
-source_file="res://assets/models/pedestrian.glb"
-dest_files=["res://.godot/imported/pedestrian.glb-be18999173a455fc8b21994ca04a797d.scn"]
+source_file="res://assets/models/pedestrians.glb"
+dest_files=["res://.godot/imported/pedestrians.glb-66e476fd70f5e3b0551da67a26af227a.scn"]
 
 [params]
 

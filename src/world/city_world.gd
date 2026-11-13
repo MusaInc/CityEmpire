@@ -59,6 +59,7 @@ var car_far_meshes: Array[Mesh] = []  # two-box stand-ins (24 tris) for chunks p
 const CAR_NEAR := 260.0
 const CAR_FAR := 520.0
 var walker_mesh: Mesh
+var walker_meshes: Array = []   # one per body type
 var furniture_mat: StandardMaterial3D
 var trains: Trains
 var sea_sky: SeaAndSky   # port ships, boats, helicopter, airliner, gulls (visual only)
@@ -94,6 +95,9 @@ var gen_ms_total := 0.0
 ## own layout (CityLayout.generate_mainland) as a child of the island's.
 var secondary := false
 var mainland: CityWorld
+## The terrain the walkers' ground_height texture was baked from (the
+## island's; the mainland world borrows it).
+var texture_terrain: CityTerrain
 
 
 func _ready() -> void:
@@ -161,6 +165,7 @@ func _ready() -> void:
 	mainland = CityWorld.new()
 	mainland.name = "Mainland"
 	mainland.secondary = true
+	mainland.texture_terrain = layout.terrain
 	# (The island's layout made Westbank's already: the railway crosses to it.)
 	mainland.layout = layout.mainland if layout.mainland else CityLayout.new().generate_mainland(layout.seed)
 	add_child(mainland)
@@ -624,6 +629,21 @@ func _load_mesh(name: String) -> Mesh:
 	return mesh
 
 
+## Every mesh in a model file, in name order (person_0, person_1, …).
+func _load_meshes(name: String) -> Array:
+	var path := MODEL_DIR + name + ".glb"
+	if not ResourceLoader.exists(path):
+		return []
+	var inst := (load(path) as PackedScene).instantiate()
+	var mis := inst.find_children("*", "MeshInstance3D", true, false)
+	mis.sort_custom(func(a, b): return String(a.name) < String(b.name))
+	var out: Array = []
+	for mi in mis:
+		out.append((mi as MeshInstance3D).mesh)
+	inst.free()
+	return out
+
+
 func _load_props() -> void:
 	for k in ["streetlight", "tree", "tree_tall", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
 			"harbour_dome", "beacon", "cathedral_top", "traffic_light", "roof_hut", "cooling_tower"]:
@@ -671,20 +691,17 @@ func _load_props() -> void:
 				cm.surface_set_material(i, sm)
 		car_meshes.append(cm)
 		car_far_meshes.append(_car_far_mesh(cm) if cm else null)
-	var walker := _load_mesh("pedestrian")
-	if walker:
-		walker_mesh = walker.duplicate()
-		var wshader: Shader = load("res://src/world/shaders/pedestrian.gdshader")
-		for i in walker_mesh.get_surface_count():
-			var src := walker_mesh.surface_get_material(i)
-			var sm := ShaderMaterial.new()
-			sm.shader = wshader
-			if src is BaseMaterial3D:
-				sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
-			var nm := String(src.resource_name) if src else ""
-			sm.set_shader_parameter("use_instance_color", nm == "shirt")
-			sm.set_shader_parameter("part", {"skin": 1, "pants": 2, "hair": 3}.get(nm, 0))
-			walker_mesh.surface_set_material(i, sm)
+	# Four body types (tools/blender/build_street.py), one surface each;
+	# pedestrian.gdshader colours and poses them from their UVs.
+	walker_meshes = _load_meshes("pedestrians")
+	if not walker_meshes.is_empty():
+		var wm := ShaderMaterial.new()
+		wm.shader = load("res://src/world/shaders/pedestrian.gdshader")
+		for i in walker_meshes.size():
+			var m: Mesh = walker_meshes[i].duplicate()
+			m.surface_set_material(0, wm)
+			walker_meshes[i] = m
+		walker_mesh = walker_meshes[0]
 	_walk_paths = _pavement_paths()
 	for k in FURNITURE:
 		var fm := _load_mesh(k)
@@ -1668,13 +1685,14 @@ func _pavement_paths() -> Array:
 
 
 func _add_walkers(root: Node3D, key: Vector2i) -> void:
-	if walker_mesh == null or traffic_density <= 0.0:
+	if walker_meshes.is_empty() or traffic_density <= 0.0:
 		return
 	var rect := Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(key) ^ 0x5eed
-	var xf: Array = []
-	var custom: Array = []
+	var groups: Array = []  # per body type: [xf, custom, colour]
+	for i in walker_meshes.size():
+		groups.append([])
 	for path in _walk_paths:
 		var seg := _clip_segment(path[0], path[1], rect)
 		if seg.is_empty():
@@ -1686,30 +1704,52 @@ func _add_walkers(root: Node3D, key: Vector2i) -> void:
 			continue
 		var dir := (s1 - s0) / length
 		var basis := Basis.looking_at(dir, Vector3.UP)
-		var n := int(length / 9.0 * traffic_density + rng.randf())
+		# Pavements on terraced blocks sit at the block's level, not a kerb
+		# above the road the height texture holds: lift linearly along the run.
+		var l0 := _walk_lift(s0)
+		var slope := (_walk_lift(s1) - l0) / length
+		var n := int(length / 7.5 * traffic_density + rng.randf())
 		for i in n:
 			var sc := rng.randf_range(0.9, 1.08)
-			xf.append(Transform3D(basis.scaled(Vector3.ONE * sc), Vector3(s0.x, 0.15, s0.z)))
-			custom.append(Color(rng.randf_range(1.1, 1.6), rng.randf_range(0.0, length), length, 0.0))
-	if xf.is_empty():
-		return
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_colors = true
-	mm.use_custom_data = true
-	mm.mesh = walker_mesh
-	mm.instance_count = xf.size()
-	var items: Array = []
-	for i in xf.size():
-		items.append([xf[i], custom[i], CLOTHES[rng.randi() % CLOTHES.size()]])
-	mm.buffer = _instance_buffer(items)
-	mm.custom_aabb = AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 70.0, CHUNK))  # walks stay in the chunk
-	var mmi := MultiMeshInstance3D.new()
-	mmi.name = "Walkers"
-	mmi.multimesh = mm
-	mmi.visibility_range_end = WALKER_RANGE
-	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	root.add_child(mmi)
+			(groups[rng.randi() % groups.size()] as Array).append([Transform3D(basis.scaled(Vector3.ONE * sc), Vector3(s0.x, l0, s0.z)),
+				Color(rng.randf_range(1.1, 1.6), rng.randf_range(0.0, length), length, slope), CLOTHES[rng.randi() % CLOTHES.size()]])
+		# Now and then two people stopped for a chat, facing each other.
+		if length > 16.0 and rng.randf() < 0.3 * traffic_density:
+			var at := rng.randf_range(4.0, length - 4.0)
+			var side := Vector3(-dir.z, 0.0, dir.x) * rng.randf_range(-0.3, 0.3)
+			var pa := s0 + dir * at + side
+			var pb := pa + dir * 0.85
+			for q in [[pa, basis], [pb, Basis.looking_at(-dir, Vector3.UP)]]:
+				var sc2 := rng.randf_range(0.92, 1.06)
+				(groups[rng.randi() % groups.size()] as Array).append([Transform3D((q[1] as Basis).scaled(Vector3.ONE * sc2), Vector3(q[0].x, _walk_lift(q[0]), q[0].z)),
+					Color(0.0, 0.0, 10.0, 0.0), CLOTHES[rng.randi() % CLOTHES.size()]])
+	for gi in groups.size():
+		var items: Array = groups[gi]
+		if items.is_empty():
+			continue
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.use_custom_data = true
+		mm.mesh = walker_meshes[gi]
+		mm.instance_count = items.size()
+		mm.buffer = _instance_buffer(items)
+		mm.custom_aabb = AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 70.0, CHUNK))  # walks stay in the chunk
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "Walkers%d" % gi
+		mmi.multimesh = mm
+		mmi.visibility_range_end = WALKER_RANGE
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(mmi)
+
+
+## How far the pavement at p stands above what the walkers' height texture
+## gives there (a kerb, a terraced block's level – and on Westbank, which the
+## texture doesn't cover, the whole difference from its clamped edge).
+func _walk_lift(p: Vector3) -> float:
+	var T := texture_terrain if texture_terrain else layout.terrain
+	var lift := layout.ground_y(p.x, p.z) - T.road_y(p.x, p.z)
+	return clampf(lift, -40.0, 40.0) if not is_nan(lift) else 0.15
 
 
 ## Cars parked along both kerbs of the ordinary streets (not the avenues,

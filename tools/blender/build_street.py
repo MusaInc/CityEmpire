@@ -25,7 +25,7 @@ from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(__file__))
 import build_kit as kit  # noqa: E402  (helpers only; its __main__ doesn't run)
-from build_kit import box, cyl, export, join, mat, new_obj, reset, sphere  # noqa: E402
+from build_kit import box, cyl, dome, export, join, mat, new_obj, reset, sphere  # noqa: E402
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = ARGS[0] if ARGS else "assets/models"
@@ -43,32 +43,114 @@ def tapered(name, r0, r1, z0, z1, x, y, material, segs=8, sx=1.0, sy=1.0, cap=Fa
 
 
 # ------------------------------------------------------------ pedestrian
+# Four body types (pedestrians.glb: objects person_0..3), each ONE surface:
+# UV.x = what it is (+ 0.5; PART: shoes 0, skin 1, legs 2, hair 3, top 4,
+# eyes 5, accent 6, tights 7) so the shaders colour it per person (vertex
+# COLOR stays free for the MultiMesh instance colour), and UV.y tags
+# the limb (+ 0.5) so they pose whole limbs round the hip / knee / shoulder /
+# elbow instead of shearing by position:
+#   0 body (static), 1 left leg, 2 right leg, 3 left arm, 4 right arm, 5 head.
+BODY, LEG_L, LEG_R, ARM_L, ARM_R, HEAD = range(6)
+PART = {"skin": 1, "shirt": 4, "pants": 2, "hair": 3, "shoes": 0, "eyes": 5, "accent": 6, "tights": 7}
+
+
+def tag(ob, variant, limb, smooth_shade=True):
+    me = ob.data
+    if not me.uv_layers:
+        me.uv_layers.new(name="UVMap")
+    part = PART[me.materials[0].name] if me.materials else 0
+    uv = me.uv_layers[0].data
+    for i in range(len(uv)):
+        uv[i].uv = (part + 0.5, limb + 0.5)
+    for poly in me.polygons:
+        poly.use_smooth = smooth_shade
+    me.materials.clear()
+    me.materials.append(_body_mat())
+    return ob
+
+
+def _body_mat():
+    return mat("person", (1.0, 1.0, 1.0), 0.7)
+
+
+def person(v, m):
+    """One body type. v: 0 casual man, 1 man in a long coat, 2 woman in a
+    skirt, 3 woman in trousers with a backpack."""
+    p = []
+
+    def add(ob, limb, smooth_shade=True):
+        p.append(tag(ob, v, limb, smooth_shade))
+
+    woman = v in (2, 3)
+    sh = 0.165 if woman else 0.19      # shoulder half-width
+    ax = 0.215 if woman else 0.235     # arm line
+    for side, sx in ((LEG_L, -0.09), (LEG_R, 0.09)):
+        legm = m["tights"] if v == 2 else m["pants"]
+        add(tapered("thigh", 0.085 if not woman else 0.078, 0.066, 0.47, 0.92, sx, 0.0, legm, 8), side)
+        add(tapered("shin", 0.064, 0.046, 0.09, 0.48, sx, 0.0, legm, 8), side)
+        add(sphere("knee", 0.066, (sx, 0.0, 0.475), legm, 8, 4), side)
+        add(box("shoe", (0.1, 0.26, 0.085), (sx, 0.045, 0.045), m["shoes"], bevel=0.035, segs=2), side, False)
+    add(tapered("pelvis", 0.15 if not woman else 0.155, 0.16, 0.8, 0.98, 0, 0, m["pants"] if v != 2 else m["shirt"], 10, sy=0.72, cap=True), BODY)
+    if v == 2:
+        # A-line skirt over the thighs.
+        add(tapered("skirt", 0.22, 0.155, 0.58, 0.98, 0, 0, m["pants"], 12, sy=0.8, cap=False), BODY)
+    if v == 1:
+        # Long coat: tails over the thighs, collar.
+        add(tapered("coat_tail", 0.215, 0.17, 0.6, 0.98, 0, 0, m["shirt"], 12, sy=0.78, cap=False), BODY)
+    waist = 0.135 if woman else 0.155
+    add(tapered("waist", waist, sh - 0.005, 0.96, 1.25, 0, 0, m["shirt"], 10, sy=0.66), BODY)
+    add(tapered("chest", sh - 0.005, sh - 0.025, 1.24, 1.44, 0, 0, m["shirt"], 10, sy=0.66, cap=True), BODY)
+    if woman:
+        add(sphere("bust", 0.1, (0, 0.045, 1.3), m["shirt"], 10, 6, scale=(1.35, 0.55, 0.65)), BODY)
+    if v == 1:
+        add(tapered("scarf", 0.075, 0.07, 1.4, 1.5, 0, 0, m["accent"], 12, cap=True), BODY)
+    for side, k in ((ARM_L, -1), (ARM_R, 1)):
+        add(sphere("shoulder", 0.072 if not woman else 0.062, (k * (sh + 0.0), 0, 1.385), m["shirt"], 10, 6), side)
+        add(tapered("upper_arm", 0.052 if not woman else 0.045, 0.043, 1.12, 1.41, k * ax, 0.0, m["shirt"], 8), side)
+        sleeve = m["skin"] if v == 0 else m["shirt"]
+        add(tapered("forearm", 0.042 if not woman else 0.037, 0.033, 0.885, 1.13, k * ax, 0.01, sleeve, 8), side)
+        add(sphere("elbow", 0.044 if not woman else 0.039, (k * ax, 0.005, 1.125), sleeve, 8, 4), side)
+        add(sphere("hand", 0.043, (k * ax, 0.012, 0.85), m["skin"], 10, 6, scale=(0.75, 1.0, 1.35)), side)
+    add(tapered("neck", 0.05 if not woman else 0.044, 0.046, 1.42, 1.56, 0, 0, m["skin"], 10), HEAD)
+    add(sphere("head", 0.104, (0, 0.012, 1.645), m["skin"], 12, 8, scale=(0.86, 0.98, 1.1)), HEAD)
+    add(sphere("nose", 0.022, (0, 0.105, 1.632), m["skin"], 6, 4, scale=(0.8, 1.0, 1.2)), HEAD)
+    for k in (-1, 1):
+        add(sphere("ear", 0.022, (k * 0.09, 0.0, 1.645), m["skin"], 6, 4, scale=(0.5, 1.0, 1.3)), HEAD)
+        add(sphere("eye", 0.011, (k * 0.034, 0.094, 1.665), m["eyes"], 6, 4), HEAD)
+    if v == 0:
+        add(sphere("hair", 0.111, (0, -0.008, 1.67), m["hair"], 12, 6, scale=(0.93, 1.0, 0.86)), HEAD)
+    elif v == 1:
+        add(dome("beanie", 0.112, (0, -0.005, 1.68), m["accent"], 12, 4, 0.95), HEAD)
+        add(tapered("beanie_rim", 0.113, 0.113, 1.665, 1.71, 0, -0.005, m["accent"], 12, sx=0.93), HEAD)
+    elif v == 2:
+        # Long hair falling to the shoulder blades.
+        add(sphere("hair", 0.115, (0, -0.012, 1.675), m["hair"], 12, 6, scale=(0.95, 1.02, 0.9)), HEAD)
+        add(tapered("hair_back", 0.1, 0.085, 1.3, 1.66, 0, -0.06, m["hair"], 12, sy=0.55, cap=True), HEAD)
+        add(box("bag", (0.06, 0.2, 0.17), (-0.27, 0.0, 0.92), m["accent"], bevel=0.02, segs=1), BODY, False)
+        add(box("strap", (0.012, 0.02, 0.62), (-0.2, 0.0, 1.17), m["accent"]), BODY, False)
+    else:
+        add(sphere("hair", 0.113, (0, -0.01, 1.675), m["hair"], 12, 6, scale=(0.94, 1.0, 0.88)), HEAD)
+        add(sphere("ponytail", 0.05, (0, -0.12, 1.6), m["hair"], 10, 6, scale=(0.8, 1.0, 1.9)), HEAD)
+        add(box("backpack", (0.26, 0.13, 0.32), (0, -0.16, 1.18), m["accent"], bevel=0.03, segs=2), BODY, False)
+    return p
+
+
 def pedestrian():
     reset()
-    skin = mat("skin", (0.62, 0.45, 0.36), 0.7)
-    shirt = mat("shirt", (1.0, 1.0, 1.0), 0.8)
-    pants = mat("pants", (0.17, 0.19, 0.25), 0.85)
-    hair = mat("hair", (0.12, 0.09, 0.07), 0.9)
-    shoes = mat("shoes", (0.1, 0.1, 0.1), 0.6)
-    p = []
-    for sx in (-0.095, 0.095):
-        # Thigh + shin taper; slight gap between the legs.
-        p.append(tapered("thigh", 0.082, 0.07, 0.46, 0.9, sx, 0.0, pants, 5))
-        p.append(tapered("shin", 0.066, 0.05, 0.08, 0.47, sx, 0.0, pants, 5))
-        p.append(box("shoe", (0.11, 0.25, 0.085), (sx, 0.045, 0.045), shoes, bevel=0.025, segs=1))
-    p.append(tapered("pelvis", 0.15, 0.16, 0.8, 0.95, 0, 0, pants, 8, sy=0.7, cap=True))
-    # Torso: narrow waist widening to the shoulders, flattened front-to-back.
-    p.append(tapered("waist", 0.15, 0.185, 0.94, 1.22, 0, 0, shirt, 8, sy=0.68))
-    p.append(tapered("chest", 0.185, 0.17, 1.22, 1.44, 0, 0, shirt, 8, sy=0.68, cap=True))
-    for sx in (-1, 1):
-        p.append(box("shoulder", (0.12, 0.14, 0.1), (sx * 0.19, 0, 1.39), shirt))
-        p.append(tapered("upper_arm", 0.052, 0.045, 1.13, 1.42, sx * 0.235, 0.0, shirt, 6))
-        p.append(tapered("forearm", 0.043, 0.036, 0.9, 1.14, sx * 0.24, 0.01, skin if sx > 0 else shirt, 6))
-        p.append(box("hand", (0.06, 0.08, 0.1), (sx * 0.24, 0.01, 0.85), skin))
-    p.append(tapered("neck", 0.05, 0.045, 1.43, 1.54, 0, 0, skin, 6))
-    p.append(sphere("head", 0.105, (0, 0.012, 1.64), skin, 7, 5, scale=(0.88, 1.0, 1.1)))
-    p.append(sphere("hair", 0.112, (0, -0.012, 1.68), hair, 7, 3, scale=(0.94, 1.0, 0.82)))
-    export("pedestrian.glb", [join("pedestrian", p)])
+    m = {
+        "skin": mat("skin", (0.62, 0.45, 0.36), 0.6),
+        "shirt": mat("shirt", (1.0, 1.0, 1.0), 0.8),
+        "pants": mat("pants", (0.17, 0.19, 0.25), 0.85),
+        "hair": mat("hair", (0.12, 0.09, 0.07), 0.7),
+        "shoes": mat("shoes", (0.1, 0.1, 0.1), 0.5),
+        "tights": mat("tights", (0.1, 0.1, 0.1), 0.5),
+        "eyes": mat("eyes", (0.05, 0.04, 0.04), 0.3),
+        "accent": mat("accent", (0.45, 0.28, 0.16), 0.6),
+    }
+    people = []
+    for v in range(4):
+        people.append(join("person_%d" % v, person(v, m)))
+    export("pedestrians.glb", people)
 
 
 # ------------------------------------------------------------------ trees
@@ -223,7 +305,7 @@ def planter():
 def preview(path):
     """Workbench lineup of everything built here."""
     reset()
-    files = ["pedestrian", "tree", "tree_tall", "bench", "bin", "hydrant", "bollard", "sign_post",
+    files = ["pedestrians", "tree", "tree_tall", "bench", "bin", "hydrant", "bollard", "sign_post",
              "bus_shelter", "planter"]
     x = 0.0
     for f in files:
