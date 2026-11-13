@@ -203,7 +203,33 @@ func _run() -> void:
 	var b2 := e2.business_at(start["id"])
 	check(b2 != null and b2.has_upgrade("lighting") and b2.has_role("cashier"), "reloaded: business, upgrade, staff")
 	check(e2.total_units() == units_before and is_equal_approx(float(b2.lifetime["revenue"]), rev), "reloaded: stock %d, takings %.2f" % [e2.total_units(), rev])
-	# 10 — the day closes.
+	# 10 — buy a home, take the lift up, sleep.
+	var homes := game.homes()
+	check(homes.size() == 5, "five homes for sale (%d)" % homes.size())
+	var studio: Dictionary = homes[0]
+	await stand_at(game.home_lift(studio))
+	check(game.spot.get("kind") == "home_lift", "FOR SALE prompt at the tower door (%s)" % game.spot.get("kind"))
+	e2.personal_cash += float(studio["price"])
+	var rec := studio.duplicate()
+	rec.erase("h")
+	check(e2.buy_property(rec), "bought %s" % studio["name"])
+	game._update_spot()
+	game.act()
+	await frames(10)
+	var up := Apartments.spawn_point(studio["h"])
+	check(game.player.global_position.distance_to(up) < 1.5, "the lift took us up %d m" % int(studio["floor"]))
+	game._update_spot()
+	var bed := {}
+	for sp in HomeInteriors.spots.get(String(studio["h"]["id"]), []):
+		if sp["kind"] == "bed":
+			bed = sp
+	if not bed.is_empty():
+		await stand_at(bed["pos"])
+		check(game.spot.get("kind") == "home_bed", "SLEEP prompt at the bed (%s)" % game.spot.get("kind"))
+		var d0 := e2.day
+		game.act()
+		check(e2.day == d0 + 1 and absf(e2.minute - 420.0) < 2.0, "slept till 07:00 next day (day %d %s)" % [e2.day, e2.clock_text()])
+	# 11 — the day closes.
 	game._end_floor()
 	e2.advance(1440.0 - e2.minute + 1.0)
 	check(b2.history.size() >= 1, "day report written (profit %.2f)" % (float(b2.history[-1]["profit"]) if not b2.history.is_empty() else 0.0))

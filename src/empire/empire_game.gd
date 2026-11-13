@@ -479,6 +479,9 @@ func _update_spot() -> void:
 				if d2 < 2.4 and d2 < best_d:
 					best = {"kind": "letboard", "unit": id, "world": w}
 					best_d = d2
+		var hs := _home_spots(p, best, best_d)
+		best = hs[0]
+		best_d = hs[1]
 		for vid in cars:
 			var car: Car = cars[vid]
 			var xf := car.global_transform
@@ -554,6 +557,18 @@ func spot_prompt() -> Array:
 		"letboard":
 			var u: Dictionary = unit_by_id[spot["unit"]]
 			return ["TO LET · %s/day" % EmpireData.money(float(u["rent"])), true]
+		"home_lift":
+			var home := home_by_id(spot["home"])
+			if empire.owns_property(spot["home"]):
+				var q = empire.properties.filter(func(x): return x["id"] == spot["home"])[0]
+				if q.get("let", false):
+					return ["%s · LET TO TENANTS" % String(home["name"]).to_upper(), false]
+				return ["LIFT UP TO %s" % String(home["name"]).to_upper(), true]
+			return ["FOR SALE · %s · %s" % [home["name"], EmpireData.money(float(home["price"]))], true]
+		"home_down":
+			return ["LIFT DOWN TO THE STREET", true]
+		"home_bed":
+			return ["SLEEP TILL 07:00", true]
 		"car_door":
 			var v := empire.vehicle(spot["vehicle"])
 			return ["DRIVE %s" % String(EmpireData.vehicle_model(v["model"])["name"]).to_upper(), true]
@@ -645,6 +660,21 @@ func act() -> void:
 			si.refresh_goods(pal)
 		"letboard":
 			ui.open_property(unit_by_id[spot["unit"]])
+		"home_lift":
+			if empire.owns_property(spot["home"]):
+				var h: Dictionary = home_by_id(spot["home"])["h"]
+				_teleport(Apartments.spawn_point(h), atan2(Apartments.outward(h).x, Apartments.outward(h).z) + PI)
+				Sfx.play("bell", -8.0)
+			else:
+				ui.open_home(home_by_id(spot["home"]))
+		"home_down":
+			var home2 := home_by_id(spot["home"])
+			var l := home_lift(home2)
+			_teleport(l + Apartments.outward(home2["h"]) * 1.5 + Vector3.UP * 1.0, atan2(-Apartments.outward(home2["h"]).x, -Apartments.outward(home2["h"]).z) + PI)
+			Sfx.play("bell", -8.0)
+		"home_bed":
+			sleep_until(7.0)
+			save_game()
 		"car_door":
 			enter_vehicle(spot["vehicle"])
 		"car_boot":
@@ -929,6 +959,62 @@ func sleep_until(hour: float) -> void:
 	var mins := fposmod(target - empire.minute, 1440.0)
 	empire.advance(mins)
 	ui.toast("It's %s %s" % [empire.weekday(), empire.clock_text()], "info")
+
+
+# ---------------------------------------------------------------- homes
+## CitySwing's five apartments (real rooms high in real towers) are the
+## homes you can buy: a lift from the street, a bed to sleep in, or let
+## them out for daily rent.
+const HOME_PRICES := [18000.0, 42000.0, 85000.0, 160000.0, 350000.0]
+
+
+func homes() -> Array:
+	var out: Array = []
+	if layout.apartments == null:
+		return out
+	for h in layout.apartments.homes:
+		out.append({"id": "home_" + String(h["id"]), "kind": "home", "name": String(h["name"]),
+			"price": HOME_PRICES[clampi(int(h["tier"]), 0, 4)], "tier": int(h["tier"]), "h": h,
+			"floor": Apartments.floor_height(h), "district": "east:" + layout.district(Apartments.window_center(h).x,
+			Apartments.window_center(h).z)})
+	return out
+
+
+## Street door of a home's tower (below its window, on the pavement).
+func home_lift(home: Dictionary) -> Vector3:
+	var h: Dictionary = home["h"]
+	var c := Apartments.window_center(h) + Apartments.outward(h) * 1.6
+	return Vector3(c.x, layout.ground_y(c.x, c.z), c.z)
+
+
+func _home_spots(p: Vector3, best: Dictionary, best_d: float) -> Array:
+	for home in homes():
+		var lift := home_lift(home)
+		var d := Vector2(p.x, p.z).distance_to(Vector2(lift.x, lift.z))
+		if d < 2.2 and absf(p.y - 0.9 - lift.y) < 2.0 and d < best_d:
+			best = {"kind": "home_lift", "home": home["id"], "world": lift}
+			best_d = d
+		if empire.owns_property(home["id"]):
+			var h: Dictionary = home["h"]
+			var up := Apartments.spawn_point(h) - Vector3.UP * 0.95
+			var d2 := p.distance_to(up + Vector3.UP * 0.95)
+			if d2 < 1.6 and d2 < best_d:
+				best = {"kind": "home_down", "home": home["id"], "world": up}
+				best_d = d2
+			for sp in HomeInteriors.spots.get(String(h["id"]), []):
+				if sp["kind"] == "bed":
+					var d3 := p.distance_to(sp["pos"] + Vector3.UP * 0.95)
+					if d3 < 1.8 and d3 < best_d:
+						best = {"kind": "home_bed", "home": home["id"], "world": sp["pos"]}
+						best_d = d3
+	return [best, best_d]
+
+
+func home_by_id(id: String) -> Dictionary:
+	for h in homes():
+		if h["id"] == id:
+			return h
+	return {}
 
 
 # -------------------------------------------------------------- tutorial

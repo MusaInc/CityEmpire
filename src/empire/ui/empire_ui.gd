@@ -606,6 +606,25 @@ static func _top_mix(d: Dictionary) -> String:
 	return ", ".join(names)
 
 
+func open_home(hm: Dictionary) -> void:
+	var v := _open(String(hm["name"]), 720, 380)
+	v.add_child(S.label("%s · %d m above the street · %s" % [EmpireData.district(hm["district"]).get("name", ""), int(hm["floor"]),
+		["a studio", "a one-bed flat", "a loft", "a luxury apartment", "the penthouse"][int(hm["tier"])]], 18, S.MUTED))
+	var txt := S.label("Live here (a bed to sleep in and a view), or let it out: tenants pay about %s a day." % EmpireData.money(float(hm["price"]) * 0.0045), 18, S.PAPER)
+	txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	txt.custom_minimum_size.x = 650
+	v.add_child(txt)
+	v.add_child(S.label("You have %s + company %s" % [EmpireData.money(game.empire.personal_cash), EmpireData.money(game.empire.company_cash)], 15, S.MUTED))
+	v.add_child(S.button("BUY · %s" % EmpireData.money(float(hm["price"])), func():
+		var rec := hm.duplicate()
+		rec.erase("h")
+		if game.empire.buy_property(rec):
+			toast("The keys are yours", "good")
+			close_panel(true)
+		else:
+			toast("Not enough money", "bad"), true, 260))
+
+
 # ----------------------------------------------------------------- rack
 func open_rack(b: Business) -> void:
 	var v := _open("Stockroom · %d/%d cases" % [b.backroom.cases_used(), b.backroom.case_capacity], 720, 520)
@@ -880,8 +899,8 @@ func open_phone(tab := "businesses") -> void:
 	var e := game.empire
 	var v := _open("Phone", 1000, 640)
 	var tabs := S.hbox(8)
-	for t in [["businesses", "Businesses"], ["map", "Map"], ["bank", "Bank"], ["vehicles", "Vehicles"], ["goals", "Goals"],
-			["game", "Game"]]:
+	for t in [["businesses", "Businesses"], ["map", "Map"], ["bank", "Bank"], ["vehicles", "Vehicles"], ["property", "Property"],
+			["goals", "Goals"], ["game", "Game"]]:
 		tabs.add_child(S.button(t[1], func(): open_phone(t[0]), t[0] == tab))
 	v.add_child(tabs)
 	match tab:
@@ -1000,6 +1019,36 @@ func open_phone(tab := "businesses") -> void:
 						toast(err if err != "" else "Delivered outside", "bad" if err != "" else "good")
 						open_phone("vehicles"), true, 180)]))
 			v.add_child(_scroll(list2, 470))
+		"property":
+			var lp := S.vbox(6)
+			lp.add_child(S.label("HOMES (buy at the tower's street door)", 14, S.AMBER, "black"))
+			for hm in game.homes():
+				var owned := e.owns_property(hm["id"])
+				var rec: Dictionary = {}
+				for q in e.properties:
+					if q["id"] == hm["id"]:
+						rec = q
+				var row: Array = [_fixed(String(hm["name"]), 230, 18, S.PAPER, "bold"),
+					_fixed("%s · %d m up" % [EmpireData.district(hm["district"]).get("name", ""), int(hm["floor"])], 220, 15, S.MUTED),
+					_fixed(EmpireData.money(float(hm["price"])), 110, 17)]
+				if owned:
+					var let: bool = rec.get("let", false)
+					row.append(S.chip("LET · %s/day" % EmpireData.money(float(hm["price"]) * 0.0045) if let else "YOURS", S.GREEN))
+					row.append(S.button("Move in" if let else "Let it out", func():
+						e.set_let(hm["id"], not let)
+						open_phone("property"), false, 140))
+				else:
+					row.append(_fixed("lets for %s/day" % EmpireData.money(float(hm["price"]) * 0.0045), 160, 15, S.MUTED))
+				row.append(S.button("GPS", func():
+					game.set_gps(game.home_lift(hm), String(hm["name"]))
+					close_panel(true), false, 70))
+				lp.add_child(_row(row))
+			lp.add_child(S.label("YOUR PREMISES", 14, S.AMBER, "black"))
+			for b: Business in e.businesses:
+				lp.add_child(_row([_fixed(b.name, 230, 18, S.PAPER, "bold"),
+					_fixed(String(b.district().get("name", "")), 220, 15, S.MUTED),
+					S.chip("FREEHOLD" if b.owned else "RENTED · %s/day" % EmpireData.money(b.rent_per_day()), S.GREEN if b.owned else S.MUTED)]))
+			v.add_child(_scroll(lp, 470))
 		"goals":
 			var list3 := S.vbox(6)
 			for ch in EmpireData.chapters():
