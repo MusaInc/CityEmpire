@@ -325,7 +325,9 @@ void fragment() {
 		vec2 csize;
 		window_layout(style, seed, uv, glass, cell, frame, wpos, whalf, csize);
 		// Ground floor: tall shopfront glazing + fascia band.
-		bool shop = uv.y < 4.6 && style != 3.0;
+		// (Only some buildings have shops on the ground floor; the rest carry
+		// their windows down. BuildingMesher.ground_shops() matches this.)
+		bool shop = uv.y < 4.6 && style != 3.0 && fract(seed * 5.37 + 0.21) < 0.5;
 		if (shop) {
 			float bay = fract(uv.x / 6.0);
 			glass = step(0.08, bay) * step(bay, 0.92) * step(0.25, uv.y) * step(uv.y, 3.6);

@@ -1146,12 +1146,19 @@ func _ledges(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, c
 		y += LEDGE_EVERY
 
 
+## Does the building shader draw shopfronts along this building's ground
+## floor? (Same test as building.gdshader, on the seed as the faces carry it.)
+static func ground_shops(b: Dictionary) -> bool:
+	var q := floorf(fposmod(float(b["seed"]), 1.0) * 256.0) / 256.0
+	return fposmod(q * 5.37 + 0.21, 1.0) < 0.5
+
+
 ## Shop awnings along the ground floor of masonry buildings, in runs with
 ## gaps, colours per shop: [a, b, out, colour] (a on the left looking out).
 ## Solid: collision_boxes() makes a slab of each, so you can land on them.
 static func awning_runs(b: Dictionary) -> Array:
 	var out_runs: Array = []
-	if b.has("shape") or not _has_plinth(b, 0) or not _parapeted(b) or int(b["style"]) not in [CityLayout.Style.BRICK,
+	if not ground_shops(b) or b.has("shape") or not _has_plinth(b, 0) or not _parapeted(b) or int(b["style"]) not in [CityLayout.Style.BRICK,
 			CityLayout.Style.STONE, CityLayout.Style.SANDSTONE, CityLayout.Style.DECO]:
 		return out_runs
 	var t: Array = b["tiers"][0]

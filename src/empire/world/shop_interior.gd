@@ -31,6 +31,8 @@ var biz: Business
 var rival := {}
 ## The shop's brand colour: fascia, shelf headers, counter front, wall band.
 var brand := Color(0.15, 0.4, 0.3)
+const PROMOS := ["MEAL DEAL\n£3.50", "COLD DRINKS\n2 FOR £2", "FRESH\nBREAD\nDAILY", "OPEN\n7AM–10PM", "HOT\nCOFFEE\n£1.80",
+	"CARD &\nCONTACTLESS", "SNACKS\n3 FOR £2", "LOCAL\n& FRESH"]
 const BRANDS := [Color(0.13, 0.42, 0.36), Color(0.16, 0.27, 0.5), Color(0.42, 0.2, 0.42), Color(0.2, 0.42, 0.2),
 	Color(0.55, 0.32, 0.12), Color(0.1, 0.38, 0.52)]
 var kind := "shop"        # "shop" | "wholesale"
@@ -190,6 +192,20 @@ func rebuild() -> void:
 		_glow = null
 	_build_walk_grid()
 	refresh_goods()
+	_cull_details()
+
+
+## Small things (lettering, posters, goods, lamps) only drawn up close; the
+## shell and fascia carry the look further out. Someone else's shop is
+## culled sooner (dozens of them line the streets).
+func _cull_details() -> void:
+	var near := 70.0 if rival.is_empty() else 55.0
+	for n in find_children("*", "GeometryInstance3D", true, false):
+		var g := n as GeometryInstance3D
+		if g == _sign or g.name == "Shell":
+			continue
+		if g is Label3D or g.get_parent() == _goods or g.name == "Glow":
+			g.visibility_range_end = near if g.name != "Glow" else maxf(near, 90.0)
 
 
 # ------------------------------------------------------------- shop
@@ -344,9 +360,10 @@ func _shell(st: _Batch, wall: Color, trim: Color) -> void:
 	st.box(R(W - 0.05, 0.0, 0.0), R(W - 0.02, D, 0.12), trim)
 	# Inner face of the front wall round the opening (0.3 m thick wall).
 	var oh: float = float(unit["oy1"]) - float(unit["oy0"])
-	_wall_box(st, 0.0, ox.x, 0.0, 0.3, 0.0, H, wall)
-	_wall_box(st, ox.y, W, 0.0, 0.3, 0.0, H, wall)
-	_wall_box(st, ox.x, ox.y, 0.0, 0.3, oh, H, wall)
+	# (Its outer face stops 3 cm inside the facade, or the two z-fight.)
+	_wall_box(st, 0.0, ox.x, 0.03, 0.3, 0.0, H, wall)
+	_wall_box(st, ox.y, W, 0.03, 0.3, 0.0, H, wall)
+	_wall_box(st, ox.x, ox.y, 0.03, 0.3, oh, H, wall)
 
 
 func _shopfront(st: _Batch, trim: Color) -> void:
@@ -369,22 +386,127 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 	gi.material_override = _mat("glass")
 	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_static.add_child(gi)
-	# Fascia outside above the opening, with the shop's name.
+	# The frontage across the whole unit, outside the facade: stone
+	# pilasters, display panels either side of the opening, a full-width
+	# fascia under a cornice, and (when trading) a canopy, lamps and a
+	# hanging blade sign. Offset off the wall so nothing z-fights.
 	var fy := oh + 0.15
-	st.box(R(ox.x - 0.3, -0.32, fy), R(ox.y + 0.3, -0.02, fy + 0.75), Color(0.1, 0.12, 0.16) if biz == null else brand.darkened(0.25))
-	if biz != null:
-		st.box(R(ox.x - 0.3, -0.34, fy - 0.06), R(ox.y + 0.3, -0.02, fy), brand.lightened(0.35))  # trim line
+	var trading_here := biz != null
+	var stone := Color(0.84, 0.81, 0.75) if absi(String(unit.get("id", "")).hash()) % 3 != 0 else Color(0.24, 0.25, 0.27)
+	var clad := brand.darkened(0.62) if trading_here else Color(0.15, 0.16, 0.18)
+	var fascia := brand if trading_here else Color(0.1, 0.12, 0.16)
+	for side in [[0.3, ox.x - 0.05], [ox.y + 0.05, W - 0.3]]:
+		var x0: float = side[0]
+		var x1: float = side[1]
+		if x1 - x0 < 0.1:
+			continue
+		st.box(R(x0, -0.07, 0.0), R(x1, -0.01, fy), clad)
+		if x1 - x0 > 1.1:
+			# A lit display panel (glass over a poster) with a stall riser.
+			st.box(R(x0 + 0.18, -0.09, 0.45), R(x1 - 0.18, -0.07, oh - 0.2), Color(0.06, 0.08, 0.1))
+			if trading_here:
+				# A lit promo poster in the window.
+				var px0 := x0 + 0.35
+				var px1 := x1 - 0.35
+				var py0 := 0.75
+				var py1 := minf(oh - 0.4, py0 + (px1 - px0) * 1.25)
+				_glow_quad(R(px0, -0.095, py0), R(px1, -0.095, py1), brand.lightened(0.12) * 0.75)
+				_glow_quad(R(px0, -0.097, py1 - 0.32), R(px1, -0.097, py1 - 0.06), Color(0.98, 0.9, 0.55))
+				var promo := Label3D.new()
+				var lines: String = PROMOS[absi(hash([unit.get("id", ""), x0])) % PROMOS.size()]
+				promo.text = lines
+				promo.font_size = 72
+				promo.pixel_size = clampf((px1 - px0) / 520.0, 0.0018, 0.004)
+				promo.shaded = false
+				promo.double_sided = false
+				promo.modulate = Color(1.0, 0.98, 0.94)
+				promo.outline_size = 0
+				promo.position = R((px0 + px1) * 0.5, -0.1, (py0 + py1 - 0.32) * 0.5)
+				_static.add_child(promo)
+			st.box(R(x0 + 0.1, -0.12, 0.0), R(x1 - 0.1, -0.06, 0.45), stone.darkened(0.25))
+	# Pilasters with capitals.
+	for px: float in [-0.04, W - 0.3]:
+		st.box(R(px, -0.22, 0.0), R(px + 0.34, -0.01, fy + 0.86), stone)
+		st.box(R(px - 0.04, -0.27, fy + 0.72), R(px + 0.38, -0.01, fy + 0.92), stone.lightened(0.08))
+		st.box(R(px - 0.03, -0.25, 0.0), R(px + 0.37, -0.01, 0.3), stone.darkened(0.2))  # plinth
+		_solid(R(px, -0.22, 0.0), R(px + 0.34, 0.0, fy))
+	# Fascia and cornice.
+	st.box(R(0.3, -0.3, fy), R(W - 0.3, -0.01, fy + 0.78), fascia)
+	st.box(R(0.3, -0.33, fy - 0.07), R(W - 0.3, -0.01, fy), fascia.lightened(0.3) if trading_here else Color(0.3, 0.32, 0.35))
+	st.box(R(-0.12, -0.4, fy + 0.78), R(W + 0.12, -0.01, fy + 0.94), stone.lightened(0.05))
+	if trading_here:
+		# A striped awning over the door and windows, sloping out to a valance.
+		var c0 := ox.x - 0.45
+		var c1 := ox.y + 0.45
+		var cream := Color(0.95, 0.92, 0.84)
+		var ay0 := fy - 0.08
+		var ay1 := fy - 0.7
+		var ad := -1.45
+		var stripes := maxi(4, int((c1 - c0) / 0.42))
+		for i in stripes:
+			var xa := lerpf(c0, c1, float(i) / stripes)
+			var xb := lerpf(c0, c1, float(i + 1) / stripes)
+			var sc := fascia if i % 2 == 0 else cream
+			st.sheet(R(xa, -0.28, ay0), R(xb, -0.28, ay0), R(xb, ad, ay1), R(xa, ad, ay1), sc)
+			st.sheet(R(xa, ad, ay1), R(xb, ad, ay1), R(xb, ad, ay1 - 0.24), R(xa, ad, ay1 - 0.24), sc.darkened(0.08))
+		for ex: float in [c0, c1]:
+			st._tri(R(ex, -0.28, ay0), R(ex, ad, ay1), R(ex, -0.28, ay1), Vector3.RIGHT, fascia.darkened(0.2))
+			st._tri(R(ex, -0.28, ay0), R(ex, -0.28, ay1), R(ex, ad, ay1), Vector3.LEFT, fascia.darkened(0.2))
+		st.box(R(c0, -0.3, ay0 - 0.04), R(c1, -0.22, ay0 + 0.06), Color(0.12, 0.12, 0.13))  # roller box
+		if rival.get("for_sale", false):
+			# An estate agent's board on the wall over the fascia.
+			var bx0 := W - 2.3
+			st.box(R(bx0, -0.14, fy + 1.02), R(bx0 + 1.7, -0.05, fy + 1.86), Color(0.98, 0.8, 0.12))
+			st.box(R(bx0, -0.15, fy + 1.02), R(bx0 + 1.7, -0.05, fy + 1.2), Color(0.75, 0.1, 0.1))
+			var fsl := Label3D.new()
+			fsl.text = "FOR SALE"
+			fsl.font_size = 96
+			fsl.pixel_size = 0.0034
+			fsl.shaded = false
+			fsl.modulate = Color(0.75, 0.08, 0.08)
+			fsl.position = R(bx0 + 0.85, -0.15, fy + 1.55)
+			_static.add_child(fsl)
+			var agl := Label3D.new()
+			agl.text = "BUSINESS TRANSFER AGENTS"
+			agl.font_size = 40
+			agl.pixel_size = 0.0034
+			agl.shaded = false
+			agl.modulate = Color(1, 1, 1)
+			agl.position = R(bx0 + 0.85, -0.16, fy + 1.11)
+			_static.add_child(agl)
+		# Gooseneck lamps lighting the fascia.
+		for gx: float in [W * 0.22, W * 0.78]:
+			st.box(R(gx - 0.02, -0.75, fy + 0.95), R(gx + 0.02, -0.3, fy + 0.99), Color(0.1, 0.1, 0.11))
+			st.box(R(gx - 0.1, -0.86, fy + 0.86), R(gx + 0.1, -0.68, fy + 1.0), Color(0.1, 0.1, 0.11))
+			_glow_quad(R(gx - 0.08, -0.84, fy + 0.855), R(gx + 0.08, -0.7, fy + 0.855), Color(1.0, 0.92, 0.75) * 1.8, true)
+		# Hanging blade sign at the left pilaster.
+		st.box(R(0.1, -0.95, fy + 0.6), R(0.16, -0.25, fy + 0.66), Color(0.1, 0.1, 0.11))
+		st.box(R(0.08, -0.9, fy - 0.15), R(0.18, -0.3, fy + 0.6), fascia)
+		st.box(R(0.07, -0.92, fy - 0.17), R(0.19, -0.28, fy - 0.12), stone)
+		var blade := Label3D.new()
+		blade.text = biz.name.left(1).to_upper()
+		blade.font_size = 120
+		blade.pixel_size = 0.004
+		blade.shaded = false
+		blade.modulate = Color(1.0, 0.95, 0.85)
+		blade.position = R(0.195, -0.6, fy + 0.22)
+		blade.rotation.y = PI * 0.5
+		_static.add_child(blade)
+		var blade2 := blade.duplicate() as Label3D
+		blade2.position = R(0.065, -0.6, fy + 0.22)
+		blade2.rotation.y = -PI * 0.5
+		_static.add_child(blade2)
 	_sign = Label3D.new()
 	_sign.text = _sign_text()
 	_sign.font_size = 96
 	_sign.pixel_size = 0.0045
 	_sign.outline_size = 0
 	_sign.modulate = Color(1.0, 0.92, 0.7)
-	_sign.position = R((ox.x + ox.y) * 0.5, -0.335, fy + 0.38)
+	_sign.position = R(W * 0.5, -0.315, fy + 0.39)
 	_sign.rotation.y = 0.0  # faces +z (out to the street)
 	_sign.double_sided = false
 	_sign.shaded = false
-	_sign.width = (ox.y - ox.x) / 0.0045
+	_sign.width = (W - 1.0) / 0.0045
 	_sign.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_static.add_child(_sign)
 	if not rival.is_empty():
@@ -900,8 +1022,9 @@ func _light(p: Vector3, c: Color, e: float, r: float) -> void:
 	o.omni_attenuation = 1.1
 	o.shadow_enabled = false
 	o.distance_fade_enabled = true
-	o.distance_fade_begin = 90.0
-	o.distance_fade_length = 30.0
+	# (Someone else's shop: only lit up close, there are dozens of them.)
+	o.distance_fade_begin = 90.0 if rival.is_empty() else 35.0
+	o.distance_fade_length = 30.0 if rival.is_empty() else 10.0
 	_static.add_child(o)
 
 
@@ -1124,6 +1247,12 @@ class _Batch:
 			var nrm := Vector3(cos((a0 + a1) * 0.5), 0, sin((a0 + a1) * 0.5))
 			_quad(p1, p0, p0 + Vector3.UP * h, p1 + Vector3.UP * h, nrm, c)
 			_tri(base + Vector3.UP * h, p1 + Vector3.UP * h, p0 + Vector3.UP * h, Vector3.UP, c)
+
+	## A thin two-sided quad (awning cloth): a→b→c→d round its edge.
+	func sheet(a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color) -> void:
+		var nrm := (b - a).cross(d - a).normalized()
+		_quad(a, b, c, d, nrm, col)
+		_quad(d, c, b, a, -nrm, col)
 
 	func _quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, nrm: Vector3, col: Color) -> void:
 		_tri(a, b, c, nrm, col)

@@ -171,6 +171,14 @@ func _after_start() -> void:
 				if d0 < best:
 					best = d0
 					u = unit_by_id.get(f["unit"], {})
+		if not u.is_empty() and args.has("front"):
+			# Captures: a camera square-on to the shopfront, `front` m out.
+			var fd := float(args["front"])
+			var fu := u
+			camera.cine = func(_dt: float) -> Array:
+				var dp := Premises.door_point(fu) + Vector3.UP * 2.3
+				var from := dp + Premises.outward(fu) * fd + Premises.along_dir(fu) * fd * 0.25
+				return [Transform3D(Basis.looking_at(dp - from, Vector3.UP), from), 62.0]
 		if not u.is_empty():
 			var inside := args.has("inside")
 			var p := Premises.door_point(u) + Premises.outward(u) * (-2.5 if inside else 3.0) + Vector3.UP * 1.0
