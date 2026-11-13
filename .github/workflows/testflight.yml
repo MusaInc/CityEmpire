@@ -10,7 +10,8 @@
 #   ASC_KEY_ID            App Store Connect API key ID (role: App Manager or Admin)
 #   ASC_ISSUER_ID         its issuer ID
 #   ASC_KEY_P8            the .p8 private key file contents
-# The app record (bundle ID com.musastudios.cityempire) must exist in App
+# The app record (bundle ID com.musastudios.cityempire; App Store Connect name
+# "City Empire: Business Sim", id 6834508894) must exist in App
 # Store Connect first: My Apps → + → New App.
 name: TestFlight
 
