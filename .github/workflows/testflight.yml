@@ -349,6 +349,28 @@ jobs:
                   r = call(f"/v1/betaGroups/{g['id']}/relationships/builds", "POST", {"data": [{"type": "builds", "id": bid}]})
                   print("  added build to group:", "yes" if r is not None else "FAILED")
               testers = call(f"/v1/betaGroups/{g['id']}/betaTesters?limit=50")
+              if ga["isInternalGroup"] and testers is not None and not testers["data"]:
+                  # An empty internal group means nobody sees the build. Linking
+                  # the other app's tester ids is refused (409 "cannot be
+                  # assigned"), so invite the same people by email instead.
+                  other = call("/v1/apps?filter[bundleId]=com.musastudios.cityswing")
+                  seen = set()
+                  for og in (call(f"/v1/apps/{other['data'][0]['id']}/betaGroups?limit=50")["data"] if other and other["data"] else []):
+                      if not og["attributes"]["isInternalGroup"]:
+                          continue
+                      for t in call(f"/v1/betaGroups/{og['id']}/betaTesters?limit=50")["data"]:
+                          ta = t["attributes"]; em = ta.get("email")
+                          if not em or em in seen:
+                              continue
+                          seen.add(em)
+                          r = call("/v1/betaTesters", "POST", {"data": {"type": "betaTesters",
+                                   "attributes": {"email": em, "firstName": ta.get("firstName") or "", "lastName": ta.get("lastName") or ""},
+                                   "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": g["id"]}]}}}})
+                          print("  invited a tester by email:", "yes" if r is not None else "FAILED")
+                  testers = call(f"/v1/betaGroups/{g['id']}/betaTesters?limit=50")
+                  if testers is not None and not testers["data"]:
+                      print("::warning::Internal group has no testers – nobody will see this build. "
+                            "Add yourself: App Store Connect → TestFlight → Internal Testing → " + ga["name"] + " → Testers (+).")
               print(f"  testers: {len(testers['data']) if testers else '?'}")
               for t in (testers or {}).get("data", []):
                   ta = t["attributes"]; em = ta.get("email") or ""
