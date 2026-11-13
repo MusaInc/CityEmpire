@@ -14,7 +14,8 @@ const GREEN := Color("#39c27f")
 const AMBER := Color("#f5b13d")
 const RED := Color("#ec5a4a")
 const BLUE := Color("#4ea3ef")
-const PANEL := Color(0.059, 0.102, 0.133, 0.94)
+const PANEL := Color(0.055, 0.094, 0.125, 0.95)
+const GOLD := Color("#e9c27a")
 
 static var _theme: Theme
 
@@ -39,6 +40,8 @@ static func theme() -> Theme:
 	btn.content_margin_bottom = 10
 	btn.border_color = LINE
 	btn.set_border_width_all(1)
+	btn.border_width_top = 2
+	btn.border_color = Color(1, 1, 1, 0.1)
 	var hov := btn.duplicate()
 	hov.bg_color = INK2.lightened(0.12)
 	var prs := btn.duplicate()
@@ -61,8 +64,13 @@ static func theme() -> Theme:
 	pnl.content_margin_right = 26
 	pnl.content_margin_top = 22
 	pnl.content_margin_bottom = 22
-	pnl.shadow_color = Color(0, 0, 0, 0.35)
-	pnl.shadow_size = 18
+	pnl.shadow_color = Color(0, 0, 0, 0.45)
+	pnl.shadow_size = 24
+	pnl.shadow_offset = Vector2(0, 6)
+	pnl.border_color = Color(1, 1, 1, 0.07)
+	pnl.set_border_width_all(1)
+	pnl.border_width_top = 2
+	pnl.anti_aliasing = true
 	t.set_stylebox("panel", "PanelContainer", pnl)
 	var sl := StyleBoxFlat.new()
 	sl.bg_color = Color(1, 1, 1, 0.12)
@@ -102,15 +110,26 @@ static func button(text: String, cb: Callable, primary := false, min_w := 0.0) -
 	b.custom_minimum_size = Vector2(min_w, 52)
 	b.focus_mode = Control.FOCUS_NONE
 	if primary:
+		# Tactile: a lighter top lip and a darker base under the amber face.
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = AMBER
 		sb.set_corner_radius_all(12)
 		sb.content_margin_left = 22
 		sb.content_margin_right = 22
+		sb.border_color = AMBER.lightened(0.35)
+		sb.border_width_top = 2
+		sb.shadow_color = AMBER.darkened(0.55)
+		sb.shadow_size = 0
+		sb.shadow_offset = Vector2(0, 3)
+		sb.expand_margin_bottom = 0
 		b.add_theme_stylebox_override("normal", sb)
 		var h := sb.duplicate()
 		h.bg_color = AMBER.lightened(0.12)
 		b.add_theme_stylebox_override("hover", h)
+		var pr := sb.duplicate()
+		pr.bg_color = AMBER.darkened(0.12)
+		pr.border_width_top = 0
+		b.add_theme_stylebox_override("pressed", pr)
 		b.add_theme_color_override("font_color", INK)
 		b.add_theme_color_override("font_hover_color", INK)
 		b.add_theme_font_override("font", font("bold"))

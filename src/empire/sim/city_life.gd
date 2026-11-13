@@ -428,9 +428,9 @@ static func _new_firm(e: Empire, u: Dictionary, rng: RandomNumberGenerator, sinc
 	var nm := ""
 	var r := rng.randf()
 	if r < 0.45:
-		nm = "%s's %s" % [owner.get_slice(" ", 1), kinds[rng.randi() % kinds.size()]]
+		nm = "%s %s" % [_possessive(owner.get_slice(" ", 1)), kinds[rng.randi() % kinds.size()]]
 	elif r < 0.7:
-		nm = "%s's %s" % [owner.get_slice(" ", 0), kinds[rng.randi() % kinds.size()]]
+		nm = "%s %s" % [_possessive(owner.get_slice(" ", 0)), kinds[rng.randi() % kinds.size()]]
 	elif not names.is_empty():
 		nm = names[rng.randi() % names.size()]
 	else:
@@ -442,6 +442,10 @@ static func _new_firm(e: Empire, u: Dictionary, rng: RandomNumberGenerator, sinc
 		"colour": cols[rng.randi() % cols.size()], "for_sale": false, "listed": 0}
 	e.firms.append(f)
 	return f
+
+
+static func _possessive(n: String) -> String:
+	return n + ("'" if n.ends_with("s") else "'s")
 
 
 ## Rough daily profit of an independent (what its books show a buyer).

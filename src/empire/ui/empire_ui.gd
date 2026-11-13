@@ -48,6 +48,15 @@ func _ready() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = S.theme()
 	add_child(root)
+	# A soft vignette over the 3-D view, under everything else.
+	var vig := ColorRect.new()
+	vig.name = "Vignette"
+	vig.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	vig.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var vm := ShaderMaterial.new()
+	vm.shader = load("res://src/empire/ui/shaders/vignette.gdshader")
+	vig.material = vm
+	root.add_child(vig)
 	hud = Control.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -75,7 +84,7 @@ func _ready() -> void:
 # ------------------------------------------------------------------ HUD
 func _build_hud() -> void:
 	# Money (top left).
-	var m := _hud_panel(Vector2(18, 16), Vector2(250, 78))
+	var m := _hud_panel(Vector2(18, 16), Vector2(250, 78), S.GREEN)
 	var mv := S.vbox(0)
 	m.add_child(mv)
 	_money = S.label("£0", 30, S.PAPER, "black")
@@ -98,7 +107,7 @@ func _build_hud() -> void:
 	_strip = S.label("", 15, S.PAPER)
 	_strip_panel.add_child(_strip)
 	# Objective (top right).
-	var o := _hud_panel(Vector2(0, 16), Vector2(360, 82))
+	var o := _hud_panel(Vector2(0, 16), Vector2(360, 82), S.AMBER)
 	_anchor(o, 1.0, 0.0, Vector2(-442, 16), Vector2(360, 82))
 	var ov := S.vbox(2)
 	o.add_child(ov)
@@ -127,8 +136,13 @@ func _build_hud() -> void:
 	# Prompt (bottom centre).
 	_prompt = PanelContainer.new()
 	var psb := StyleBoxFlat.new()
-	psb.bg_color = Color(S.INK, 0.86)
+	psb.bg_color = Color(S.INK, 0.88)
 	psb.set_corner_radius_all(26)
+	psb.border_color = Color(1, 1, 1, 0.1)
+	psb.set_border_width_all(1)
+	psb.shadow_color = Color(0, 0, 0, 0.3)
+	psb.shadow_size = 12
+	psb.shadow_offset = Vector2(0, 4)
 	psb.content_margin_left = 10
 	psb.content_margin_right = 22
 	psb.content_margin_top = 8
@@ -177,11 +191,21 @@ static func _anchor(c: Control, ax: float, ay: float, off: Vector2, size: Vector
 	c.offset_bottom = off.y + size.y
 
 
-func _hud_panel(pos: Vector2, size: Vector2) -> PanelContainer:
+func _hud_panel(pos: Vector2, size: Vector2, accent := Color(0, 0, 0, 0)) -> PanelContainer:
 	var p := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(S.INK, 0.78)
+	sb.bg_color = Color(S.INK, 0.8)
 	sb.set_corner_radius_all(16)
+	sb.border_color = Color(1, 1, 1, 0.07)
+	sb.border_width_top = 1
+	sb.shadow_color = Color(0, 0, 0, 0.25)
+	sb.shadow_size = 10
+	sb.shadow_offset = Vector2(0, 3)
+	if accent.a > 0.0:
+		# A coloured edge on the left (money green, objective amber).
+		sb.border_color = accent
+		sb.border_width_left = 4
+		sb.border_width_top = 0
 	sb.content_margin_left = 16
 	sb.content_margin_right = 16
 	sb.content_margin_top = 8
@@ -420,32 +444,55 @@ func show_title(has_save: bool) -> void:
 	for c in _title_root.get_children():
 		c.queue_free()
 	_title_root.visible = true
-	var shade := ColorRect.new()
-	shade.color = Color(0.03, 0.05, 0.07, 0.45)
+	# A scrim from the left (the city stays bright on the right), and a
+	# darker floor for the footer.
+	var g := Gradient.new()
+	g.set_color(0, Color(0.02, 0.04, 0.06, 0.88))
+	g.set_color(1, Color(0.02, 0.04, 0.06, 0.0))
+	g.add_point(0.45, Color(0.02, 0.04, 0.06, 0.62))
+	var gt := GradientTexture2D.new()
+	gt.gradient = g
+	gt.width = 256
+	gt.height = 4
+	gt.fill_from = Vector2(0, 0)
+	gt.fill_to = Vector2(1, 0)
+	var shade := TextureRect.new()
+	shade.texture = gt
+	shade.stretch_mode = TextureRect.STRETCH_SCALE
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_title_root.add_child(shade)
-	var v := S.vbox(14)
-	v.position = Vector2(80, 150)
+	var v := S.vbox(12)
+	v.position = Vector2(84, 128)
 	_title_root.add_child(v)
-	var mark := S.label("MUSA STUDIOS", 16, S.AMBER, "black")
+	var mark := S.label("M U S A   S T U D I O S   P R E S E N T S", 14, S.GOLD, "bold")
 	v.add_child(mark)
-	var t := S.label("CITY EMPIRE", 84, S.PAPER, "black")
-	t.add_theme_constant_override("outline_size", 0)
+	var t := S.label("CITY EMPIRE", 92, S.PAPER, "black")
+	t.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.45))
+	t.add_theme_constant_override("shadow_offset_y", 4)
+	t.add_theme_constant_override("shadow_offset_x", 0)
+	t.add_theme_constant_override("shadow_outline_size", 10)
 	v.add_child(t)
-	v.add_child(S.label("Start as the worker. Become the owner. Build the empire.", 21, S.MUTED))
+	var rule := ColorRect.new()
+	rule.color = S.GOLD
+	rule.custom_minimum_size = Vector2(120, 3)
+	v.add_child(rule)
+	v.add_child(S.label("Start as the worker. Become the owner. Build the empire.", 22, Color(S.PAPER, 0.82)))
+	var foot := S.label("v%s  ·  a Musa Studios game" % String(ProjectSettings.get_setting("application/config/version", "")), 14, Color(S.MUTED, 0.8))
+	_anchor(foot, 0.0, 1.0, Vector2(84, -48), Vector2(500, 24))
+	_title_root.add_child(foot)
 	var gap := Control.new()
 	gap.custom_minimum_size.y = 24
 	v.add_child(gap)
 	if has_save:
-		var b := S.button("CONTINUE", func(): game.continue_game(), true, 320)
+		var b := S.button("CONTINUE", func(): game.continue_game(), true, 360)
 		v.add_child(b)
 	v.add_child(S.button("NEW GAME", func():
 		if has_save:
 			_confirm_new()
 		else:
-			game.start_new(), not has_save, 320))
-	v.add_child(S.button("SETTINGS", func(): _settings_panel(), false, 320))
+			game.start_new(), not has_save, 360))
+	v.add_child(S.button("SETTINGS", func(): _settings_panel(), false, 360))
 
 
 func _confirm_new() -> void:
@@ -1218,8 +1265,8 @@ func _city_tab(v: VBoxContainer) -> void:
 			var u2: Dictionary = game.unit_by_id.get(f["unit"], {})
 			if u2.is_empty():
 				continue
-			list.add_child(_row([_fixed(String(f["name"]), 260, 17, S.PAPER, "bold"),
-				_fixed("%s · ★ %d · %s/day" % [CityLife._dname(f), int(f["rep"]), EmpireData.money(CityLife.firm_profit(f))], 230, 15, S.MUTED),
+			list.add_child(_row([_fixed(String(f["name"]), 240, 17, S.PAPER, "bold"),
+				_fixed("%s · ★ %d · %s/day" % [CityLife._dname(f), int(f["rep"]), EmpireData.money(CityLife.firm_profit(f))], 262, 15, S.MUTED),
 				_fixed(EmpireData.money(CityLife.firm_price(f)), 100, 17, S.PAPER, "bold"),
 				S.button("View", func(): open_firm(u2), true, 100),
 				S.button("GPS", func():
