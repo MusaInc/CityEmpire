@@ -2,7 +2,7 @@
   "_doc": "Economy tuning. Districts are keyed island:district (CityLayout.district on each landmass). footfall = shoppers per open hour for a 50-reputation shop; affluence scales what shoppers will pay; rent_k scales premises rent; mix weights the categories people come in for.",
   "start": {"personal_cash": 650, "company_cash": 0, "hour": 7.5, "day": 1},
   "minutes_per_real_second": 1.0,
-  "footfall_scale": 1.4,
+  "footfall_scale": 1.65,
   "districts": {
     "west:suburb":     {"name": "Westbank Estates", "island": "west", "footfall": 9.0, "affluence": 0.92, "rent_k": 1.0,
                         "mix": {"groceries": 1.5, "household": 1.3, "drinks": 1.0, "snacks": 0.9, "sweets": 0.9, "hot": 0.6}},

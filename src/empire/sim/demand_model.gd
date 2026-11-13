@@ -18,10 +18,10 @@ extends RefCounted
 ##    small markup loses few sales, a big one loses most (test_economy).
 
 
-static func arrivals_per_hour(b: Business, hour: float, competitors := 0, k := 1.0) -> float:
+static func arrivals_per_hour(b: Business, hour: float, competitors := 0.0, k := 1.0) -> float:
 	var d := b.district()
 	var rep := 0.5 + b.reputation / 100.0
-	var comp := pow(float(EmpireData.economy().get("competition_factor", 0.75)), float(competitors))
+	var comp := pow(float(EmpireData.economy().get("competition_factor", 0.75)), competitors)
 	return float(d.get("footfall", 6.0)) * float(EmpireData.economy().get("footfall_scale", 1.0)) * EmpireData.hour_curve(hour) * rep * (1.0 + b.footfall_bonus()) * comp * k
 
 

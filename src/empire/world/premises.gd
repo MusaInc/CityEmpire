@@ -20,6 +20,12 @@ const WAREHOUSE_SMALL := {"w": [13.0, 22.0], "d": [11.0, 18.0], "h": 5.2, "open_
 const QUOTA := {"west:suburb": 4, "west:midtown": 3, "west:waterfront": 2, "east:docks": 2, "east:midtown": 3,
 	"east:cbd": 3, "east:waterfront": 3, "east:georgian": 3}
 const SPACING := 110.0
+## Second pass: smaller units along every shopping street, already trading
+## (independent shops) or empty. Placed after the 24 originals so their ids
+## (and old saves) don't change.
+const SHOP_SMALL := {"w": [9.0, 12.5], "d": [9.6, 12.5], "h": 4.2, "open_w": 5.0, "open_h": 3.1}
+const EST_SPACING := 42.0
+const EST_QUOTA := 14
 const WHOLESALERS := {"west:waterfront": "Quayside Cash & Carry", "east:docks": "Harbour Wholesale Market"}
 const NAMES := ["Corner Shop", "Daily Stop", "Night & Day", "Local Store", "Mini Market", "Express", "Grab & Go",
 	"Neighbourhood Store", "Village Shop", "City Stop", "Quick Mart", "Late Shop", "Food & Wine", "The Kiosk",
@@ -66,6 +72,21 @@ static func place(layout: CityLayout) -> Premises:
 		c["kind"] = "shop"
 		P._claim(c)
 		per[key] = int(per.get(key, 0)) + 1
+	# Established units: the rest of the high street.
+	var est: Array = []
+	for key in QUOTA:
+		if String(key).begins_with(island):
+			est.append_array(P._candidates(key, SHOP_SMALL))
+	est.sort_custom(func(a, b): return a["score"] > b["score"])
+	var per2 := {}
+	for c in est:
+		var key: String = c["district"]
+		if int(per2.get(key, 0)) >= EST_QUOTA or c["b"].has("apt") or not P._far_from_others(c, EST_SPACING):
+			continue
+		c["kind"] = "shop"
+		c["est"] = true
+		P._claim(c)
+		per2[key] = int(per2.get(key, 0)) + 1
 	# Names, rents and prices.
 	var n := 0
 	for u in P.units:
@@ -206,10 +227,10 @@ func _district_heart(key: String) -> Vector2:
 	return Vector2(-900.0, 150.0)
 
 
-func _far_from_others(c: Dictionary) -> bool:
+func _far_from_others(c: Dictionary, spacing := SPACING) -> bool:
 	var p := Vector2(float(c["pos"][0]), float(c["pos"][2]))
 	for u in units:
-		if Vector2(float(u["pos"][0]), float(u["pos"][2])).distance_to(p) < SPACING:
+		if Vector2(float(u["pos"][0]), float(u["pos"][2])).distance_to(p) < spacing:
 			return false
 	return true
 
@@ -269,7 +290,7 @@ static func opening_x(c: Dictionary) -> Vector2:
 ## Record without the building reference (for Business.premises / saves).
 static func record(c: Dictionary) -> Dictionary:
 	var r := {}
-	for k in ["id", "kind", "name", "shop_name", "district", "island", "size", "rent", "price", "pos"]:
+	for k in ["id", "kind", "name", "shop_name", "district", "island", "size", "rent", "price", "pos", "est"]:
 		if c.has(k):
 			r[k] = c[k]
 	return r

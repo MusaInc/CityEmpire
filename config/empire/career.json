@@ -96,6 +96,12 @@
      "value": 3
     },
     {
+     "id": "firm1",
+     "text": "Buy an established business",
+     "stat": "firms_bought",
+     "value": 1
+    },
+    {
      "id": "east_shop",
      "text": "Open on the Commercial Island",
      "stat": "east_businesses",

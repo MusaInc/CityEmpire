@@ -12,6 +12,11 @@ func _market() -> Array:
 		var dk := "west:suburb" if i < 5 else "east:midtown"
 		m.append({"id": "u%d" % i, "kind": "shop", "name": "Unit %d" % i, "shop_name": "Shop %d" % i, "district": dk,
 			"island": dk.get_slice(":", 0), "size": 100.0, "rent": 30.0, "price": 7000.0, "pos": [i * 90.0, 0.0, 0.0]})
+	# The established high street: smaller units already trading.
+	for i in 12:
+		var dk := "west:suburb" if i < 6 else "east:midtown"
+		m.append({"id": "e%d" % i, "kind": "shop", "name": "Est %d" % i, "shop_name": "Est %d" % i, "district": dk, "est": true,
+			"island": dk.get_slice(":", 0), "size": 110.0, "rent": 28.0, "price": 6700.0, "pos": [i * 45.0, 0.0, 40.0]})
 	return m
 
 
@@ -26,7 +31,7 @@ func _game(seed := 5) -> Empire:
 func _free(e: Empire, from := 1) -> Dictionary:
 	for i in range(from, e.market.size()):
 		var u: Dictionary = e.market[i]
-		if not CityLife.is_rival(e, u["id"]) and e.business_at(u["id"]) == null:
+		if not CityLife.is_taken(e, u["id"]) and e.business_at(u["id"]) == null and not u.get("est", false):
 			return u
 	return {}
 
@@ -208,3 +213,88 @@ func test_city_life_saves(t) -> void:
 		old.erase(k)
 	var e3 := Empire.from_dict(old)
 	t.check(e3.rivals.is_empty() and e3.events.is_empty(), "a v2 save loads with no city life yet")
+
+
+func test_established_businesses_trade_everywhere(t) -> void:
+	var e := _game()
+	t.check(e.firms.size() >= 6, "most established units already trade (%d of 12)" % e.firms.size())
+	t.check(e.firms.all(func(f): return String(f["name"]) != "" and String(f["owner"]) != ""), "each has a name and an owner")
+	t.check(not CityLife.firms_for_sale(e).is_empty(), "some are for sale from the start")
+	var f: Dictionary = e.firms[0]
+	var u: Dictionary = e.market.filter(func(x): return x["id"] == f["unit"])[0]
+	t.check(e.rent_premises(u) == null, "an independent's unit can't be rented")
+	t.check(CityLife.firm_profit(f) > 0.0, "its books show a profit (%s)" % EmpireData.money(CityLife.firm_profit(f)))
+	var p_sale := CityLife.firm_price(f)
+	f["for_sale"] = true
+	t.check(CityLife.firm_price(f) < p_sale, "cheaper once it's on the market (%s < %s)" % [EmpireData.money(CityLife.firm_price(f)), EmpireData.money(p_sale)])
+
+
+func test_independents_compete_a_little(t) -> void:
+	var e := _game()
+	var b := _stocked(e, _free(e))
+	e.firms.clear()
+	var alone := e.competitors_near(b)
+	for i in 6:
+		e.firms.append({"unit": "x%d" % i, "name": "X", "owner": "Y Z", "district": "west:suburb", "pos": b.premises["pos"],
+			"rent": 30.0, "price": 7000.0, "rep": 60.0, "since": 0, "colour": "#2f7d4a", "for_sale": false, "listed": 0})
+	var crowded := e.competitors_near(b)
+	t.check(crowded > alone, "independents nearby count (%.2f > %.2f)" % [crowded, alone])
+	t.check(crowded - alone <= float(CityLife.firm_cfg()["comp_cap"]) + 0.001, "but capped (%.2f)" % (crowded - alone))
+
+
+func test_buy_an_established_business(t) -> void:
+	var e := _game()
+	var f: Dictionary = e.firms[0]
+	var u: Dictionary = e.market.filter(func(x): return x["id"] == f["unit"])[0]
+	e.personal_cash = 0.0
+	t.check(CityLife.buy_firm(e, u) == null, "can't buy without the money")
+	e.personal_cash = 50000.0
+	var rep := float(f["rep"])
+	var price := CityLife.firm_price(f)
+	var cash := e.personal_cash + e.company_cash
+	var b := CityLife.buy_firm(e, u)
+	t.check(b != null and not CityLife.is_firm(e, u["id"]), "bought: it's yours")
+	t.check(is_equal_approx(cash - e.personal_cash - e.company_cash, price), "paid the asking price")
+	t.check(not b.owned, "leasehold: you pay the rent")
+	t.check(b.name == f["name"] and is_equal_approx(b.reputation, maxf(rep, 30.0)), "keeps its name and regulars")
+	t.check(b.stocked_products().size() >= 8, "shelves stocked (%d lines)" % b.stocked_products().size())
+	t.check(b.has_role("cashier") and b.trading(12.0), "the cashier stays: trading straight away")
+	t.check(e.total_units() + int(e.stats["units_sold"]) + int(e.stats["units_stolen"]) == int(e.stats["units_bought"]), "units balance")
+	t.check(e.stat("firms_bought") == 1.0, "goal stat")
+	e.advance(1440.0)
+	t.check(int(b.history[-1]["customers"]) > 0, "it served customers on its first day (%d)" % int(b.history[-1]["customers"]))
+
+
+func test_firms_come_and_go(t) -> void:
+	var e := _game(11)
+	var names := {}
+	for f in e.firms:
+		names[f["name"]] = true
+	var closed := false
+	var opened := false
+	for d in 60:
+		var before := e.firms.size()
+		e.advance(1440.0)
+		for n in e.news:
+			if String(n["text"]).contains("closed for good"):
+				closed = true
+			if String(n["text"]).begins_with("New independent"):
+				opened = true
+	t.check(closed, "unsold businesses close")
+	t.check(opened, "new independents open in empty units")
+	t.check(e.firms.all(func(f): return not CityLife.is_rival(e, f["unit"]) and e.business_at(f["unit"]) == null), "never on a taken unit")
+
+
+func test_old_save_gets_firms(t) -> void:
+	var e := _game()
+	var d := e.to_dict()
+	d["version"] = 3
+	d.erase("firms")
+	(d["flags"] as Dictionary).erase("firms_seeded")
+	var e2 := Empire.from_dict(JSON.parse_string(JSON.stringify(d)))
+	t.check(e2.firms.is_empty(), "a v3 save loads without independents")
+	e2.market = _market()
+	CityLife.ensure_firms(e2)
+	t.check(not e2.firms.is_empty(), "they appear once the city's units are known (%d)" % e2.firms.size())
+	var e3 := Empire.from_dict(JSON.parse_string(JSON.stringify(e2.to_dict())))
+	t.check(e3.firms.size() == e2.firms.size(), "and are saved")

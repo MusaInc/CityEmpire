@@ -6,9 +6,12 @@ extends SceneTree
 
 func _init() -> void:
 	var days := 20
+	var nfirms := 4
 	for a in OS.get_cmdline_user_args():
 		if a.is_valid_int():
 			days = int(a)
+		elif a.begins_with("firms="):
+			nfirms = int(a.get_slice("=", 1))
 	for dk in EmpireData.economy()["districts"]:
 		var e := Empire.new()
 		e.new_game(3)
@@ -17,7 +20,12 @@ func _init() -> void:
 		var rent := roundf(120.0 * 0.22 * k)
 		var prem := {"id": "u_" + dk, "name": dk, "shop_name": dk, "district": dk, "island": dk.split(":")[0],
 			"size": 120.0, "rent": rent, "price": rent * 240.0}
+		prem["pos"] = [0.0, 0.0, 0.0]
 		var b := e.rent_premises(prem)
+		# A typical high street: independents trading around it.
+		for i in nfirms:
+			e.firms.append({"unit": "f%d" % i, "name": "F", "owner": "O", "district": dk, "pos": [60.0 + i * 10.0, 0.0, 0.0],
+				"rent": rent, "price": rent * 240.0, "rep": 50.0, "since": 0, "colour": "#2f7d4a", "for_sale": false, "listed": 0})
 		e.transfer_to_company(6000.0)
 		var order := {}
 		for pid in EmpireData.product_ids():

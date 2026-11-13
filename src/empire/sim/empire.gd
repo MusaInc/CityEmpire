@@ -23,7 +23,7 @@ signal goal_done(goal: Dictionary)
 signal changed
 signal won
 
-const VERSION := 3
+const VERSION := 4
 
 var seed := 1
 var day := 1
@@ -53,6 +53,7 @@ var weather := "sunny"
 var forecast := "cloudy"
 var events: Array = []
 var rivals: Array = []
+var firms: Array = []           # independent shops (CityLife firms)
 var news: Array = []
 ## The city's shop units (set by the game from Premises; not saved).
 var market: Array = []
@@ -73,7 +74,7 @@ func new_game(p_seed := 1) -> void:
 	company_cash = float(st.get("company_cash", 0.0))
 	stats = {"cases_bought": 0, "units_bought": 0, "units_sold": 0, "units_stolen": 0, "units_shelved": 0,
 		"sales": 0, "revenue": 0.0, "profitable_days": 0, "upgrades": 0, "hires": 0, "km": 0.0,
-		"spent_stock": 0.0, "days": 0, "rivals_bought": 0, "inspections_passed": 0, "best_day": 0.0}
+		"spent_stock": 0.0, "days": 0, "rivals_bought": 0, "inspections_passed": 0, "best_day": 0.0, "firms_bought": 0}
 	candidates = Staff.candidates(day, seed)
 	add_vehicle("hatch", Vector3.ZERO, 0.0)
 	CityLife.start(self)
@@ -575,7 +576,7 @@ func business_at(premises_id: String) -> Business:
 
 ## Rent: three days up front as a deposit (kept) + the daily rent from then on.
 func rent_premises(premises: Dictionary, type_id := "convenience") -> Business:
-	if business_at(premises.get("id", "")) != null or CityLife.is_rival(self, premises.get("id", "")):
+	if business_at(premises.get("id", "")) != null or CityLife.is_taken(self, premises.get("id", "")):
 		return null
 	var deposit := float(premises.get("rent", 0.0)) * 3.0
 	if not pay(deposit, "rent", "Deposit: %s" % premises.get("name", "")):
@@ -588,7 +589,7 @@ func rent_premises(premises: Dictionary, type_id := "convenience") -> Business:
 func buy_premises(premises: Dictionary, type_id := "convenience") -> Business:
 	var existing := business_at(premises.get("id", ""))
 	var price := float(premises.get("price", 0.0))
-	if CityLife.is_rival(self, premises.get("id", "")):
+	if CityLife.is_taken(self, premises.get("id", "")):
 		return null
 	if existing and existing.owned:
 		return null
@@ -629,20 +630,21 @@ func buy_upgrade(b: Business, u: String) -> String:
 	return ""
 
 
-## Nearby shops of yours compete for the same shoppers (premises "pos").
-func competitors_near(b: Business) -> int:
+## Nearby shops compete for the same shoppers (premises "pos"): yours and
+## QuikSave count 1 each, the independents a fraction (CityLife.firms_near).
+func competitors_near(b: Business) -> float:
 	var p = b.premises.get("pos", null)
 	if not p is Array or (p as Array).size() < 3:
-		return 0
+		return 0.0
 	var me := Vector3(p[0], p[1], p[2])
 	var r := float(EmpireData.economy().get("competition_radius", 140.0))
-	var n := int(b.premises.get("rivals", 0)) + CityLife.rivals_near(self, b)
+	var n := float(b.premises.get("rivals", 0)) + float(CityLife.rivals_near(self, b)) + CityLife.firms_near(self, b)
 	for o: Business in businesses:
 		if o == b:
 			continue
 		var q = o.premises.get("pos", null)
 		if q is Array and (q as Array).size() >= 3 and Vector3(q[0], q[1], q[2]).distance_to(me) < r:
-			n += 1
+			n += 1.0
 	return n
 
 
@@ -963,7 +965,8 @@ func to_dict() -> Dictionary:
 		"ledger": ledger.duplicate(true), "log": log.duplicate(true), "day_reports": day_reports.duplicate(true),
 		"flags": flags.duplicate(), "id_n": _id_n, "rng_state": str(rng.state),
 		"hour_served": _hour_served.duplicate(), "carry": _carry_minutes, "weather": weather, "forecast": forecast,
-		"events": events.duplicate(true), "rivals": rivals.duplicate(true), "news": news.duplicate(true)}
+		"events": events.duplicate(true), "rivals": rivals.duplicate(true), "news": news.duplicate(true),
+		"firms": firms.duplicate(true)}
 
 
 static func from_dict(src: Dictionary) -> Empire:
@@ -1012,6 +1015,7 @@ static func from_dict(src: Dictionary) -> Empire:
 	e.events = d.get("events", [])
 	e.rivals = d.get("rivals", [])
 	e.news = d.get("news", [])
+	e.firms = d.get("firms", [])
 	if e.candidates.is_empty():
 		e.candidates = Staff.candidates(e.day, e.seed)
 	return e
@@ -1036,5 +1040,11 @@ static func migrate(d: Dictionary) -> Dictionary:
 			if not d.has(k):
 				d[k] = []
 		v = 3
+	if v < 4:
+		# v4 added the independent shops; they're seeded on the first day
+		# the game has the city's units (CityLife.ensure_firms).
+		if not d.has("firms"):
+			d["firms"] = []
+		v = 4
 	d["version"] = v
 	return d

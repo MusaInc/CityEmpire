@@ -1,22 +1,115 @@
 {
   "_doc": "City life. Weather is rolled per day (with a forecast for tomorrow); footfall multiplies shoppers, mix multiplies what they come in for, sky is the Atmosphere weather shown. Events: at most one new one a day (chance), weighted; each lasts `days`. Rivals: the QuikSave chain opens stores in free units and competes for shoppers; buy them out at price_k x the premises price.",
   "weather": {
-    "sunny":    {"name": "Sunny",    "icon": "☀", "weight": 0.34, "sky": "clear",  "footfall": 1.08, "mix": {"drinks": 1.35, "sweets": 1.1}},
-    "cloudy":   {"name": "Cloudy",   "icon": "☁", "weight": 0.3,  "sky": "cloudy", "footfall": 1.0,  "mix": {}},
-    "rain":     {"name": "Rain",     "icon": "☂", "weight": 0.2,  "sky": "rain",   "footfall": 0.82, "mix": {"hot": 1.6, "groceries": 1.15, "drinks": 0.85}},
-    "storm":    {"name": "Storm",    "icon": "⚡", "weight": 0.06, "sky": "storm",  "footfall": 0.62, "mix": {"hot": 1.7, "household": 1.3, "drinks": 0.8}},
-    "heatwave": {"name": "Heatwave", "icon": "🔥", "weight": 0.1,  "sky": "clear",  "footfall": 1.15, "mix": {"drinks": 1.9, "sweets": 1.2, "hot": 0.5}}
+    "sunny": {
+      "name": "Sunny",
+      "icon": "☀",
+      "weight": 0.34,
+      "sky": "clear",
+      "footfall": 1.08,
+      "mix": {
+        "drinks": 1.35,
+        "sweets": 1.1
+      }
+    },
+    "cloudy": {
+      "name": "Cloudy",
+      "icon": "☁",
+      "weight": 0.3,
+      "sky": "cloudy",
+      "footfall": 1.0,
+      "mix": {}
+    },
+    "rain": {
+      "name": "Rain",
+      "icon": "☂",
+      "weight": 0.2,
+      "sky": "rain",
+      "footfall": 0.82,
+      "mix": {
+        "hot": 1.6,
+        "groceries": 1.15,
+        "drinks": 0.85
+      }
+    },
+    "storm": {
+      "name": "Storm",
+      "icon": "⚡",
+      "weight": 0.06,
+      "sky": "storm",
+      "footfall": 0.62,
+      "mix": {
+        "hot": 1.7,
+        "household": 1.3,
+        "drinks": 0.8
+      }
+    },
+    "heatwave": {
+      "name": "Heatwave",
+      "icon": "🔥",
+      "weight": 0.1,
+      "sky": "clear",
+      "footfall": 1.15,
+      "mix": {
+        "drinks": 1.9,
+        "sweets": 1.2,
+        "hot": 0.5
+      }
+    }
   },
   "event_chance": 0.6,
   "events": {
-    "festival":   {"weight": 1.0, "days": 1, "footfall": 1.6, "text": "Street festival in %s today: crowds everywhere"},
-    "deal":       {"weight": 1.3, "days": 2, "price": 0.7,    "text": "Wholesale deal: %s 30%% off at every cash & carry"},
-    "price_rise": {"weight": 0.7, "days": 3, "price": 1.18,   "text": "Supplier shortage: %s cost 18%% more at wholesale"},
-    "inspection": {"weight": 0.9, "days": 1, "hour": 14,       "text": "Food hygiene inspector visiting %s this afternoon", "good": 0.72, "bad": 0.45, "fine": 150, "rep": 8},
-    "viral":      {"weight": 0.6, "days": 1, "rep": 10,        "text": "%s went viral online: \"best little shop in the city\""},
-    "sick":       {"weight": 0.7, "days": 1,                   "text": "%s called in sick today"},
-    "burglary":   {"weight": 0.5, "days": 1, "share": 0.2,     "text": "Break-in overnight at %s"},
-    "payday":     {"weight": 0.8, "days": 1, "footfall": 1.25, "text": "Payday: people are spending across the city"}
+    "festival": {
+      "weight": 1.0,
+      "days": 1,
+      "footfall": 1.6,
+      "text": "Street festival in %s today: crowds everywhere"
+    },
+    "deal": {
+      "weight": 1.3,
+      "days": 2,
+      "price": 0.7,
+      "text": "Wholesale deal: %s 30%% off at every cash & carry"
+    },
+    "price_rise": {
+      "weight": 0.7,
+      "days": 3,
+      "price": 1.18,
+      "text": "Supplier shortage: %s cost 18%% more at wholesale"
+    },
+    "inspection": {
+      "weight": 0.9,
+      "days": 1,
+      "hour": 14,
+      "text": "Food hygiene inspector visiting %s this afternoon",
+      "good": 0.72,
+      "bad": 0.45,
+      "fine": 150,
+      "rep": 8
+    },
+    "viral": {
+      "weight": 0.6,
+      "days": 1,
+      "rep": 10,
+      "text": "%s went viral online: \"best little shop in the city\""
+    },
+    "sick": {
+      "weight": 0.7,
+      "days": 1,
+      "text": "%s called in sick today"
+    },
+    "burglary": {
+      "weight": 0.5,
+      "days": 1,
+      "share": 0.2,
+      "text": "Break-in overnight at %s"
+    },
+    "payday": {
+      "weight": 0.8,
+      "days": 1,
+      "footfall": 1.25,
+      "text": "Payday: people are spending across the city"
+    }
   },
   "rivals": {
     "name": "QuikSave",
@@ -29,5 +122,61 @@
     "near_you": 0.6,
     "price_k": 1.6,
     "retreat_after": 3
+  },
+  "firms": {
+    "_doc": "Independent shops already trading in the established units. They compete (comp_weight each within the competition radius, capped), go up for sale (owner retiring) and close if nobody buys; new ones open in empty units. Buying one takes over the lease with its regulars, stock and a cashier.",
+    "trading_share": 0.8,
+    "for_sale_start": 3,
+    "max_for_sale": 7,
+    "sale_chance": 0.05,
+    "close_after": 10,
+    "open_chance": 0.25,
+    "comp_weight": 0.3,
+    "comp_cap": 0.8,
+    "rent_days": 40,
+    "goodwill_days": 30,
+    "stock_value": 450,
+    "sale_discount": 0.8,
+    "offer_premium": 1.25,
+    "kinds": [
+      "Mini Market",
+      "Food & Wine",
+      "Convenience Store",
+      "Corner Shop",
+      "Stores",
+      "Newsagents",
+      "Express",
+      "Superette",
+      "Grocers",
+      "Late Shop"
+    ],
+    "names": [
+      "Sunrise Stores",
+      "The Daily Basket",
+      "Open All Hours",
+      "Kingsway Mini Market",
+      "Bridge Street Stores",
+      "The Pantry",
+      "Harbour Lights Store",
+      "Moonlight Express",
+      "Greenleaf Grocers",
+      "The Corner Larder",
+      "Market Cross Stores",
+      "Penny Lane Superette"
+    ],
+    "colours": [
+      "#2f7d4a",
+      "#1f5fa8",
+      "#8a3ea0",
+      "#c8761c",
+      "#2b8c8c",
+      "#a8323e",
+      "#4a5a7a",
+      "#6f8a2a",
+      "#b04e7c",
+      "#3c6e47",
+      "#9a6b2f",
+      "#245b7a"
+    ]
   }
 }

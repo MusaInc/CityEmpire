@@ -69,10 +69,19 @@ func _draw() -> void:
 		if not rv.is_empty():
 			col = Color(CityLife.rival_cfg().get("colour", "#d8262f"))
 			label = String(rv["name"])
+		var fm := CityLife.firm_at(game.empire, u["id"])
+		var sale: bool = fm.get("for_sale", false)
+		if not fm.is_empty():
+			col = Color(0.62, 0.66, 0.7) if not sale else Color(0.35, 0.95, 0.75)
+			label = String(fm["name"]) + (" · for sale" if sale else "")
 		var w := Vector2(float(u["pos"][0]), float(u["pos"][2]))
 		var s := _to_screen(w)
-		var big: bool = b != null or u["kind"] == "wholesale" or not rv.is_empty()
-		if not rv.is_empty():
+		var big: bool = b != null or u["kind"] == "wholesale" or not rv.is_empty() or sale
+		if not fm.is_empty() and not sale:
+			draw_circle(s, 3.0, col)
+		elif sale:
+			draw_rect(Rect2(s - Vector2(5, 5), Vector2(10, 10)), col)
+		elif not rv.is_empty():
 			draw_rect(Rect2(s - Vector2(6, 6), Vector2(12, 12)), col)
 		else:
 			draw_circle(s, 7.0 if big else 4.5, col)
@@ -89,7 +98,7 @@ func _draw() -> void:
 	var tri := PackedVector2Array([sp + Vector2(0, -11).rotated(-yaw), sp + Vector2(7, 7).rotated(-yaw), sp + Vector2(-7, 7).rotated(-yaw)])
 	draw_colored_polygon(tri, EmpireStyle.RED)
 	draw_string(f, Vector2(14, size.y - 14), "Westbank — industrial & residential", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, EmpireStyle.MUTED)
-	draw_string(f, Vector2(size.x * 0.5 - 170, size.y - 14), "● yours   ● to let   ● wholesale   ■ QuikSave", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, EmpireStyle.MUTED)
+	draw_string(f, Vector2(size.x * 0.5 - 250, size.y - 14), "● yours   ● to let   ● wholesale   ■ QuikSave   ■ for sale   · independent", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, EmpireStyle.MUTED)
 	draw_string(f, Vector2(size.x - 300, size.y - 14), "Commercial Island", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, EmpireStyle.MUTED)
 	var t := game.gps_target()
 	if t != Vector3.INF:

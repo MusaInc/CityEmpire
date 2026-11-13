@@ -12,9 +12,12 @@ extends RefCounted
 ##    yours) and takes shoppers within the competition radius. Buy them out;
 ##    after a few buy-outs the chain stops expanding, and when the last
 ##    store is yours QuikSave leaves the city.
+##  * Firms: independent shops trading in most of the smaller units. They
+##    compete a little, go up for sale when an owner retires (and close if
+##    nobody buys) and new ones open; buy one to take over a running shop.
 ##
 ## Everything lives in Empire's saved state (weather, forecast, events,
-## rivals, news); Empire.market (the city's shop units) is set by the game
+## rivals, firms, news); Empire.market (the city's shop units) is set by the game
 ## and isn't saved.
 
 
@@ -38,8 +41,11 @@ static func start(e: Empire) -> void:
 	e.events.clear()
 	e.rivals.clear()
 	e.news.clear()
+	e.firms.clear()
+	e.flags.erase("firms_seeded")
 	for i in int(rival_cfg().get("start", 2)):
 		_open_rival(e, true)
+	ensure_firms(e)
 	_headline(e, "Welcome to the city. %s runs %d stores here – for now." % [rival_cfg().get("name", "QuikSave"), e.rivals.size()], "info")
 
 
@@ -59,6 +65,7 @@ static func new_day(e: Empire) -> void:
 	if e.rng.randf() < float(cfg().get("event_chance", 0.6)):
 		_roll_event(e)
 	_rivals_day(e)
+	_firms_day(e)
 
 
 static func _weather_tip(w: String) -> String:
@@ -268,7 +275,7 @@ static func rival_price(r: Dictionary) -> float:
 
 static func _free_units(e: Empire) -> Array:
 	return e.market.filter(func(u): return u.get("kind", "shop") == "shop" and e.business_at(u["id"]) == null \
-		and not is_rival(e, u["id"]) and u["id"] != e.flags.get("start_unit", ""))
+		and not is_taken(e, u["id"]) and u["id"] != e.flags.get("start_unit", ""))
 
 
 static func _open_rival(e: Empire, quiet := false) -> Dictionary:
@@ -363,3 +370,181 @@ static func _headline(e: Empire, text: String, kind: String) -> void:
 	if e.news.size() > 40:
 		e.news = e.news.slice(e.news.size() - 40)
 	e._note(text, kind)
+
+
+# --------------------------------------------------------------- firms
+## Independent shops trading in the established units (Premises "est"):
+## {unit, name, owner, district, pos, rent, price, rep, since, colour,
+## for_sale, listed}. They compete for shoppers, sometimes go up for sale
+## and close if nobody buys; buying one takes over a running shop.
+static func firm_cfg() -> Dictionary:
+	return cfg().get("firms", {})
+
+
+static func is_firm(e: Empire, unit_id: String) -> bool:
+	return e.firms.any(func(f): return f["unit"] == unit_id)
+
+
+static func firm_at(e: Empire, unit_id: String) -> Dictionary:
+	for f in e.firms:
+		if f["unit"] == unit_id:
+			return f
+	return {}
+
+
+## Someone else trades here (QuikSave or an independent).
+static func is_taken(e: Empire, unit_id: String) -> bool:
+	return is_rival(e, unit_id) or is_firm(e, unit_id)
+
+
+## Seeds the independents once (new game, or the first load of an older save).
+static func ensure_firms(e: Empire) -> void:
+	if e.flags.get("firms_seeded", false) or e.market.is_empty():
+		return
+	e.flags["firms_seeded"] = true
+	var fc := firm_cfg()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([e.seed, "firms"])
+	for u in e.market:
+		if not u.get("est", false) or e.business_at(u["id"]) != null or is_rival(e, u["id"]):
+			continue
+		if rng.randf() < float(fc.get("trading_share", 0.8)):
+			_new_firm(e, u, rng, e.day - rng.randi_range(200, 4000))
+	var n := mini(int(fc.get("for_sale_start", 3)), e.firms.size())
+	for i in n:
+		var f: Dictionary = e.firms[rng.randi() % e.firms.size()]
+		f["for_sale"] = true
+		f["listed"] = e.day
+
+
+static func _new_firm(e: Empire, u: Dictionary, rng: RandomNumberGenerator, since: int) -> Dictionary:
+	var fc := firm_cfg()
+	var sd := EmpireData.file("staff")
+	var first: Array = sd.get("first_names", ["Sam"])
+	var last: Array = sd.get("last_names", ["Smith"])
+	var owner := "%s %s" % [first[rng.randi() % first.size()], last[rng.randi() % last.size()]]
+	var kinds: Array = fc.get("kinds", ["Stores"])
+	var names: Array = fc.get("names", [])
+	var nm := ""
+	var r := rng.randf()
+	if r < 0.45:
+		nm = "%s's %s" % [owner.get_slice(" ", 1), kinds[rng.randi() % kinds.size()]]
+	elif r < 0.7:
+		nm = "%s's %s" % [owner.get_slice(" ", 0), kinds[rng.randi() % kinds.size()]]
+	elif not names.is_empty():
+		nm = names[rng.randi() % names.size()]
+	else:
+		nm = "%s %s" % [owner.get_slice(" ", 1), kinds[0]]
+	var cols: Array = fc.get("colours", ["#2f7d4a"])
+	var f := {"unit": u["id"], "name": nm, "owner": owner, "district": u["district"], "pos": u.get("pos", []),
+		"rent": float(u.get("rent", 30.0)), "price": float(u.get("price", 7000.0)),
+		"rep": roundf(clampf(rng.randfn(52.0, 14.0), 15.0, 90.0)), "since": since,
+		"colour": cols[rng.randi() % cols.size()], "for_sale": false, "listed": 0}
+	e.firms.append(f)
+	return f
+
+
+## Rough daily profit of an independent (what its books show a buyer).
+static func firm_profit(f: Dictionary) -> float:
+	var d := EmpireData.district(f["district"])
+	var hours := 0.0
+	for h in range(7, 22):
+		hours += EmpireData.hour_curve(float(h) + 0.5)
+	var shoppers := float(d.get("footfall", 8.0)) * float(EmpireData.economy().get("footfall_scale", 1.0)) * hours \
+		* (0.5 + float(f.get("rep", 50.0)) / 100.0) * 0.8
+	var gross := shoppers * 1.4 * 1.15 * float(d.get("affluence", 1.0))
+	return roundf(gross - float(f.get("rent", 30.0)) - 100.0 - 12.0)
+
+
+static func firm_price(f: Dictionary) -> float:
+	var fc := firm_cfg()
+	var v := float(f.get("rent", 30.0)) * float(fc.get("rent_days", 40)) + maxf(firm_profit(f), 15.0) * float(fc.get("goodwill_days", 20)) \
+		+ float(fc.get("stock_value", 450))
+	v *= float(fc.get("sale_discount", 0.8)) if f.get("for_sale", false) else float(fc.get("offer_premium", 1.25))
+	return roundf(v / 50.0) * 50.0
+
+
+static func firms_for_sale(e: Empire) -> Array:
+	return e.firms.filter(func(f): return f.get("for_sale", false))
+
+
+static func _firms_day(e: Empire) -> void:
+	ensure_firms(e)
+	if e.market.is_empty():
+		return
+	var fc := firm_cfg()
+	for f in e.firms.duplicate():
+		f["rep"] = clampf(float(f["rep"]) + e.rng.randf_range(-1.5, 1.5) + (50.0 - float(f["rep"])) * 0.02, 10.0, 95.0)
+		if f.get("for_sale", false) and e.day - int(f.get("listed", 0)) > int(fc.get("close_after", 10)):
+			e.firms.erase(f)
+			_headline(e, "%s in %s has closed for good. The unit is to let." % [f["name"], _dname(f)], "info")
+	if firms_for_sale(e).size() < int(fc.get("max_for_sale", 7)) and e.rng.randf() < float(fc.get("sale_chance", 0.05)) * 4.0:
+		var cands := e.firms.filter(func(f): return not f.get("for_sale", false))
+		if not cands.is_empty():
+			var f: Dictionary = cands[e.rng.randi() % cands.size()]
+			f["for_sale"] = true
+			f["listed"] = e.day
+			_headline(e, "For sale: %s in %s – %s is retiring. Asking %s." % [f["name"], _dname(f), f["owner"],
+				EmpireData.money(firm_price(f))], "good")
+	if e.rng.randf() < float(fc.get("open_chance", 0.25)):
+		var free := _free_units(e).filter(func(u): return u.get("est", false))
+		if not free.is_empty():
+			var u: Dictionary = free[e.rng.randi() % free.size()]
+			var f := _new_firm(e, u, e.rng, e.day)
+			f["rep"] = 35.0
+			var mine := e.businesses.filter(func(b): return _dist(f["pos"], b.premises.get("pos", [])) < float(EmpireData.economy().get("competition_radius", 140.0)))
+			_headline(e, ("New independent %s opened near %s." % [f["name"], (mine[0] as Business).name]) if not mine.is_empty()
+				else "New independent %s opened in %s." % [f["name"], _dname(f)], "warn" if not mine.is_empty() else "info")
+
+
+static func _dname(f: Dictionary) -> String:
+	return String(EmpireData.district(f.get("district", "")).get("name", ""))
+
+
+## How much the independents within the competition radius weigh against a
+## business (each counts as part of a competitor, capped).
+static func firms_near(e: Empire, b: Business) -> float:
+	var fc := firm_cfg()
+	var r := float(EmpireData.economy().get("competition_radius", 140.0))
+	var n := 0.0
+	for f in e.firms:
+		if _dist(f["pos"], b.premises.get("pos", [])) < r:
+			n += float(fc.get("comp_weight", 0.3)) * (0.5 + float(f.get("rep", 50.0)) / 100.0)
+	return minf(n, float(fc.get("comp_cap", 0.9)))
+
+
+## Buys an independent: you take over the lease (rent from tomorrow), its
+## regulars (reputation), the stock on its shelves and its cashier.
+static func buy_firm(e: Empire, unit: Dictionary, err := []) -> Business:
+	var f := firm_at(e, unit.get("id", ""))
+	if f.is_empty():
+		err.append("Not for sale")
+		return null
+	var price := firm_price(f)
+	if not e.pay(price, "property", "Bought %s" % f["name"]):
+		err.append("Not enough money (%s)" % EmpireData.money(price))
+		return null
+	e.firms.erase(f)
+	var b := e._open_business(unit, "convenience")
+	b.name = f["name"]
+	b.reputation = maxf(float(f["rep"]), 30.0)
+	# The stock that came with it, on the shelves.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([e.seed, unit["id"], e.day])
+	for pid in EmpireData.product_ids():
+		var p := EmpireData.product(pid)
+		if p["fixture"] in ["shelf", "fridge"] and rng.randf() < 0.8:
+			e._receive(b.backroom, pid, EmpireData.case_qty(pid), float(p.get("case_cost", 0.0)) / float(EmpireData.case_qty(pid)))
+	e.restock_from_backroom(b, 999)
+	# The cashier stays on.
+	var c := Staff.make(rng, "cashier", e.day, 90 + e.businesses.size())
+	c["hired_day"] = e.day
+	c["business"] = b.id
+	b.staff.append(c)
+	b.open = true
+	e.stats["hires"] = int(e.stats.get("hires", 0)) + 1
+	e.stats["firms_bought"] = int(e.stats.get("firms_bought", 0)) + 1
+	_headline(e, "You bought %s from %s. Its regulars, stock and cashier come with it." % [f["name"], f["owner"]], "good")
+	e._check_goals()
+	e.changed.emit()
+	return b

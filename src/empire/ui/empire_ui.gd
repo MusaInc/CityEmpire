@@ -1178,7 +1178,7 @@ func day_report(r: Dictionary) -> void:
 func _city_tab(v: VBoxContainer) -> void:
 	var e := game.empire
 	var g := GridContainer.new()
-	g.columns = 3
+	g.columns = 4
 	g.add_theme_constant_override("h_separation", 40)
 	var wd := CityLife.weather_def(e.weather)
 	var fd := CityLife.weather_def(e.forecast)
@@ -1187,6 +1187,7 @@ func _city_tab(v: VBoxContainer) -> void:
 	var rc := CityLife.rival_cfg()
 	g.add_child(_stat(String(rc.get("name", "QuikSave")) + " stores", "gone" if e.flags.get("rival_gone", false) else str(e.rivals.size()),
 		S.GREEN if e.flags.get("rival_gone", false) else S.RED))
+	g.add_child(_stat("Independents", "%d · %d for sale" % [e.firms.size(), CityLife.firms_for_sale(e).size()], S.PAPER))
 	v.add_child(g)
 	var tip := String(CityLife._weather_tip(e.weather))
 	if tip != "":
@@ -1208,6 +1209,21 @@ func _city_tab(v: VBoxContainer) -> void:
 				S.button("Buy out", func(): open_rival(u), true, 120),
 				S.button("GPS", func():
 					game.set_gps(Premises.door_point(u), String(r["name"]))
+					close_panel(true), false, 70)]))
+	var sale := CityLife.firms_for_sale(e)
+	sale.sort_custom(func(a, b): return CityLife.firm_price(a) < CityLife.firm_price(b))
+	if not sale.is_empty():
+		list.add_child(S.label("BUSINESSES FOR SALE · running shops with stock, staff and regulars", 14, S.GREEN, "black"))
+		for f in sale:
+			var u2: Dictionary = game.unit_by_id.get(f["unit"], {})
+			if u2.is_empty():
+				continue
+			list.add_child(_row([_fixed(String(f["name"]), 260, 17, S.PAPER, "bold"),
+				_fixed("%s · ★ %d · %s/day" % [CityLife._dname(f), int(f["rep"]), EmpireData.money(CityLife.firm_profit(f))], 230, 15, S.MUTED),
+				_fixed(EmpireData.money(CityLife.firm_price(f)), 100, 17, S.PAPER, "bold"),
+				S.button("View", func(): open_firm(u2), true, 100),
+				S.button("GPS", func():
+					game.set_gps(Premises.door_point(u2), String(f["name"]))
 					close_panel(true), false, 70)]))
 	list.add_child(S.label("NEWS", 14, S.AMBER, "black"))
 	var ns: Array = e.news.duplicate()
@@ -1244,6 +1260,50 @@ func open_rival(u: Dictionary) -> void:
 			toast(err, "bad")
 		else:
 			close_panel(true), true, 320)
+	buy.disabled = not e.can_afford(price)
+	h.add_child(buy)
+	h.add_child(S.button("Not now", close_panel.bind(true), false, 160))
+	v.add_child(h)
+
+
+## An independent shop: its books and the asking price.
+func open_firm(u: Dictionary) -> void:
+	var e := game.empire
+	var f := CityLife.firm_at(e, u["id"])
+	if f.is_empty():
+		return
+	var v := _open(String(f["name"]), 780, 470)
+	var d := EmpireData.district(f["district"])
+	var yrs := maxi(1, (e.day - int(f.get("since", e.day))) / 365)
+	v.add_child(S.label("Independent · run by %s for %d year%s  ·  %s  ·  %d m²" % [f["owner"], yrs, "" if yrs == 1 else "s",
+		d.get("name", ""), int(u.get("size", 0))], 17, S.MUTED))
+	var g := GridContainer.new()
+	g.columns = 4
+	g.add_theme_constant_override("h_separation", 36)
+	var prof := CityLife.firm_profit(f)
+	g.add_child(_stat("Reputation", "★ %d" % int(f["rep"]), S.AMBER))
+	g.add_child(_stat("Profit / day", EmpireData.money(prof), S.GREEN if prof > 0.0 else S.RED))
+	g.add_child(_stat("Rent / day", EmpireData.money(float(f.get("rent", 0.0)))))
+	g.add_child(_stat("Status", "FOR SALE" if f.get("for_sale", false) else "Trading", S.AMBER if f.get("for_sale", false) else S.PAPER))
+	v.add_child(g)
+	var txt := S.label(("%s is retiring and wants a quick sale: the price is %d%% under value." % [f["owner"], roundi((1.0 - float(CityLife.firm_cfg().get("sale_discount", 0.8))) * 100.0)])
+		if f.get("for_sale", false) else "Not on the market, but %s will sell for the right offer." % f["owner"].get_slice(" ", 0), 17, S.PAPER)
+	txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	txt.custom_minimum_size.x = 720
+	v.add_child(txt)
+	var inc := S.label("You take over the lease (rent from tomorrow), the stock on the shelves, the cashier and its regulars. It keeps trading from the moment you buy it.", 16, S.MUTED)
+	inc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inc.custom_minimum_size.x = 720
+	v.add_child(inc)
+	var price := CityLife.firm_price(f)
+	v.add_child(S.label("Price %s  ·  you have %s + company %s" % [EmpireData.money(price), EmpireData.money(e.personal_cash), EmpireData.money(e.company_cash)], 18, S.AMBER, "bold"))
+	var h := S.hbox(12)
+	var buy := S.button("BUY THE BUSINESS · %s" % EmpireData.money(price), func():
+		var err := game.buy_firm(u)
+		if err != "":
+			toast(err, "bad")
+		else:
+			close_panel(true), true, 360)
 	buy.disabled = not e.can_afford(price)
 	h.add_child(buy)
 	h.add_child(S.button("Not now", close_panel.bind(true), false, 160))

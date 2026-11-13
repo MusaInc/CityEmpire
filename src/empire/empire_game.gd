@@ -159,6 +159,18 @@ func _after_start() -> void:
 		var u: Dictionary = starter_unit() if g == "start" else (wholesaler(g.get_slice(":", 1)) if g.begins_with("wholesale") else unit_by_id.get(g, {}))
 		if g == "rival" and not empire.rivals.is_empty():
 			u = unit_by_id.get(empire.rivals[0]["unit"], {})
+		if g == "firm":
+			var fs := CityLife.firms_for_sale(empire)
+			if fs.is_empty():
+				fs = empire.firms
+			# The independent nearest the starter shop (a familiar street).
+			var s0 := starter_unit()
+			var best := INF
+			for f in fs:
+				var d0 := CityLife._dist(f["pos"], s0["pos"])
+				if d0 < best:
+					best = d0
+					u = unit_by_id.get(f["unit"], {})
 		if not u.is_empty():
 			var inside := args.has("inside")
 			var p := Premises.door_point(u) + Premises.outward(u) * (-2.5 if inside else 3.0) + Vector3.UP * 1.0
@@ -219,6 +231,9 @@ func _after_start() -> void:
 			ui.victory()
 		elif pn == "rival" and not empire.rivals.is_empty():
 			ui.open_rival(unit_by_id[empire.rivals[0]["unit"]])
+		elif pn == "firm" and not empire.firms.is_empty():
+			var fs2 := CityLife.firms_for_sale(empire)
+			ui.open_firm(unit_by_id[(fs2[0] if not fs2.is_empty() else empire.firms[0])["unit"]])
 		elif pn == "report":
 			empire.advance(1440.0 - empire.minute + 1.0)
 		else:
@@ -267,20 +282,43 @@ func _market() -> Array:
 var _rival_sig := ""
 
 
-## Rebuilds the interiors of units whose rival status changed.
+## Rebuilds the interiors of units whose occupier (QuikSave, an independent,
+## for sale or not) changed.
 func _sync_rivals() -> void:
-	var ids: Array = []
+	var tags := {}
 	for r in empire.rivals:
-		ids.append(String(r["unit"]))
+		tags[String(r["unit"])] = "r"
+	for f in empire.firms:
+		tags[String(f["unit"])] = "f" + ("s" if f.get("for_sale", false) else "") + String(f["name"])
+	var ids: Array = tags.keys()
 	ids.sort()
-	var sig := ",".join(ids)
+	var parts: Array = []
+	for id in ids:
+		parts.append("%s=%s" % [id, tags[id]])
+	var sig := ",".join(parts)
 	if sig == _rival_sig:
 		return
-	var old := _rival_sig.split(",", false)
+	var old := {}
+	for p in _rival_sig.split(",", false):
+		old[p.get_slice("=", 0)] = p.get_slice("=", 1)
 	_rival_sig = sig
 	for id in interiors.keys():
-		if (id in ids) != (id in old):
+		if String(tags.get(id, "")) != String(old.get(id, "")):
 			rebuild_interior(id)
+
+
+## Who trades in a unit that isn't yours: the QuikSave record, or an
+## independent's (marked "firm"), or {}.
+func occupier(unit_id: String) -> Dictionary:
+	var r := CityLife.rival_at(empire, unit_id)
+	if not r.is_empty():
+		return r
+	var f := CityLife.firm_at(empire, unit_id)
+	if not f.is_empty():
+		var d := f.duplicate()
+		d["firm"] = true
+		return d
+	return {}
 
 
 ## Today's sky follows the Empire's weather.
@@ -476,7 +514,7 @@ func _stream_interiors() -> void:
 func _build_interior(u: Dictionary) -> ShopInterior:
 	var si := ShopInterior.new()
 	var b := empire.business_at(u["id"])
-	si.setup(u, b, layout.ground_y, CityLife.rival_at(empire, u["id"]) if b == null else {})
+	si.setup(u, b, layout.ground_y, occupier(u["id"]) if b == null else {})
 	add_child(si)
 	interiors[u["id"]] = si
 	if u["kind"] == "wholesale":
@@ -502,7 +540,7 @@ func _refresh_signs(unit_id: String) -> void:
 	var b := empire.business_at(unit_id)
 	if not si.rival.is_empty():
 		var h := empire.hour()
-		si.update_signs(h >= 7.0 and h < 23.0)
+		si.update_signs(h >= 7.0 and h < (22.0 if si.rival.get("firm", false) else 23.0))
 		return
 	si.update_signs(b != null and b.open and b.within_hours(empire.hour()))
 
@@ -663,6 +701,10 @@ func spot_prompt() -> Array:
 			var rv := CityLife.rival_at(empire, u["id"])
 			if not rv.is_empty():
 				return ["%s · BUY OUT %s" % [String(CityLife.rival_cfg().get("name", "QuikSave")).to_upper(), EmpireData.money(CityLife.rival_price(rv))], true]
+			var fm := CityLife.firm_at(empire, u["id"])
+			if not fm.is_empty():
+				return ["%s · %s %s" % [String(fm["name"]).to_upper(), "FOR SALE" if fm.get("for_sale", false) else "MAKE AN OFFER",
+					EmpireData.money(CityLife.firm_price(fm))], true]
 			return ["TO LET · %s/day" % EmpireData.money(float(u["rent"])), true]
 		"home_lift":
 			var home := home_by_id(spot["home"])
@@ -768,6 +810,8 @@ func act() -> void:
 		"letboard":
 			if CityLife.is_rival(empire, spot["unit"]):
 				ui.open_rival(unit_by_id[spot["unit"]])
+			elif CityLife.is_firm(empire, spot["unit"]):
+				ui.open_firm(unit_by_id[spot["unit"]])
 			else:
 				ui.open_property(unit_by_id[spot["unit"]])
 		"home_lift":
@@ -997,6 +1041,18 @@ func buy_vehicle(model: String) -> String:
 
 
 # -------------------------------------------------------------- business
+func buy_firm(u: Dictionary) -> String:
+	var err: Array = []
+	var b := CityLife.buy_firm(empire, Premises.record(u), err)
+	if b == null:
+		return err[0] if not err.is_empty() else "Can't buy it"
+	_sync_rivals()
+	rebuild_interior(u["id"])
+	Sfx.play("cash", -2.0)
+	save_game()
+	return ""
+
+
 func buy_out_rival(u: Dictionary) -> String:
 	var err: Array = []
 	var b := CityLife.buy_out(empire, Premises.record(u), err)
@@ -1215,6 +1271,7 @@ func load_game() -> bool:
 	empire.market = _market()
 	if not empire.flags.has("start_unit"):
 		empire.flags["start_unit"] = starter_unit()["id"]
+	CityLife.ensure_firms(empire)
 	_connect_empire()
 	_rival_sig = "?"
 	_spawn_cars()

@@ -80,8 +80,12 @@ func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival
 	rival = p_rival
 	brand = BRANDS[absi(String(unit.get("id", "")).hash()) % BRANDS.size()]
 	if not rival.is_empty() and biz == null:
-		brand = Color(CityLife.rival_cfg().get("colour", "#d8262f"))
-		biz = rival_display(unit)
+		if rival.get("firm", false):
+			brand = Color(String(rival.get("colour", "#2f7d4a")))
+			biz = rival_display(unit, String(rival.get("name", "")))
+		else:
+			brand = Color(CityLife.rival_cfg().get("colour", "#d8262f"))
+			biz = rival_display(unit)
 	var sz := Premises.room_size(unit)
 	W = sz.x
 	H = sz.y
@@ -107,13 +111,14 @@ func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival
 	rebuild()
 
 
-## A fully stocked, fitted-out stand-in Business for drawing a rival store.
-static func rival_display(u: Dictionary) -> Business:
+## A fully stocked, fitted-out stand-in Business for drawing a store run by
+## someone else (QuikSave, or an independent called `title`).
+static func rival_display(u: Dictionary, title := "") -> Business:
 	var b := Business.new("rival_" + String(u.get("id", "")), "convenience")
 	b.setup_new(Premises.record(u), 1)
 	for up in ["shelf_2", "fridge_2", "lighting", "signage", "floor"]:
 		b.apply_upgrade(up)
-	b.name = String(CityLife.rival_cfg().get("name", "QuikSave"))
+	b.name = title if title != "" else String(CityLife.rival_cfg().get("name", "QuikSave"))
 	var shelf: Array = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == "shelf")
 	var cold: Array = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == "fridge")
 	var si := 0
@@ -413,7 +418,10 @@ func update_signs(trading: bool) -> void:
 	if _sign:
 		_sign.text = _sign_text()
 	if _open_sign:
-		if not rival.is_empty():
+		if rival.get("for_sale", false):
+			_open_sign.text = "FOR SALE\n%s" % EmpireData.money(CityLife.firm_price(rival))
+			_open_sign.modulate = Color(1.0, 0.85, 0.3)
+		elif not rival.is_empty():
 			_open_sign.text = "OPEN" if trading else "CLOSED"
 			_open_sign.modulate = Color(1.0, 0.95, 0.9)
 		elif biz == null:
