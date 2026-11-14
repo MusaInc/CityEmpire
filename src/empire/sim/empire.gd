@@ -329,7 +329,7 @@ func hire(b: Business, cand: Dictionary) -> bool:
 	e["business"] = b.id
 	b.staff.append(e)
 	stats["hires"] = int(stats["hires"]) + 1
-	_note("Hired %s as %s at %s" % [e["name"], EmpireData.role(e["role"]).get("name", ""), b.name], "good")
+	_note("Hired %s as %s at %s" % [e["name"], EmpireData.role(e["role"]).get("name", ""), b.name], "good", {"kind": "biz", "id": b.id, "tab": "staff"})
 	_check_goals()
 	changed.emit()
 	return true
@@ -339,9 +339,10 @@ func fire(b: Business, e: Dictionary) -> void:
 	for x in b.staff.duplicate():
 		if x["id"] == e["id"]:
 			b.staff.erase(x)
-	# A day's notice pay.
+	# A day's notice pay (in the shop's day, so its profit shows it).
 	var pay := float(e["wage"]) * 8.0
 	company_cash -= pay
+	b.today["other"] = float(b.today.get("other", 0.0)) + pay
 	_book("company", -pay, "wages", "Notice pay: %s" % e["name"], b.id)
 	changed.emit()
 
@@ -399,11 +400,19 @@ func _book(acct: String, amount: float, cat: String, memo: String, biz := "") ->
 		ledger = ledger.slice(ledger.size() - 300)
 
 
-func _note(text: String, kind := "info") -> void:
-	log.append({"day": day, "min": int(minute), "text": text, "kind": kind})
+## A notification. `ref` says what it's about ({kind: biz|unit|vehicle|tab,
+## id, tab}) so tapping it opens that (EmpireUI.open_ref); read it from
+## last_ref while `notified` is being handled.
+var last_ref := {}
+
+
+func _note(text: String, kind := "info", ref := {}) -> void:
+	log.append({"day": day, "min": int(minute), "text": text, "kind": kind, "ref": ref})
 	if log.size() > 80:
 		log = log.slice(log.size() - 80)
+	last_ref = ref
 	notified.emit(text, kind)
+	last_ref = {}
 
 
 # ----------------------------------------------------------- wholesale
@@ -516,7 +525,7 @@ func _deliver_orders() -> void:
 						b.backroom.case_capacity += Stock.cases_for(pid, units - room)  # stacked in the aisle
 					var cost := float(o.get("unit_prices", {}).get(pid, EmpireData.unit_cost(pid)))
 					_receive(b.backroom, pid, units, cost)
-				_note("Delivery arrived at %s" % b.name, "info")
+				_note("Delivery arrived at %s" % b.name, "info", {"kind": "biz", "id": b.id, "tab": "stock"})
 			else:
 				keep.append(o)
 		b.orders = keep
@@ -555,9 +564,9 @@ func _manager_reorders() -> void:
 		if not order.is_empty():
 			var err := order_delivery(b, order, true)
 			if err == "":
-				_note("%s: manager ordered %d lines for the morning" % [b.name, order.size()], "info")
+				_note("%s: manager ordered %d lines for the morning" % [b.name, order.size()], "info", {"kind": "biz", "id": b.id, "tab": "stock"})
 			else:
-				_note("%s: manager couldn't re-order – %s" % [b.name, err], "warn")
+				_note("%s: manager couldn't re-order – %s" % [b.name, err], "warn", {"kind": "tab", "id": "bank"})
 
 
 # ------------------------------------------------------------ premises
@@ -588,7 +597,7 @@ func rent_premises(premises: Dictionary, type_id := "convenience") -> Business:
 	if not pay(deposit, "rent", "Deposit: %s" % premises.get("name", "")):
 		return null
 	var b := _open_business(premises, type_id)
-	_note("You rented %s. Stock it up and open!" % b.name, "good")
+	_note("You rented %s. Stock it up and open!" % b.name, "good", {"kind": "biz", "id": b.id, "tab": "stock"})
 	return b
 
 
@@ -608,7 +617,7 @@ func buy_premises(premises: Dictionary, type_id := "convenience") -> Business:
 		return existing
 	var b := _open_business(premises, type_id)
 	b.owned = true
-	_note("You bought %s." % b.name, "good")
+	_note("You bought %s." % b.name, "good", {"kind": "biz", "id": b.id, "tab": "overview"})
 	_check_goals()
 	return b
 
@@ -825,7 +834,7 @@ func end_day() -> void:
 		report["profit"] = float(report["profit"]) - interest
 		if day >= int(l["due"]) and not flags.has("due_" + String(l["id"])):
 			flags["due_" + String(l["id"])] = true
-			_note("A loan is past its term: repay it from the Bank tab when you can", "warn")
+			_note("A loan is past its term: repay it from Finances when you can", "warn", {"kind": "tab", "id": "bank"})
 	for q in properties:
 		if q.get("let", false):
 			var inc := float(q.get("price", 0.0)) * 0.0045
@@ -841,7 +850,7 @@ func end_day() -> void:
 		var od := -company_cash * 0.01
 		company_cash -= od
 		_book("company", -od, "interest", "Overdraft interest")
-		_note("Company account overdrawn: %s. Move savings in or take a loan." % EmpireData.money(company_cash), "bad")
+		_note("Company account overdrawn: %s. Move savings in or take a loan." % EmpireData.money(company_cash), "bad", {"kind": "tab", "id": "bank"})
 	if not businesses.is_empty() and float(report["profit"]) > 0.0:
 		stats["profitable_days"] = int(stats["profitable_days"]) + 1
 	stats["days"] = int(stats["days"]) + 1
@@ -934,7 +943,7 @@ func _check_goals() -> void:
 				continue
 			if stat(g["stat"]) >= float(g["value"]):
 				goals_done.append(g["id"])
-				_note("Goal complete: %s" % g["text"], "good")
+				_note("Goal complete: %s" % g["text"], "good", {"kind": "tab", "id": "goals"})
 				goal_done.emit(g)
 	if not flags.get("won", false) and all_goals_done():
 		flags["won"] = true
@@ -1155,7 +1164,56 @@ static func from_dict(src: Dictionary) -> Empire:
 	e.hq = d.get("hq", {})
 	if e.candidates.is_empty():
 		e.candidates = Staff.candidates(e.day, e.seed)
+	e.repair_duplicates()
+	# A unit has one occupier: yours beats a stale independent / rival record.
+	e.firms = e.firms.filter(func(f): return e.business_at(String(f.get("unit", ""))) == null)
+	e.rivals = e.rivals.filter(func(r): return e.business_at(String(r.get("unit", ""))) == null)
 	return e
+
+
+## One business per commercial unit. A save that somehow holds two for the
+## same unit (an old bug, a double tap mid-save) is merged, not dropped:
+## the freehold / older record is kept and the other's stock, staff and
+## takings move into it. Returns how many were merged.
+func repair_duplicates() -> int:
+	var by_unit := {}
+	var merged := 0
+	var keep: Array = []
+	for b: Business in businesses:
+		var uid := String(b.premises.get("id", ""))
+		if uid == "" or not by_unit.has(uid):
+			by_unit[uid] = b
+			keep.append(b)
+			continue
+		var k: Business = by_unit[uid]
+		if b.owned and not k.owned:
+			# The freehold wins: swap which one is kept.
+			keep[keep.find(k)] = b
+			by_unit[uid] = b
+			var t := k
+			k = b
+			b = t
+		for pid in b.backroom.units.keys():
+			k.backroom.create(pid, b.backroom.qty(pid))
+		for pid in b.floor_pile.units.keys():
+			k.backroom.create(pid, b.floor_pile.qty(pid))
+		for sl: Dictionary in b.slots:
+			if String(sl["product"]) != "" and int(sl["qty"]) > 0:
+				k.backroom.create(String(sl["product"]), int(sl["qty"]))
+		k.backroom.case_capacity = maxi(k.backroom.case_capacity, k.backroom.cases_used())
+		var ids := k.staff.map(func(x): return x["id"])
+		for x in b.staff:
+			if not ids.has(x["id"]):
+				x["business"] = k.id
+				k.staff.append(x)
+		for key in ["revenue", "cogs", "fees", "wages", "other"]:
+			k.today[key] = float(k.today.get(key, 0.0)) + float(b.today.get(key, 0.0))
+		k.orders.append_array(b.orders)
+		merged += 1
+	if merged > 0:
+		businesses = keep
+		flags["repaired_duplicates"] = int(flags.get("repaired_duplicates", 0)) + merged
+	return merged
 
 
 ## Upgrades older saves step by step to VERSION.

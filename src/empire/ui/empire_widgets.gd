@@ -100,6 +100,42 @@ class Icon extends Control:
 				draw_polyline(PackedVector2Array([_pt(0.16, 0.38), _pt(0.72, 0.14), _pt(0.72, 0.82), _pt(0.16, 0.6), _pt(0.16, 0.38)]), c, w, true)
 				draw_line(_pt(0.3, 0.64), _pt(0.36, 0.88), c, w)
 				draw_arc(_pt(0.74, 0.48), s * 0.16, -PI * 0.35, PI * 0.35, 12, c, w, true)
+			"home":
+				draw_polyline(PackedVector2Array([_pt(0.08, 0.5), _pt(0.5, 0.12), _pt(0.92, 0.5)]), c, w, true)
+				draw_polyline(PackedVector2Array([_pt(0.2, 0.42), _pt(0.2, 0.88), _pt(0.8, 0.88), _pt(0.8, 0.42)]), c, w, true)
+				draw_rect(Rect2(_pt(0.42, 0.62), Vector2(0.16, 0.26) * s), Color(c, 0.6))
+			"more":
+				for i in 3:
+					for j in 3:
+						draw_circle(_pt(0.22 + i * 0.28, 0.22 + j * 0.28), s * 0.075, c)
+			"staff":
+				draw_circle(_pt(0.5, 0.3), s * 0.15, c)
+				draw_arc(_pt(0.5, 0.92), s * 0.34, PI * 1.08, PI * 1.92, 20, c, w, true)
+			"stock":
+				for r2 in [[0.1, 0.5], [0.5, 0.5], [0.3, 0.14]]:
+					draw_rect(Rect2(_pt(r2[0], r2[1]), Vector2(0.38, 0.36) * s), Color(c, 0.3))
+					draw_rect(Rect2(_pt(r2[0], r2[1]), Vector2(0.38, 0.36) * s), c, false, w)
+			"finances":
+				draw_line(_pt(0.1, 0.9), _pt(0.92, 0.9), c, w)
+				for i in 4:
+					var hh: float = [0.28, 0.5, 0.38, 0.7][i]
+					draw_rect(Rect2(_pt(0.14 + i * 0.2, 0.86 - hh), Vector2(0.13, hh) * s), Color(c, 0.75))
+			"alert":
+				var tri := PackedVector2Array([_pt(0.5, 0.08), _pt(0.94, 0.88), _pt(0.06, 0.88), _pt(0.5, 0.08)])
+				draw_polyline(tri, c, w, true)
+				draw_line(_pt(0.5, 0.36), _pt(0.5, 0.62), c, w * 1.3)
+				draw_circle(_pt(0.5, 0.75), s * 0.05, c)
+			"gps":
+				draw_colored_polygon(PackedVector2Array([_pt(0.88, 0.1), _pt(0.5, 0.9), _pt(0.42, 0.56), _pt(0.1, 0.46)]), Color(c, 0.35))
+				draw_polyline(PackedVector2Array([_pt(0.88, 0.1), _pt(0.5, 0.9), _pt(0.42, 0.56), _pt(0.1, 0.46), _pt(0.88, 0.1)]), c, w, true)
+			"wrench":
+				draw_line(_pt(0.2, 0.82), _pt(0.62, 0.4), c, w * 1.8)
+				draw_arc(_pt(0.7, 0.3), s * 0.17, -PI * 0.3, PI * 1.3, 18, c, w * 1.3, true)
+			"truck":
+				draw_rect(Rect2(_pt(0.06, 0.3), Vector2(0.54, 0.4) * s), c, false, w)
+				draw_polyline(PackedVector2Array([_pt(0.6, 0.42), _pt(0.8, 0.42), _pt(0.94, 0.56), _pt(0.94, 0.7), _pt(0.6, 0.7)]), c, w, true)
+				for x2: float in [0.24, 0.76]:
+					draw_circle(_pt(x2, 0.74), s * 0.09, c)
 			_:
 				draw_circle(_pt(0.5, 0.5), s * 0.3, c)
 

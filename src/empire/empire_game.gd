@@ -38,6 +38,7 @@ var audio: AudioDirector
 var sfx: Sfx
 var empire: Empire
 var ui: EmpireUI
+var gps: Gps
 var units: Array = []
 var unit_by_id := {}
 var interiors := {}      # unit id -> ShopInterior
@@ -143,6 +144,11 @@ func _ready() -> void:
 	ui = EmpireUI.new()
 	ui.game = self
 	add_child(ui)
+	# The one GPS route (both maps draw it); its road graph builds on a thread.
+	gps = Gps.new()
+	gps.name = "Gps"
+	add_child(gps)
+	gps.setup(self)
 
 	var has_save := FileAccess.file_exists(SAVE_PATH) or FileAccess.file_exists(SAVE_PATH + ".bak")
 	if args.has("save"):
@@ -205,6 +211,12 @@ func _after_start() -> void:
 			var inside := args.has("inside")
 			var p := Premises.door_point(u) + Premises.outward(u) * (-2.5 if inside else 3.0) + Vector3.UP * 1.0
 			_teleport(p, atan2(Premises.outward(u).x, Premises.outward(u).z) + (PI if not inside else 0.0))
+	if args.has("at"):
+		# Captures: stand at world x,z (on the ground), facing yaw (deg).
+		var av := String(args["at"]).split(",")
+		var ax := float(av[0])
+		var az := float(av[1])
+		_teleport(Vector3(ax, layout.ground_y(ax, az) + 1.0, az), deg_to_rad(float(av[2]) if av.size() > 2 else 0.0))
 	if args.has("hour"):
 		empire.minute = float(args["hour"]) * 60.0
 	if args.has("brand"):
@@ -262,6 +274,17 @@ func _after_start() -> void:
 		for i in int(args["days"]):
 			empire.advance(1440.0)
 		ui.close_panel(true)
+	if args.has("gps"):
+		# Captures/tests: a route to a unit id, "wholesale:<island>" or "car".
+		gps.wait_net()
+		var gid := String(args["gps"])
+		if gid == "car":
+			ui.find_vehicle(String(empire.vehicles[0]["id"]))
+			ui.close_panel(true)
+		else:
+			var gu: Dictionary = wholesaler(gid.get_slice(":", 1)) if gid.begins_with("wholesale") else unit_by_id.get(gid, {})
+			if not gu.is_empty():
+				set_gps(Premises.door_point(gu), String(gu.get("name", gid)), {"kind": "unit", "id": String(gu["id"])})
 	if args.has("panel"):
 		var pn := String(args["panel"])
 		if pn == "victory":
@@ -283,6 +306,10 @@ func _after_start() -> void:
 		_capture(String(args["shot"]), float(args.get("shot-at", "4")))
 	if args.has("selftest"):
 		_selftest.call_deferred()
+	if args.has("scenarios"):
+		var sc: Node = load("res://src/empire/dev/scenarios.gd").new()
+		sc.set("game", self)
+		add_child(sc)
 	if args.has("autoplay"):
 		var ap: Node = load("res://src/empire/dev/autoplay.gd").new()
 		ap.set("game", self)
@@ -307,6 +334,8 @@ func new_game() -> void:
 	v["pos"] = [car_p.x, car_p.y, car_p.z]
 	v["yaw"] = atan2(-along.x, -along.z)
 	_spawn_cars()
+	_obj_sig = ""
+	gps.restore()
 	_teleport(door + out * 3.2 + Vector3.UP * 1.0, atan2(-out.x, -out.z) + PI)
 	_tutorial = 0
 
@@ -466,7 +495,7 @@ func wholesaler(island: String) -> Dictionary:
 func _connect_empire() -> void:
 	_brand_sig = "?"
 	_sync_brand()
-	empire.notified.connect(func(t, k): ui.toast(t, k))
+	empire.notified.connect(func(t, k): ui.toast(t, k, empire.last_ref))
 	empire.day_ended.connect(func(r):
 		ui.day_report(r)
 		save_game())
@@ -509,7 +538,8 @@ func _play() -> void:
 	camera.snap()
 	player.input_enabled = driving == ""
 	ui.show_hud()
-	if empire.flags.get("intro_done", false) == false and not args.has("shot") and not args.has("autoplay") and not args.has("perf"):
+	if empire.flags.get("intro_done", false) == false and not args.has("shot") and not args.has("autoplay") and not args.has("perf") \
+			and not args.has("scenarios"):
 		ui.intro()
 	if not DisplayServer.is_touchscreen_available() and not args.has("touch") and not args.has("shot"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -550,6 +580,8 @@ func _process(dt: float) -> void:
 		_sync_brand()
 		_stream_interiors()
 		_update_live_floor()
+		if state == "play":
+			_objective_gps()
 	if state != "play":
 		return
 	_update_spot()
@@ -1217,6 +1249,74 @@ func _recover_car(c: Car) -> void:
 	empire.pay(60.0, "vehicle", "Recovery")
 
 
+## Having a vehicle brought to you: {ok, fee, why, at (Transform3D)}.
+## A paid driver brings it to the kerb of the street you're on – you need
+## to be outdoors near a road, and it has to be further than a short walk.
+func delivery_quote(vid: String) -> Dictionary:
+	var out := {"ok": false, "fee": 0.0, "why": "", "at": Transform3D()}
+	var c: Car = cars.get(vid)
+	if c == null:
+		out["why"] = "Not found"
+		return out
+	if driving != "":
+		out["why"] = "Get out of the car first"
+		return out
+	if player.indoors or floor_unit != "":
+		out["why"] = "Step outside onto a street first"
+		return out
+	var me := player.global_position
+	var d := me.distance_to(c.global_position)
+	if d < 80.0:
+		out["why"] = "It's %d m away – just walk to it" % int(d)
+		return out
+	if not gps.ready_net():
+		out["why"] = "Finding the roads…"
+		return out
+	var near := gps.net.nearest(me, Vector3.ZERO, 40.0, -1, true)
+	if near.is_empty():
+		out["why"] = "No road within 40 m – walk to a street"
+		return out
+	# The kerb side of the lane nearest you, facing along the lane.
+	var lane: int = near["lane"]
+	var s: float = near["s"]
+	var p: Vector3 = gps.net.lane_point(lane, s)
+	var dir := gps.net.lane_dir(lane, s)
+	var side := Vector3(-dir.z, 0.0, dir.x)
+	if side.dot(me - p) < 0.0:
+		side = -side
+	var at := _kerb_point(p + side * 1.6)
+	out["at"] = Transform3D(Basis.looking_at(dir, Vector3.UP), at)
+	out["fee"] = clampf(roundf(30.0 + d * 0.03), 30.0, 150.0)
+	if not empire.can_afford(float(out["fee"])):
+		out["why"] = "Costs %s – not enough money" % EmpireData.money(float(out["fee"]))
+		return out
+	out["ok"] = true
+	return out
+
+
+## Pays a driver to bring the vehicle round (it arrives a few seconds later).
+func deliver_vehicle(vid: String) -> String:
+	var q := delivery_quote(vid)
+	if not q["ok"]:
+		return String(q["why"])
+	if not empire.pay(float(q["fee"]), "vehicle", "Vehicle delivered to you"):
+		return "Not enough money"
+	var c: Car = cars[vid]
+	var xf: Transform3D = q["at"]
+	get_tree().create_timer(2.5, false).timeout.connect(func():
+		if not is_instance_valid(c) or driving == vid:
+			return
+		c.linear_velocity = Vector3.ZERO
+		c.angular_velocity = Vector3.ZERO
+		c.place(Transform3D(xf.basis, xf.origin + Vector3.UP * 0.3))
+		var v := empire.vehicle(vid)
+		v["pos"] = [xf.origin.x, xf.origin.y, xf.origin.z]
+		v["yaw"] = xf.basis.get_euler().y
+		ui.toast("Your vehicle is here", "good")
+		Sfx.play("chime", -6.0))
+	return ""
+
+
 func buy_vehicle(model: String) -> String:
 	# Delivered to the kerb outside where you are.
 	var p := player.global_position
@@ -1230,34 +1330,70 @@ func buy_vehicle(model: String) -> String:
 
 
 # -------------------------------------------------------------- business
-func buy_firm(u: Dictionary) -> String:
+## Buying or renting from the phone goes through an agent: 4% of the money
+## changing hands, £40 to £2,500. At the door it's free.
+static func agent_fee(amount: float) -> float:
+	return clampf(roundf(amount * 0.04), 40.0, 2500.0)
+
+
+func _agent(fee: float, total: float) -> String:
+	if fee > 0.0 and not empire.can_afford(total + fee):
+		return "Not enough money (%s with the agent's fee)" % EmpireData.money(total + fee)
+	return ""
+
+
+func _pay_agent(fee: float, what: String, biz := "") -> void:
+	if fee > 0.0:
+		empire.pay(fee, "other", "Agent's fee: %s" % what, biz)
+
+
+func buy_firm(u: Dictionary, fee := 0.0) -> String:
+	var f := CityLife.firm_at(empire, u["id"])
+	var pre := _agent(fee, CityLife.firm_price(f) if not f.is_empty() else 0.0)
+	if pre != "":
+		return pre
 	var err: Array = []
 	var b := CityLife.buy_firm(empire, Premises.record(u), err)
 	if b == null:
 		return err[0] if not err.is_empty() else "Can't buy it"
+	_pay_agent(fee, b.name, b.id)
 	_sync_rivals()
 	rebuild_interior(u["id"])
 	Sfx.play("cash", -2.0)
+	MapKit.invalidate()
 	save_game()
 	return ""
 
 
-func buy_out_rival(u: Dictionary) -> String:
+func buy_out_rival(u: Dictionary, fee := 0.0) -> String:
+	var r := CityLife.rival_at(empire, u["id"])
+	var pre := _agent(fee, CityLife.rival_price(r) if not r.is_empty() else 0.0)
+	if pre != "":
+		return pre
 	var err: Array = []
 	var b := CityLife.buy_out(empire, Premises.record(u), err)
 	if b == null:
 		return err[0] if not err.is_empty() else "Can't buy it"
+	_pay_agent(fee, b.name, b.id)
 	_sync_rivals()
 	rebuild_interior(u["id"])
 	Sfx.play("cash", -2.0)
+	MapKit.invalidate()
 	save_game()
 	return ""
 
 
-func rent_unit(u: Dictionary, buy := false, type_id := "convenience") -> String:
+func rent_unit(u: Dictionary, buy := false, type_id := "convenience", fee := 0.0) -> String:
+	if empire.business_at(u["id"]) != null and not buy:
+		return "You already run this shop"
+	var pre := _agent(fee, float(u["price"]) if buy else float(u["rent"]) * 3.0)
+	if pre != "":
+		return pre
 	var b := empire.buy_premises(Premises.record(u), type_id) if buy else empire.rent_premises(Premises.record(u), type_id)
 	if b == null:
-		return "Not enough money"
+		return "Not enough money" if not CityLife.is_taken(empire, u["id"]) else "Someone else trades here"
+	_pay_agent(fee, b.name, b.id)
+	MapKit.invalidate()
 	if type_id != "convenience" and b.opened_day == empire.day:
 		# A name to suit the trade: "Village Shop" → "Village Café".
 		var kinds: Array = (CityLife.firm_cfg().get("kinds_by_type", {}) as Dictionary).get(type_id, [])
@@ -1308,20 +1444,54 @@ func take_case(b: Business, pid: String) -> void:
 
 
 func gps_target() -> Vector3:
-	var t = empire.flags.get("gps", null)
-	if t is Array and (t as Array).size() == 3:
-		return Vector3(t[0], t[1], t[2])
-	return Vector3.INF
+	return gps.dest if gps else Vector3.INF
 
 
-func set_gps(p: Vector3, label: String) -> void:
-	empire.flags["gps"] = [p.x, p.y, p.z]
-	empire.flags["gps_label"] = label
+## Sets the GPS (a road route on both maps). `ref` names what it points at
+## ({kind: unit|vehicle|home|objective|point, id}) so the route follows a
+## moving car and survives a save.
+func set_gps(p: Vector3, label: String, ref := {}) -> void:
+	gps.set_destination(p, label, ref)
+	if String(ref.get("kind", "")) != "objective":
+		empire.flags["gps_manual"] = true
 
 
 func clear_gps() -> void:
-	empire.flags.erase("gps")
-	empire.flags.erase("gps_label")
+	gps.clear()
+	empire.flags.erase("gps_manual")
+
+
+## Where a vehicle is now (the live car, else where it was parked).
+func vehicle_position(vid: String) -> Vector3:
+	var c: Car = cars.get(vid)
+	if c and is_instance_valid(c):
+		return c.global_position
+	var v := empire.vehicle(vid) if empire else {}
+	if v.is_empty():
+		return Vector3.ZERO
+	return Vector3(float(v["pos"][0]), float(v["pos"][1]), float(v["pos"][2]))
+
+
+var _obj_sig := ""
+
+
+## The current objective drives the GPS unless you set your own route.
+func _objective_gps() -> void:
+	var ob := objective()
+	var t: Vector3 = ob[1]
+	var sig := "%s|%s" % [ob[0], str(t.snapped(Vector3.ONE * 2.0)) if t != Vector3.INF else ""]
+	if sig == _obj_sig:
+		return
+	_obj_sig = sig
+	if empire.flags.get("gps_manual", false) and gps.active():
+		return
+	empire.flags.erase("gps_manual")
+	if t == Vector3.INF:
+		if String(gps.ref.get("kind", "")) == "objective":
+			gps.clear()
+		return
+	if Vector2(t.x - gps.dest.x, t.z - gps.dest.z).length() > 3.0 or not gps.active():
+		gps.set_destination(t, String(ob[2]) if ob.size() > 2 else String(ob[0]), {"kind": "objective"})
 
 
 func sleep_until(hour: float) -> void:
@@ -1390,35 +1560,71 @@ func home_by_id(id: String) -> Dictionary:
 
 
 # -------------------------------------------------------------- tutorial
-## The opening objectives, in order, shown on the HUD with a GPS target.
+## The opening objectives, in order: [text, GPS target (or INF), short
+## label for the route, action] – the action is what tapping the objective
+## opens ("map", "property", "staff", "finances", "stock", "" = nothing).
+## Each step is done by doing the real thing (flags set where it happens).
 func objective() -> Array:
 	var start: Dictionary = unit_by_id.get(empire.flags.get("start_unit", ""), starter_unit())
-	if empire.businesses.is_empty():
-		return ["Rent %s – walk up to the TO LET sign" % String(start.get("shop_name", "the shop")), Premises.door_point(start)]
+	var f := empire.flags
+	var no_shop := empire.businesses.is_empty()
+	if no_shop and not f.get("seen_car", false) and not empire.vehicles.is_empty():
+		var vid: String = empire.vehicles[0]["id"]
+		return ["Find your car – it's parked on this street", vehicle_position(vid), "Your car", ""]
+	if no_shop and not f.get("opened_map", false):
+		return ["Open the map: tap the minimap", Vector3.INF, "", "map"]
+	if no_shop and not f.get("inspected_property", false):
+		return ["Inspect a shop to let – %s is close by" % String(start.get("shop_name", "one")),
+			Premises.door_point(start), String(start.get("shop_name", "Shop to let")), "property"]
+	if no_shop:
+		return ["Rent a shop – walk up to its TO LET sign (%s is the cheapest)" % String(start.get("shop_name", "")),
+			Premises.door_point(start), String(start.get("shop_name", "Shop to let")), "property"]
 	var b: Business = empire.businesses[0]
 	var w := wholesaler(b.island())
 	if int(empire.stats["cases_bought"]) == 0:
-		return ["Drive to %s and buy stock" % String(w.get("name", "the wholesaler")), Premises.door_point(w)]
+		return ["Drive to %s and buy stock" % String(w.get("name", "the wholesaler")), Premises.door_point(w),
+			String(w.get("name", "Wholesaler")), ""]
 	var pal := _pallet(w.get("id", ""))
 	var in_cars := 0
 	for v in empire.vehicles:
 		in_cars += (v["cargo"] as Stock).total_units()
 	if not pal.is_empty() and in_cars == 0 and empire.carried.is_empty() and b.stock_units() == 0:
-		return ["Collect your goods from the collection bay (park by it, use the boot)", Premises.door_point(w)]
-	if b.stock_units() == 0:
-		return ["Take the stock to %s and carry it in" % b.name, Premises.door_point(unit_by_id.get(b.premises["id"], start))]
-	if int(empire.stats["sales"]) == 0:
-		if b.shelf_units() == 0:
-			return ["Put stock on the shelves (carry a case to a shelf)", Vector3.INF]
-		return ["Serve customers at the till", Vector3.INF]
+		return ["Collect your goods from the collection bay (park by it, use the boot)", Premises.door_point(w),
+			String(w.get("name", "Wholesaler")), ""]
+	if b.stock_units() == 0 and b.orders.is_empty():
+		return ["Take the stock to %s and carry it in" % b.name, Premises.door_point(unit_by_id.get(b.premises["id"], start)),
+			b.name, ""]
+	if int(empire.stats["sales"]) == 0 and b.shelf_units() == 0:
+		return ["Put stock on the shelves (carry a case to a shelf)", Vector3.INF, "", ""]
+	if int(empire.stats["sales"]) < 3:
+		return ["Serve customers at the till (%d/3 sales)" % int(empire.stats["sales"]), _door_if_away(b), b.name, ""]
+	if int(empire.stats["hires"]) == 0:
+		return ["Hire your first employee – a cashier serves while you're away", Vector3.INF, "", "staff"]
+	if not f.get("viewed_finances", false):
+		return ["Check how %s is doing: its Finances" % b.name, Vector3.INF, "", "finances"]
+	if not f.get("viewed_expansion", false):
+		return ["Find your next shop: Property lists every unit to let and for sale", Vector3.INF, "", "property"]
 	var g: Array = empire.current_goals(1)
 	if (g[1] as Array).is_empty():
-		return ["Build your empire", Vector3.INF]
-	return [String(g[0]) + ": " + String(g[1][0]["text"]), Vector3.INF]
+		return ["Build your empire", Vector3.INF, "", ""]
+	return [String(g[0]) + ": " + String(g[1][0]["text"]), Vector3.INF, "", ""]
+
+
+## A shop's door when you're not at it (the objective's route), else none.
+func _door_if_away(b: Business) -> Vector3:
+	var u: Dictionary = unit_by_id.get(b.premises.get("id", ""), {})
+	if u.is_empty() or floor_unit == b.premises.get("id", ""):
+		return Vector3.INF
+	return Premises.door_point(u)
 
 
 func _tutorial_step() -> void:
-	pass
+	# Found the car: within a few metres of it (or in it).
+	if not empire.flags.get("seen_car", false) and not empire.vehicles.is_empty():
+		var vid: String = empire.vehicles[0]["id"]
+		if driving != "" or player.global_position.distance_to(vehicle_position(vid)) < Gps.ARRIVE_WALK + 2.0:
+			empire.flags["seen_car"] = true
+			ui.toast("That's your car: it shows on the map as a white square", "good")
 
 
 # ------------------------------------------------------------------ save
@@ -1469,6 +1675,8 @@ func load_game() -> bool:
 	_connect_empire()
 	_rival_sig = "?"
 	_spawn_cars()
+	_obj_sig = ""
+	gps.restore()
 	var pp: Array = d.get("player", [])
 	if pp.size() >= 4:
 		_teleport(Vector3(pp[0], pp[1], pp[2]) + Vector3.UP * 0.2, float(pp[3]))

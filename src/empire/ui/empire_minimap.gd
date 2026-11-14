@@ -1,15 +1,16 @@
 class_name EmpireMinimap
 extends Control
 ## The HUD minimap: a disc of the real city (City Swing's baked map, see
-## Minimap.MapPainter) round you, turning with the camera, zooming out when
-## you drive. Markers: your shops (green), wholesalers (blue), QuikSave
-## (red squares), businesses for sale (teal), shops to let (amber), your
-## vehicles (white) and the GPS target (gold, pinned to the rim when it's
-## off the map). Tap it to open the full map. EmpireMap shares the texture.
+## Minimap.MapPainter) round you, turning with your heading, zooming out
+## with speed when you drive. It is the full map (EmpireMap) seen closer:
+## the same image, markers, colours and purple GPS route (MapKit, Gps),
+## with only the more important markers shown. The destination is pinned
+## to the rim when it's off the disc. Tap it to open the full map.
 
 const SHADER := preload("res://src/ui/shaders/minimap.gdshader")
 const R_WALK := 110.0
-const R_DRIVE := 240.0
+const R_DRIVE := 190.0      # at a crawl; out to R_DRIVE_FAST at speed
+const R_DRIVE_FAST := 330.0
 
 static var map_tex: Texture2D
 static var _baking := false
@@ -19,6 +20,8 @@ var _mat: ShaderMaterial
 var _overlay: Control
 var _radius := R_WALK
 var _yaw := 0.0
+## The route this view last drew (world points; scenario checks compare views).
+var drawn_route := PackedVector3Array()
 
 
 ## Bakes the city map once (both islands); awaitable, no-op headless.
@@ -82,8 +85,12 @@ func _process(dt: float) -> void:
 		_mat.set_shader_parameter("map", map_tex)
 		_mat.set_shader_parameter("origin", Minimap.BOUNDS.position)
 		_mat.set_shader_parameter("extent", Minimap.BOUNDS.size)
-	_yaw = lerp_angle(_yaw, game.camera.view_yaw(), 1.0 - exp(-10.0 * dt))
-	var want := R_DRIVE if game.driving != "" else R_WALK
+	var view := game.chase.view_yaw() if game.driving != "" else game.camera.view_yaw()
+	_yaw = lerp_angle(_yaw, view, 1.0 - exp(-10.0 * dt))
+	var want := R_WALK
+	if game.driving != "" and game.cars.has(game.driving):
+		var spd := absf((game.cars[game.driving] as Car).speed)
+		want = lerpf(R_DRIVE, R_DRIVE_FAST, clampf(spd / 30.0, 0.0, 1.0))
 	_radius = lerpf(_radius, want, 1.0 - exp(-1.5 * dt))
 	var c := _focus()
 	_mat.set_shader_parameter("center", Vector2(c.x, c.z))
@@ -113,47 +120,57 @@ func _draw_overlay() -> void:
 		return
 	var ov := _overlay
 	var ctr := size * 0.5
-	var rad := size.x * 0.5 - 6.0
-	var e := game.empire
-	for u in game.units:
-		var dp := Premises.door_point(u)
-		var sp := _to_map(dp)
-		if sp.distance_to(ctr) > rad:
+	var rad := size.x * 0.5 - 4.0
+	var k := 0.8
+	# The GPS route first (markers sit on top of it).
+	var gps: Gps = game.gps
+	if gps and gps.active():
+		var pts := gps.ahead()
+		drawn_route = pts
+		if pts.size() >= 2:
+			var sp := PackedVector2Array()
+			for p in pts:
+				sp.append(_to_map(p))
+			for run in MapKit.clip_to_circle(sp, ctr, rad):
+				MapKit.draw_route(ov, run, 4.0)
+	var near_r := rad - 4.0
+	for m in MapKit.markers(game):
+		var kind: String = m["kind"]
+		var pri := MapKit.priority(kind)
+		if pri > 1 or m["world"] == Vector3.ZERO:
 			continue
-		var kind := EmpireMap.unit_kind(game, u)
-		var col := EmpireMap.kind_colour(kind)
-		match kind:
-			"yours", "wholesale":
-				ov.draw_circle(sp, 5.5, Color(0, 0, 0, 0.5))
-				ov.draw_circle(sp, 4.5, col)
-			"rival", "sale":
-				ov.draw_rect(Rect2(sp - Vector2(4, 4), Vector2(8, 8)), col)
-			"to_let":
-				ov.draw_circle(sp, 3.0, col)
-			_:
-				ov.draw_circle(sp, 2.0, Color(col, 0.7))
-	for vid in game.cars:
-		if vid == game.driving:
+		if kind == "car" and String(m["id"]) == game.driving:
 			continue
-		var cp := _to_map((game.cars[vid] as Node3D).global_position)
-		if cp.distance_to(ctr) < rad:
-			ov.draw_rect(Rect2(cp - Vector2(3, 3), Vector2(6, 6)), Color.WHITE)
-	# GPS target: on the map, or pinned to the rim pointing at it.
-	var t: Vector3 = game.gps_target()
-	if t != Vector3.INF:
-		var gp := _to_map(t)
+		var sp2 := _to_map(m["world"])
+		var dc := sp2.distance_to(ctr)
+		if dc > near_r:
+			continue
+		# Lower-priority markers only near the middle (less clutter at the rim).
+		if pri == 1 and dc > near_r * 0.8:
+			continue
+		MapKit.draw_marker(ov, sp2, kind, k)
+	# Destination: on the disc, or pinned to the rim pointing at it.
+	if gps and gps.active():
+		var gp := _to_map(gps.dest)
 		var off := gp - ctr
-		if off.length() > rad - 6.0:
-			gp = ctr + off.normalized() * (rad - 6.0)
-		ov.draw_circle(gp, 7.0, Color(0, 0, 0, 0.5))
-		ov.draw_circle(gp, 5.5, EmpireStyle.AMBER)
-		ov.draw_arc(gp, 9.0, 0, TAU, 20, Color(EmpireStyle.AMBER, 0.6), 1.5, true)
-	# You: an arrow pointing where the camera faces (always up).
-	var tri := PackedVector2Array([ctr + Vector2(0, -9), ctr + Vector2(6.5, 7), ctr + Vector2(0, 3.5), ctr + Vector2(-6.5, 7)])
-	ov.draw_colored_polygon(tri, Color.WHITE)
-	ov.draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[3], tri[0]]), Color(0, 0, 0, 0.6), 1.2, true)
+		if off.length() > rad - 10.0:
+			gp = ctr + off.normalized() * (rad - 10.0)
+			ov.draw_circle(gp, 8.0, Color(0, 0, 0, 0.55))
+			ov.draw_circle(gp, 6.5, Gps.COLOUR)
+		else:
+			MapKit.draw_destination(ov, gp, 0.85)
+	# You: always in the middle, pointing up (the map turns under you).
+	MapKit.draw_player(ov, ctr, Vector2.UP, 0.9)
 	# North tick on the rim.
 	var north := (_to_map(_focus() + Vector3(0, 0, -50)) - ctr).normalized()
 	var n := ctr + north * (size.x * 0.5 - 10.0)
 	ov.draw_circle(n, 8.0, Color(EmpireStyle.INK, 0.9))
 	ov.draw_string(EmpireStyle.font("black"), n + Vector2(-4.5, 5), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
+	# Next turn, under the disc.
+	if gps and gps.active() and gps.turn.x != 0.0 and gps.turn.y < 400.0:
+		var f := EmpireStyle.font("black")
+		var txt := ("◀ " if gps.turn.x < 0.0 else "") + "%d m" % int(roundf(gps.turn.y / 10.0) * 10.0) + (" ▶" if gps.turn.x > 0.0 else "")
+		var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+		var bp := Vector2(ctr.x - w * 0.5 - 10.0, size.y - 14.0)
+		ov.draw_rect(Rect2(bp, Vector2(w + 20.0, 24.0)), Gps.COLOUR)
+		ov.draw_string(f, bp + Vector2(10, 18), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)

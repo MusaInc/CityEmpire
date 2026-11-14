@@ -157,6 +157,36 @@ static func button(text: String, cb: Callable, primary := false, min_w := 0.0) -
 	return b
 
 
+## A tappable filter chip (pill): filled amber when on. 44 px tall.
+static func chip_button(text: String, on: bool, cb: Callable, col := AMBER) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, 44)
+	for st in ["normal", "hover", "pressed", "focus"]:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = col if on else Color(INK, 0.86)
+		if st == "hover" and not on:
+			sb.bg_color = INK2.lightened(0.1)
+		sb.set_corner_radius_all(22)
+		sb.border_color = Color(col, 0.9) if on else Color(1, 1, 1, 0.16)
+		sb.set_border_width_all(1)
+		sb.content_margin_left = 16
+		sb.content_margin_right = 16
+		b.add_theme_stylebox_override(st, sb)
+	b.add_theme_color_override("font_color", INK if on else PAPER)
+	b.add_theme_color_override("font_hover_color", INK if on else Color.WHITE)
+	b.add_theme_color_override("font_pressed_color", INK if on else Color.WHITE)
+	b.add_theme_font_override("font", font("bold"))
+	b.add_theme_font_size_override("font_size", 16)
+	b.pressed.connect(func():
+		if Time.get_ticks_msec() < tap_block_until:
+			return
+		Sfx.play("click", -10.0)
+		cb.call())
+	return b
+
+
 static func chip(text: String, col: Color) -> PanelContainer:
 	var p := PanelContainer.new()
 	var sb := StyleBoxFlat.new()

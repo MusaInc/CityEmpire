@@ -1,52 +1,36 @@
 class_name EmpireMap
 extends Control
-## The phone map: the real city (the same baked map as the HUD minimap),
-## north up, that you drag to pan and pinch / scroll / +− to zoom. Markers:
-## your shops, wholesalers, QuikSave, businesses for sale, shops to let,
-## independents, your vehicles and you; names appear as you zoom in. Tap a
-## marker to set the GPS (and see what it is).
+## The phone's full map: the real city, north up, that you drag to pan and
+## pinch / scroll / +− to zoom. It is the HUD minimap seen from further out:
+## the same baked image, markers and purple GPS route (MapKit, Gps).
+##
+## Tap a marker to select it: a card says what it is, how far, and offers
+## Set GPS / Cancel route and the place's own action (manage, inspect, buy
+## a vehicle…). Tap an empty street for a waypoint. Filter chips hide the
+## kinds of place you don't care about. No typing anywhere.
 
 const MIN_ZOOM := 0.35   # px per metre
 const MAX_ZOOM := 3.2
+const S = preload("res://src/empire/ui/empire_style.gd")
+const FILTERS := [["all", "All"], ["yours", "Mine"], ["to_let", "To let"], ["sale", "For sale"],
+	["wholesale", "Suppliers"], ["car", "Vehicles"]]
+
+static var filter := "all"     # (kept while the phone is closed)
+static var _view := {}         # last centre/zoom (kept between openings)
 
 var game: EmpireGame
 var _center := Vector2.ZERO   # world x/z at the middle of the view
 var _zoom := 0.8
-var _markers: Array = []      # [screen pos, world pos, label]
-var _selected := ""
+var _drawn: Array = []        # [screen pos, marker]
+var _selected := {}           # marker dict, or {"kind": "point", "world": …}
 var _touches := {}            # index -> position (pinch)
 var _pinch0 := 0.0
 var _zoom0 := 0.0
 var _dragged := 0.0
-
-
-## What occupies a unit, for colours and labels.
-static func unit_kind(g: EmpireGame, u: Dictionary) -> String:
-	if u["kind"] == "wholesale":
-		return "wholesale"
-	if g.empire.business_at(u["id"]) != null:
-		return "yours"
-	if CityLife.is_rival(g.empire, u["id"]):
-		return "rival"
-	var f := CityLife.firm_at(g.empire, u["id"])
-	if not f.is_empty():
-		return "sale" if f.get("for_sale", false) else "firm"
-	return "to_let"
-
-
-static func kind_colour(kind: String) -> Color:
-	match kind:
-		"yours":
-			return EmpireStyle.GREEN
-		"wholesale":
-			return EmpireStyle.BLUE
-		"rival":
-			return Color(CityLife.rival_cfg().get("colour", "#d8262f"))
-		"sale":
-			return Color(0.3, 0.92, 0.78)
-		"to_let":
-			return EmpireStyle.AMBER
-	return Color(0.78, 0.8, 0.84)
+var _card: PanelContainer
+var _chips: HBoxContainer
+## The route this view last drew (world points; scenario checks compare views).
+var drawn_route := PackedVector3Array()
 
 
 func _ready() -> void:
@@ -55,24 +39,57 @@ func _ready() -> void:
 	clip_contents = true
 	var me := game.player.global_position
 	_center = Vector2(me.x, me.z)
-	if game.gps_target() != Vector3.INF:
-		var t: Vector3 = game.gps_target()
+	if not _view.is_empty():
+		_center = _view["c"]
+		_zoom = _view["z"]
+	elif game.gps and game.gps.active():
+		var t: Vector3 = game.gps.dest
 		_center = (_center + Vector2(t.x, t.z)) * 0.5
-	# Buttons: zoom and re-centre.
+	# Zoom, centre on you, whole route.
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 8)
 	col.anchor_left = 1.0
 	col.anchor_right = 1.0
-	col.offset_left = -64
+	col.offset_left = -66
 	col.offset_top = 12
 	add_child(col)
-	for b in [["+", func(): _zoom_by(1.4, size * 0.5)], ["−", func(): _zoom_by(1.0 / 1.4, size * 0.5)], ["◎", func():
-			var p := game.player.global_position
-			_center = Vector2(p.x, p.z)
-			queue_redraw()]]:
-		var btn := EmpireStyle.button(b[0], b[1], false, 52)
+	for b in [["+", func(): _zoom_by(1.4, size * 0.5)], ["−", func(): _zoom_by(1.0 / 1.4, size * 0.5)],
+			["◎", center_on_player], ["⤢", _fit_route]]:
+		var btn := S.button(b[0], b[1], false, 54)
+		btn.custom_minimum_size = Vector2(54, 54)
 		btn.add_theme_font_size_override("font_size", 24)
 		col.add_child(btn)
+	# Filter chips (top left).
+	_chips = HBoxContainer.new()
+	_chips.add_theme_constant_override("separation", 6)
+	_chips.position = Vector2(10, 10)
+	add_child(_chips)
+	_build_chips()
+	_card = PanelContainer.new()
+	_card.visible = false
+	add_child(_card)
+	# Re-select the destination so its card shows Cancel route.
+	if game.gps and game.gps.active():
+		for m in MapKit.markers(game):
+			if m["ref"] == game.gps.ref:
+				_selected = m
+		_show_card()
+
+
+func _exit_tree() -> void:
+	_view = {"c": _center, "z": _zoom}
+
+
+func _build_chips() -> void:
+	for c in _chips.get_children():
+		c.queue_free()
+	for f in FILTERS:
+		var on: bool = filter == f[0]
+		var b := S.chip_button(f[1], on, func():
+			filter = f[0]
+			_build_chips()
+			queue_redraw())
+		_chips.add_child(b)
 
 
 var _had_tex := false
@@ -82,6 +99,9 @@ func _process(_dt: float) -> void:
 	# (Opened before the city image finished baking: draw it when it lands.)
 	if not _had_tex and EmpireMinimap.map_tex != null:
 		_had_tex = true
+		queue_redraw()
+	# Live: you, your car and the route move.
+	if is_visible_in_tree() and Engine.get_process_frames() % 6 == 0:
 		queue_redraw()
 
 
@@ -106,76 +126,92 @@ func _clamp() -> void:
 	_center = _center.clamp(b.position, b.end)
 
 
+func center_on_player() -> void:
+	var p := game.gps._here() if game.gps else game.player.global_position
+	_center = Vector2(p.x, p.z)
+	queue_redraw()
+
+
+## Zooms to show the whole route (or you and the destination).
+func _fit_route() -> void:
+	if game.gps == null or not game.gps.active():
+		center_on_player()
+		return
+	var pts: PackedVector3Array = game.gps.points
+	var r := Rect2(Vector2(game.gps.dest.x, game.gps.dest.z), Vector2.ZERO)
+	var here: Vector3 = game.gps._here()
+	r = r.expand(Vector2(here.x, here.z))
+	for p in pts:
+		r = r.expand(Vector2(p.x, p.z))
+	_center = r.get_center()
+	var sz := r.size + Vector2(80, 80)
+	_zoom = clampf(minf((size.x - 140.0) / sz.x, (size.y - 160.0) / sz.y), MIN_ZOOM, MAX_ZOOM)
+	queue_redraw()
+
+
+func _shown(kind: String) -> bool:
+	if filter == "all":
+		return true
+	if filter == "sale":
+		return kind in ["sale", "rival"]
+	return kind == filter
+
+
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.13, 0.22, 0.3))
 	var b := Minimap.BOUNDS
 	if EmpireMinimap.map_tex:
 		draw_texture_rect(EmpireMinimap.map_tex, Rect2(_to_screen(b.position), b.size * _zoom), false)
-	_markers.clear()
-	var f := EmpireStyle.font("bold")
+	var k := clampf(_zoom / 0.8, 0.85, 1.35)
+	# Route (the same points the minimap draws).
+	var gps: Gps = game.gps
+	if gps and gps.active():
+		var sp := PackedVector2Array()
+		drawn_route = gps.ahead()
+		for p in drawn_route:
+			sp.append(_to_screen(Vector2(p.x, p.z)))
+		MapKit.draw_route(self, sp, clampf(3.0 * _zoom + 2.0, 4.0, 9.0))
+	_drawn.clear()
+	var f := S.font("bold")
 	var labels: Array = []
-	for u in game.units:
-		var kind := unit_kind(game, u)
-		var dp := Premises.door_point(u)
-		var s := _to_screen(Vector2(dp.x, dp.z))
+	var sel_id := String(_selected.get("id", ""))
+	for m in MapKit.markers(game):
+		var kind: String = m["kind"]
+		if m["world"] == Vector3.ZERO or not _shown(kind):
+			continue
+		var w: Vector3 = m["world"]
+		var s := _to_screen(Vector2(w.x, w.z))
 		if s.x < -20 or s.y < -20 or s.x > size.x + 20 or s.y > size.y + 20:
 			continue
-		var col := kind_colour(kind)
-		var label := ""
-		match kind:
-			"yours":
-				label = game.empire.business_at(u["id"]).name
-			"wholesale":
-				label = String(u["name"])
-			"rival":
-				label = String(CityLife.rival_at(game.empire, u["id"])["name"])
-			"sale", "firm":
-				var fm := CityLife.firm_at(game.empire, u["id"])
-				label = String(fm["name"]) + (" · for sale %s" % EmpireData.money(CityLife.firm_price(fm)) if kind == "sale" else "")
-			_:
-				label = "To let · %s/day" % EmpireData.money(float(u["rent"]))
-		var big := kind in ["yours", "wholesale", "rival", "sale"]
-		var r := (7.0 if big else (4.5 if kind == "to_let" else 3.2)) * clampf(_zoom / 0.8, 0.8, 1.4)
-		draw_circle(s, r + 1.5, Color(0, 0, 0, 0.55))
-		if kind in ["rival", "sale"]:
-			draw_rect(Rect2(s - Vector2(r, r), Vector2(r, r) * 2.0), col)
-		else:
-			draw_circle(s, r, col)
-		if big or _zoom > 1.6 or u["id"] == _selected:
-			labels.append([s, label, big or u["id"] == _selected])
-		_markers.append([s, dp, label, u["id"]])
+		var pri := MapKit.priority(kind)
+		# Independents only when zoomed in or filtered for.
+		if pri == 2 and _zoom < 1.1 and filter == "all" and m["id"] != sel_id:
+			continue
+		MapKit.draw_marker(self, s, kind, k, m["id"] == sel_id)
+		_drawn.append([s, m])
+		if pri == 0 or _zoom > 1.6 or m["id"] == sel_id:
+			labels.append([s, String(m["label"]), pri == 0 or m["id"] == sel_id])
 	for l in labels:
 		var fs := 15 if l[2] else 13
-		var w := f.get_string_size(l[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var pos: Vector2 = l[0] + Vector2(10, 5)
-		draw_rect(Rect2(pos + Vector2(-4, -fs), Vector2(w + 8, fs + 6)), Color(EmpireStyle.INK, 0.72))
+		var tw := f.get_string_size(l[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var pos: Vector2 = l[0] + Vector2(11, 5)
+		draw_rect(Rect2(pos + Vector2(-4, -fs), Vector2(tw + 8, fs + 6)), Color(S.INK, 0.75))
 		draw_string(f, pos, l[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.95))
-	for vid in game.cars:
-		var c: Node3D = game.cars[vid]
-		var s2 := _to_screen(Vector2(c.global_position.x, c.global_position.z))
-		draw_rect(Rect2(s2 - Vector2(5, 5), Vector2(10, 10)), Color(0, 0, 0, 0.6))
-		draw_rect(Rect2(s2 - Vector2(4, 4), Vector2(8, 8)), Color.WHITE)
-	var t: Vector3 = game.gps_target()
-	if t != Vector3.INF:
-		var g := _to_screen(Vector2(t.x, t.z))
-		draw_arc(g, 13.0, 0, TAU, 28, EmpireStyle.AMBER, 3.0, true)
-		draw_line(_to_screen(Vector2(game.player.global_position.x, game.player.global_position.z)), g, Color(EmpireStyle.AMBER, 0.5), 2.0, true)
-	var me := game.player.global_position
-	var sp := _to_screen(Vector2(me.x, me.z))
-	var yaw := game.camera.view_yaw()
-	var tri := PackedVector2Array([sp + Vector2(0, -12).rotated(-yaw), sp + Vector2(8, 8).rotated(-yaw), sp + Vector2(0, 4).rotated(-yaw), sp + Vector2(-8, 8).rotated(-yaw)])
-	draw_circle(sp, 15.0, Color(1, 1, 1, 0.18))
-	draw_colored_polygon(tri, Color.WHITE)
-	draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[3], tri[0]]), Color(0, 0, 0, 0.7), 1.5, true)
-	# Legend.
-	var lx := 14.0
-	var ly := size.y - 16.0
-	draw_rect(Rect2(Vector2(6, size.y - 36), Vector2(size.x - 12, 30)), Color(EmpireStyle.INK, 0.8))
-	for it in [["yours", "Yours"], ["wholesale", "Wholesale"], ["rival", "QuikSave"], ["sale", "For sale"], ["to_let", "To let"], ["firm", "Independent"]]:
-		draw_circle(Vector2(lx + 5, ly - 5), 5.0, kind_colour(it[0]))
-		draw_string(f, Vector2(lx + 14, ly), it[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, EmpireStyle.PAPER)
-		lx += 22.0 + f.get_string_size(it[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x + 14.0
-	draw_string(f, Vector2(size.x - 250, ly), "drag to move · pinch to zoom · tap to GPS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, EmpireStyle.MUTED)
+	if gps and gps.active():
+		MapKit.draw_destination(self, _to_screen(Vector2(gps.dest.x, gps.dest.z)), k)
+	if String(_selected.get("kind", "")) == "point":
+		var wp: Vector3 = _selected["world"]
+		draw_arc(_to_screen(Vector2(wp.x, wp.z)), 10.0, 0, TAU, 24, Color.WHITE, 2.5, true)
+	# You (on foot: where you face; driving: the car's heading).
+	var me: Vector3 = gps._here() if gps else game.player.global_position
+	var yaw := game.chase.view_yaw() if game.driving != "" else game.camera.view_yaw()
+	MapKit.draw_player(self, _to_screen(Vector2(me.x, me.z)), Vector2(-sin(yaw), -cos(yaw)), 1.1)
+	# Route status (no route / planning) along the bottom.
+	if gps and gps.active() and gps.message != "":
+		var msg := gps.message
+		var mw := f.get_string_size(msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+		draw_rect(Rect2(Vector2(size.x * 0.5 - mw * 0.5 - 12, 60), Vector2(mw + 24, 30)), Color(S.INK, 0.88))
+		draw_string(f, Vector2(size.x * 0.5 - mw * 0.5, 81), msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, S.AMBER)
 
 
 func _gui_input(e: InputEvent) -> void:
@@ -192,7 +228,7 @@ func _gui_input(e: InputEvent) -> void:
 		else:
 			_touches.erase(t.index)
 			if _touches.is_empty() and _dragged < 12.0:
-				_tap(t.position)
+				tap(t.position)
 		accept_event()
 	elif e is InputEventScreenDrag:
 		var d := e as InputEventScreenDrag
@@ -220,7 +256,7 @@ func _gui_input(e: InputEvent) -> void:
 			if m.pressed:
 				_dragged = 0.0
 			elif _dragged < 6.0:
-				_tap(m.position)
+				tap(m.position)
 		accept_event()
 	elif e is InputEventMouseMotion and (e as InputEventMouseMotion).button_mask & MOUSE_BUTTON_MASK_LEFT \
 			and not DisplayServer.is_touchscreen_available():
@@ -233,17 +269,123 @@ func _gui_input(e: InputEvent) -> void:
 		_zoom_by((e as InputEventMagnifyGesture).factor, (e as InputEventMagnifyGesture).position)
 
 
-func _tap(pos: Vector2) -> void:
-	var best: Array = []
-	var bd := 28.0
-	for m in _markers:
-		var d := (m[0] as Vector2).distance_to(pos)
-		if d < bd:
-			bd = d
-			best = m
+## A tap: the nearest marker within reach, else a waypoint on that street.
+func tap(pos: Vector2) -> void:
+	var best := {}
+	var bd := 30.0
+	for d in _drawn:
+		var dd := (d[0] as Vector2).distance_to(pos)
+		if dd < bd:
+			bd = dd
+			best = d[1]
 	if best.is_empty():
-		return
-	_selected = best[3]
-	game.set_gps(best[1], best[2])
-	game.ui.toast("GPS set: %s" % best[2], "info")
+		var w := _to_world(pos)
+		var wy := game.layout.ground_y(w.x, w.y)
+		_selected = {"id": "", "kind": "point", "world": Vector3(w.x, wy, w.y), "label": "Waypoint",
+			"sub": String(EmpireData.district(("west:" if w.x < CityLayout.FAR_SHORE else "east:") + game.layout.district(w.x, w.y)).get("name", "")),
+			"ref": {"kind": "point"}}
+	else:
+		_selected = best
+	_show_card()
 	queue_redraw()
+
+
+## Selects a marker by its ref (another screen's "Show on map").
+func select_ref(ref: Dictionary) -> void:
+	for m in MapKit.markers(game):
+		if m["ref"] == ref:
+			_selected = m
+			var w: Vector3 = m["world"]
+			_center = Vector2(w.x, w.z)
+			_zoom = maxf(_zoom, 1.2)
+			_show_card()
+			queue_redraw()
+			return
+
+
+func _show_card() -> void:
+	for c in _card.get_children():
+		c.queue_free()
+	if _selected.is_empty():
+		_card.visible = false
+		return
+	_card.visible = true
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(S.INK, 0.94)
+	sb.set_corner_radius_all(18)
+	sb.border_color = Color(1, 1, 1, 0.1)
+	sb.set_border_width_all(1)
+	sb.content_margin_left = 18
+	sb.content_margin_right = 14
+	sb.content_margin_top = 12
+	sb.content_margin_bottom = 12
+	_card.add_theme_stylebox_override("panel", sb)
+	var h := S.hbox(14)
+	_card.add_child(h)
+	var v := S.vbox(2)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(v)
+	var kind := String(_selected.get("kind", "point"))
+	var name_l := S.label(String(_selected.get("label", "")), 20, S.PAPER, "black")
+	name_l.clip_text = true
+	v.add_child(name_l)
+	var w: Vector3 = _selected["world"]
+	var here: Vector3 = game.gps._here() if game.gps else game.player.global_position
+	var dist := Vector2(here.x - w.x, here.z - w.z).length()
+	var dtxt := "%.1f km" % (dist / 1000.0) if dist >= 1000.0 else "%d m" % int(dist)
+	v.add_child(S.label("%s · %s away" % [String(_selected.get("sub", "")), dtxt], 15, S.MUTED))
+	var is_dest: bool = game.gps != null and game.gps.active() and (game.gps.ref == _selected.get("ref", {}) and kind != "point" \
+		or (kind == "point" and game.gps.dest.distance_to(w) < 1.0))
+	if is_dest:
+		var st := game.gps.message if game.gps.message != "" else "Route: %s" % game.gps.distance_text()
+		v.add_child(S.label(st, 15, Gps.COLOUR.lightened(0.3), "bold"))
+		h.add_child(S.button("Cancel route", func():
+			game.clear_gps()
+			_show_card()
+			queue_redraw(), false, 52))
+	else:
+		h.add_child(S.button("Set GPS", func():
+			game.set_gps(w, String(_selected.get("label", "")), _selected.get("ref", {}))
+			_show_card()
+			queue_redraw(), true, 52))
+	var act := _action()
+	if not act.is_empty():
+		h.add_child(S.button(act[0], act[1], false, 52))
+	var x := S.button("✕", func():
+		_selected = {}
+		_show_card()
+		queue_redraw(), false, 52)
+	x.custom_minimum_size = Vector2(52, 52)
+	h.add_child(x)
+	_card.anchor_left = 0.0
+	_card.anchor_right = 1.0
+	_card.anchor_top = 1.0
+	_card.anchor_bottom = 1.0
+	_card.offset_left = 10
+	_card.offset_right = -84
+	_card.offset_top = -92
+	_card.offset_bottom = -10
+
+
+## The selected place's own action: [label, callable] or [].
+func _action() -> Array:
+	var ref: Dictionary = _selected.get("ref", {})
+	var ui: EmpireUI = game.ui
+	match String(ref.get("kind", "")):
+		"unit":
+			var u: Dictionary = game.unit_by_id.get(String(ref["id"]), {})
+			match String(_selected["kind"]):
+				"yours":
+					var b: Business = game.empire.business_at(String(ref["id"]))
+					return ["Manage", func(): ui.open_manage(b)]
+				"to_let":
+					return ["Inspect", func(): ui.open_property(u, true)]
+				"sale":
+					return ["Inspect", func(): ui.open_firm(u, true)]
+				"rival":
+					return ["Inspect", func(): ui.open_rival(u, true)]
+				"hq":
+					return ["Head office", func(): ui.open_hq()]
+		"vehicle":
+			return ["Vehicles", func(): ui.open_phone("vehicles")]
+	return []

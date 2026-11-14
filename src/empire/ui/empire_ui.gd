@@ -143,6 +143,13 @@ func _build_hud() -> void:
 	# Objective (top right).
 	var o := _hud_panel(Vector2(0, 16), Vector2(360, 82), S.AMBER)
 	_anchor(o, 1.0, 0.0, Vector2(-442, 16), Vector2(360, 82))
+	# Tap the objective: its screen, or its route.
+	o.mouse_filter = Control.MOUSE_FILTER_STOP
+	o.gui_input.connect(func(ev: InputEvent):
+		var tap: bool = (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT) or (ev is InputEventScreenTouch and ev.pressed)
+		if tap and game.state == "play" and _panel == null:
+			o.accept_event()
+			objective_action())
 	var ov := S.vbox(2)
 	o.add_child(ov)
 	_obj_title = S.label("OBJECTIVE", 13, S.AMBER, "black")
@@ -165,7 +172,7 @@ func _build_hud() -> void:
 	# Toasts (right, under the objective).
 	_toasts = S.vbox(8)
 	_anchor(_toasts, 1.0, 0.0, Vector2(-442, 112), Vector2(390, 300))
-	_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE   # (tappable toasts stop clicks themselves)
 	hud.add_child(_toasts)
 	# Prompt (bottom centre).
 	_prompt = PanelContainer.new()
@@ -274,21 +281,38 @@ func update_hud() -> void:
 	_speed.text = "×%d" % int(game.time_scale) if game.time_scale > 1.0 and game.floor == null and game.driving == "" else ""
 	var ob := game.objective()
 	_obj.text = String(ob[0])
-	var tgt: Vector3 = ob[1]
-	if tgt == Vector3.INF:
-		tgt = game.gps_target()
-		if tgt != Vector3.INF:
-			_obj.text += "\nGPS: " + String(e.flags.get("gps_label", ""))
-	var me := game.player.global_position
-	if tgt != Vector3.INF and Vector2(me.x, me.z).distance_to(Vector2(tgt.x, tgt.z)) > 8.0:
-		var d := Vector2(me.x, me.z).distance_to(Vector2(tgt.x, tgt.z))
-		_gps.text = "%d m" % int(d) if d < 1000.0 else "%.1f km" % (d / 1000.0)
+	# Route line: the GPS (purple, as on both maps): next turn and distance.
+	var gps: Gps = game.gps
+	var me := gps._here()
+	if gps.active():
+		var bits: Array = []
+		if String(gps.ref.get("kind", "")) != "objective" and gps.label != "":
+			bits.append("GPS: " + gps.label)
+		if gps.message != "":
+			bits.append(gps.message)
+		else:
+			var tt := gps.turn_text()
+			if tt != "":
+				bits.append(tt)
+			bits.append(gps.distance_text())
+		_gps.text = "  ·  ".join(bits)
+		_gps.add_theme_color_override("font_color", Gps.COLOUR.lightened(0.35) if gps.message == "" else S.AMBER)
+		# The arrow points along the route ~30 m ahead (not through buildings).
+		var aim := gps.dest
+		var pts := gps.ahead()
+		var acc := 0.0
+		for i in range(1, pts.size()):
+			acc += pts[i].distance_to(pts[i - 1])
+			aim = pts[i]
+			if acc > 30.0:
+				break
 		var view := game.camera.view_yaw() if game.driving == "" else game.chase.view_yaw()
-		var to := atan2(-(tgt.x - me.x), -(tgt.z - me.z))
+		var to := atan2(-(aim.x - me.x), -(aim.z - me.z))
 		(_arrow as _Arrow).angle = wrapf(view - to, -PI, PI)
-		_arrow.visible = true
+		_arrow.visible = Vector2(me.x - gps.dest.x, me.z - gps.dest.z).length() > 8.0
 	else:
-		_gps.text = ""
+		_gps.text = "Tap for what to do" if (ob.size() > 3 and String(ob[3]) != "") else ""
+		_gps.add_theme_color_override("font_color", S.MUTED)
 		_arrow.visible = false
 	_arrow.queue_redraw()
 	# Prompt.
@@ -334,7 +358,8 @@ func update_hud() -> void:
 	_update_floats()
 
 
-func toast(text: String, kind := "info") -> void:
+## A notification. With a ref it's tappable ("›"): it opens what it's about.
+func toast(text: String, kind := "info", ref := {}) -> void:
 	var col: Color = {"good": S.GREEN, "warn": S.AMBER, "bad": S.RED}.get(kind, S.BLUE)
 	var p := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
@@ -347,11 +372,18 @@ func toast(text: String, kind := "info") -> void:
 	sb.content_margin_top = 8
 	sb.content_margin_bottom = 8
 	p.add_theme_stylebox_override("panel", sb)
-	var l := S.label(text, 16, S.PAPER)
+	var l := S.label(text + ("  ›" if not ref.is_empty() else ""), 16, S.PAPER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.custom_minimum_size.x = 340
 	p.add_child(l)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if not ref.is_empty():
+		p.mouse_filter = Control.MOUSE_FILTER_STOP
+		p.gui_input.connect(func(ev: InputEvent):
+			var tap: bool = (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT) or (ev is InputEventScreenTouch and ev.pressed)
+			if tap and game.state == "play":
+				p.accept_event()
+				open_ref(ref))
 	_toasts.add_child(p)
 	while _toasts.get_child_count() > 4:
 		_toasts.get_child(0).queue_free()
@@ -642,9 +674,15 @@ func _cart_add(pid: String, d: int) -> void:
 var _rent_type := "convenience"
 
 
-func open_property(u: Dictionary) -> void:
+## A shop unit to let. `remote`: inspected from the phone – renting or
+## buying then goes through the letting agent (a stated fee); at the
+## door it's free.
+func open_property(u: Dictionary, remote := false) -> void:
+	game.empire.flags["inspected_property"] = true
+	if not game.empire.businesses.is_empty():
+		game.empire.flags["viewed_expansion"] = true
 	var d := EmpireData.district(u["district"])
-	var v := _open(String(u.get("shop_name", "Shop unit")), 900, 560)
+	var v := _open(String(u.get("shop_name", "Shop unit")), 900, 600)
 	v.add_child(S.label("%s  ·  %s  ·  %d m²" % [u["name"], d.get("name", ""), int(u["size"])], 18, S.MUTED))
 	var g := GridContainer.new()
 	g.columns = 2
@@ -675,20 +713,32 @@ func open_property(u: Dictionary) -> void:
 	for c in td2.get("categories", []):
 		sells.append(String((EmpireData.file("products").get("categories", {}) as Dictionary).get(c, {}).get("name", c)))
 	v.add_child(S.label("%s: sells %s · open %02d:00–%02d:00" % [td2.get("name", ""), ", ".join(sells), int(td2.get("open", 7)), int(td2.get("close", 22))], 15, S.MUTED))
-	v.add_child(S.label("You have %s + company %s" % [EmpireData.money(game.empire.personal_cash), EmpireData.money(game.empire.company_cash)], 15, S.MUTED))
+	var fee_r := EmpireGame.agent_fee(float(u["rent"]) * 3.0) if remote else 0.0
+	var fee_b := EmpireGame.agent_fee(float(u["price"])) if remote else 0.0
+	var dist := game.player.global_position.distance_to(Premises.door_point(u))
+	v.add_child(S.label("You have %s + company %s%s" % [EmpireData.money(game.empire.personal_cash), EmpireData.money(game.empire.company_cash),
+		("  ·  %s away · through the agent: +%s rent / +%s buy" % [_dist_text(dist), EmpireData.money(fee_r), EmpireData.money(fee_b)]) if remote else ""], 15, S.MUTED))
 	var h := S.hbox(12)
-	h.add_child(S.button("RENT · %s deposit" % EmpireData.money(float(u["rent"]) * 3.0), func():
-		var err := game.rent_unit(u, false, _rent_type)
+	var rent := S.button("RENT · %s deposit%s" % [EmpireData.money(float(u["rent"]) * 3.0), " + fee" if remote else ""], func():
+		var err := game.rent_unit(u, false, _rent_type, fee_r)
 		if err != "":
 			toast(err, "bad")
 		else:
-			close_panel(true), true, 300))
-	h.add_child(S.button("BUY · %s" % EmpireData.money(float(u["price"])), func():
-		var err := game.rent_unit(u, true, _rent_type)
+			close_panel(true), true, 300)
+	rent.disabled = not game.empire.can_afford(float(u["rent"]) * 3.0 + fee_r)
+	h.add_child(rent)
+	var buy := S.button("BUY · %s%s" % [EmpireData.money(float(u["price"])), " + fee" if remote else ""], func():
+		var err := game.rent_unit(u, true, _rent_type, fee_b)
 		if err != "":
 			toast(err, "bad")
 		else:
-			close_panel(true), false, 240))
+			close_panel(true), false, 240)
+	buy.disabled = not game.empire.can_afford(float(u["price"]) + fee_b)
+	h.add_child(buy)
+	if remote:
+		h.add_child(S.button("GPS there", func():
+			game.set_gps(Premises.door_point(u), String(u.get("shop_name", "Shop")), {"kind": "unit", "id": String(u["id"])})
+			close_panel(true), false, 150))
 	v.add_child(h)
 
 
@@ -930,11 +980,20 @@ func _m_stock(v: VBoxContainer, b: Business) -> void:
 func _m_staff(v: VBoxContainer, b: Business) -> void:
 	var e := game.empire
 	var list := S.vbox(6)
+	# Who covers what (and what happens without them).
+	var cov := HFlowContainer.new()
+	cov.add_theme_constant_override("h_separation", 8)
+	cov.add_theme_constant_override("v_separation", 6)
+	for r in [["cashier", "Till", "only while you serve"], ["stocker", "Shelves", "you refill them"],
+			["cleaner", "Cleaning", "gets dirty"], ["manager", "Re-orders", "you order stock"], ["driver", "Collections", "delivery fee"]]:
+		var have := b.has_role(r[0])
+		cov.add_child(S.chip("%s %s" % ["✓" if have else "✗", r[1] if have else "%s – %s" % [r[1], r[2]]], S.GREEN if have else S.MUTED))
+	list.add_child(cov)
 	list.add_child(S.label("ON YOUR TEAM", 14, S.AMBER, "black"))
 	if b.staff.is_empty():
 		list.add_child(S.label("Just you. Hire people to take over the routine work.", 16, S.MUTED))
 	for st in b.staff:
-		list.add_child(_row([_fixed(String(st["name"]), 200, 18, S.PAPER, "bold"),
+		list.add_child(_row([_fixed(String(st["name"]) + (" · off today" if st.get("off", false) else ""), 200, 18, S.AMBER if st.get("off", false) else S.PAPER, "bold"),
 			_fixed(String(EmpireData.role(st["role"]).get("name", "")), 150, 16, S.MUTED),
 			_fixed("skill " + "●".repeat(int(st["skill"])) + "○".repeat(5 - int(st["skill"])), 140, 15, S.AMBER),
 			_fixed(Staff.trait_names(st), 150, 14, S.MUTED),
@@ -1001,12 +1060,18 @@ func _m_reports(v: VBoxContainer, b: Business) -> void:
 
 
 # ---------------------------------------------------------------- phone
-const PHONE_TABS := [["businesses", "Businesses"], ["company", "Company"], ["city", "City"], ["map", "Map"],
-	["bank", "Bank"], ["vehicles", "Vehicles"], ["property", "Property"], ["goals", "Goals"], ["game", "Game"]]
-const PHONE_SUB := {"businesses": "Your shops and places to trade", "company": "Brand, head office and marketing",
-	"city": "Weather, rivals and the news", "map": "Tap anywhere to set GPS", "bank": "Accounts, loans and the ledger",
-	"vehicles": "Your fleet and the dealer", "property": "Homes and premises", "goals": "Your career, chapter by chapter",
-	"game": "Save, speed and settings"}
+const PHONE_TABS := [["home", "Home"], ["businesses", "Businesses"], ["map", "Map"], ["vehicles", "Vehicles"],
+	["property", "Property"], ["bank", "Finances"], ["more", "More"]]
+## Under More (the rail highlights More; a back button returns to it).
+const MORE_TABS := [["company", "Company", "Brand, head office and marketing campaigns"],
+	["city", "City", "Weather, rivals, news and the market"], ["goals", "Goals", "Your career, chapter by chapter"],
+	["game", "Game", "Save, speed, sleep and settings"]]
+const PHONE_SUB := {"home": "Your empire at a glance: what needs you, and where to go next",
+	"businesses": "Every shop you run: status, stock, staff and money", "company": "Brand, head office and marketing",
+	"city": "Weather, rivals and the news", "map": "Tap a place for its card · tap a street for a waypoint",
+	"bank": "Accounts, profit, loans and the ledger", "vehicles": "Where your vehicles are, and getting to them",
+	"property": "Shops to let, businesses for sale and homes", "goals": "Your career, chapter by chapter",
+	"game": "Save, speed and settings", "more": "Everything else"}
 
 
 ## The phone: a nav rail with line icons on the left, the tab's title and
@@ -1062,8 +1127,9 @@ func _phone_shell(tab: String) -> VBoxContainer:
 	var gap := Control.new()
 	gap.custom_minimum_size.y = 12
 	rv.add_child(gap)
+	var in_more := MORE_TABS.any(func(t): return t[0] == tab)
 	for t in PHONE_TABS:
-		rv.add_child(_rail_button(t[0], t[1], t[0] == tab))
+		rv.add_child(_rail_button(t[0], t[1], t[0] == tab or (t[0] == "more" and in_more)))
 	# Content.
 	var body := MarginContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1077,9 +1143,11 @@ func _phone_shell(tab: String) -> VBoxContainer:
 	var head := S.hbox(14)
 	var hv := S.vbox(-2)
 	var title := ""
-	for t in PHONE_TABS:
+	for t in PHONE_TABS + MORE_TABS:
 		if t[0] == tab:
 			title = t[1]
+	if in_more:
+		head.add_child(S.button("‹", func(): open_phone("more"), false, 52))
 	hv.add_child(S.label(title, 30, S.PAPER, "black"))
 	hv.add_child(S.label(String(PHONE_SUB.get(tab, "")), 15, S.MUTED))
 	head.add_child(hv)
@@ -1177,43 +1245,23 @@ class _Roundel extends Control:
 		draw_string(f, c + Vector2(-w * 0.5, fs * 0.36), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, acc)
 
 
-func open_phone(tab := "businesses") -> void:
+func open_phone(tab := "home", focus := {}) -> void:
 	var e := game.empire
+	# (Onboarding: these count as having looked.)
+	if tab == "map":
+		e.flags["opened_map"] = true
+	elif tab == "bank":
+		e.flags["viewed_finances"] = true
+	elif tab == "property" and not e.businesses.is_empty():
+		e.flags["viewed_expansion"] = true
 	var v := _phone_shell(tab)
 	match tab:
+		"home":
+			_home_tab(v)
 		"businesses":
-			var list := S.vbox(6)
-			if e.businesses.is_empty():
-				list.add_child(S.label("No businesses yet. Look for TO LET signs.", 18, S.MUTED))
-			for b: Business in e.businesses:
-				var trading := b.trading(e.hour())
-				list.add_child(_row([_fixed(b.name, 220, 19, S.PAPER, "bold"),
-					_fixed(String(b.district().get("name", "")), 170, 15, S.MUTED),
-					S.chip("TRADING" if trading else ("OPEN" if b.open else "CLOSED"), S.GREEN if trading else S.MUTED),
-					_fixed("today %s" % EmpireData.money(float(b.today["revenue"])), 130, 16),
-					_fixed("★ %d · staff %d" % [int(b.reputation), b.staff.size()], 130, 15, S.AMBER),
-					S.button("Manage", func(): open_manage(b), true, 110),
-					S.button("GPS", func():
-						game.set_gps(Premises.door_point(game.unit_by_id[b.premises["id"]]), b.name)
-						close_panel(true), false, 70)]))
-			list.add_child(S.label("PLACES", 14, S.AMBER, "black"))
-			for u in game.units:
-				if u["kind"] == "wholesale":
-					list.add_child(_row([_fixed(String(u["name"]), 300, 18, S.PAPER, "bold"),
-						_fixed("Wholesaler · " + String(EmpireData.district(u["district"]).get("name", "")), 300, 15, S.MUTED),
-						S.button("GPS", func():
-							game.set_gps(Premises.door_point(u), u["name"])
-							close_panel(true), false, 70)]))
-			var free := game.units.filter(func(u): return u["kind"] == "shop" and e.business_at(u["id"]) == null)
-			free.sort_custom(func(a, b): return float(a["rent"]) < float(b["rent"]))
-			for u in free:
-				list.add_child(_row([_fixed("TO LET · " + String(u["shop_name"]), 300, 17, S.PAPER),
-					_fixed(String(EmpireData.district(u["district"]).get("name", "")), 220, 15, S.MUTED),
-					_fixed("%s/day" % EmpireData.money(float(u["rent"])), 110, 16, S.AMBER),
-					S.button("GPS", func():
-						game.set_gps(Premises.door_point(u), String(u["shop_name"]))
-						close_panel(true), false, 70)]))
-			v.add_child(_scroll(list, 470))
+			_portfolio_tab(v)
+		"more":
+			_more_tab(v)
 		"city":
 			_city_tab(v)
 		"company":
@@ -1221,8 +1269,10 @@ func open_phone(tab := "businesses") -> void:
 		"map":
 			var m := EmpireMap.new()
 			m.game = game
-			m.custom_minimum_size = Vector2(948, 470)
+			m.custom_minimum_size = Vector2(948, 520)
 			v.add_child(m)
+			if not focus.is_empty():
+				m.select_ref.call_deferred(focus)
 		"bank":
 			var g := GridContainer.new()
 			g.columns = 4
@@ -1277,64 +1327,9 @@ func open_phone(tab := "businesses") -> void:
 					_fixed(EmpireData.money(float(x["amount"]), true), 110, 16, S.GREEN if float(x["amount"]) > 0 else S.PAPER, "bold")]))
 			v.add_child(_scroll(led, 150 if e.day_reports.size() >= 2 else 260))
 		"vehicles":
-			var list2 := S.vbox(6)
-			for veh in e.vehicles:
-				var md := EmpireData.vehicle_model(veh["model"])
-				list2.add_child(_row([_fixed(String(md["name"]), 220, 18, S.PAPER, "bold"),
-					_fixed("%d cases · %d%% condition · %d km" % [(veh["cargo"] as Stock).case_capacity, int(float(veh["condition"]) * 100.0),
-						int(float(veh["km"]))], 330, 15, S.MUTED),
-					S.button("Service", func():
-						var err := e.service_vehicle(veh)
-						toast(err if err != "" else "Serviced", "bad" if err != "" else "good")
-						open_phone("vehicles"), false, 120),
-					S.button("GPS", func():
-						var c: Car = game.cars.get(veh["id"])
-						if c:
-							game.set_gps(c.global_position, String(md["name"]))
-						close_panel(true), false, 70)]))
-			list2.add_child(S.label("DEALER (delivered to the kerb beside you)", 14, S.AMBER, "black"))
-			for mid in EmpireData.vehicle_models():
-				var md2 := EmpireData.vehicle_model(mid)
-				if float(md2.get("price", 0)) <= 0.0:
-					continue
-				list2.add_child(_row([_fixed(String(md2["name"]), 220, 18, S.PAPER, "bold"),
-					_fixed("%d cases · top %d mph" % [int(md2["cargo"]), int(float(md2["top_speed"]) * 2.237)], 260, 15, S.MUTED),
-					S.spacer(),
-					S.button("Buy · %s" % EmpireData.money(float(md2["price"])), func():
-						var err := game.buy_vehicle(mid)
-						toast(err if err != "" else "Delivered outside", "bad" if err != "" else "good")
-						open_phone("vehicles"), true, 180)]))
-			v.add_child(_scroll(list2, 470))
+			_vehicles_tab(v)
 		"property":
-			var lp := S.vbox(6)
-			lp.add_child(S.label("HOMES (buy at the tower's street door)", 14, S.AMBER, "black"))
-			for hm in game.homes():
-				var owned := e.owns_property(hm["id"])
-				var rec: Dictionary = {}
-				for q in e.properties:
-					if q["id"] == hm["id"]:
-						rec = q
-				var row: Array = [_fixed(String(hm["name"]), 230, 18, S.PAPER, "bold"),
-					_fixed("%s · %d m up" % [EmpireData.district(hm["district"]).get("name", ""), int(hm["floor"])], 220, 15, S.MUTED),
-					_fixed(EmpireData.money(float(hm["price"])), 110, 17)]
-				if owned:
-					var let: bool = rec.get("let", false)
-					row.append(S.chip("LET · %s/day" % EmpireData.money(float(hm["price"]) * 0.0045) if let else "YOURS", S.GREEN))
-					row.append(S.button("Move in" if let else "Let it out", func():
-						e.set_let(hm["id"], not let)
-						open_phone("property"), false, 140))
-				else:
-					row.append(_fixed("lets for %s/day" % EmpireData.money(float(hm["price"]) * 0.0045), 160, 15, S.MUTED))
-				row.append(S.button("GPS", func():
-					game.set_gps(game.home_lift(hm), String(hm["name"]))
-					close_panel(true), false, 70))
-				lp.add_child(_row(row))
-			lp.add_child(S.label("YOUR PREMISES", 14, S.AMBER, "black"))
-			for b: Business in e.businesses:
-				lp.add_child(_row([_fixed(b.name, 230, 18, S.PAPER, "bold"),
-					_fixed(String(b.district().get("name", "")), 220, 15, S.MUTED),
-					S.chip("FREEHOLD" if b.owned else "RENTED · %s/day" % EmpireData.money(b.rent_per_day()), S.GREEN if b.owned else S.MUTED)]))
-			v.add_child(_scroll(lp, 470))
+			_property_tab(v)
 		"goals":
 			var list3 := S.vbox(6)
 			if e.flags.get("won", false):
@@ -1833,11 +1828,12 @@ func _city_tab(v: VBoxContainer) -> void:
 	v.add_child(_scroll(list, 400))
 
 
-func open_rival(u: Dictionary) -> void:
+func open_rival(u: Dictionary, remote := false) -> void:
 	var e := game.empire
 	var r := CityLife.rival_at(e, u["id"])
 	if r.is_empty():
 		return
+	e.flags["inspected_property"] = true
 	var rc := CityLife.rival_cfg()
 	var v := _open(String(r["name"]), 760, 440)
 	var d := EmpireData.district(r["district"])
@@ -1848,26 +1844,31 @@ func open_rival(u: Dictionary) -> void:
 	txt.custom_minimum_size.x = 700
 	v.add_child(txt)
 	var price := CityLife.rival_price(r)
-	v.add_child(S.label("Price %s  ·  you have %s + company %s" % [EmpireData.money(price), EmpireData.money(e.personal_cash), EmpireData.money(e.company_cash)], 18, S.AMBER, "bold"))
+	var fee := EmpireGame.agent_fee(price) if remote else 0.0
+	v.add_child(S.label("Price %s%s  ·  you have %s + company %s" % [EmpireData.money(price), (" + %s broker" % EmpireData.money(fee)) if remote else "",
+		EmpireData.money(e.personal_cash), EmpireData.money(e.company_cash)], 18, S.AMBER, "bold"))
 	var h := S.hbox(12)
-	var buy := S.button("BUY OUT · %s" % EmpireData.money(price), func():
-		var err := game.buy_out_rival(u)
+	var buy := S.button("BUY OUT · %s" % EmpireData.money(price + fee), func():
+		var err := game.buy_out_rival(u, fee)
 		if err != "":
 			toast(err, "bad")
 		else:
 			close_panel(true), true, 320)
-	buy.disabled = not e.can_afford(price)
+	buy.disabled = not e.can_afford(price + fee)
 	h.add_child(buy)
 	h.add_child(S.button("Not now", close_panel.bind(true), false, 160))
 	v.add_child(h)
 
 
 ## An independent shop: its books and the asking price.
-func open_firm(u: Dictionary) -> void:
+func open_firm(u: Dictionary, remote := false) -> void:
 	var e := game.empire
 	var f := CityLife.firm_at(e, u["id"])
 	if f.is_empty():
 		return
+	e.flags["inspected_property"] = true
+	if not e.businesses.is_empty():
+		e.flags["viewed_expansion"] = true
 	var v := _open(String(f["name"]), 780, 470)
 	var d := EmpireData.district(f["district"])
 	var yrs := maxi(1, (e.day - int(f.get("since", e.day))) / 365)
@@ -1892,15 +1893,17 @@ func open_firm(u: Dictionary) -> void:
 	inc.custom_minimum_size.x = 720
 	v.add_child(inc)
 	var price := CityLife.firm_price(f)
-	v.add_child(S.label("Price %s  ·  you have %s + company %s" % [EmpireData.money(price), EmpireData.money(e.personal_cash), EmpireData.money(e.company_cash)], 18, S.AMBER, "bold"))
+	var fee := EmpireGame.agent_fee(price) if remote else 0.0
+	v.add_child(S.label("Price %s%s  ·  you have %s + company %s" % [EmpireData.money(price), (" + %s broker" % EmpireData.money(fee)) if remote else "",
+		EmpireData.money(e.personal_cash), EmpireData.money(e.company_cash)], 18, S.AMBER, "bold"))
 	var h := S.hbox(12)
-	var buy := S.button("BUY THE BUSINESS · %s" % EmpireData.money(price), func():
-		var err := game.buy_firm(u)
+	var buy := S.button("BUY THE BUSINESS · %s" % EmpireData.money(price + fee), func():
+		var err := game.buy_firm(u, fee)
 		if err != "":
 			toast(err, "bad")
 		else:
 			close_panel(true), true, 360)
-	buy.disabled = not e.can_afford(price)
+	buy.disabled = not e.can_afford(price + fee)
 	h.add_child(buy)
 	h.add_child(S.button("Not now", close_panel.bind(true), false, 160))
 	v.add_child(h)
@@ -1971,3 +1974,549 @@ class _NetChart extends Control:
 			var x2 := 10.0 + (w - 20.0) * float(i) / float(n - 1)
 			var bh := 12.0 * absf(p) / pm
 			draw_rect(Rect2(x2 - 2.0, h - 6.0 - (bh if p > 0 else 0.0), 4.0, maxf(bh, 1.0)), Color("#39c27f") if p >= 0 else Color("#ec5a4a"))
+
+
+# ================================================================ phone 2
+# Home dashboard, portfolio, property listings, vehicles and More. Every
+# button here goes somewhere real (a manage tab, the map with a place
+# selected, a route) – nothing needs typing.
+
+const TONES := {"good": S.GREEN, "warn": S.AMBER, "bad": S.RED, "muted": S.MUTED, "info": S.BLUE}
+
+static var _pf_district := "all"
+static var _pf_sort := "attention"
+static var _pr_kind := "to_let"
+static var _pr_district := "all"
+
+
+## What's wrong at a shop: [[text, tone, manage tab], …] (worst first).
+func biz_issues(b: Business) -> Array:
+	var e := game.empire
+	var out: Array = []
+	var st := b.status(e.hour())
+	if st[0] == "no_stock":
+		out.append(["Out of stock – nothing on the shelves", "bad", "stock"])
+	elif b.shelf_fill() < 0.25 and b.backroom.total_units() < 12 and b.orders.is_empty():
+		out.append(["Running low – shelves %d%%, back room nearly empty" % int(b.shelf_fill() * 100.0), "warn", "stock"])
+	if not b.has_role("cashier"):
+		out.append(["No cashier – it only trades while you're at the till", "warn", "staff"])
+	for x in b.staff:
+		if x.get("off", false):
+			out.append(["%s is off today" % String(x["name"]), "warn", "staff"])
+	var ld := b.last_day()
+	if not ld.is_empty() and float(ld.get("profit", 0.0)) < 0.0:
+		out.append(["Lost %s yesterday" % EmpireData.money(-float(ld["profit"])), "bad", "reports"])
+	if b.cleanliness < 0.4:
+		out.append(["Dirty floor is putting shoppers off – a cleaner fixes it", "warn", "staff"])
+	if not b.open:
+		out.append(["Closed by you", "muted", "overview"])
+	return out
+
+
+## Things that need you, company-wide: {text, tone, icon, btn, cb}.
+func alerts() -> Array:
+	var e := game.empire
+	var out: Array = []
+	var ob := game.objective()
+	if String(ob[0]) != "":
+		var act := String(ob[3]) if ob.size() > 3 else ""
+		out.append({"text": "Next: " + String(ob[0]), "tone": "info", "icon": "goals",
+			"btn": "Go" if (ob[1] as Vector3) != Vector3.INF or act != "" else "", "cb": objective_action})
+	if e.company_cash < 0.0:
+		out.append({"text": "The company account is overdrawn (%s): 1%% a day interest" % EmpireData.money(e.company_cash),
+			"tone": "bad", "icon": "bank", "btn": "Finances", "cb": func(): open_phone("bank")})
+	for b: Business in e.businesses:
+		for iss in biz_issues(b):
+			if iss[1] == "muted":
+				continue
+			var tab: String = iss[2]
+			out.append({"text": "%s: %s" % [b.name, iss[0]], "tone": iss[1], "icon": "businesses",
+				"btn": {"stock": "Stock", "staff": "Staff", "reports": "Finances", "overview": "Manage"}.get(tab, "Manage"),
+				"cb": func(): open_manage(b, tab)})
+	# Your car, when it's a walk away.
+	if game.driving == "" and not e.vehicles.is_empty():
+		var vid: String = e.vehicles[0]["id"]
+		var d := game.player.global_position.distance_to(game.vehicle_position(vid))
+		if d > 350.0:
+			out.append({"text": "Your %s is %s away" % [EmpireData.vehicle_model(e.vehicles[0]["model"]).get("name", "car"), _dist_text(d)],
+				"tone": "muted", "icon": "vehicles", "btn": "Find", "cb": func(): find_vehicle(vid)})
+	# A business for sale (the nearest).
+	var fs := CityLife.firms_for_sale(e)
+	if not fs.is_empty() and not e.businesses.is_empty():
+		var f: Dictionary = fs[0]
+		var u: Dictionary = game.unit_by_id.get(f["unit"], {})
+		if not u.is_empty():
+			out.append({"text": "%s is for sale: %s" % [f["name"], EmpireData.money(CityLife.firm_price(f))],
+				"tone": "muted", "icon": "property", "btn": "Inspect", "cb": func(): open_firm(u, true)})
+	var rank := {"bad": 0, "warn": 1, "info": 2, "good": 3, "muted": 4}
+	out.sort_custom(func(a, b): return int(rank[a["tone"]]) < int(rank[b["tone"]]))
+	return out
+
+
+## Tapping the objective: its screen, or its route on the map.
+func objective_action() -> void:
+	var ob := game.objective()
+	var act := String(ob[3]) if ob.size() > 3 else ""
+	var b: Business = game.empire.businesses[0] if not game.empire.businesses.is_empty() else null
+	match act:
+		"map":
+			open_phone("map")
+		"property":
+			if game.empire.businesses.is_empty():
+				var u: Dictionary = game.unit_by_id.get(game.empire.flags.get("start_unit", ""), game.starter_unit())
+				open_phone("map", {"kind": "unit", "id": String(u.get("id", ""))})
+			else:
+				open_phone("property")
+		"staff":
+			if b:
+				open_manage(b, "staff")
+		"finances":
+			if b:
+				open_manage(b, "reports")
+		_:
+			if (ob[1] as Vector3) != Vector3.INF:
+				game.set_gps(ob[1], String(ob[2]) if ob.size() > 2 else "", {"kind": "objective"})
+				game.empire.flags.erase("gps_manual")
+				open_phone("map")
+
+
+static func _dist_text(d: float) -> String:
+	return "%.1f km" % (d / 1000.0) if d >= 1000.0 else "%d m" % int(roundf(d / 10.0) * 10.0)
+
+
+func _tile(icon: String, title: String, sub: String, cb: Callable, col := S.AMBER) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(218, 92)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(1, 1, 1, 0.05)
+	sb.set_corner_radius_all(16)
+	sb.border_color = Color(1, 1, 1, 0.08)
+	sb.set_border_width_all(1)
+	var hv := sb.duplicate() as StyleBoxFlat
+	hv.bg_color = Color(1, 1, 1, 0.09)
+	var pr := sb.duplicate() as StyleBoxFlat
+	pr.bg_color = Color(col, 0.22)
+	for st in ["normal", "focus"]:
+		b.add_theme_stylebox_override(st, sb)
+	b.add_theme_stylebox_override("hover", hv)
+	b.add_theme_stylebox_override("pressed", pr)
+	var ic := Widgets.Icon.new(icon, col, 30)
+	ic.position = Vector2(16, 16)
+	ic.size = Vector2(30, 30)
+	b.add_child(ic)
+	var t := S.label(title, 19, S.PAPER, "black")
+	t.position = Vector2(58, 12)
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(t)
+	var st2 := S.label(sub, 14, S.MUTED)
+	st2.position = Vector2(58, 40)
+	st2.size = Vector2(150, 44)
+	st2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	st2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(st2)
+	b.pressed.connect(func():
+		if Time.get_ticks_msec() < S.tap_block_until:
+			return
+		Sfx.play("click", -10.0)
+		cb.call())
+	return b
+
+
+func _home_tab(v: VBoxContainer) -> void:
+	var e := game.empire
+	# Today, yesterday, shops, staff.
+	var today_rev := 0.0
+	var yday := 0.0
+	var trading := 0
+	var staff_n := 0
+	for b: Business in e.businesses:
+		today_rev += float(b.today["revenue"])
+		yday += float(b.last_day().get("profit", 0.0))
+		if b.status(e.hour())[0] == "trading":
+			trading += 1
+		staff_n += b.staff.size()
+	var g := S.hbox(26)
+	g.add_child(_stat("Takings today", EmpireData.money(today_rev), S.PAPER))
+	g.add_child(_stat("Profit yesterday", EmpireData.money(yday, true) if not e.day_reports.is_empty() else "–",
+		S.GREEN if yday >= 0.0 else S.RED))
+	g.add_child(_stat("Shops trading", "%d / %d" % [trading, e.businesses.size()], S.PAPER))
+	g.add_child(_stat("Staff", str(staff_n), S.PAPER))
+	if game.gps.active():
+		g.add_child(S.spacer())
+		var gv := S.vbox(4)
+		gv.add_child(S.label("ROUTE · " + game.gps.label.to_upper(), 13, Gps.COLOUR.lightened(0.3), "black"))
+		var gh := S.hbox(8)
+		gh.add_child(S.label(game.gps.message if game.gps.message != "" else game.gps.distance_text(), 18, S.PAPER, "bold"))
+		gh.add_child(S.button("Map", func(): open_phone("map"), false, 80))
+		gh.add_child(S.button("Cancel", func():
+			game.clear_gps()
+			open_phone("home"), false, 96))
+		gv.add_child(gh)
+		g.add_child(gv)
+	v.add_child(g)
+	var cols := S.hbox(18)
+	cols.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(cols)
+	# Needs you.
+	var left := S.vbox(8)
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.add_child(left)
+	left.add_child(_section("alert", "Needs you"))
+	var list := S.vbox(6)
+	var al := alerts()
+	if al.is_empty():
+		list.add_child(S.label("All quiet: every shop is stocked, staffed and making money.", 17, S.MUTED))
+	for a in al.slice(0, 12):
+		var row := PanelContainer.new()
+		var sb := S.row_bg()
+		sb.border_color = TONES[a["tone"]]
+		sb.border_width_left = 4
+		row.add_theme_stylebox_override("panel", sb)
+		var h := S.hbox(12)
+		row.add_child(h)
+		var tl := S.label(String(a["text"]), 16, S.PAPER)
+		tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tl.custom_minimum_size.x = 300
+		h.add_child(tl)
+		if String(a["btn"]) != "":
+			h.add_child(S.button(String(a["btn"]), a["cb"], a["tone"] == "info", 104))
+		list.add_child(row)
+	left.add_child(_scroll(list, 400))
+	# Quick actions.
+	var right := S.vbox(10)
+	cols.add_child(right)
+	right.add_child(_section("gps", "Quick actions"))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	right.add_child(grid)
+	var vid: String = e.vehicles[0]["id"] if not e.vehicles.is_empty() else ""
+	grid.add_child(_tile("map", "Map", "Places, routes, GPS", func(): open_phone("map")))
+	grid.add_child(_tile("vehicles", "Find my car", "Route to where it's parked" if game.driving == "" else "You're in it",
+		func(): find_vehicle(vid) if vid != "" else null))
+	grid.add_child(_tile("businesses", "My shops", "%d running" % e.businesses.size(), func(): open_phone("businesses")))
+	grid.add_child(_tile("property", "Expand", "Shops to let and for sale", func(): open_phone("property")))
+	grid.add_child(_tile("finances", "Finances", "Profit, cash, loans", func(): open_phone("bank")))
+	grid.add_child(_tile("stock", "Suppliers", "Route to the cash & carry", func():
+		var here := game.player.global_position
+		var w := game.wholesaler("west" if here.x < CityLayout.FAR_SHORE else "east")
+		if not w.is_empty():
+			game.set_gps(Premises.door_point(w), String(w["name"]), {"kind": "unit", "id": String(w["id"])})
+			open_phone("map", {"kind": "unit", "id": String(w["id"])})))
+
+
+func _portfolio_tab(v: VBoxContainer) -> void:
+	var e := game.empire
+	if e.businesses.is_empty():
+		var cv := _card()
+		(cv[1] as VBoxContainer).add_child(S.label("No shops yet", 24, S.PAPER, "black"))
+		(cv[1] as VBoxContainer).add_child(S.label("Rent an empty unit (amber on the map) or buy an independent that's for sale.", 17, S.MUTED))
+		(cv[1] as VBoxContainer).add_child(S.button("Find a shop", func(): open_phone("property"), true, 220))
+		v.add_child(cv[0])
+		return
+	# Company line + filters.
+	var dists := {}
+	for b: Business in e.businesses:
+		dists[b.district_key()] = String(b.district().get("name", b.district_key()))
+	var fh := S.hbox(6)
+	fh.add_child(S.chip_button("All districts", _pf_district == "all", func():
+		_pf_district = "all"
+		open_phone("businesses")))
+	for k in dists:
+		fh.add_child(S.chip_button(String(dists[k]), _pf_district == k, func():
+			_pf_district = k
+			open_phone("businesses")))
+	fh.add_child(S.spacer())
+	for sk in [["attention", "Needs me"], ["profit", "Profit"], ["name", "A–Z"]]:
+		fh.add_child(S.chip_button(sk[1], _pf_sort == sk[0], func():
+			_pf_sort = sk[0]
+			open_phone("businesses"), S.BLUE))
+	v.add_child(fh)
+	var bs: Array = e.businesses.filter(func(b): return _pf_district == "all" or b.district_key() == _pf_district)
+	match _pf_sort:
+		"profit":
+			bs.sort_custom(func(a, b): return float(a.last_day().get("profit", 0.0)) > float(b.last_day().get("profit", 0.0)))
+		"name":
+			bs.sort_custom(func(a, b): return a.name < b.name)
+		_:
+			bs.sort_custom(func(a, b): return biz_issues(a).size() > biz_issues(b).size())
+	var list := S.vbox(10)
+	for b: Business in bs:
+		list.add_child(_biz_card(b))
+	v.add_child(_scroll(list, 470))
+
+
+func _biz_card(b: Business) -> PanelContainer:
+	var e := game.empire
+	var cv := _card()
+	var c: VBoxContainer = cv[1]
+	var st := b.status(e.hour())
+	var top := S.hbox(12)
+	var nm := S.label(b.name, 21, S.PAPER, "black")
+	top.add_child(nm)
+	top.add_child(S.label("%s · %s" % [String(b.type_def().get("name", "Shop")), String(b.district().get("name", ""))], 15, S.MUTED))
+	top.add_child(S.spacer())
+	var issues := biz_issues(b)
+	if issues.any(func(i): return i[1] in ["bad", "warn"]):
+		top.add_child(Widgets.Icon.new("alert", S.AMBER, 22))
+	top.add_child(S.chip(String(st[1]), TONES[st[2]]))
+	c.add_child(top)
+	var ld := b.last_day()
+	var prof := float(ld.get("profit", 0.0))
+	var roles: Array = []
+	for r in ["cashier", "stocker", "cleaner", "manager", "driver"]:
+		var n := b.staff_with(r).size()
+		if n > 0:
+			roles.append("%s%s" % [String(EmpireData.role(r).get("name", r)).to_lower(), " ×%d" % n if n > 1 else ""])
+	var stats := HFlowContainer.new()
+	stats.add_theme_constant_override("h_separation", 30)
+	stats.add_theme_constant_override("v_separation", 6)
+	var staff_txt := ", ".join(roles) if not roles.is_empty() else "none"
+	if staff_txt.length() > 30:
+		staff_txt = "%d people" % b.staff.size()
+	stats.add_child(_stat("Yesterday", EmpireData.money(prof, true) if not ld.is_empty() else "–", S.GREEN if prof >= 0.0 else S.RED))
+	stats.add_child(_stat("Takings today", EmpireData.money(float(b.today["revenue"]))))
+	stats.add_child(_stat("Shelves", "%d%%" % int(b.shelf_fill() * 100.0), S.RED if b.shelf_fill() < 0.2 else S.PAPER))
+	stats.add_child(_stat("Back room", "%d/%d cases" % [b.backroom.cases_used(), b.backroom.case_capacity]))
+	stats.add_child(_stat("Staff", staff_txt, S.PAPER if not roles.is_empty() else S.AMBER))
+	stats.add_child(_stat("Premises", "Freehold" if b.owned else "%s/day" % EmpireData.money(b.rent_per_day())))
+	c.add_child(stats)
+	if not issues.is_empty() and issues[0][1] != "muted":
+		c.add_child(S.label("⚠ " + String(issues[0][0]), 15, TONES[issues[0][1]], "bold"))
+	var acts := S.hbox(8)
+	acts.add_child(S.button("Manage", func(): open_manage(b), true, 120))
+	for t in [["Stock", "stock"], ["Staff", "staff"], ["Finances", "reports"], ["Upgrades", "upgrades"]]:
+		acts.add_child(S.button(t[0], func(): open_manage(b, t[1]), false, 110))
+	acts.add_child(S.spacer())
+	acts.add_child(S.button("GPS", func():
+		var u: Dictionary = game.unit_by_id.get(b.premises["id"], {})
+		if not u.is_empty():
+			game.set_gps(Premises.door_point(u), b.name, {"kind": "unit", "id": String(u["id"])})
+			open_phone("map", {"kind": "unit", "id": String(u["id"])}), false, 90))
+	c.add_child(acts)
+	return cv[0]
+
+
+func _more_tab(v: VBoxContainer) -> void:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 14)
+	grid.add_theme_constant_override("v_separation", 14)
+	for t in MORE_TABS:
+		var tile := _tile(t[0], t[1], t[2], func(): open_phone(t[0]))
+		tile.custom_minimum_size = Vector2(440, 100)
+		(tile.get_child(2) as Label).size = Vector2(360, 44)
+		grid.add_child(tile)
+	v.add_child(grid)
+
+
+# ------------------------------------------------------------ property
+func _property_tab(v: VBoxContainer) -> void:
+	var e := game.empire
+	var kh := S.hbox(6)
+	for k in [["to_let", "To let"], ["sale", "For sale"], ["yours", "Yours"], ["home", "Homes"]]:
+		kh.add_child(S.chip_button(k[1], _pr_kind == k[0], func():
+			_pr_kind = k[0]
+			open_phone("property")))
+	kh.add_child(S.spacer())
+	var dists := {}
+	for u in game.units:
+		if u["kind"] == "shop":
+			dists[String(u["district"])] = String(EmpireData.district(u["district"]).get("name", u["district"]))
+	var dh := S.hbox(6)
+	dh.add_child(S.chip_button("Everywhere", _pr_district == "all", func():
+		_pr_district = "all"
+		open_phone("property"), S.BLUE))
+	var keys := dists.keys()
+	keys.sort()
+	for k in keys:
+		dh.add_child(S.chip_button(String(dists[k]), _pr_district == k, func():
+			_pr_district = k
+			open_phone("property"), S.BLUE))
+	v.add_child(kh)
+	var ds := ScrollContainer.new()
+	ds.custom_minimum_size = Vector2(900, 52)
+	ds.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ds.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	ds.add_child(dh)
+	v.add_child(ds)
+	var note := S.label("Inspect anything from here. Sign at the door for free, or through an agent from your phone for a fee.", 15, S.MUTED)
+	v.add_child(note)
+	var list := S.vbox(6)
+	var here := game.player.global_position
+	var rows: Array = []
+	if _pr_kind == "home":
+		for hm in game.homes():
+			rows.append([here.distance_to(game.home_lift(hm)), hm])
+	else:
+		for u in game.units:
+			if u["kind"] != "shop":
+				continue
+			if _pr_district != "all" and u["district"] != _pr_district:
+				continue
+			var kind := MapKit.unit_kind(game, u)
+			if _pr_kind == "sale" and kind not in ["sale", "rival"]:
+				continue
+			if _pr_kind != "sale" and kind != _pr_kind:
+				continue
+			rows.append([here.distance_to(Premises.door_point(u)), u])
+	rows.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+	if rows.is_empty():
+		list.add_child(S.label("Nothing here right now – try another district.", 17, S.MUTED))
+	for r in rows.slice(0, 40):
+		list.add_child(_property_row(r[1], float(r[0])))
+	v.add_child(_scroll(list, 360))
+
+
+func _property_row(x: Dictionary, dist: float) -> PanelContainer:
+	var e := game.empire
+	var cells: Array = []
+	if x.get("kind", "") == "home":
+		var owned := e.owns_property(x["id"])
+		cells = [_fixed(String(x["name"]), 230, 18, S.PAPER, "bold"),
+			_fixed("%s · %d m up" % [EmpireData.district(x["district"]).get("name", ""), int(x["floor"])], 210, 15, S.MUTED),
+			_fixed(_dist_text(dist), 80, 15, S.MUTED),
+			_fixed("Yours" if owned else EmpireData.money(float(x["price"])), 110, 17, S.GREEN if owned else S.PAPER, "bold")]
+		if owned:
+			var let := false
+			for q in e.properties:
+				if q["id"] == x["id"]:
+					let = q.get("let", false)
+			cells.append(S.button("Move in" if let else "Let it out", func():
+				e.set_let(x["id"], not let)
+				open_phone("property"), false, 130))
+		else:
+			cells.append(_fixed("buy at its street door", 180, 14, S.MUTED))
+		cells.append(S.spacer())
+		cells.append(S.button("GPS", func():
+			game.set_gps(game.home_lift(x), String(x["name"]), {"kind": "home", "id": String(x["id"])})
+			open_phone("map", {"kind": "home", "id": String(x["id"])}), false, 80))
+		return _row(cells)
+	var u := x
+	var kind := MapKit.unit_kind(game, u)
+	var dname := String(EmpireData.district(u["district"]).get("name", ""))
+	var title := ""
+	var money := ""
+	var inspect: Callable
+	match kind:
+		"to_let":
+			title = String(u.get("shop_name", "Shop unit"))
+			money = "%s/day · buy %s" % [EmpireData.money(float(u["rent"])), EmpireData.money(float(u["price"]))]
+			inspect = func(): open_property(u, true)
+		"sale":
+			var f := CityLife.firm_at(e, u["id"])
+			title = String(f.get("name", "Shop"))
+			money = "%s · makes ~%s/day" % [EmpireData.money(CityLife.firm_price(f)), EmpireData.money(CityLife.firm_profit(f))]
+			inspect = func(): open_firm(u, true)
+		"rival":
+			var r := CityLife.rival_at(e, u["id"])
+			title = String(r.get("name", "QuikSave"))
+			money = "buy out %s" % EmpireData.money(CityLife.rival_price(r))
+			inspect = func(): open_rival(u, true)
+		"yours":
+			var b: Business = e.business_at(u["id"])
+			title = b.name
+			money = "Freehold" if b.owned else "Rented · %s/day" % EmpireData.money(b.rent_per_day())
+			inspect = func(): open_manage(b)
+	cells = [_fixed(title, 200, 18, S.PAPER, "bold"), _fixed("%s · %d m²" % [dname, int(u.get("size", 0))], 190, 15, S.MUTED),
+		_fixed(_dist_text(dist), 70, 15, S.MUTED), _fixed(money, 230, 16, S.AMBER if kind != "yours" else S.GREEN, "bold"),
+		S.spacer(), S.button("Inspect" if kind != "yours" else "Manage", inspect, false, 112),
+		S.button("GPS", func():
+			game.set_gps(Premises.door_point(u), title, {"kind": "unit", "id": String(u["id"])})
+			open_phone("map", {"kind": "unit", "id": String(u["id"])}), false, 80)]
+	return _row(cells)
+
+
+# ------------------------------------------------------------ vehicles
+func find_vehicle(vid: String) -> void:
+	if vid == "" or game.driving == vid:
+		toast("You're driving it", "info")
+		return
+	var p := game.vehicle_position(vid)
+	var nm := String(EmpireData.vehicle_model(game.empire.vehicle(vid).get("model", "hatch")).get("name", "Car"))
+	game.set_gps(p, "Your " + nm, {"kind": "vehicle", "id": vid})
+	open_phone("map", {"kind": "vehicle", "id": vid})
+
+
+func _vehicles_tab(v: VBoxContainer) -> void:
+	var e := game.empire
+	var list := S.vbox(10)
+	var here := game.player.global_position
+	for veh in e.vehicles:
+		var vid := String(veh["id"])
+		var md := EmpireData.vehicle_model(veh["model"])
+		var p := game.vehicle_position(vid)
+		var dist := here.distance_to(p)
+		var where := String(EmpireData.district(("west:" if p.x < CityLayout.FAR_SHORE else "east:") + game.layout.district(p.x, p.z)).get("name", ""))
+		var cargo := veh["cargo"] as Stock
+		var cv := _card()
+		var c: VBoxContainer = cv[1]
+		var top := S.hbox(12)
+		top.add_child(S.label(String(md["name"]), 21, S.PAPER, "black"))
+		top.add_child(S.label(("You're driving it" if game.driving == vid else "Parked · %s · %s away" % [where, _dist_text(dist)]), 16, S.MUTED))
+		top.add_child(S.spacer())
+		var cond := float(veh["condition"])
+		top.add_child(S.chip("%d%% condition" % int(cond * 100.0), S.GREEN if cond > 0.7 else (S.AMBER if cond > 0.35 else S.RED)))
+		c.add_child(top)
+		c.add_child(S.label("Cargo %d/%d cases%s · %d km driven" % [cargo.cases_used(), cargo.case_capacity,
+			(" (" + _cargo_text(cargo) + ")") if not cargo.is_empty() else "", int(float(veh["km"]))], 15, S.MUTED))
+		var acts := S.hbox(8)
+		if game.driving != vid:
+			acts.add_child(S.button("Find · set GPS", func(): find_vehicle(vid), true, 180))
+			var q := game.delivery_quote(vid)
+			var del := S.button("Deliver to me · %s" % EmpireData.money(float(q["fee"])) if q["ok"] else "Deliver to me", func():
+				var err := game.deliver_vehicle(vid)
+				toast(err if err != "" else "A driver is bringing it round – look for it on your street", "bad" if err != "" else "good")
+				open_phone("vehicles"), false, 230)
+			del.disabled = not q["ok"]
+			acts.add_child(del)
+			if not q["ok"]:
+				acts.add_child(S.label(String(q["why"]), 14, S.MUTED))
+		acts.add_child(S.spacer())
+		var cost := float(EmpireData.file("vehicles").get("service_cost", 80.0)) * (1.5 - cond * 0.5)
+		var svc := S.button("Mobile mechanic · %s" % EmpireData.money(cost), func():
+			var err := e.service_vehicle(veh)
+			toast(err if err != "" else "Serviced: back to 100%", "bad" if err != "" else "good")
+			open_phone("vehicles"), false, 240)
+		svc.disabled = cond > 0.95
+		acts.add_child(svc)
+		c.add_child(acts)
+		list.add_child(cv[0])
+	list.add_child(S.label("DEALER (delivered to the kerb beside you)", 14, S.AMBER, "black"))
+	for mid in EmpireData.vehicle_models():
+		var md2 := EmpireData.vehicle_model(mid)
+		if float(md2.get("price", 0)) <= 0.0:
+			continue
+		list.add_child(_row([_fixed(String(md2["name"]), 220, 18, S.PAPER, "bold"),
+			_fixed("%d cases · top %d mph" % [int(md2["cargo"]), int(float(md2["top_speed"]) * 2.237)], 260, 15, S.MUTED),
+			S.spacer(),
+			S.button("Buy · %s" % EmpireData.money(float(md2["price"])), func():
+				var err := game.buy_vehicle(mid)
+				toast(err if err != "" else "Delivered outside", "bad" if err != "" else "good")
+				open_phone("vehicles"), true, 180)]))
+	v.add_child(_scroll(list, 470))
+
+
+static func _cargo_text(c: Stock) -> String:
+	var names: Array = []
+	for pid in c.units:
+		names.append("%s ×%d" % [EmpireData.product(pid).get("name", pid), c.qty(pid)])
+	return ", ".join(names.slice(0, 3)) + ("…" if names.size() > 3 else "")
+
+
+## A notification's "show me": opens what it refers to.
+func open_ref(ref: Dictionary) -> void:
+	match String(ref.get("kind", "")):
+		"biz":
+			var b: Business = game.empire.business(String(ref.get("id", "")))
+			if b:
+				open_manage(b, String(ref.get("tab", "overview")))
+		"unit":
+			open_phone("map", {"kind": "unit", "id": String(ref.get("id", ""))})
+		"vehicle":
+			find_vehicle(String(ref.get("id", "")))
+		"tab":
+			open_phone(String(ref.get("id", "home")))

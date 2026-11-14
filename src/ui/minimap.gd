@@ -216,7 +216,7 @@ class MapPainter:
 	const PLAZA := Color(0.56, 0.55, 0.52)
 	const PARK := Color(0.27, 0.43, 0.27)
 	const PIECE := Color(0.45, 0.42, 0.38)
-	const BRIDGE := Color(0.72, 0.3, 0.24)
+	const BRIDGE := Color(0.33, 0.34, 0.37)   # (City Empire: a road like any other – the GPS route is the colour)
 	const RAIL := Color(0.15, 0.15, 0.17)
 
 	func _px(v: Vector2) -> Vector2:
@@ -301,4 +301,4 @@ class MapPainter:
 		_line(PackedVector2Array([Vector2(56.0, z), Vector2(CityLayout.APPROACH_END, z)]), 20.0, BRIDGE.darkened(0.2))
 		_line(PackedVector2Array([Vector2(56.0, z), Vector2(CityLayout.APPROACH_END, z)]), 12.0, BRIDGE)
 		for tx: float in CityLayout.BRIDGE_TOWERS:
-			draw_circle(_px(Vector2(tx, z)), 14.0 / Minimap.M_PER_PX, Color(0.95, 0.45, 0.35))
+			draw_circle(_px(Vector2(tx, z)), 14.0 / Minimap.M_PER_PX, Color(0.5, 0.5, 0.53))

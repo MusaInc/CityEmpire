@@ -1,6 +1,18 @@
-# Status (2026-11-14, 0.3.0: kinds of shop, brands, crowd, luxury cars)
+# Status (2026-11-14, gameplay overhaul after 0.3.0: GPS, portfolio, car recovery, onboarding, sunk buildings)
 
 ## Working (verified headless / in renders on the VPS)
+- Gameplay overhaul (2026-11-14, after 0.3.0):
+  - GPS (src/empire/nav/gps.gd): one route for the whole game on RoadNet (Never Stop's lane graph of both lands, built on a thread at start, ~1 s / 6 MB). Driving follows lanes the way traffic does; on foot the same graph is walked both ways. Planned when set (25–40 ms on the VPS), re-planned on a worker thread when you leave the route (18 m on foot / 28 m driving), get in/out of the car or the target moves; clears on arrival; unreachable places say why and draw nothing. Saved in Empire.flags (gps, gps_label, gps_ref). Objectives set the route unless you set your own.
+  - One map identity (src/empire/ui/map_kit.gd): markers, shapes, colours, purple route, destination pin and "you" arrow shared by the HUD minimap and the phone map (same baked image; the bridge is road-grey now, not red). Minimap: route clipped to the disc, next-turn badge, zoom with speed. Full map: filter chips, tap a place for a card (Set GPS / Cancel route / Manage / Inspect), tap a street for a waypoint, fit-route and centre buttons, keeps its view between openings.
+  - Phone: rail Home · Businesses · Map · Vehicles · Property · Finances · More (Company, City, Goals, Game). Home = takings/profit/shops/staff, active route, "Needs you" (every alert has a working button) and quick-action tiles. Businesses = portfolio cards (status, yesterday's profit, shelves, back room, staff, premises, worst issue; Manage/Stock/Staff/Finances/Upgrades/GPS), district filter, sort by attention/profit/name. Property = To let / For sale / Yours / Homes × district, nearest first, Inspect + GPS. Notifications with a target are tappable (›).
+  - Remote acquisition is explicit: sign at the door for free, or rent/buy any unit (and independents, QuikSave buy-outs) from the phone through an agent for 4% (£40–£2,500), shown on the button.
+  - Vehicles: each with where it's parked (district, distance), cargo, condition; Find (GPS to it, follows it if it moves), Deliver to me (paid driver, £30 + 3p/m up to £150, only outdoors near a road and when it's over 80 m away, lands on the kerb along the lane), Mobile mechanic (only when worn).
+  - Business.status(): trading / closed / after hours / out of stock / nobody on the till – one wording everywhere. Staff tab shows which jobs are covered and what happens without each role.
+  - Onboarding objectives (each done by doing it): find your car → open the map → inspect a shop → rent it → buy stock → … → 3 sales → hire → look at Finances → find the next shop; tapping the objective opens its screen or its route.
+  - Integrity: one business per unit (renting twice refused; a save holding two is merged, stock/staff kept, flags.repaired_duplicates); a unit with your business drops stale independent/rival records on load; notice pay counts in the shop's profit.
+  - Sunk buildings fixed: the buildings CityInfrastructure.open_ground adds on bare squares and round the set pieces were never lifted onto the ground – on Westbank's hillside squares their painted shopfronts showed just above the pavement with the rest underground (up to 13 m), and five on a Georgian terrace were buried whole (58 m). They now get the same slope/terrace lift as every block (after the shop units are placed: no unit id or save changes). Test: test_no_building_is_sunk_into_the_ground.
+  - Tests: 53 City Empire tests (new: test_gps ×4, test_portfolio ×5, sunk buildings); `--scenarios` A–H runtime journeys (see README); autoplay 43/43.
+  - Perf vs the commit before (VPS, llvmpipe): start street 582k vs 579k prims, 218 vs 214 draws; busy street 874k vs 882k, 333 vs 326; memory +15 MB (448 vs 433, 497 vs 482: road graph + UI); world build unchanged (~6.3 s).
 - Two islands with economic identities: Westbank (cheap, industrial/residential) and the Commercial Island (avg rent >1.5×); 24 shops to let + a wholesaler each.
 - Full loop: rent → drive → buy at trade counter → collection bay → boot → carry in → stock shelves/stockroom → open → serve at till → takings; hire staff (cashier serves alone, stacker, cleaner, manager re-orders, driver = free delivery); upgrades rebuild the shop; loans, transfers, vehicles (van/box truck), homes (buy, lift, sleep, let), goals, day reports, autosave.
 - City life: daily weather + forecast (drives footfall, what sells and the sky), daily events (festival, wholesale deal/shortage, hygiene inspection, viral review, sick staff, break-in vs CCTV, payday), news feed.
@@ -20,6 +32,8 @@
 - Draw calls near a busy street ~190 (was ~110 before the established units); other people's shop details cull at 55 m.
 
 ## Not verified
+- The underground shops the user reported came with a screenshot that didn't reach the session: the sunk-building fix is the cause found (44 buried shopfront faces on the hillside, now 0); confirm on device that it's the same spot.
+- Touch on a real phone/iPad (all phone screens were checked in 1688×780 renders and by scripted taps, not fingers).
 - No phone, tablet or web build tested. No device FPS claims.
 - Autoplay teleports the car between places; road driving routes aren't scripted.
 - Long-run pacing (how many real hours to City Tycoon) is estimated from the sim, not playtested.

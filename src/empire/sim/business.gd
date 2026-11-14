@@ -328,6 +328,34 @@ func trading(hour: float) -> bool:
 	return live or has_role("cashier")
 
 
+## What the shop is doing now, for every screen that shows it:
+## [key, label, tone] – key: trading / closed / after_hours / no_stock /
+## no_cashier; tone: good / warn / bad / muted.
+func status(hour: float) -> Array:
+	if not open:
+		return ["closed", "CLOSED", "muted"]
+	if not within_hours(hour):
+		return ["after_hours", "CLOSED · opens %02d:00" % int(hours().x), "muted"]
+	if shelf_units() == 0:
+		return ["no_stock", "OUT OF STOCK", "bad"]
+	if not live and not has_role("cashier"):
+		return ["no_cashier", "NO ONE ON THE TILL", "warn"]
+	return ["trading", "TRADING", "good"]
+
+
+## Shelves filled, 0..1 (of what the fixtures hold).
+func shelf_fill() -> float:
+	var cap := 0
+	for s in slots:
+		cap += int(s["cap"])
+	return float(shelf_units()) / float(maxi(cap, 1))
+
+
+## Profit of the last closed day ({} before the first day ends).
+func last_day() -> Dictionary:
+	return history[-1] if not history.is_empty() else {}
+
+
 # ------------------------------------------------------------ reports
 func reset_today() -> void:
 	today = {"revenue": 0.0, "cogs": 0.0, "customers": 0, "served": 0, "units": 0, "stockouts": 0,
