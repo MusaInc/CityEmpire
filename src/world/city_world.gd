@@ -27,8 +27,25 @@ const PROP_RANGES := {
 ## chunk: [kind, inset from the kerb line (m)].
 const FURNITURE := ["bench", "bin", "hydrant", "bollard", "sign_post", "bus_shelter", "planter"]
 const FURNITURE_RANGE := 190.0
-## Traffic models (tools/blender/build_cars.py) and how common each is.
-const CAR_KINDS := [["car_sedan", 0.32], ["car_hatch", 0.25], ["car_suv", 0.2], ["car_taxi", 0.13], ["car_van", 0.1]]
+## Traffic: [kind, how common, Never Stop civilian body (assets/vehicles)].
+## The bodies are ~3x the old build_cars.py models' triangles, so there are
+## fewer of them (Traffic.SPACING, PARKED_KEEP): quieter roads, better cars.
+const CAR_KINDS := [["car_sedan", 0.32, "civ_sedan"], ["car_hatch", 0.25, "civ_compact"], ["car_suv", 0.2, "civ_suv"],
+	["car_taxi", 0.13, "civ_taxi"], ["car_van", 0.1, "civ_van"]]
+## Share of the kerbside parking spots that hold a car.
+const PARKED_KEEP := 0.35
+## Traffic material per glTF material name: [merge group, tint, emission, roughness].
+## Groups with the same look are merged into one surface (fewer draw calls).
+const TRAFFIC_MATS := {
+	"paint": ["paint", Color(1, 1, 1), 0.0, 0.4], "paint2": ["paint2", Color(0.88, 0.88, 0.86), 0.0, 0.4],
+	"glass": ["glass", Color(0.05, 0.06, 0.07), 0.0, 0.25],
+	"chrome": ["chrome", Color(0.62, 0.63, 0.66), 0.0, 0.2], "lamp_rev": ["chrome", Color(0.62, 0.63, 0.66), 0.0, 0.2],
+	"plate": ["plate", Color(0.9, 0.88, 0.78), 0.0, 0.6],
+	"lamp_head": ["lamp", Color(0.95, 0.93, 0.85), 2.0, 0.3], "lamp_tail": ["lamp_red", Color(0.7, 0.03, 0.02), 1.2, 0.3],
+	"lamp_amber": ["lamp_amber", Color(0.95, 0.5, 0.06), 0.6, 0.3], "sign": ["sign", Color(1.0, 0.86, 0.35), 1.2, 0.4],
+	"tyre": ["tyre", Color(0.045, 0.045, 0.045), 0.0, 0.88], "rim": ["rim", Color(0.42, 0.43, 0.45), 0.0, 0.35],
+}
+const TRAFFIC_DARK := ["dark", Color(0.035, 0.035, 0.04), 0.0, 0.6]  # trim, liner, grille, seam, cladding, housings
 const TAXI_YELLOW := Color(0.98, 0.76, 0.12)
 const CAR_COLORS := [Color(0.85, 0.85, 0.83), Color(0.1, 0.1, 0.11), Color(0.62, 0.08, 0.07), Color(0.12, 0.24, 0.45),
 	Color(0.55, 0.57, 0.6), Color(0.9, 0.72, 0.15), Color(0.2, 0.35, 0.3)]
@@ -56,7 +73,7 @@ var car_meshes: Array[Mesh] = []  # CAR_KINDS order; null where the model is mis
 var car_far_meshes: Array[Mesh] = []  # two-box stand-ins (24 tris) for chunks past CAR_NEAR
 ## Full car models only in chunks this close (centre distance); 1 650 tris each
 ## is wasted on a car a few pixels long.
-const CAR_NEAR := 260.0
+const CAR_NEAR := 170.0  # (was 260: the detailed civilian bodies cost ~3x the old cars)
 const CAR_FAR := 520.0
 var walker_mesh: Mesh
 var walker_meshes: Array = []   # one per body type
@@ -676,21 +693,9 @@ func _load_props() -> void:
 		_glow_meshes.append(q)
 	var shader: Shader = load("res://src/world/shaders/traffic.gdshader")
 	for kind in CAR_KINDS:
-		var car := _load_mesh(kind[0])
-		var cm: Mesh = null
-		if car:
-			cm = car.duplicate()
-			for i in cm.get_surface_count():
-				var src := cm.surface_get_material(i)
-				var sm := ShaderMaterial.new()
-				sm.shader = shader
-				var name := String(src.resource_name) if src else ""
-				if src is BaseMaterial3D:
-					sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
-				sm.set_shader_parameter("use_instance_color", name == "paint")
-				sm.set_shader_parameter("emission", 2.0 if name.begins_with("lamp") else 0.0)
-				sm.set_shader_parameter("roughness", 0.25 if name == "car_glass" else 0.45)
-				cm.surface_set_material(i, sm)
+		var cm := _traffic_car_mesh(String(kind[2]), shader)
+		if cm == null:  # (the old low-detail model as a fallback)
+			cm = _legacy_car_mesh(String(kind[0]), shader)
 		car_meshes.append(cm)
 		car_far_meshes.append(_car_far_mesh(cm) if cm else null)
 	# Four body types (tools/blender/build_street.py), one surface each;
@@ -719,6 +724,96 @@ func _load_props() -> void:
 
 ## Body + cabin boxes sized from the full model, sharing its paint and glass
 ## materials (so the GPU drive, instance colour and taxi yellow still apply).
+## A traffic car: the Never Stop civilian body with four light wheels (a
+## 16-sided tyre and a hub disc, not the 1.5k-triangle player wheel), all
+## merged into one mesh with a surface per look. Front along -Z like the
+## old models; ground at y = 0.
+func _traffic_car_mesh(body: String, shader: Shader) -> Mesh:
+	var path := "res://assets/vehicles/%s.glb" % body
+	var d: Dictionary = BodyDims.DIMS.get(body, {})
+	if not ResourceLoader.exists(path) or d.is_empty():
+		return null
+	var inst := (load(path) as PackedScene).instantiate()
+	var mis := inst.find_children("*", "MeshInstance3D", true, false)
+	var src: Mesh = (mis[0] as MeshInstance3D).mesh if mis.size() > 0 else null
+	inst.free()
+	if src == null:
+		return null
+	var tools := {}   # group -> SurfaceTool
+	var looks := {}   # group -> TRAFFIC_MATS entry
+	var add := func(group_look: Array) -> SurfaceTool:
+		var g: String = group_look[0]
+		if not tools.has(g):
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			tools[g] = st
+			looks[g] = group_look
+		return tools[g]
+	for i in src.get_surface_count():
+		var m := src.surface_get_material(i)
+		var n := String(m.resource_name) if m else ""
+		var look: Array = TRAFFIC_MATS.get(n, TRAFFIC_DARK)
+		(add.call(look) as SurfaceTool).append_from(_surface_mesh(src, i), 0, Transform3D.IDENTITY)
+	var wr: float = d["wheel_r"]
+	var tw: float = d["tyre_w"]
+	var track: float = float(d["W"]) - tw - 0.05
+	var tyre := CylinderMesh.new()
+	tyre.top_radius = wr
+	tyre.bottom_radius = wr
+	tyre.height = tw
+	tyre.radial_segments = 16
+	tyre.rings = 1
+	var hub := CylinderMesh.new()
+	hub.top_radius = wr * 0.56
+	hub.bottom_radius = wr * 0.56
+	hub.height = tw + 0.012
+	hub.radial_segments = 12
+	hub.rings = 1
+	for az in d["axles"]:
+		for side in [-1.0, 1.0]:
+			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
+			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(tyre, 0, xf)
+			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(hub, 0, xf)
+	var out := ArrayMesh.new()
+	for g in tools:
+		var look: Array = looks[g]
+		(tools[g] as SurfaceTool).commit(out)
+		var sm := ShaderMaterial.new()
+		sm.shader = shader
+		sm.set_shader_parameter("tint", look[1])
+		sm.set_shader_parameter("use_instance_color", g == "paint")
+		sm.set_shader_parameter("emission", look[2])
+		sm.set_shader_parameter("roughness", look[3])
+		out.surface_set_material(out.get_surface_count() - 1, sm)
+	return out
+
+
+static func _surface_mesh(m: Mesh, i: int) -> ArrayMesh:
+	var a := ArrayMesh.new()
+	a.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, m.surface_get_arrays(i))
+	return a
+
+
+## The old build_cars.py traffic model (only if a Never Stop body is missing).
+func _legacy_car_mesh(name: String, shader: Shader) -> Mesh:
+	var car := _load_mesh(name)
+	if car == null:
+		return null
+	var cm: Mesh = car.duplicate()
+	for i in cm.get_surface_count():
+		var src := cm.surface_get_material(i)
+		var sm := ShaderMaterial.new()
+		sm.shader = shader
+		var n := String(src.resource_name) if src else ""
+		if src is BaseMaterial3D:
+			sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
+		sm.set_shader_parameter("use_instance_color", n == "paint")
+		sm.set_shader_parameter("emission", 2.0 if n.begins_with("lamp") else 0.0)
+		sm.set_shader_parameter("roughness", 0.25 if n == "car_glass" else 0.45)
+		cm.surface_set_material(i, sm)
+	return cm
+
+
 static func _car_far_mesh(full: Mesh) -> Mesh:
 	var paint: Material
 	var glass: Material
@@ -1791,6 +1886,8 @@ func parked_cars(key: Vector2i) -> Array:
 	_parked_cars(rect, rng, xf, custom)
 	var out: Array = []
 	for t in xf:
+		if rng.randf() > PARKED_KEEP:
+			continue
 		# The shader shifts a parked car 5 m back along its segment (see below).
 		out.append([Transform3D((t as Transform3D).basis, (t as Transform3D).origin - (t as Transform3D).basis.z * 5.0),
 			_car_kind(rng.randf())])

@@ -117,7 +117,7 @@ func _ready() -> void:
 	camera.name = "CameraRig"
 	add_child(camera)
 	camera.set_target(player)
-	camera.distance_scale = 0.62   # closer than the swing camera: street level
+	camera.distance_scale = 0.76   # closer than the swing camera: street level (0.62 felt cramped)
 	world.set_viewer(camera)
 	chase = ChaseCamera.new()
 	chase.name = "ChaseCamera"

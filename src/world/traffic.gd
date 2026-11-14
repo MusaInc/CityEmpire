@@ -31,7 +31,7 @@ const JOIN_R := 24.0       # m: how far a lane end looks for lanes to join
 const NO_STOP := 1.0e9
 const PATH_SHADER := preload("res://src/world/shaders/traffic_path.gdshader")
 const LANE_V := {"ring": 13.0, "major": 12.0, "minor": 9.0, "roundabout": 8.0}
-const SPACING := 72.0      # m of lane per car at density 1
+const SPACING := 140.0     # m of lane per car at density 1 (was 72: quieter roads for the detailed civilian cars)
 
 enum { EV_NONE, EV_EXIT, EV_DECIDE, EV_END, EV_JOIN, EV_LOOP, EV_FOLLOW }
 
