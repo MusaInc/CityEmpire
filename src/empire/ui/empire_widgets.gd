@@ -136,6 +136,21 @@ class Icon extends Control:
 				draw_polyline(PackedVector2Array([_pt(0.6, 0.42), _pt(0.8, 0.42), _pt(0.94, 0.56), _pt(0.94, 0.7), _pt(0.6, 0.7)]), c, w, true)
 				for x2: float in [0.24, 0.76]:
 					draw_circle(_pt(x2, 0.74), s * 0.09, c)
+			"ball":
+				draw_arc(_pt(0.5, 0.5), s * 0.4, 0.0, TAU, 28, c, w, true)
+				var pent := PackedVector2Array()
+				for i in 5:
+					pent.append(_pt(0.5, 0.5) + Vector2.from_angle(-PI * 0.5 + TAU * i / 5.0) * s * 0.15)
+				draw_colored_polygon(pent, c)
+				for i in 5:
+					var a := -PI * 0.5 + TAU * i / 5.0
+					draw_line(_pt(0.5, 0.5) + Vector2.from_angle(a) * s * 0.15, _pt(0.5, 0.5) + Vector2.from_angle(a) * s * 0.38, c, w * 0.8)
+			"desk":
+				draw_rect(Rect2(_pt(0.08, 0.5), Vector2(0.84, 0.1) * s), c)
+				draw_line(_pt(0.16, 0.6), _pt(0.16, 0.9), c, w)
+				draw_line(_pt(0.84, 0.6), _pt(0.84, 0.9), c, w)
+				draw_rect(Rect2(_pt(0.3, 0.18), Vector2(0.4, 0.26) * s), c, false, w)
+				draw_line(_pt(0.5, 0.44), _pt(0.5, 0.5), c, w)
 			_:
 				draw_circle(_pt(0.5, 0.5), s * 0.3, c)
 
@@ -230,3 +245,194 @@ class BrandPreview extends Control:
 		draw_line(Vector2(dx + dw * 0.75, gy + gh * 0.45), Vector2(dx + dw * 0.75, gy + gh * 0.7), Color(0.85, 0.85, 0.85), 3.0)
 		# Pavement.
 		draw_rect(Rect2(Vector2(0, bx.end.y - size.y * 0.06), Vector2(size.x, size.y * 0.06)), Color(0.55, 0.55, 0.53))
+
+
+## A small line chart of recent values (profit by day): a zero line, the
+## area under the line tinted, the last value dotted. Green when the last
+## value is ≥ 0, red below.
+class Spark extends Control:
+	var values: Array = []
+
+	func _init(p_values: Array = [], sz := Vector2(140, 40)) -> void:
+		values = p_values
+		custom_minimum_size = sz
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		var r := Rect2(Vector2.ZERO, size)
+		draw_rect(r, Color(1, 1, 1, 0.035))
+		if values.size() < 2:
+			draw_string(EmpireStyle.font("semibold"), Vector2(6, size.y * 0.5 + 5), "no days yet", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, EmpireStyle.MUTED)
+			return
+		var lo := 0.0
+		var hi := 0.0
+		for v in values:
+			lo = minf(lo, float(v))
+			hi = maxf(hi, float(v))
+		if hi - lo < 1.0:
+			hi = lo + 1.0
+		var pad := 4.0
+		var pts := PackedVector2Array()
+		for i in values.size():
+			var x := pad + (size.x - pad * 2.0) * float(i) / float(values.size() - 1)
+			var y := pad + (size.y - pad * 2.0) * (1.0 - (float(values[i]) - lo) / (hi - lo))
+			pts.append(Vector2(x, y))
+		var zy := pad + (size.y - pad * 2.0) * (1.0 - (0.0 - lo) / (hi - lo))
+		var col := EmpireStyle.GREEN if float(values[-1]) >= 0.0 else EmpireStyle.RED
+		var area := pts.duplicate()
+		area.append(Vector2(pts[-1].x, zy))
+		area.append(Vector2(pts[0].x, zy))
+		draw_colored_polygon(area, Color(col, 0.16))
+		draw_line(Vector2(pad, zy), Vector2(size.x - pad, zy), Color(1, 1, 1, 0.18), 1.0)
+		draw_polyline(pts, col, 2.0, true)
+		draw_circle(pts[-1], 3.5, col)
+
+
+## A rounded bar filled to `value` (0..1).
+class Meter extends Control:
+	var value := 0.0
+	var color := EmpireStyle.GREEN
+
+	func _init(p_value := 0.0, p_color := EmpireStyle.GREEN, sz := Vector2(120, 10)) -> void:
+		value = p_value
+		color = p_color
+		custom_minimum_size = sz
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		var h := size.y
+		_round(Rect2(Vector2.ZERO, size), Color(1, 1, 1, 0.1), h * 0.5)
+		var w := clampf(value, 0.0, 1.0) * size.x
+		if w > 1.0:
+			_round(Rect2(Vector2.ZERO, Vector2(maxf(w, h), h)), color, h * 0.5)
+
+	func _round(r: Rect2, c: Color, rad: float) -> void:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = c
+		sb.set_corner_radius_all(int(rad))
+		draw_style_box(sb, r)
+
+
+## An icon on a coloured disc (a kind of business, a role…).
+class Badge extends Control:
+	var key := ""
+	var color := EmpireStyle.AMBER
+
+	func _init(p_key := "", p_color := EmpireStyle.AMBER, px := 44.0) -> void:
+		key = p_key
+		color = p_color
+		custom_minimum_size = Vector2(px, px)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _ready() -> void:
+		var ic := Icon.new(key, Color.WHITE, size.x * 0.56)
+		ic.position = size * 0.22
+		ic.size = size * 0.56
+		add_child(ic)
+
+	func _draw() -> void:
+		var c := size * 0.5
+		draw_circle(c, size.x * 0.5, color.darkened(0.25))
+		draw_circle(c, size.x * 0.5 - 2.0, color)
+
+
+## Meridian Tower at dusk: lit floors (yours in your brand colour) and your
+## name round the crown at the whole-tower tier.
+class TowerArt extends Control:
+	var tier := 0
+	var accent := Color(0.96, 0.75, 0.35)
+	var title := ""
+
+	func _draw() -> void:
+		var r := Rect2(Vector2.ZERO, size)
+		var sky := Gradient.new()
+		sky.set_color(0, Color(0.12, 0.16, 0.28))
+		sky.set_color(1, Color(0.42, 0.3, 0.38))
+		for i in 12:
+			var y0 := size.y * i / 12.0
+			draw_rect(Rect2(0, y0, size.x, size.y / 12.0 + 1.0), sky.sample(float(i) / 11.0))
+		# Neighbours.
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 7
+		for i in 7:
+			var w := size.x * rng.randf_range(0.08, 0.14)
+			var h := size.y * rng.randf_range(0.25, 0.6)
+			var x := size.x * (i / 7.0) + rng.randf_range(-8, 8)
+			draw_rect(Rect2(x, size.y - h, w, h), Color(0.09, 0.11, 0.16))
+		# The tower.
+		var tw := size.x * 0.2
+		var tx := size.x * 0.5 - tw * 0.5
+		var top := size.y * 0.1
+		draw_rect(Rect2(tx, top, tw, size.y - top), Color(0.13, 0.16, 0.22))
+		draw_rect(Rect2(tx + tw * 0.46, top - size.y * 0.06, tw * 0.08, size.y * 0.06), Color(0.2, 0.22, 0.27))
+		var floors := 18
+		var fh := (size.y - top) / floors
+		for f in floors:
+			var y := top + f * fh
+			var ours := (tier >= 3) or (tier == 2 and f >= floors - 4) or (tier == 1 and f == floors - 2)
+			for k in 5:
+				var lit := ours or rng.randf() < 0.45
+				var col := accent if ours else Color(1.0, 0.86, 0.6, 0.55)
+				if lit:
+					draw_rect(Rect2(tx + 4 + k * (tw - 8) / 5.0, y + fh * 0.25, (tw - 8) / 5.0 - 3, fh * 0.45), col)
+		if tier >= 3 and title != "":
+			var f := EmpireStyle.font("black")
+			var fs := 14
+			var tw2 := f.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			draw_string(f, Vector2(size.x * 0.5 - tw2 * 0.5, top - size.y * 0.075), title, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, accent)
+		draw_rect(r, Color(1, 1, 1, 0.08), false, 1.0)
+
+
+## The Heights Ground from above: the bowl in club red and white, the
+## pitch, four floodlight masts, and the scoreboard line under it.
+class StadiumArt extends Control:
+	var line := ""
+	var crowd := 0.6   # 0..1: how full the stands look
+
+	func _draw() -> void:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0.1, 0.12, 0.15))
+		var c := Vector2(size.x * 0.5, size.y * 0.46)
+		var rx := size.x * 0.36
+		var rz := size.y * 0.36
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 3
+		var n := 32
+		for i in n:
+			var t0 := TAU * i / n
+			var t1 := TAU * (i + 1) / n
+			for band in 3:
+				var d0 := 0.62 + band * 0.12
+				var d1 := d0 + 0.12
+				var col := Color(0.78, 0.14, 0.16) if (i / 4 + band) % 2 == 0 else Color(0.92, 0.92, 0.9)
+				if i % 4 == 0:
+					col = Color(0.32, 0.32, 0.34)
+				var q := PackedVector2Array([c + Vector2(cos(t0) * rx * d0, sin(t0) * rz * d0), c + Vector2(cos(t1) * rx * d0, sin(t1) * rz * d0),
+					c + Vector2(cos(t1) * rx * d1, sin(t1) * rz * d1), c + Vector2(cos(t0) * rx * d1, sin(t0) * rz * d1)])
+				draw_colored_polygon(q, col.darkened(0.08 * band))
+				# The crowd: dots in the seats.
+				if i % 4 != 0 and rng.randf() < crowd:
+					var m := (q[0] + q[2]) * 0.5
+					draw_circle(m, 1.6, Color(rng.randf_range(0.2, 0.95), rng.randf_range(0.2, 0.9), rng.randf_range(0.2, 0.9)))
+		# Pitch with stripes and markings.
+		var pw := rx * 1.05
+		var ph := rz * 0.95
+		var pr := Rect2(c - Vector2(pw, ph) * 0.5, Vector2(pw, ph))
+		for k in 8:
+			draw_rect(Rect2(pr.position.x + pw * k / 8.0, pr.position.y, pw / 8.0 + 1.0, ph), Color(0.2, 0.5, 0.22) if k % 2 == 0 else Color(0.24, 0.56, 0.25))
+		draw_rect(pr, Color(1, 1, 1, 0.8), false, 1.5)
+		draw_line(Vector2(c.x, pr.position.y), Vector2(c.x, pr.end.y), Color(1, 1, 1, 0.8), 1.5)
+		draw_arc(c, ph * 0.16, 0, TAU, 24, Color(1, 1, 1, 0.8), 1.5)
+		# Floodlights.
+		for k in 4:
+			var a := PI * 0.25 + PI * 0.5 * k
+			var fp := c + Vector2(cos(a) * rx * 1.02, sin(a) * rz * 1.02)
+			draw_circle(fp, 9.0, Color(1.0, 0.95, 0.75, 0.18))
+			draw_circle(fp, 4.0, Color(1.0, 0.97, 0.85))
+		if line != "":
+			var f := EmpireStyle.font("black")
+			var fs := 17
+			var w := f.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			var br := Rect2(Vector2(size.x * 0.5 - w * 0.5 - 12, size.y - 34), Vector2(w + 24, 28))
+			draw_rect(br, Color(0.05, 0.05, 0.07, 0.92))
+			draw_rect(br, Color(0.85, 0.15, 0.18), false, 2.0)
+			draw_string(f, br.position + Vector2(12, 20), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.95, 0.75))

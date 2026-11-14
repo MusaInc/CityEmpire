@@ -1298,16 +1298,16 @@ func _m_reports(v: VBoxContainer, b: Business) -> void:
 
 # ---------------------------------------------------------------- phone
 const PHONE_TABS := [["home", "Home"], ["businesses", "Businesses"], ["map", "Map"], ["vehicles", "Vehicles"],
-	["property", "Property"], ["bank", "Finances"], ["more", "More"]]
+	["property", "Property"], ["bank", "Finances"], ["company", "Corporate"], ["more", "More"]]
 ## Under More (the rail highlights More; a back button returns to it).
-const MORE_TABS := [["company", "Company", "Brand, head office and marketing campaigns"],
-	["city", "City", "Weather, rivals, news and the market"], ["goals", "Goals", "Your career, chapter by chapter"],
+const MORE_TABS := [["city", "City", "Weather, rivals, news and the market"], ["goals", "Goals", "Your career, chapter by chapter"],
 	["game", "Game", "Save, speed, sleep and settings"]]
 const PHONE_SUB := {"home": "Your empire at a glance: what needs you, and where to go next",
-	"businesses": "Every shop you run: status, stock, staff and money", "company": "Brand, head office and marketing",
+	"businesses": "Every shop, office and the club: status, stock, staff and money",
+	"company": "Brand, head office, office companies, the football club and marketing",
 	"city": "Weather, rivals and the news", "map": "Tap a place for its card · tap a street for a waypoint",
 	"bank": "Accounts, profit, loans and the ledger", "vehicles": "Where your vehicles are, and getting to them",
-	"property": "Shops to let, businesses for sale and homes", "goals": "Your career, chapter by chapter",
+	"property": "Shops to let, businesses for sale, office floors and homes", "goals": "Your career, chapter by chapter",
 	"game": "Save, speed and settings", "more": "Everything else"}
 
 

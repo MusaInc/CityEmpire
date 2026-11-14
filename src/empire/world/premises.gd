@@ -31,6 +31,12 @@ const EST_QUOTA := 14
 ## earlier id holds).
 const HQ := {"w": [11.0, 16.0], "d": [9.0, 13.0], "h": 5.0, "open_w": 5.2, "open_h": 3.6}
 const HQ_DISTRICT := "east:cbd"
+## Fourth pass: office lobbies in the other tall towers, where you can open
+## office companies (Offices). Placed after the head office: every earlier
+## id holds.
+const OFFICE := {"w": [10.0, 14.0], "d": [9.0, 12.0], "h": 4.6, "open_w": 4.6, "open_h": 3.4}
+const OFFICE_QUOTA := {"east:cbd": 3, "east:midtown": 2, "east:waterfront": 1, "east:docks": 1}
+const OFFICE_MIN_H := 28.0
 const WHOLESALERS := {"west:waterfront": "Quayside Cash & Carry", "east:docks": "Harbour Wholesale Market"}
 const NAMES := ["Corner Shop", "Daily Stop", "Night & Day", "Local Store", "Mini Market", "Express", "Grab & Go",
 	"Neighbourhood Store", "Village Shop", "City Stop", "Quick Mart", "Late Shop", "Food & Wine", "The Kiosk",
@@ -110,6 +116,34 @@ static func place(layout: CityLayout) -> Premises:
 			best_hq["kind"] = "hq"
 			best_hq["name"] = "Meridian Tower"
 			P._claim(best_hq)
+	# Office towers (the Commercial Island).
+	if not layout.is_mainland:
+		var offs: Array = []
+		for key in OFFICE_QUOTA:
+			for c in P._candidates(key, OFFICE):
+				var b: Dictionary = c["b"]
+				if b.has("apt") or not P._far_from_others(c, 60.0):
+					continue
+				var top := 0.0
+				for t in b["tiers"]:
+					top = maxf(top, float(t[5]))
+				if top - float(c["y0"]) < OFFICE_MIN_H:
+					continue
+				c["score"] = float(c["score"]) * 0.3 + (top - float(c["y0"])) * 0.5
+				offs.append(c)
+		offs.sort_custom(func(a, b): return a["score"] > b["score"])
+		var per3 := {}
+		var towers: Array = EmpireData.file("offices").get("towers", [])
+		var ti := 0
+		for c in offs:
+			var key: String = c["district"]
+			if int(per3.get(key, 0)) >= int(OFFICE_QUOTA[key]) or c["b"].has("apt") or not P._far_from_others(c, 60.0):
+				continue
+			c["kind"] = "office"
+			c["name"] = towers[ti % towers.size()] if not towers.is_empty() else "Office tower"
+			ti += 1
+			P._claim(c)
+			per3[key] = int(per3.get(key, 0)) + 1
 	# Names, rents and prices.
 	var n := 0
 	for u in P.units:

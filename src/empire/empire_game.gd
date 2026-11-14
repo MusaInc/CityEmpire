@@ -586,6 +586,7 @@ func _process(dt: float) -> void:
 		_update_live_floor()
 		if state == "play":
 			_objective_gps()
+			_update_stadium()
 	if state != "play":
 		return
 	_update_spot()
@@ -670,6 +671,8 @@ func _stream_interiors() -> void:
 
 func _build_interior(u: Dictionary) -> ShopInterior:
 	var si := ShopInterior.new()
+	if u["kind"] == "office":
+		si.office = Offices.at(empire, u["id"])
 	var b := empire.business_at(u["id"])
 	si.setup(u, b, layout.ground_y, occupier(u["id"]) if b == null else {})
 	add_child(si)
@@ -766,7 +769,7 @@ func _update_spot() -> void:
 				continue
 			for s in si.world_spots():
 				var d := Vector2(p.x, p.z).distance_to(Vector2(s["world"].x, s["world"].z))
-				var reach := REACH * (1.4 if s["kind"] in ["trade", "pallet", "office", "hq_desk"] else 1.0)
+				var reach := REACH * (1.4 if s["kind"] in ["trade", "pallet", "office", "hq_desk", "office_desk", "club_office"] else 1.0)
 				if d < reach and absf(p.y - 0.9 - s["world"].y) < 1.6 and d < best_d:
 					best = s
 					best_d = d
@@ -791,6 +794,12 @@ func _update_spot() -> void:
 		var hs := _home_spots(p, best, best_d)
 		best = hs[0]
 		best_d = hs[1]
+		# The club office: the ticket kiosk at the stadium's south gate.
+		var co := club_office_pos()
+		var dco := Vector2(p.x, p.z).distance_to(Vector2(co.x, co.z))
+		if dco < 2.6 and absf(p.y - 0.9 - co.y) < 2.0 and dco < best_d:
+			best = {"kind": "club_office", "world": co}
+			best_d = dco
 		for vid in cars:
 			var car: Car = cars[vid]
 			var xf := car.global_transform
@@ -807,6 +816,67 @@ func _update_spot() -> void:
 	spot = best
 	if changed:
 		spot_changed.emit(spot)
+
+
+func _spot_unit() -> String:
+	var si = spot.get("interior")
+	return String((si as ShopInterior).unit.get("id", "")) if si is ShopInterior else ""
+
+
+## In front of the south-gate ticket kiosk at The Heights Ground.
+func club_office_pos() -> Vector3:
+	var c := SetPieces.STADIUM_AT
+	var kp := SetPieces._bowl(c, PI * 0.5, SetPieces.BOWL_DEPTH + 6.0)
+	var kd := (kp - c).normalized()
+	var ks := Vector2(-kd.y, kd.x)
+	var q := kp - ks * 7.0 + kd * 2.4
+	return Vector3(q.x, layout.ground_y(q.x, q.y), q.y)
+
+
+var _screen: Label3D
+var _screen_sig := ""
+
+
+## Matchday: the big screen on the forecourt shows the fixture / the score,
+## and the streets round the ground fill up for home games.
+func _update_stadium() -> void:
+	Club.ensure(empire)
+	var cl := empire.club
+	var txt := ""
+	var md := Club.next_match_day(empire)
+	var opp: Dictionary = Club.opponent(empire, md)
+	var last: Dictionary = cl.get("last", {})
+	if not last.is_empty() and int(last.get("day", -1)) == empire.day and empire.hour() >= 17.0:
+		txt = "FULL TIME\nHARBOUR CITY %d–%d %s" % [int(last["gf"]), int(last["ga"]), String(last["opp"]).to_upper()]
+	elif Club.is_matchday(empire) and empire.hour() >= 15.0 and empire.hour() < 17.0:
+		txt = "LIVE · %s\nHARBOUR CITY v %s" % ["HOME" if Club.is_home(empire) else "AWAY", String(opp["name"]).to_upper()]
+	else:
+		txt = "HARBOUR CITY FC\n%s %s · %s 15:00\nv %s" % ["HOME" if Club.is_home(empire, md) else "AWAY", "TODAY" if md == empire.day else "",
+			["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"][(md - 1) % 7], String(opp["name"]).to_upper()]
+	if txt != _screen_sig:
+		_screen_sig = txt
+		if _screen == null:
+			var r := Rect2(SetPieces.STADIUM_AT - Vector2(75, 65), Vector2(150, 130))
+			var sc := Vector2(r.position.x + 9.0, r.end.y - 9.0)
+			var face := (SetPieces.STADIUM_AT - sc).normalized()
+			_screen = Label3D.new()
+			_screen.name = "StadiumScreen"
+			_screen.font = EmpireStyle.font("black")
+			_screen.font_size = 96
+			_screen.pixel_size = 0.012
+			_screen.shaded = false
+			_screen.outline_size = 0
+			_screen.modulate = Color(1.0, 0.97, 0.9)
+			_screen.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			_screen.visibility_range_end = 400.0
+			var gy := layout.ground_y(sc.x, sc.y)
+			var at := Vector3(sc.x + face.x * 0.45, gy + 17.0, sc.y + face.y * 0.45)
+			add_child(_screen)
+			_screen.global_transform = Transform3D(Basis.looking_at(-Vector3(face.x, 0, face.y), Vector3.UP), at)
+		_screen.text = txt
+	# Home-game crowds on the streets round the ground.
+	var near := Vector2(player.global_position.x, player.global_position.z).distance_to(SetPieces.STADIUM_AT) < 450.0
+	crowd.density = 2.4 if Club.crowd_on(empire) and near else 1.0
 
 
 ## The prompt for the current spot: [text, enabled].
@@ -867,6 +937,11 @@ func spot_prompt() -> Array:
 			return ["BUY STOCK", true]
 		"hq_desk":
 			return ["RECEPTION · %s" % ("YOUR HEAD OFFICE" if empire.hq_tier() > 0 else "OFFICE SUITES TO LET"), true]
+		"office_desk":
+			var of := Offices.at(empire, _spot_unit())
+			return ["RECEPTION · %s" % (String(of["name"]).to_upper() if not of.is_empty() else "OFFICE FLOORS TO LET"), true]
+		"club_office":
+			return ["CLUB OFFICE · %s" % String(Club.cfg().get("name", "")).to_upper(), true]
 		"pallet":
 			var pal := _pallet(si.unit["id"])
 			if pal.is_empty():
@@ -1003,6 +1078,10 @@ func act() -> void:
 			ui.open_wholesale(si.unit)
 		"hq_desk":
 			ui.open_hq()
+		"office_desk":
+			ui.open_office(unit_by_id.get(_spot_unit(), {}))
+		"club_office":
+			ui.open_club()
 		"pallet":
 			var pal := _pallet(si.unit["id"])
 			var pid3: String = pal.units.keys()[0]

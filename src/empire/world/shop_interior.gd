@@ -89,6 +89,8 @@ static var _shape_meshes := {}
 ## lots comes up to a kerb's height over it): set by the game from the ground.
 var lift := 0.0
 var _ground_fn := Callable()
+## An office tower's lobby: your company there ({} = floors to let).
+var office := {}
 
 
 func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival := {}) -> void:
@@ -205,7 +207,7 @@ func rebuild() -> void:
 	var st := _Batch.new()
 	if kind == "wholesale":
 		_build_warehouse(st)
-	elif kind == "hq":
+	elif kind == "hq" or kind == "office":
 		_build_lobby(st)
 	else:
 		_build_shop(st)
@@ -1446,11 +1448,17 @@ func _build_warehouse(st: _Batch) -> void:
 ## company's name – yours once you take the offices (ShopStyle.house_hq),
 ## the tower's own while it's to let.
 func _build_lobby(st: _Batch) -> void:
-	var ours := ShopStyle.hq_tier > 0
+	var is_office := kind == "office"
+	var ours := (not office.is_empty()) if is_office else ShopStyle.hq_tier > 0
 	var hi := ShopStyle.house_ident(ShopStyle.house) if ours and not ShopStyle.house.is_empty() else {}
 	var prim: Color = hi.get("primary", Color(0.1, 0.13, 0.17))
 	var acc: Color = hi.get("accent", Color(0.85, 0.72, 0.45))
 	var title := String(hi.get("name", "")) if not hi.is_empty() else ""
+	if is_office:
+		# The company's own name, in its trade's colour.
+		title = String(office.get("name", "")) if ours else String(unit.get("name", "OFFICES"))
+		if ours:
+			acc = Color(String(Offices.type_def(String(office.get("type", ""))).get("colour", "#d9b46e")))
 	if title == "":
 		title = "HEAD OFFICE" if ours else "MERIDIAN TOWER"
 	var walnut := Color(0.24, 0.15, 0.1)
@@ -1482,6 +1490,9 @@ func _build_lobby(st: _Batch) -> void:
 	var sub := Label3D.new()
 	sub.text = ["HEAD OFFICE", "HEAD OFFICE · CORPORATE FLOORS", "HEAD OFFICE · THE WHOLE TOWER"][clampi(ShopStyle.hq_tier - 1, 0, 2)] if ours \
 		else "OFFICE SUITES TO LET · ENQUIRE AT RECEPTION"
+	if is_office:
+		sub.text = ("%s · %d DESKS" % [String(Offices.type_def(String(office.get("type", ""))).get("name", "")).to_upper(), int(office.get("desks", 0))]) \
+			if ours else "OFFICE FLOORS TO LET · ENQUIRE AT RECEPTION"
 	sub.font_size = 40
 	sub.pixel_size = 0.0045
 	sub.shaded = false
@@ -1499,7 +1510,7 @@ func _build_lobby(st: _Batch) -> void:
 		st.box(R(cx + mx - 0.25, dd + 0.25, 1.12), R(cx + mx + 0.25, dd + 0.3, 1.45), Color(0.05, 0.05, 0.06))
 		_glow_quad(R(cx + mx - 0.23, dd + 0.245, 1.15), R(cx + mx + 0.23, dd + 0.245, 1.43), Color(0.35, 0.55, 0.85))
 	_solid(R(cx - 2.25, dd - 0.05, 0.0), R(cx + 2.25, dd + 0.85, 1.12))
-	spots.append({"kind": "hq_desk", "pos": R(cx, dd - 0.9, 0.0), "label": "RECEPTION"})
+	spots.append({"kind": "office_desk" if is_office else "hq_desk", "pos": R(cx, dd - 0.9, 0.0), "label": "RECEPTION"})
 	# Lifts on the side wall: brushed steel doors, lit call panels.
 	for i in 3:
 		var lz := D * 0.25 + i * 2.1

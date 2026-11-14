@@ -1,0 +1,36 @@
+{
+ "_doc": "Harbour City FC at The Heights Ground (SetPieces.STADIUM_AT). Saturdays are matchdays (home every other week, kick-off 15:00). Home games bring crowds: shops within footfall_radius get footfall_k more shoppers from 12:00 to 18:00 (food_k for cafés and takeaways) whoever owns the club. Owned: ticket money from home games, the squad's wages every day, prize money at the end of each season.",
+ "name": "Harbour City FC",
+ "ground": "The Heights Ground",
+ "price": 240000,
+ "requires_shops": 4,
+ "start_rating": 60,
+ "season_matches": 18,
+ "kickoff": 15,
+ "footfall_radius": 650,
+ "footfall_k": 1.6,
+ "food_k": 2.1,
+ "capacity": 9000,
+ "tickets": [{"name": "Cheap seats", "price": 9, "pull": 1.12}, {"name": "Standard", "price": 14, "pull": 1.0}, {"name": "Premium", "price": 22, "pull": 0.8}],
+ "wage_base": 900,
+ "wage_per_rating": 28,
+ "upkeep": 300,
+ "signings": [
+  {"id": "prospect", "name": "A young prospect", "rating": 2, "fee": 15000, "wage": 120},
+  {"id": "striker", "name": "A proven striker", "rating": 4, "fee": 48000, "wage": 380},
+  {"id": "star", "name": "A star from abroad", "rating": 7, "fee": 150000, "wage": 950}
+ ],
+ "sell_back": 0.55,
+ "upgrades": [
+  {"id": "kiosks", "name": "Your food kiosks", "blurb": "Your brand serves the concourse: £1.40 a fan.", "cost": 25000, "per_fan": 1.4},
+  {"id": "boxes", "name": "Executive boxes", "blurb": "Corporate hospitality: £7,000 a home game.", "cost": 90000, "per_match": 7000},
+  {"id": "academy", "name": "Youth academy", "blurb": "Home-grown talent: the squad improves a little each week.", "cost": 60000, "weekly_rating": 0.4},
+  {"id": "stand", "name": "New east stand", "blurb": "4,500 more seats.", "cost": 160000, "capacity": 4500}
+ ],
+ "rivals": ["Riverside Athletic", "Westbank Rovers", "Docklands United", "Northshore Town", "Old Town Wanderers",
+  "Midtown City", "Marina Albion", "Georgian Park", "Lighthouse FC"],
+ "prize_top": 120000,
+ "prize_step": 12000,
+ "trophy_footfall": 1.12,
+ "trophy_days": 7
+}

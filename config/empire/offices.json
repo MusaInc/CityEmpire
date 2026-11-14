@@ -1,0 +1,24 @@
+{
+ "_doc": "Office companies in the CBD towers (Offices). Each desk earns `per_desk` a day (x level and +-15%) and costs `wage` a day; the floor's rent is the unit's rent x rent_k. Every company also helps your shops (perk), more with more desks. levels: fit-outs (max desks, productivity).",
+ "rent_k": 1.6,
+ "start_desks": 2,
+ "open_cost": 2500,
+ "levels": [
+  {"name": "Starter floor", "desks": 4, "k": 1.0, "cost": 0},
+  {"name": "Fitted floor", "desks": 8, "k": 1.12, "cost": 18000},
+  {"name": "Two floors", "desks": 14, "k": 1.25, "cost": 55000}
+ ],
+ "types": {
+  "logistics": {"name": "Logistics", "suffix": "Logistics", "per_desk": 175, "wage": 120, "colour": "#3d8bd9",
+   "perk": "Your shops' stock deliveries are free (2+ desks), and arrive the same evening at 4+ desks.", "short": "Free deliveries"},
+  "marketing": {"name": "Marketing agency", "suffix": "Creative", "per_desk": 160, "wage": 115, "colour": "#d9643d",
+   "perk": "Every shop gets +2% shoppers per desk (up to +20%).", "short": "+Shoppers"},
+  "recruitment": {"name": "Recruitment agency", "suffix": "Recruitment", "per_desk": 150, "wage": 105, "colour": "#3dbf8a",
+   "perk": "More people looking for work every day, a grade more skilled at 3+ desks; sick staff are covered by temps at 5+.", "short": "Better staff"},
+  "property": {"name": "Property management", "suffix": "Estates", "per_desk": 190, "wage": 130, "colour": "#b58a3d",
+   "perk": "Rent on every rented shop falls 2% per desk (up to 20%).", "short": "Lower rents"},
+  "tech": {"name": "Tech studio", "suffix": "Labs", "per_desk": 240, "wage": 175, "colour": "#8a5cd9",
+   "perk": "Your own card payments: card fees fall 10% per desk (up to 80%).", "short": "Cheaper card fees"}
+ },
+ "towers": ["Atlas House", "Northgate Tower", "Sterling House", "Quay Point", "Crown Exchange", "Harbour House", "Beacon Court"]
+}

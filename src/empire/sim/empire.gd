@@ -23,7 +23,7 @@ signal goal_done(goal: Dictionary)
 signal changed
 signal won
 
-const VERSION := 4
+const VERSION := 5
 
 var seed := 1
 var day := 1
@@ -59,6 +59,9 @@ var news: Array = []
 var brand := {}
 ## Head office: {tier, paid, day}; {} = none (config hq.json).
 var hq := {}
+## Office companies (Offices) and the football club (Club).
+var offices: Array = []
+var club := {}
 ## The city's shop units (set by the game from Premises; not saved).
 var market: Array = []
 
@@ -83,6 +86,7 @@ func new_game(p_seed := 1) -> void:
 	candidates = Staff.candidates(day, seed)
 	add_vehicle("hatch", Vector3.ZERO, 0.0)
 	CityLife.start(self)
+	Club.ensure(self)
 
 
 # ----------------------------------------------------------------- time
@@ -120,7 +124,10 @@ func _minute_tick() -> void:
 		_deliver_orders()
 	if int(minute) == 21 * 60 + 5:
 		_manager_reorders()
+	if int(minute) == 19 * 60:
+		_deliver_orders()   # (same-day orders: your logistics firm)
 	CityLife.minute(self)
+	Club.minute(self)
 	for b: Business in businesses:
 		_staff_work(b, h)
 		if b.trading(h):
@@ -235,7 +242,7 @@ func checkout(b: Business, basket: Stock, server := {}) -> float:
 		basket.destroy(pid, n)
 	if units == 0:
 		return 0.0
-	var fee := total * float(EmpireData.economy().get("card_fee", 0.015)) * 0.6
+	var fee := total * float(EmpireData.economy().get("card_fee", 0.015)) * 0.6 * (1.0 - Offices.fee_cut(self))
 	company_cash += total - fee
 	b.today["revenue"] = float(b.today["revenue"]) + total
 	b.today["cogs"] = float(b.today["cogs"]) + cogs
@@ -335,6 +342,17 @@ func restock_from_backroom(b: Business, n: int) -> int:
 		moved += m
 	stats["units_shelved"] = int(stats["units_shelved"]) + moved
 	return moved
+
+
+## Today's job seekers: more, and better, with your recruitment agency.
+func fresh_candidates() -> Array:
+	var rec := Offices.recruitment(self)
+	var cs := Staff.candidates(day, seed, Staff.daily_count() + int(rec[0]))
+	if int(rec[1]) > 0:
+		for c in cs:
+			c["skill"] = mini(int(c["skill"]) + int(rec[1]), 5)
+			c["wage"] = Staff.wage_for(c)
+	return cs
 
 
 ## Today's best job seeker for a role: most skilled, then cheapest (the
@@ -530,7 +548,10 @@ func order_delivery(b: Business, order: Dictionary, by_manager := false) -> Stri
 	var unit_prices := {}
 	for pid in units:
 		unit_prices[pid] = case_price(pid) / EmpireData.case_qty(pid)
-	b.orders.append({"units": units, "cost": cost, "fee": fee, "due": day + (1 if minute >= 360.0 else 0), "unit_prices": unit_prices})
+	var due := day + (1 if minute >= 360.0 else 0)
+	if Offices.same_day(self) and minute < 18.0 * 60.0:
+		due = day   # your logistics firm brings it this evening (19:00)
+	b.orders.append({"units": units, "cost": cost, "fee": fee, "due": due, "unit_prices": unit_prices})
 	stats["spent_stock"] = float(stats["spent_stock"]) + cost
 	b.today["fees"] = float(b.today["fees"]) + fee
 	changed.emit()
@@ -599,6 +620,8 @@ func restock_plan(b: Business, full := false, max_cases := 9999, budget := INF, 
 
 ## A driver with a company van collects for free; otherwise the wholesaler delivers for a fee.
 func delivery_fee(b: Business) -> float:
+	if Offices.free_delivery(self):
+		return 0.0
 	if b.has_role("driver") and vehicles.any(func(v): return v["model"] in ["van", "box"]):
 		return 0.0
 	return float(EmpireData.economy().get("wholesale_delivery_fee", 35.0))
@@ -893,7 +916,7 @@ func end_day() -> void:
 		stats["units_stolen"] = int(stats["units_stolen"]) + stolen
 		t["stolen"] = stolen
 		t["stolen_cost"] = stolen_cost
-		t["rent"] = b.rent_per_day()
+		t["rent"] = b.rent_per_day() * (1.0 - Offices.rent_discount(self))
 		t["utilities"] = b.utilities_per_day() if b.open else b.utilities_per_day() * 0.3
 		var costs := float(t["wages"]) + float(t["rent"]) + float(t["utilities"])
 		company_cash -= costs
@@ -920,6 +943,12 @@ func end_day() -> void:
 		var mid := EmpireData.rep_param("daily_decay_to")
 		b.reputation = lerpf(b.reputation, mid, EmpireData.rep_param("daily_decay"))
 		b.reset_today()
+	# Office companies and the club settle their own days.
+	var op := Offices.settle(self)
+	var cp := Club.settle(self)
+	report["offices"] = op
+	report["club"] = cp
+	report["profit"] = float(report["profit"]) + op + cp
 	# Personal side: loans, let properties.
 	for l in loans:
 		var interest := float(l["principal"]) * float(l["rate"])
@@ -955,7 +984,7 @@ func end_day() -> void:
 	if day_reports.size() > 30:
 		day_reports = day_reports.slice(day_reports.size() - 30)
 	day += 1
-	candidates = Staff.candidates(day, seed)
+	candidates = fresh_candidates()
 	report["weather"] = weather
 	CityLife.new_day(self)
 	report["tomorrow"] = weather
@@ -994,7 +1023,7 @@ func net_worth() -> float:
 	for q in properties:
 		props += float(q.get("price", 0.0))
 	return personal_cash + company_cash + stock_value() + premises_value() + vehicles_value() + props \
-		+ float(hq.get("paid", 0.0)) - debt
+		+ float(hq.get("paid", 0.0)) + Club.value(self) - debt
 
 
 # -------------------------------------------------------------- career
@@ -1021,6 +1050,17 @@ func stat(key: String) -> float:
 			return 1.0 if flags.get("rival_gone", false) else 0.0
 		"hq_tier":
 			return float(hq_tier())
+		"offices":
+			return float(offices.size())
+		"office_desks":
+			var n2 := 0
+			for o in offices:
+				n2 += int(o["desks"])
+			return float(n2)
+		"club_owned":
+			return 1.0 if club.get("owned", false) else 0.0
+		"trophies":
+			return float(club.get("trophies", 0))
 		"branded":
 			return 1.0 if String(brand.get("name", "")) != "" else 0.0
 		"owned_both":
@@ -1204,7 +1244,8 @@ func to_dict() -> Dictionary:
 		"flags": flags.duplicate(), "id_n": _id_n, "rng_state": str(rng.state),
 		"hour_served": _hour_served.duplicate(), "carry": _carry_minutes, "weather": weather, "forecast": forecast,
 		"events": events.duplicate(true), "rivals": rivals.duplicate(true), "news": news.duplicate(true),
-		"firms": firms.duplicate(true), "brand": brand.duplicate(), "hq": hq.duplicate()}
+		"firms": firms.duplicate(true), "brand": brand.duplicate(), "hq": hq.duplicate(),
+		"offices": offices.duplicate(true), "club": club.duplicate(true)}
 
 
 static func from_dict(src: Dictionary) -> Empire:
@@ -1256,6 +1297,9 @@ static func from_dict(src: Dictionary) -> Empire:
 	e.firms = d.get("firms", [])
 	e.brand = d.get("brand", {})
 	e.hq = d.get("hq", {})
+	e.offices = d.get("offices", [])
+	e.club = d.get("club", {})
+	Club.ensure(e)
 	if e.candidates.is_empty():
 		e.candidates = Staff.candidates(e.day, e.seed)
 	e.repair_duplicates()
@@ -1335,5 +1379,10 @@ static func migrate(d: Dictionary) -> Dictionary:
 		if not d.has("firms"):
 			d["firms"] = []
 		v = 4
+	if v < 5:
+		# v5: office companies and the football club (seeded by Club.ensure).
+		if not d.has("offices"):
+			d["offices"] = []
+		v = 5
 	d["version"] = v
 	return d

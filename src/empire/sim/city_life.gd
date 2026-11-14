@@ -158,9 +158,12 @@ static func trigger(e: Empire, kind: String, target := "") -> Dictionary:
 			if pool.is_empty():
 				return {}
 			var pick: Array = pool[e.rng.randi() % pool.size()]
-			pick[1]["off"] = true
 			ev["biz"] = (pick[0] as Business).id
 			text = text % ("%s (%s, %s)" % [pick[1]["name"], EmpireData.role(pick[1]["role"]).get("name", ""), (pick[0] as Business).name])
+			if Offices.recruitment(e)[2]:
+				text += " Your recruitment agency's temp covers the shift."   # (no lost shift)
+			else:
+				pick[1]["off"] = true
 	ev["text"] = text
 	e.events.append(ev)
 	var kind_col := "good" if kind in ["festival", "deal", "viral", "payday"] else ("bad" if kind in ["burglary", "price_rise"] else "warn")
@@ -240,6 +243,8 @@ static func footfall_k(e: Empire, b: Business) -> float:
 					k *= float(ev.get("k", 1.0))
 			"payday", "campaign":
 				k *= float(ev.get("k", 1.0))
+	# The football (home-game crowds, a title), your marketing agency.
+	k *= Club.footfall_k(e, b) * Club.trophy_k(e) * (1.0 + Offices.footfall_bonus(e))
 	return k * e.hq_footfall_k()
 
 
