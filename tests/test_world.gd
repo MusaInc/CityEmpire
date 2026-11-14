@@ -176,3 +176,33 @@ func test_base_course_is_stone_not_windows(t) -> void:
 	t.check(checked > 5, "buildings on slopes found (%d)" % checked)
 	t.check(stone > 0, "their base courses are stone (%d verts)" % stone)
 	t.check(painted == 0, "no facade (window-painted) wall below a lot's level (%d verts)" % painted)
+
+
+## No building stands sunk into the ground: every face's floor is at most a
+## kerb or two below the street in front of it. (Buildings added on the bare
+## squares and round the set pieces were laid out at height 0 and never
+## lifted: on Westbank's hillside their shopfronts showed just above the
+## pavement – "shops 80% underground" – and five on a Georgian terrace were
+## buried whole.)
+func test_no_building_is_sunk_into_the_ground(t) -> void:
+	if _layout == null:
+		_layout = CityLayout.new().generate()
+	var sunk: Array = []
+	var n := 0
+	for lay: CityLayout in [_layout.mainland, _layout]:
+		for b in lay.buildings:
+			if b["kind"] != "normal" or b.has("shape"):
+				continue
+			var tiers: Array = b["tiers"]
+			var t0: Array = tiers[0]
+			var base := float(t0[4])
+			for k in 4:
+				var f := BuildingMesher._face(t0, k)
+				var mid: Vector3 = CityLayout.bxf(b) * BuildingMesher._fpt(f, float(f[3]) * 0.5, 0.0, base)
+				var out: Vector3 = (CityLayout.bxf(b).basis * (f[2] as Vector3)).normalized()
+				var p := mid + out * 2.5
+				n += 1
+				var g := lay.ground_y(p.x, p.z)
+				if g - base > 2.0:
+					sunk.append("(%.0f, %.0f) %.1f m" % [p.x, p.z, g - base])
+	t.check(sunk.is_empty(), "%d building faces checked, none sunk more than 2 m (%d: %s)" % [n, sunk.size(), str(sunk.slice(0, 4))])

@@ -289,6 +289,7 @@ static func open_ground(l: CityLayout, rail_lines: Array) -> void:
 			l.reserved.erase(r)
 		var b0 := l.buildings.size()
 		var p0 := l.props.size()
+		var snap := l._snap()
 		for pc: PackedVector2Array in pieces:
 			if CityRoads._area(pc) < 1500.0:
 				continue
@@ -333,6 +334,12 @@ static func open_ground(l: CityLayout, rail_lines: Array) -> void:
 				keep_p.append(l.props[pi])
 		l.props.resize(p0)
 		l.props.append_array(keep_p)
+		# Stand them on the ground like any block's buildings. (They were laid
+		# out at street level 0: on Westbank's hillside squares that sank
+		# them up to 13 m – their painted shopfronts showed just above the
+		# pavement, the rest underground.) Placed after the shop units, so
+		# no unit id moves.
+		l._lift_on_slope(snap)
 		built_on += keep_b.size()
 	var piece_rects: Array = []
 	if l.pieces and not l.is_mainland:
@@ -571,6 +578,7 @@ static func _fill_piece_blocks(l: CityLayout, piece_rects: Array, kit_rects: Arr
 		brng.seed = hash(Vector2i(int(c0.x), int(c0.y))) ^ 0x9a5e
 		var b0 := l.buildings.size()
 		var p0 := l.props.size()
+		var snap := l._snap()
 		# A planned grid of lots (34 m cells: ~26 m lots, 8 m lanes between,
 		# so the new blocks read as streets of their own), each lot built by
 		# the city's normal builder (_make_building: heights, forms, shapes,
@@ -649,6 +657,13 @@ static func _fill_piece_blocks(l: CityLayout, piece_rects: Array, kit_rects: Arr
 				keep_p.append(l.props[pi])
 		l.props.resize(p0)
 		l.props.append_array(keep_p)
+		# On the block's ground (the set-piece terraces sit well above street
+		# level 0 – these were buried whole), like every other block.
+		var lv: float = float(blk.get("level", NAN))
+		if is_nan(lv):
+			l._lift_on_slope(snap)
+		else:
+			l._lift(snap, lv - CityTerrain.KERB)
 		added += kept.size()
 	if added > 0:
 		print("PieceBlocks: %d buildings round the set pieces" % added)
