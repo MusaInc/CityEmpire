@@ -60,3 +60,41 @@ void person_pose(inout vec3 v, inout vec3 n, int limb, float ph, float walk, flo
 	v.y += abs(cos(ph)) * 0.025 * walk;
 	v.x += sin(ph) * 0.012 * walk * step(0.5, v.y);
 }
+
+// The crowd's bodies (tools/blender/build_crowd.py, made from the hero):
+// limbs blend by their skin weights instead of a hard tag, so hips,
+// shoulders, knees and elbows bend smoothly. cw: how much the vertex follows
+// its limb; lw: how much it follows the lower segment (shin / forearm).
+// Pivots are the hero rig's (metres up): hip 0.94, knee 0.49, shoulder 1.5,
+// elbow 1.21.
+void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float ph, float walk, float carry, float look) {
+	float sw = sin(ph) * walk;
+	if (limb == 1 || limb == 2) {
+		float side = limb == 1 ? -1.0 : 1.0;
+		float a = -sw * side * 0.3;
+		float k = max(0.0, -a) * 1.9 + 0.06 * walk;
+		vec3 vk = pitch_about(v, vec3(0.0, 0.49, 0.02), -k);
+		v = mix(v, vk, lw);
+		n = normalize(mix(n, pitch_dir(n, -k), lw));
+		vec3 vh = pitch_about(v, vec3(0.0, 0.94, 0.0), a);
+		v = mix(v, vh, cw);
+		n = normalize(mix(n, pitch_dir(n, a), cw));
+	} else if (limb == 3 || limb == 4) {
+		float side = limb == 3 ? -1.0 : 1.0;
+		float a = mix(sw * side * 0.42, 0.3, carry);
+		float e = 0.22 * walk + 1.25 * carry + max(0.0, sw * side) * 0.25;
+		vec3 ve = pitch_about(v, vec3(0.0, 1.21, 0.0), e);
+		v = mix(v, ve, lw);
+		n = normalize(mix(n, pitch_dir(n, e), lw));
+		vec3 vs = pitch_about(v, vec3(0.0, 1.48, 0.0), a);
+		v = mix(v, vs, cw);
+		n = normalize(mix(n, pitch_dir(n, a), cw));
+	} else if (limb == 5 && abs(look) > 0.001) {
+		float c = cos(look * cw);
+		float s = sin(look * cw);
+		v.xz = vec2(v.x * c - v.z * s, v.x * s + v.z * c);
+		n.xz = vec2(n.x * c - n.z * s, n.x * s + n.z * c);
+	}
+	v.y += abs(cos(ph)) * 0.022 * walk;
+	v.x += sin(ph) * 0.01 * walk * step(0.5, v.y);
+}

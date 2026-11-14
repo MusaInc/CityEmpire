@@ -1,36 +1,450 @@
 {
-  "_doc": "Industry definitions. A business type lists the fixtures it uses, the product categories it may sell, staff roles, hours and its upgrade tree. Only types with playable=true can be opened; the others are planned on the same architecture.",
-  "types": {
-    "convenience": {
-      "name": "Convenience Shop", "playable": true,
-      "categories": ["snacks", "sweets", "drinks", "groceries", "household", "hot"],
-      "open": 7, "close": 22,
-      "roles": ["cashier", "stocker", "cleaner", "manager", "driver"],
-      "base_fixtures": {"shelf": 3, "fridge": 1, "till": 1},
-      "slot_units": {"shelf": 30, "fridge": 24, "coffee": 60, "pickmix": 80},
-      "slots_per": {"shelf": 6, "fridge": 4, "coffee": 1, "pickmix": 1},
-      "backroom_cases": 24,
-      "utilities": 4.0,
-      "upgrades": ["shelf_2", "fridge_2", "lighting", "signage", "floor", "second_till", "coffee", "pick_mix", "security", "backroom"]
-    },
-    "supermarket": {
-      "name": "Mini Supermarket", "playable": false, "planned": "Bigger premises, trolleys, aisles, self-checkout. Same stock and staff systems."
-    },
-    "takeaway": {"name": "Takeaway", "playable": false, "planned": "Cook-to-order menu from raw ingredients, delivery riders."},
-    "car_wash": {"name": "Car Wash", "playable": false, "planned": "Bays, queue of vehicles from traffic, wash stations."},
-    "warehouse": {"name": "Warehouse", "playable": false, "planned": "Bulk storage, cheaper pallet buying, auto-supply shops with vans."}
+ "_doc": "Industry definitions. A business type lists the fixtures it uses, the product categories it may sell, staff roles, hours and its upgrade tree. Only types with playable=true can be opened; the others are planned on the same architecture.",
+ "types": {
+  "convenience": {
+   "name": "Convenience Shop",
+   "playable": true,
+   "categories": [
+    "snacks",
+    "sweets",
+    "drinks",
+    "groceries",
+    "household",
+    "hot"
+   ],
+   "open": 7,
+   "close": 22,
+   "roles": [
+    "cashier",
+    "stocker",
+    "cleaner",
+    "manager",
+    "driver"
+   ],
+   "base_fixtures": {
+    "shelf": 3,
+    "fridge": 1,
+    "till": 1
+   },
+   "slot_units": {
+    "shelf": 30,
+    "fridge": 24,
+    "coffee": 60,
+    "pickmix": 80
+   },
+   "slots_per": {
+    "shelf": 6,
+    "fridge": 4,
+    "coffee": 1,
+    "pickmix": 1
+   },
+   "backroom_cases": 24,
+   "utilities": 4.0,
+   "upgrades": [
+    "shelf_2",
+    "fridge_2",
+    "lighting",
+    "signage",
+    "floor",
+    "second_till",
+    "coffee",
+    "pick_mix",
+    "security",
+    "backroom"
+   ],
+   "footfall_k": 1.0
   },
-  "upgrades": {
-    "shelf_2":     {"name": "Extra Shelving",   "cost": 420,  "desc": "Another 6-slot shelf unit.", "adds": {"shelf": 1}, "utilities": 0.0},
-    "fridge_2":    {"name": "Second Drinks Fridge", "cost": 780, "desc": "Four more chilled slots.", "adds": {"fridge": 1}, "utilities": 3.0},
-    "lighting":    {"name": "LED Lighting",     "cost": 350,  "desc": "Brighter, warmer shop. +8% shopper conversion.", "quality": 0.08, "utilities": -1.0},
-    "signage":     {"name": "Illuminated Sign", "cost": 600,  "desc": "People notice you. +18% footfall.", "footfall": 0.18, "utilities": 1.0},
-    "floor":       {"name": "New Flooring",     "cost": 900,  "desc": "Clean modern floor. Gets dirty 30% slower, +6% conversion.", "quality": 0.06, "dirt": -0.3},
-    "second_till": {"name": "Second Till",      "cost": 1100, "desc": "Two queues: half the waiting.", "adds": {"till": 1}, "utilities": 0.5},
-    "coffee":      {"name": "Coffee Machine",   "cost": 1400, "desc": "Sell fresh coffee (made in store, big margin).", "adds": {"coffee": 1}, "utilities": 2.0},
-    "pick_mix":    {"name": "Pick & Mix Wall",  "cost": 950,  "desc": "Customers fill their own sweet bags.", "adds": {"pickmix": 1}},
-    "security":    {"name": "CCTV",             "cost": 500,  "desc": "Shoplifting drops from 3% to 0.5% of shelf stock walking out.", "theft": 0.005},
-    "backroom":    {"name": "Stockroom Racking","cost": 650,  "desc": "Back room holds 24 more cases.", "backroom": 24}
+  "supermarket": {
+   "name": "Mini Supermarket",
+   "playable": false,
+   "planned": "Bigger premises, trolleys, aisles, self-checkout. Same stock and staff systems."
   },
-  "theft_base": 0.03
+  "takeaway": {
+   "name": "Takeaway",
+   "playable": true,
+   "icon": "🍗",
+   "categories": [
+    "takeaway",
+    "drinks"
+   ],
+   "open": 11,
+   "close": 23,
+   "footfall_k": 0.7,
+   "basket": [
+    1,
+    3
+   ],
+   "roles": [
+    "cashier",
+    "stocker",
+    "cleaner",
+    "manager",
+    "driver"
+   ],
+   "base_fixtures": {
+    "hotcab": 2,
+    "fridge": 1,
+    "till": 1
+   },
+   "slot_units": {
+    "hotcab": 40,
+    "fridge": 24
+   },
+   "slots_per": {
+    "hotcab": 2,
+    "fridge": 4
+   },
+   "backroom_cases": 20,
+   "utilities": 9.0,
+   "upgrades": [
+    "hotcab_2",
+    "fridge_2",
+    "lighting",
+    "signage",
+    "floor",
+    "second_till",
+    "security",
+    "backroom"
+   ]
+  },
+  "car_wash": {
+   "name": "Car Wash",
+   "playable": false,
+   "planned": "Bays, queue of vehicles from traffic, wash stations."
+  },
+  "warehouse": {
+   "name": "Warehouse",
+   "playable": false,
+   "planned": "Bulk storage, cheaper pallet buying, auto-supply shops with vans."
+  },
+  "clothing": {
+   "name": "Clothing Store",
+   "playable": true,
+   "icon": "👕",
+   "categories": [
+    "clothing",
+    "shoes",
+    "accessories"
+   ],
+   "open": 9,
+   "close": 20,
+   "footfall_k": 0.06,
+   "basket": [
+    1,
+    2
+   ],
+   "roles": [
+    "cashier",
+    "stocker",
+    "cleaner",
+    "manager",
+    "driver"
+   ],
+   "base_fixtures": {
+    "rail": 3,
+    "table": 1,
+    "shelf": 1,
+    "till": 1
+   },
+   "slot_units": {
+    "rail": 12,
+    "table": 16,
+    "shelf": 8
+   },
+   "slots_per": {
+    "rail": 2,
+    "table": 2,
+    "shelf": 6
+   },
+   "backroom_cases": 20,
+   "utilities": 5.0,
+   "upgrades": [
+    "rail_2",
+    "table_2",
+    "shelf_2",
+    "lighting",
+    "signage",
+    "floor",
+    "second_till",
+    "security",
+    "backroom"
+   ]
+  },
+  "cafe": {
+   "name": "Café",
+   "playable": true,
+   "icon": "☕",
+   "categories": [
+    "hot",
+    "bakery",
+    "drinks"
+   ],
+   "open": 7,
+   "close": 19,
+   "footfall_k": 0.75,
+   "basket": [
+    1,
+    3
+   ],
+   "roles": [
+    "cashier",
+    "stocker",
+    "cleaner",
+    "manager",
+    "driver"
+   ],
+   "base_fixtures": {
+    "coffee": 1,
+    "cake": 1,
+    "fridge": 1,
+    "till": 1
+   },
+   "slot_units": {
+    "coffee": 60,
+    "cake": 24,
+    "fridge": 24
+   },
+   "slots_per": {
+    "coffee": 1,
+    "cake": 3,
+    "fridge": 4
+   },
+   "backroom_cases": 20,
+   "utilities": 6.0,
+   "upgrades": [
+    "cake_2",
+    "fridge_2",
+    "lighting",
+    "signage",
+    "floor",
+    "second_till",
+    "security",
+    "backroom"
+   ]
+  },
+  "bakery": {
+   "name": "Bakery",
+   "playable": true,
+   "icon": "🥐",
+   "categories": [
+    "bakery",
+    "hot",
+    "groceries"
+   ],
+   "open": 7,
+   "close": 17,
+   "footfall_k": 1.3,
+   "basket": [
+    1,
+    3
+   ],
+   "roles": [
+    "cashier",
+    "stocker",
+    "cleaner",
+    "manager",
+    "driver"
+   ],
+   "base_fixtures": {
+    "cake": 2,
+    "shelf": 1,
+    "till": 1
+   },
+   "slot_units": {
+    "cake": 24,
+    "shelf": 12,
+    "coffee": 60
+   },
+   "slots_per": {
+    "cake": 3,
+    "shelf": 6,
+    "coffee": 1
+   },
+   "backroom_cases": 20,
+   "utilities": 7.0,
+   "upgrades": [
+    "cake_2",
+    "shelf_2",
+    "coffee",
+    "lighting",
+    "signage",
+    "floor",
+    "second_till",
+    "security",
+    "backroom"
+   ]
+  },
+  "phones": {
+   "name": "Phone & Tech",
+   "playable": true,
+   "icon": "📱",
+   "categories": [
+    "tech"
+   ],
+   "open": 9,
+   "close": 19,
+   "footfall_k": 0.065,
+   "basket": [
+    1,
+    2
+   ],
+   "roles": [
+    "cashier",
+    "stocker",
+    "cleaner",
+    "manager",
+    "driver"
+   ],
+   "base_fixtures": {
+    "techtable": 2,
+    "shelf": 2,
+    "till": 1
+   },
+   "slot_units": {
+    "techtable": 6,
+    "shelf": 10
+   },
+   "slots_per": {
+    "techtable": 3,
+    "shelf": 6
+   },
+   "backroom_cases": 16,
+   "utilities": 6.0,
+   "upgrades": [
+    "techtable_2",
+    "shelf_2",
+    "lighting",
+    "signage",
+    "floor",
+    "second_till",
+    "security",
+    "backroom"
+   ]
+  }
+ },
+ "upgrades": {
+  "shelf_2": {
+   "name": "Extra Shelving",
+   "cost": 420,
+   "desc": "Another 6-slot shelf unit.",
+   "adds": {
+    "shelf": 1
+   },
+   "utilities": 0.0
+  },
+  "fridge_2": {
+   "name": "Second Drinks Fridge",
+   "cost": 780,
+   "desc": "Four more chilled slots.",
+   "adds": {
+    "fridge": 1
+   },
+   "utilities": 3.0
+  },
+  "lighting": {
+   "name": "LED Lighting",
+   "cost": 350,
+   "desc": "Brighter, warmer shop. +8% shopper conversion.",
+   "quality": 0.08,
+   "utilities": -1.0
+  },
+  "signage": {
+   "name": "Illuminated Sign",
+   "cost": 600,
+   "desc": "People notice you. +18% footfall.",
+   "footfall": 0.18,
+   "utilities": 1.0
+  },
+  "floor": {
+   "name": "New Flooring",
+   "cost": 900,
+   "desc": "Clean modern floor. Gets dirty 30% slower, +6% conversion.",
+   "quality": 0.06,
+   "dirt": -0.3
+  },
+  "second_till": {
+   "name": "Second Till",
+   "cost": 1100,
+   "desc": "Two queues: half the waiting.",
+   "adds": {
+    "till": 1
+   },
+   "utilities": 0.5
+  },
+  "coffee": {
+   "name": "Coffee Machine",
+   "cost": 1400,
+   "desc": "Sell fresh coffee (made in store, big margin).",
+   "adds": {
+    "coffee": 1
+   },
+   "utilities": 2.0
+  },
+  "pick_mix": {
+   "name": "Pick & Mix Wall",
+   "cost": 950,
+   "desc": "Customers fill their own sweet bags.",
+   "adds": {
+    "pickmix": 1
+   }
+  },
+  "security": {
+   "name": "CCTV",
+   "cost": 500,
+   "desc": "Shoplifting drops from 3% to 0.5% of shelf stock walking out.",
+   "theft": 0.005
+  },
+  "backroom": {
+   "name": "Stockroom Racking",
+   "cost": 650,
+   "desc": "Back room holds 24 more cases.",
+   "backroom": 24
+  },
+  "rail_2": {
+   "name": "Extra Clothes Rail",
+   "cost": 480,
+   "desc": "Another two-slot rail.",
+   "adds": {
+    "rail": 1
+   },
+   "utilities": 0.0
+  },
+  "table_2": {
+   "name": "Display Table",
+   "cost": 380,
+   "desc": "Another folded-stock table.",
+   "adds": {
+    "table": 1
+   },
+   "utilities": 0.0
+  },
+  "cake_2": {
+   "name": "Second Display Counter",
+   "cost": 900,
+   "desc": "Three more counter slots.",
+   "adds": {
+    "cake": 1
+   },
+   "utilities": 1.5
+  },
+  "hotcab_2": {
+   "name": "Second Fryer & Hot Cabinet",
+   "cost": 1500,
+   "desc": "Cook two more menu items.",
+   "adds": {
+    "hotcab": 1
+   },
+   "utilities": 4.0
+  },
+  "techtable_2": {
+   "name": "Demo Table",
+   "cost": 850,
+   "desc": "Three more device slots.",
+   "adds": {
+    "techtable": 1
+   },
+   "utilities": 0.5
+  }
+ },
+ "theft_base": 0.03
 }

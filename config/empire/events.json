@@ -177,6 +177,157 @@
       "#3c6e47",
       "#9a6b2f",
       "#245b7a"
-    ]
+    ],
+    "types": {
+      "_doc": "What kind of shop an independent is, weighted per district.",
+      "default": {
+        "convenience": 3,
+        "cafe": 2,
+        "takeaway": 2.5,
+        "bakery": 1.2,
+        "clothing": 1.5,
+        "phones": 0.8
+      },
+      "east:cbd": {
+        "convenience": 1.5,
+        "cafe": 3,
+        "takeaway": 2.5,
+        "bakery": 1.5,
+        "clothing": 1.2,
+        "phones": 1.8
+      },
+      "east:georgian": {
+        "convenience": 1.5,
+        "cafe": 2.5,
+        "takeaway": 1,
+        "bakery": 2,
+        "clothing": 3,
+        "phones": 1
+      },
+      "east:midtown": {
+        "convenience": 2,
+        "cafe": 2,
+        "takeaway": 2,
+        "bakery": 1,
+        "clothing": 2.5,
+        "phones": 1.5
+      },
+      "east:docks": {
+        "convenience": 2.5,
+        "cafe": 1.5,
+        "takeaway": 3.5,
+        "bakery": 1,
+        "clothing": 0.6,
+        "phones": 0.8
+      },
+      "west:suburb": {
+        "convenience": 3.5,
+        "cafe": 1,
+        "takeaway": 3,
+        "bakery": 1.5,
+        "clothing": 0.8,
+        "phones": 0.8
+      }
+    },
+    "kinds_by_type": {
+      "convenience": [
+        "Mini Market",
+        "Food & Wine",
+        "Convenience Store",
+        "Corner Shop",
+        "Stores",
+        "Newsagents",
+        "Express",
+        "Late Shop"
+      ],
+      "cafe": [
+        "Café",
+        "Coffee House",
+        "Coffee Co.",
+        "Espresso Bar",
+        "Kitchen"
+      ],
+      "takeaway": [
+        "Fried Chicken",
+        "Pizza",
+        "Kebab House",
+        "Burger Bar",
+        "Grill",
+        "Peri Peri"
+      ],
+      "bakery": [
+        "Bakery",
+        "Patisserie",
+        "Bakehouse",
+        "Bread & Co."
+      ],
+      "clothing": [
+        "Boutique",
+        "Clothing",
+        "Threads",
+        "Outfitters",
+        "Studio",
+        "Apparel"
+      ],
+      "phones": [
+        "Mobile",
+        "Phone Repair",
+        "Tech",
+        "Mobiles",
+        "Connect"
+      ]
+    },
+    "names_by_type": {
+      "convenience": [
+        "Sunrise Stores",
+        "The Daily Basket",
+        "Open All Hours",
+        "Kingsway Mini Market",
+        "Bridge Street Stores",
+        "The Pantry",
+        "Moonlight Express"
+      ],
+      "cafe": [
+        "The Daily Grind",
+        "Bean There",
+        "Copper Kettle",
+        "Little Fern",
+        "Steam & Co.",
+        "Ground Floor",
+        "Morning Glory"
+      ],
+      "takeaway": [
+        "Chicken Republic",
+        "Golden Fryer",
+        "Big Bite",
+        "Smokehouse",
+        "Dough Bros",
+        "Flame Grill",
+        "Midnight Kebab"
+      ],
+      "bakery": [
+        "Rise & Shine",
+        "The Crusty Loaf",
+        "Sugar & Spice",
+        "Flour Power",
+        "The Bread Box"
+      ],
+      "clothing": [
+        "Thread & Needle",
+        "Northern Soul",
+        "Common Thread",
+        "Atelier Rose",
+        "Urban Rack",
+        "Velvet & Vine",
+        "Second Skin"
+      ],
+      "phones": [
+        "Fone Zone",
+        "Pixel Point",
+        "Volt Mobile",
+        "Signal",
+        "Circuit"
+      ]
+    }
   }
 }

@@ -22,6 +22,9 @@ var slots: Array = []   # [{fixture, unit, product, qty, cap}]
 var fixtures := {}      # kind -> count
 var upgrades: Array = []
 var backroom: Stock
+## Every fixture that holds stock, in slot order (the first four as saves
+## have always had them).
+const FIXTURE_KINDS := ["shelf", "fridge", "coffee", "pickmix", "rail", "table", "cake", "hotcab", "techtable"]
 ## Cases put down on the shop floor (no limit): they wait by the door until
 ## there's room in the stockroom (tidy_pile).
 var floor_pile: Stock
@@ -98,7 +101,7 @@ func rebuild_slots() -> void:
 		seen[base] = k + 1
 		old["%s:%d" % [base, k]] = o
 	slots = []
-	for kind in ["shelf", "fridge", "coffee", "pickmix"]:
+	for kind in FIXTURE_KINDS:
 		var n := int(fixtures.get(kind, 0))
 		for u in n:
 			for k in int(per.get(kind, 0)):

@@ -423,8 +423,21 @@ static func _new_firm(e: Empire, u: Dictionary, rng: RandomNumberGenerator, sinc
 	var first: Array = sd.get("first_names", ["Sam"])
 	var last: Array = sd.get("last_names", ["Smith"])
 	var owner := "%s %s" % [first[rng.randi() % first.size()], last[rng.randi() % last.size()]]
-	var kinds: Array = fc.get("kinds", ["Stores"])
-	var names: Array = fc.get("names", [])
+	# What kind of shop: weighted by the district (cafés in the Financial
+	# District, boutiques in Old Town, takeaways by the docks…).
+	var tw: Dictionary = (fc.get("types", {}) as Dictionary).get(u["district"], (fc.get("types", {}) as Dictionary).get("default", {"convenience": 1}))
+	var type := "convenience"
+	var tot := 0.0
+	for k in tw:
+		tot += float(tw[k])
+	var pick := rng.randf() * tot
+	for k in tw:
+		pick -= float(tw[k])
+		if pick <= 0.0:
+			type = k
+			break
+	var kinds: Array = (fc.get("kinds_by_type", {}) as Dictionary).get(type, fc.get("kinds", ["Stores"]))
+	var names: Array = (fc.get("names_by_type", {}) as Dictionary).get(type, fc.get("names", []))
 	var nm := ""
 	var r := rng.randf()
 	if r < 0.45:
@@ -439,7 +452,7 @@ static func _new_firm(e: Empire, u: Dictionary, rng: RandomNumberGenerator, sinc
 	var f := {"unit": u["id"], "name": nm, "owner": owner, "district": u["district"], "pos": u.get("pos", []),
 		"rent": float(u.get("rent", 30.0)), "price": float(u.get("price", 7000.0)),
 		"rep": roundf(clampf(rng.randfn(52.0, 14.0), 15.0, 90.0)), "since": since,
-		"colour": cols[rng.randi() % cols.size()], "for_sale": false, "listed": 0}
+		"colour": cols[rng.randi() % cols.size()], "for_sale": false, "listed": 0, "type": type}
 	e.firms.append(f)
 	return f
 
@@ -451,13 +464,26 @@ static func _possessive(n: String) -> String:
 ## Rough daily profit of an independent (what its books show a buyer).
 static func firm_profit(f: Dictionary) -> float:
 	var d := EmpireData.district(f["district"])
+	var td := EmpireData.business_type(String(f.get("type", "convenience")))
 	var hours := 0.0
-	for h in range(7, 22):
+	for h in range(int(td.get("open", 7)), int(td.get("close", 22))):
 		hours += EmpireData.hour_curve(float(h) + 0.5)
 	var shoppers := float(d.get("footfall", 8.0)) * float(EmpireData.economy().get("footfall_scale", 1.0)) * hours \
-		* (0.5 + float(f.get("rep", 50.0)) / 100.0) * 0.8
-	var gross := shoppers * 1.4 * 1.15 * float(d.get("affluence", 1.0))
-	return roundf(gross - float(f.get("rent", 30.0)) - 100.0 - 12.0)
+		* (0.5 + float(f.get("rep", 50.0)) / 100.0) * 0.8 * float(td.get("footfall_k", 1.0))
+	# What a shopper spends here, net of what it cost: the type's goods.
+	var cats: Array = td.get("categories", [])
+	var margin := 0.0
+	var wsum := 0.0
+	for pid in EmpireData.product_ids():
+		var p := EmpireData.product(pid)
+		if String(p["cat"]) in cats:
+			var w := float(p.get("demand", 1.0))
+			margin += w * (float(p["rrp"]) - float(p["case_cost"]) / float(p["case_qty"]))
+			wsum += w
+	var basket: Array = td.get("basket", [1, 4])
+	var per := (margin / maxf(wsum, 0.01)) * (float(basket[0]) + float(basket[1])) * 0.5 * 0.75
+	var gross := shoppers * per * float(d.get("affluence", 1.0))
+	return roundf(gross - float(f.get("rent", 30.0)) - 100.0 - float(td.get("utilities", 4.0)) * 3.0)
 
 
 static func firm_price(f: Dictionary) -> float:
@@ -529,15 +555,16 @@ static func buy_firm(e: Empire, unit: Dictionary, err := []) -> Business:
 		err.append("Not enough money (%s)" % EmpireData.money(price))
 		return null
 	e.firms.erase(f)
-	var b := e._open_business(unit, "convenience")
+	var b := e._open_business(unit, String(f.get("type", "convenience")))
 	b.name = f["name"]
 	b.reputation = maxf(float(f["rep"]), 30.0)
-	# The stock that came with it, on the shelves.
+	# The stock that came with it, on the shelves: its own kind of goods.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([e.seed, unit["id"], e.day])
+	var cats: Array = b.type_def().get("categories", [])
 	for pid in EmpireData.product_ids():
 		var p := EmpireData.product(pid)
-		if p["fixture"] in ["shelf", "fridge"] and rng.randf() < 0.8:
+		if String(p["cat"]) in cats and int(b.fixtures.get(String(p["fixture"]), 0)) > 0 and rng.randf() < 0.85:
 			e._receive(b.backroom, pid, EmpireData.case_qty(pid), float(p.get("case_cost", 0.0)) / float(EmpireData.case_qty(pid)))
 	e.restock_from_backroom(b, 999)
 	# The cashier stays on.

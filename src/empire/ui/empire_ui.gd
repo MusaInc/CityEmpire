@@ -610,9 +610,12 @@ func _cart_add(pid: String, d: int) -> void:
 
 
 # ------------------------------------------------------------- property
+var _rent_type := "convenience"
+
+
 func open_property(u: Dictionary) -> void:
 	var d := EmpireData.district(u["district"])
-	var v := _open(String(u.get("shop_name", "Shop unit")), 760, 470)
+	var v := _open(String(u.get("shop_name", "Shop unit")), 900, 560)
 	v.add_child(S.label("%s  ·  %s  ·  %d m²" % [u["name"], d.get("name", ""), int(u["size"])], 18, S.MUTED))
 	var g := GridContainer.new()
 	g.columns = 2
@@ -627,16 +630,32 @@ func open_property(u: Dictionary) -> void:
 		g.add_child(S.label(pair[0], 17, S.MUTED))
 		g.add_child(S.label(pair[1], 18, S.PAPER, "bold"))
 	v.add_child(g)
+	# What to open here.
+	var types := S.hbox(8)
+	for tid in EmpireData.business_types():
+		var td := EmpireData.business_type(tid)
+		if not td.get("playable", false):
+			continue
+		types.add_child(S.button("%s %s" % [td.get("icon", ""), td.get("name", tid)], func():
+			_rent_type = tid
+			open_property(u), tid == _rent_type, 0))
+	v.add_child(S.label("OPEN AS", 13, S.AMBER, "black"))
+	v.add_child(types)
+	var td2 := EmpireData.business_type(_rent_type)
+	var sells := []
+	for c in td2.get("categories", []):
+		sells.append(String((EmpireData.file("products").get("categories", {}) as Dictionary).get(c, {}).get("name", c)))
+	v.add_child(S.label("%s: sells %s · open %02d:00–%02d:00" % [td2.get("name", ""), ", ".join(sells), int(td2.get("open", 7)), int(td2.get("close", 22))], 15, S.MUTED))
 	v.add_child(S.label("You have %s + company %s" % [EmpireData.money(game.empire.personal_cash), EmpireData.money(game.empire.company_cash)], 15, S.MUTED))
 	var h := S.hbox(12)
 	h.add_child(S.button("RENT · %s deposit" % EmpireData.money(float(u["rent"]) * 3.0), func():
-		var err := game.rent_unit(u)
+		var err := game.rent_unit(u, false, _rent_type)
 		if err != "":
 			toast(err, "bad")
 		else:
 			close_panel(true), true, 300))
 	h.add_child(S.button("BUY · %s" % EmpireData.money(float(u["price"])), func():
-		var err := game.rent_unit(u, true)
+		var err := game.rent_unit(u, true, _rent_type)
 		if err != "":
 			toast(err, "bad")
 		else:

@@ -224,6 +224,7 @@ func test_established_businesses_trade_everywhere(t) -> void:
 	var u: Dictionary = e.market.filter(func(x): return x["id"] == f["unit"])[0]
 	t.check(e.rent_premises(u) == null, "an independent's unit can't be rented")
 	t.check(CityLife.firm_profit(f) > 0.0, "its books show a profit (%s)" % EmpireData.money(CityLife.firm_profit(f)))
+	f["for_sale"] = false
 	var p_sale := CityLife.firm_price(f)
 	f["for_sale"] = true
 	t.check(CityLife.firm_price(f) < p_sale, "cheaper once it's on the market (%s < %s)" % [EmpireData.money(CityLife.firm_price(f)), EmpireData.money(p_sale)])
@@ -257,7 +258,7 @@ func test_buy_an_established_business(t) -> void:
 	t.check(is_equal_approx(cash - e.personal_cash - e.company_cash, price), "paid the asking price")
 	t.check(not b.owned, "leasehold: you pay the rent")
 	t.check(b.name == f["name"] and is_equal_approx(b.reputation, maxf(rep, 30.0)), "keeps its name and regulars")
-	t.check(b.stocked_products().size() >= 8, "shelves stocked (%d lines)" % b.stocked_products().size())
+	t.check(b.stocked_products().size() >= 3, "shelves stocked with its own goods (%d lines, a %s)" % [b.stocked_products().size(), b.type_id])
 	t.check(b.has_role("cashier") and b.trading(12.0), "the cashier stays: trading straight away")
 	t.check(e.total_units() + int(e.stats["units_sold"]) + int(e.stats["units_stolen"]) == int(e.stats["units_bought"]), "units balance")
 	t.check(e.stat("firms_bought") == 1.0, "goal stat")
@@ -323,3 +324,30 @@ func test_cases_put_down_on_the_floor(t) -> void:
 	t.check(b.floor_pile.is_empty(), "moved into the stockroom overnight")
 	var d := Empire.from_dict(JSON.parse_string(JSON.stringify(e.to_dict())))
 	t.check(d.businesses[0].floor_pile != null and d.businesses[0].floor_pile.case_capacity == 0, "the pile is saved (unlimited)")
+
+
+func test_every_kind_of_shop_trades(t) -> void:
+	for type in ["clothing", "cafe", "takeaway", "bakery", "phones"]:
+		var e := _game()
+		e.personal_cash = 100000.0
+		var u := _free(e)
+		var b := e.rent_premises(u, type)
+		t.check(b != null and b.type_id == type, "%s: opened" % type)
+		e.transfer_to_company(20000.0)
+		var cats: Array = b.type_def().get("categories", [])
+		var order := {}
+		for pid in EmpireData.product_ids():
+			var p := EmpireData.product(pid)
+			if String(p["cat"]) in cats and int(b.fixtures.get(String(p["fixture"]), 0)) > 0:
+				order[pid] = 1
+		t.check(order.size() >= 3, "%s: has %d products it can sell" % [type, order.size()])
+		e.buy_wholesale("w1", order)
+		for pid in order:
+			Stock.transfer(e.pallets["w1"], b.backroom, pid, 9999)
+		e.restock_from_backroom(b, 9999)
+		t.check(b.stocked_products().size() >= 3, "%s: on display" % type)
+		var c: Dictionary = e.candidates.filter(func(x): return x["role"] == "cashier")[0]
+		e.hire(b, c)
+		e.advance(1440.0)
+		var r: Dictionary = b.history[-1]
+		t.check(int(r["customers"]) > 0 and float(r["revenue"]) > 0.0, "%s: served %d, took %s" % [type, int(r["customers"]), EmpireData.money(float(r["revenue"]))])

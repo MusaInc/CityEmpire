@@ -13,6 +13,7 @@ render_mode cull_back, diffuse_burley;
 #include "res://src/world/shaders/person_pose.gdshaderinc"
 
 global uniform vec3 player_pos;
+uniform float crowd_radius = 0.0;  // m round the hero handed to the CPU crowd (0: none)
 // Pavements follow the road surface (+ kerb, in the instance origin).
 global uniform sampler2D ground_height : filter_linear, repeat_disable;
 global uniform vec4 ground_rect;
@@ -83,6 +84,9 @@ void vertex() {
 	}
 	// Fade in/out at the segment ends so the wrap isn't a pop.
 	float s = walking > 0.5 ? smoothstep(0.0, 1.5, d) * smoothstep(len, len - 1.5, d) : 1.0;
+	// Near the hero the CPU crowd (City Empire's Crowd) takes over the
+	// pavements: these walkers only carry the streets beyond it.
+	s *= smoothstep(crowd_radius - 6.0, crowd_radius + 4.0, length((player_pos - wp).xz));
 	v *= s;
 	v.z -= d;
 	v.y += (gy + INSTANCE_CUSTOM.w * d) / length(MODEL_MATRIX[1].xyz);  // (instances are scaled)

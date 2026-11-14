@@ -60,6 +60,8 @@ const CAR_NEAR := 260.0
 const CAR_FAR := 520.0
 var walker_mesh: Mesh
 var walker_meshes: Array = []   # one per body type
+## Within this many metres of the hero a CPU crowd draws the pavements (0: none).
+static var walker_crowd_radius := 0.0
 var furniture_mat: StandardMaterial3D
 var trains: Trains
 var sea_sky: SeaAndSky   # port ships, boats, helicopter, airliner, gulls (visual only)
@@ -697,6 +699,7 @@ func _load_props() -> void:
 	if not walker_meshes.is_empty():
 		var wm := ShaderMaterial.new()
 		wm.shader = load("res://src/world/shaders/pedestrian.gdshader")
+		wm.set_shader_parameter("crowd_radius", walker_crowd_radius)
 		for i in walker_meshes.size():
 			var m: Mesh = walker_meshes[i].duplicate()
 			m.surface_set_material(0, wm)

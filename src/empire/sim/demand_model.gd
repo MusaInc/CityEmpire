@@ -22,7 +22,10 @@ static func arrivals_per_hour(b: Business, hour: float, competitors := 0.0, k :=
 	var d := b.district()
 	var rep := 0.5 + b.reputation / 100.0
 	var comp := pow(float(EmpireData.economy().get("competition_factor", 0.75)), competitors)
-	return float(d.get("footfall", 6.0)) * float(EmpireData.economy().get("footfall_scale", 1.0)) * EmpireData.hour_curve(hour) * rep * (1.0 + b.footfall_bonus()) * comp * k
+	# (A clothing or phone shop sees fewer, bigger-spending shoppers than a
+	# corner shop: the type's footfall_k.)
+	var tk := float(b.type_def().get("footfall_k", 1.0))
+	return float(d.get("footfall", 6.0)) * float(EmpireData.economy().get("footfall_scale", 1.0)) * EmpireData.hour_curve(hour) * rep * (1.0 + b.footfall_bonus()) * comp * k * tk
 
 
 ## Multiplier on what shoppers will pay: upgrades (lighting, floor) and a clean shop.
@@ -33,14 +36,15 @@ static func appeal(b: Business) -> float:
 static func make_shopper(b: Business, rng: RandomNumberGenerator, mix_k := {}) -> Dictionary:
 	var d := b.district()
 	var bk: Dictionary = EmpireData.economy().get("basket", {})
-	var n := rng.randi_range(int(bk.get("min", 1)), int(bk.get("max", 3)))
+	var tb: Array = b.type_def().get("basket", [bk.get("min", 1), bk.get("max", 3)])
+	var n := rng.randi_range(int(tb[0]), int(tb[1]))
 	var mix: Dictionary = (d.get("mix", {}) as Dictionary).duplicate()
 	for c in mix_k:
 		mix[c] = float(mix.get(c, 0.5)) * float(mix_k[c])
 	var allowed: Array = b.type_def().get("categories", [])
 	var wants: Array = []
 	for i in n:
-		var pid := _pick_product(mix, allowed, rng)
+		var pid := _pick_product(mix, allowed, rng, b.fixtures)
 		if pid != "" and not wants.has(pid):
 			wants.append(pid)
 	var spread: Array = EmpireData.economy().get("wtp_spread", [0.9, 1.7])
@@ -54,7 +58,7 @@ static func make_shopper(b: Business, rng: RandomNumberGenerator, mix_k := {}) -
 		"spend_k": aff * rng.randf_range(float(spread[0]), float(spread[1]))}
 
 
-static func _pick_product(mix: Dictionary, allowed: Array, rng: RandomNumberGenerator) -> String:
+static func _pick_product(mix: Dictionary, allowed: Array, rng: RandomNumberGenerator, fixtures := {}) -> String:
 	var total := 0.0
 	for c in allowed:
 		total += float(mix.get(c, 0.5))
@@ -69,7 +73,9 @@ static func _pick_product(mix: Dictionary, allowed: Array, rng: RandomNumberGene
 	var wsum := 0.0
 	for pid in EmpireData.product_ids():
 		var p := EmpireData.product(pid)
-		if p["cat"] == cat:
+		# (Only things this shop could have a place for: a bakery's shelf
+		# holds loaves, not the milk that needs a fridge.)
+		if p["cat"] == cat and (fixtures.is_empty() or int(fixtures.get(String(p.get("fixture", "")), 0)) > 0):
 			pool.append(pid)
 			wsum += float(p.get("demand", 1.0))
 	var q := rng.randf() * wsum

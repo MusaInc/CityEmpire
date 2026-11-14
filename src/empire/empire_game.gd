@@ -26,6 +26,7 @@ var args := {}
 var state := "boot"      # boot / title / play
 var atmosphere: Atmosphere
 var world: CityWorld
+var crowd: Crowd
 var layout: CityLayout
 var player: Player
 var rig: CharacterRig
@@ -75,6 +76,7 @@ func _ready() -> void:
 	atmosphere.name = "Atmosphere"
 	add_child(atmosphere)
 	var t0 := Time.get_ticks_msec()
+	CityWorld.walker_crowd_radius = Crowd.NEAR
 	world = CityWorld.new()
 	world.name = "World"
 	add_child(world)
@@ -104,6 +106,11 @@ func _ready() -> void:
 		"pants": "pants_navy", "hero": "hero_ade", "hair": "hair_natural"})
 	look["glove"] = look["skin"]  # bare hands (the hero model always wears gloves)
 	rig.apply_look(look)
+	# The people on the pavements round you (the GPU walkers carry the far streets).
+	crowd = Crowd.new()
+	crowd.name = "Crowd"
+	add_child(crowd)
+	crowd.setup(self)
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
 	add_child(camera)
@@ -160,6 +167,15 @@ func _after_start() -> void:
 		var u: Dictionary = starter_unit() if g == "start" else (wholesaler(g.get_slice(":", 1)) if g.begins_with("wholesale") else unit_by_id.get(g, {}))
 		if g == "rival" and not empire.rivals.is_empty():
 			u = unit_by_id.get(empire.rivals[0]["unit"], {})
+		if g.begins_with("type:"):
+			# Captures: the independent of that kind nearest the starter shop.
+			var want := g.get_slice(":", 1)
+			var s1 := starter_unit()
+			var bd := INF
+			for f in empire.firms:
+				if String(f.get("type", "")) == want and CityLife._dist(f["pos"], s1["pos"]) < bd:
+					bd = CityLife._dist(f["pos"], s1["pos"])
+					u = unit_by_id.get(f["unit"], {})
 		if g == "firm":
 			var fs := CityLife.firms_for_sale(empire)
 			if fs.is_empty():
@@ -1114,10 +1130,15 @@ func buy_out_rival(u: Dictionary) -> String:
 	return ""
 
 
-func rent_unit(u: Dictionary, buy := false) -> String:
-	var b := empire.buy_premises(Premises.record(u)) if buy else empire.rent_premises(Premises.record(u))
+func rent_unit(u: Dictionary, buy := false, type_id := "convenience") -> String:
+	var b := empire.buy_premises(Premises.record(u), type_id) if buy else empire.rent_premises(Premises.record(u), type_id)
 	if b == null:
 		return "Not enough money"
+	if type_id != "convenience" and b.opened_day == empire.day:
+		# A name to suit the trade: "Village Shop" → "Village Café".
+		var kinds: Array = (CityLife.firm_cfg().get("kinds_by_type", {}) as Dictionary).get(type_id, [])
+		if not kinds.is_empty():
+			b.name = "%s %s" % [String(u.get("shop_name", "Corner")).get_slice(" ", 0), kinds[0]]
 	rebuild_interior(u["id"])
 	save_game()
 	return ""

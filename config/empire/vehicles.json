@@ -1,11 +1,106 @@
 {
-  "_doc": "Vehicles you can own. body = assets/vehicles/<body>.glb (Never Stop's fleet). cargo = cases carried.",
-  "models": {
-    "hatch":  {"name": "Kestrel Hatch",    "body": "kestrel",   "base": "kestrel", "cargo": 8,  "price": 0,     "top_speed": 34.0, "paint": "#c9c6bd"},
-    "van":    {"name": "Courier Van",      "body": "civ_van",   "base": "civ",     "cargo": 30, "price": 6500,  "top_speed": 30.0, "paint": "#e9e6df"},
-    "box":    {"name": "Box Truck",        "body": "civ_box",   "base": "civ",     "cargo": 80, "price": 19000, "top_speed": 26.0, "paint": "#e9e6df"},
-    "saloon": {"name": "Marlin Saloon",    "body": "marlin",    "base": "marlin",  "cargo": 10, "price": 9500,  "top_speed": 44.0, "paint": "#1a3a7a"}
+ "_doc": "Vehicles you can own. body = assets/vehicles/<body>.glb (Never Stop's fleet). cargo = cases carried. Luxury cars carry little but show the city you've made it.",
+ "models": {
+  "hatch": {
+   "name": "Kestrel Hatch",
+   "body": "kestrel",
+   "base": "kestrel",
+   "cargo": 8,
+   "price": 0,
+   "top_speed": 34.0,
+   "paint": "#c9c6bd"
   },
-  "service_cost": 80,
-  "wear_per_km": 0.004
+  "van": {
+   "name": "Courier Van",
+   "body": "civ_van",
+   "base": "civ",
+   "cargo": 30,
+   "price": 6500,
+   "top_speed": 30.0,
+   "paint": "#e9e6df"
+  },
+  "box": {
+   "name": "Box Truck",
+   "body": "civ_box",
+   "base": "civ",
+   "cargo": 80,
+   "price": 19000,
+   "top_speed": 26.0,
+   "paint": "#e9e6df"
+  },
+  "saloon": {
+   "name": "Marlin Saloon",
+   "body": "marlin",
+   "base": "marlin",
+   "cargo": 10,
+   "price": 9500,
+   "top_speed": 44.0,
+   "paint": "#1a3a7a"
+  },
+  "scout": {
+   "name": "Scout RS",
+   "body": "scout",
+   "base": "scout",
+   "cargo": 6,
+   "price": 24000,
+   "top_speed": 46.0,
+   "paint": "#e8a33a"
+  },
+  "brute": {
+   "name": "Brute V8",
+   "body": "brute",
+   "base": "brute",
+   "cargo": 5,
+   "price": 42000,
+   "top_speed": 52.0,
+   "paint": "#1d1d22"
+  },
+  "vanta": {
+   "name": "Vanta GT",
+   "body": "vanta",
+   "base": "vanta",
+   "cargo": 3,
+   "price": 78000,
+   "top_speed": 58.0,
+   "paint": "#c4202a"
+  },
+  "goliath": {
+   "name": "Goliath Pickup",
+   "body": "goliath",
+   "base": "goliath",
+   "cargo": 24,
+   "price": 36000,
+   "top_speed": 42.0,
+   "paint": "#3a4a3a"
+  },
+  "warden": {
+   "name": "Warden 4x4",
+   "body": "warden",
+   "base": "warden",
+   "cargo": 14,
+   "price": 65000,
+   "top_speed": 44.0,
+   "paint": "#2b2d33"
+  },
+  "halcyon": {
+   "name": "Halcyon Supercar",
+   "body": "halcyon",
+   "base": "halcyon",
+   "cargo": 2,
+   "price": 185000,
+   "top_speed": 64.0,
+   "paint": "#e6e8ea"
+  },
+  "stiletto": {
+   "name": "Stiletto Hypercar",
+   "body": "stiletto",
+   "base": "stiletto",
+   "cargo": 1,
+   "price": 420000,
+   "top_speed": 72.0,
+   "paint": "#f2c12e"
+  }
+ },
+ "service_cost": 80,
+ "wear_per_km": 0.004
 }

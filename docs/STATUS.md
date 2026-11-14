@@ -1,4 +1,4 @@
-# Status (2026-11-14, 0.2.0: established businesses, shopfronts, pedestrians, premium pass)
+# Status (2026-11-14, 0.3.0: kinds of shop, brands, crowd, luxury cars)
 
 ## Working (verified headless / in renders on the VPS)
 - Two islands with economic identities: Westbank (cheap, industrial/residential) and the Commercial Island (avg rent >1.5×); 24 shops to let + a wholesaler each.
@@ -7,6 +7,7 @@
 - Established businesses (CityLife firms): ~96 more units line the shopping streets (second Premises pass after the original 24, so old ids/saves hold). Most trade as named independents with an owner and reputation, compete a little (capped), go up for sale (estate agent board, phone City tab, map), close if unsold; new ones open. Buying one takes over the lease, regulars, shelf stock and a cashier – it trades at once. Goal "Buy an established business". Save v4.
 - Shopfronts: every unit has a built frontage (pilasters, full-width fascia, cornice, lit window posters, striped awning, lamps, blade sign); only ~half the other buildings keep painted shop windows on the ground floor.
 - Pedestrians: four body types (tools/blender/build_street.py → pedestrians.glb) posed limb-by-limb (person_pose.gdshaderinc) on the street and in shops; chatting pairs; walkers on Westbank no longer sink into the pavement.
+- 0.3.0: six playable kinds of shop – convenience, clothing (rails, tables, shoe wall), café (coffee machine, cake counters, seating), takeaway (hot cabinets, neon menus, window bar), bakery, phone & tech – with their own products, fixtures, hours, footfall and interiors (ShopStyle.look). Choose the kind when you rent; independents are typed by district and bought as what they are. Every shop has a brand (ShopStyle.brand: colour pair, OFL typeface in assets/fonts/brand, painted/lightbox/neon/script fascia, logo badge, its own window posters). Near crowd (src/empire/npc/crowd.gd): hero-derived bodies (tools/blender/build_crowd.py → crowd.glb, ~3.2k tris, skin-weighted limbs) walking block loops on the CPU within 62 m – no popping; they browse windows and go into shops. Luxury cars at the dealer (Scout RS … Stiletto hypercar £420k). Balance per type: `tools/balance_sim.gd -- 15 type=<kind>`.
 - 0.2.1: put cases down anywhere in your shop (they stack by the door; staff move them to the stockroom when there's room, or overnight – Business.floor_pile, saved); STOCKROOM sign; prompt says when a product needs an upgrade you don't have. Entrances: stone plinth + steps up to the shop floor, no street furniture within 4.5 m of a shop door. HUD minimap (EmpireMinimap, City Swing's baked map) + phone map rebuilt on the same image (drag, pinch, +/−, tap to GPS). Lists scroll by dragging anywhere (TouchScroll; a drag never taps a button). Game tab has a TESTER +£1,000,000 button – remove before App Store release.
 - Look: screen vignette, accented HUD panels, tactile primary buttons, new title screen.
 - Rival chain QuikSave: starts with 2 stores, opens more every 4 days (often next to yours), drawn in its red livery with a BUY OUT prompt at the door; buy-outs become your freehold shops; retreats after 3 buy-outs, leaves when the last store is yours.
@@ -14,13 +15,16 @@
 - Phone: Businesses, City (weather, rivals, news), Map (rivals marked), Bank (net-worth chart + profit bars), Vehicles, Property, Goals, Game; Settings has music/sound volume.
 - Balance (tools/balance_sim.gd, fully staffed shop per district, 20 days): +£50..£400/day in good districts, a loss in Westbank Quay without coffee/hot food. Wages were cut ~30% and footfall ×1.4 (footfall_scale) in the finishing pass: before it, a staffed shop lost money in 7 of 8 districts.
 - Tests: 39 City Empire tests pass (15 for city life); `--autoplay` 43/43; inherited CitySwing 154–156/161 (4 course tests + 1 test_city as before; test_motion_quality ledge_dive checks are flaky run to run, 2 of 3 isolated runs pass).
-- Capture helpers: `--days=N` (run the economy N days), `--panel=city|bank|goals|victory|rival|firm|…`, `--goto=rival|firm`, `--front=<m>` (camera square-on to the --goto shopfront).
+- Capture helpers: `--days=N` (run the economy N days), `--panel=city|bank|goals|victory|rival|firm|…`, `--goto=rival|firm|type:<kind>`, `--front=<m>` (camera square-on to the --goto shopfront).
 - Draw calls near a busy street ~190 (was ~110 before the established units); other people's shop details cull at 55 m.
 
 ## Not verified
 - No phone, tablet or web build tested. No device FPS claims.
 - Autoplay teleports the car between places; road driving routes aren't scripted.
 - Long-run pacing (how many real hours to City Tycoon) is estimated from the sim, not playtested.
+
+## Not done (asked for, next)
+- Office HQ for big corporations in the towers, football stadium, more trades (barber, florist), choosing your own brand.
 
 ## Not done
 - Other industries (types defined, hidden), AI delivery vans on the roads, walking customers inside rival stores, City Empire-specific music.

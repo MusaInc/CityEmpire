@@ -66,7 +66,9 @@ func test_interiors_walkable_even_fully_upgraded(t) -> void:
 	for u in _units():
 		var b: Business = null
 		if u["kind"] == "shop":
-			b = Business.new("t", "convenience")
+			# Every kind of shop, spread over the units.
+			var kinds := ["convenience", "clothing", "cafe", "takeaway", "bakery", "phones"]
+			b = Business.new("t", kinds[shops % kinds.size()])
 			b.setup_new(Premises.record(u), 1)
 			for up in b.type_def().get("upgrades", []):
 				b.apply_upgrade(up)
@@ -77,7 +79,7 @@ func test_interiors_walkable_even_fully_upgraded(t) -> void:
 		var goals: Array = []
 		if b:
 			var want := 0
-			for k in ["shelf", "fridge", "coffee", "pickmix"]:
+			for k in Business.FIXTURE_KINDS:
 				want += int(b.fixtures.get(k, 0))
 			if si.placed.size() < want:
 				bad.append("%s fits %d of %d fixtures" % [u["id"], si.placed.size(), want])

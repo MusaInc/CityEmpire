@@ -31,6 +31,18 @@ var biz: Business
 var rival := {}
 ## The shop's brand colour: fascia, shelf headers, counter front, wall band.
 var brand := Color(0.15, 0.4, 0.3)
+## The shop's identity (ShopStyle.brand) and its kind's interior (look).
+var ident := {}
+var look := {}
+var type_id := "convenience"
+## Window posters per kind of shop (PROMOS below for corner shops).
+const PROMOS_BY := {
+	"clothing": ["NEW\nSEASON", "UP TO\n50% OFF", "DENIM\nFROM £34", "SUMMER\nEDIT", "SALE"],
+	"cafe": ["FLAT WHITE\n£2.90", "FRESH\nPASTRIES", "BREAKFAST\nTILL 11", "OAT MILK\nNO EXTRA", "CAKE OF\nTHE DAY"],
+	"takeaway": ["2 PIECE\nMEAL £4.99", "OPEN\nTILL LATE", "FAMILY\nBUCKET", "HALAL", "FREE\nDRINK"],
+	"bakery": ["BAKED\nTHIS\nMORNING", "SOURDOUGH\n£3.90", "CELEBRATION\nCAKES", "SAUSAGE\nROLLS"],
+	"phones": ["NOVA 12\nOUT NOW", "REPAIRS\nWHILE\nYOU WAIT", "TRADE IN\nYOUR OLD\nPHONE", "SIM ONLY\n£10"],
+}
 const PROMOS := ["MEAL DEAL\n£3.50", "COLD DRINKS\n2 FOR £2", "FRESH\nBREAD\nDAILY", "OPEN\n7AM–10PM", "HOT\nCOFFEE\n£1.80",
 	"CARD &\nCONTACTLESS", "SNACKS\n3 FOR £2", "LOCAL\n& FRESH"]
 const BRANDS := [Color(0.13, 0.42, 0.36), Color(0.16, 0.27, 0.5), Color(0.42, 0.2, 0.42), Color(0.2, 0.42, 0.2),
@@ -55,6 +67,7 @@ var door_in := Vector3.ZERO
 var door_out := Vector3.ZERO
 var rack_pos := Vector3.ZERO
 var pile_pos := Vector3.ZERO
+var _mid_used := false            # did fixtures take the middle of the floor?
 var street_drop := 0.0            # m the floor stands above the pavement outside      # where cases put down on the floor stack up
 var office_pos := Vector3.ZERO
 var walk := {}            # Vector2i cell -> true when free
@@ -85,11 +98,14 @@ func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival
 	brand = BRANDS[absi(String(unit.get("id", "")).hash()) % BRANDS.size()]
 	if not rival.is_empty() and biz == null:
 		if rival.get("firm", false):
-			brand = Color(String(rival.get("colour", "#2f7d4a")))
-			biz = rival_display(unit, String(rival.get("name", "")))
+			biz = rival_display(unit, String(rival.get("name", "")), String(rival.get("type", "convenience")))
 		else:
-			brand = Color(CityLife.rival_cfg().get("colour", "#d8262f"))
 			biz = rival_display(unit)
+	type_id = biz.type_id if biz else "convenience"
+	look = ShopStyle.look(type_id)
+	if biz:
+		ident = ShopStyle.brand(biz.name, type_id, not rival.is_empty() and not rival.get("firm", false))
+		brand = ident["primary"]
 	var sz := Premises.room_size(unit)
 	W = sz.x
 	H = sz.y
@@ -121,26 +137,32 @@ func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival
 
 ## A fully stocked, fitted-out stand-in Business for drawing a store run by
 ## someone else (QuikSave, or an independent called `title`).
-static func rival_display(u: Dictionary, title := "") -> Business:
-	var b := Business.new("rival_" + String(u.get("id", "")), "convenience")
+static func rival_display(u: Dictionary, title := "", type := "convenience") -> Business:
+	var b := Business.new("rival_" + String(u.get("id", "")), type)
 	b.setup_new(Premises.record(u), 1)
-	for up in ["shelf_2", "fridge_2", "lighting", "signage", "floor"]:
-		b.apply_upgrade(up)
+	for up in b.type_def().get("upgrades", []):
+		if up in ["shelf_2", "fridge_2", "rail_2", "table_2", "cake_2", "lighting", "signage", "floor"]:
+			b.apply_upgrade(up)
 	b.name = title if title != "" else String(CityLife.rival_cfg().get("name", "QuikSave"))
-	var shelf: Array = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == "shelf")
-	var cold: Array = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == "fridge")
-	var si := 0
-	var ci := 0
+	# Every slot stocked with something its fixture holds, from the shop's
+	# own categories (a bakery's shelf has loaves, a clothes shop's shoes).
+	var cats: Array = b.type_def().get("categories", [])
+	var used := {}
 	for s: Dictionary in b.slots:
-		var pool: Array = cold if s["fixture"] == "fridge" else shelf
-		if s["fixture"] in ["shelf", "fridge"] and not pool.is_empty():
-			var k := ci if s["fixture"] == "fridge" else si
-			s["product"] = pool[k % pool.size()]
+		var fx: String = s["fixture"]
+		if String(s["product"]) != "":
 			s["qty"] = int(s["cap"])
-			if s["fixture"] == "fridge":
-				ci += 1
-			else:
-				si += 1
+			continue
+		var pool: Array = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == fx \
+			and String(EmpireData.product(p)["cat"]) in cats)
+		if pool.is_empty():
+			pool = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == fx)
+		if pool.is_empty():
+			continue
+		var k := int(used.get(fx, 0))
+		used[fx] = k + 1
+		s["product"] = pool[k % pool.size()]
+		s["qty"] = int(s["cap"])
 	return b
 
 
@@ -188,6 +210,14 @@ func rebuild() -> void:
 	mi.material_override = _mat("vc")
 	mi.visibility_range_end = 260.0
 	_static.add_child(mi)
+	if _glass != null:
+		var gl := MeshInstance3D.new()
+		gl.name = "Glass"
+		gl.mesh = _glass.commit()
+		gl.material_override = _mat("glass")
+		gl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_static.add_child(gl)
+		_glass = null
 	if _glow != null:
 		var gi := MeshInstance3D.new()
 		gi.name = "Glow"
@@ -216,10 +246,19 @@ func _cull_details() -> void:
 
 # ------------------------------------------------------------- shop
 func _build_shop(st: _Batch) -> void:
-	var wall := Color(0.8, 0.77, 0.71)
+	if look.is_empty():
+		look = ShopStyle.look(type_id)
+	var wall: Color = look["wall"]
 	var trim := Color(0.18, 0.2, 0.22)
-	var floor_style := 1 if biz and biz.has_upgrade("floor") else 0
-	_floor(Color(0.86, 0.85, 0.82) if floor_style == 1 else Color(0.72, 0.7, 0.66), floor_style)
+	var floor_style := int(look["floor_style"])
+	var floor_col: Color = look["floor"]
+	if biz and biz.has_upgrade("floor"):
+		if type_id == "convenience":
+			floor_style = 1
+			floor_col = Color(0.86, 0.85, 0.82)
+		else:
+			floor_col = floor_col.lightened(0.08)
+	_floor(floor_col, floor_style)
 	_shell(st, wall, trim)
 	var part_d := D - BACKROOM
 	# Back-room partition with a doorway on the right.
@@ -275,14 +314,12 @@ func _build_shop(st: _Batch) -> void:
 	srs.outline_size = 8
 	srs.position = R((dw0 + dw1) * 0.5, part_d - 0.03, 2.55)
 	_static.add_child(srs)
-	# Ceiling lights.
+	# Ceiling lights (their kind follows the shop's).
 	var bright := 1.25 if biz and biz.has_upgrade("lighting") else 0.85
-	var tint := Color(1.0, 0.93, 0.82) if biz and biz.has_upgrade("lighting") else Color(1.0, 0.97, 0.92)
-	for ix in 2:
-		for iz in 2:
-			var px := W * (0.28 + 0.44 * ix)
-			var pd := part_d * (0.28 + 0.44 * iz)
-			_glow_quad(R(px - 0.6, pd - 0.25, H - 0.02), R(px + 0.6, pd + 0.25, H - 0.02), tint * 0.95, true)
+	var tint: Color = look.get("tint", Color(1.0, 0.97, 0.92))
+	if biz and biz.has_upgrade("lighting"):
+		tint = tint.lerp(Color(1.0, 0.9, 0.78), 0.4)
+	_ceiling_lights(st, part_d, tint)
 	_light(R(W * 0.35, part_d * 0.4, H - 0.4), tint, bright, maxf(W, D) * 0.9)
 	_light(R(W * 0.68, part_d * 0.7, H - 0.4), tint, bright, maxf(W, D) * 0.9)
 	_light(R(W * 0.5, D - 1.5, H - 0.4), Color(1.0, 0.9, 0.75), 0.5, 5.0)
@@ -301,6 +338,13 @@ func _build_shop(st: _Batch) -> void:
 ## Dressing: a brand band round the walls, posters, an entrance mat, a
 ## basket stack and a newspaper stand by the door, a plant, PAY HERE sign.
 func _decor(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float) -> void:
+	if type_id == "convenience":
+		_decor_corner(st, part_d, cx0, cd0, cd1)
+	else:
+		_decor_trade(st, part_d, cx0, cd0, cd1)
+
+
+func _decor_corner(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float) -> void:
 	var band := brand.lightened(0.05)
 	# Band at 2.4 m on both side walls and the partition.
 	st.box(R(0.03, 0.3, 2.35), R(0.06, part_d, 2.6), band)
@@ -364,16 +408,18 @@ func _shell(st: _Batch, wall: Color, trim: Color) -> void:
 	_wall_box(st, -0.05, 0.02, 0.0, D, 0.0, H, wall)
 	_wall_box(st, W - 0.02, W + 0.05, 0.0, D, 0.0, H, wall)
 	_wall_box(st, 0.0, W, D - 0.02, D + 0.05, 0.0, H, wall.darkened(0.06))
-	st.box(R(0.0, 0.0, H - 0.01), R(W, D, H + 0.05), Color(0.78, 0.78, 0.76))
-	# Suspended-ceiling grid.
-	var gx := 1.2
-	while gx < W:
-		st.box(R(gx - 0.015, 0.3, H - 0.035), R(gx + 0.015, D, H - 0.01), Color(0.55, 0.56, 0.57))
-		gx += 1.2
-	var gz := 1.5
-	while gz < D:
-		st.box(R(0.0, gz - 0.015, H - 0.035), R(W, gz + 0.015, H - 0.01), Color(0.55, 0.56, 0.57))
-		gz += 1.2
+	var ceil_col: Color = look.get("ceiling", Color(0.78, 0.78, 0.76)) if not look.is_empty() else Color(0.78, 0.78, 0.76)
+	st.box(R(0.0, 0.0, H - 0.01), R(W, D, H + 0.05), ceil_col)
+	# Suspended-ceiling grid (corner shops and the warehouse).
+	if look.is_empty() or String(look.get("lights", "grid")) == "grid":
+		var gx := 1.2
+		while gx < W:
+			st.box(R(gx - 0.015, 0.3, H - 0.035), R(gx + 0.015, D, H - 0.01), Color(0.55, 0.56, 0.57))
+			gx += 1.2
+		var gz := 1.5
+		while gz < D:
+			st.box(R(0.0, gz - 0.015, H - 0.035), R(W, gz + 0.015, H - 0.01), Color(0.55, 0.56, 0.57))
+			gz += 1.2
 	# Skirting.
 	st.box(R(0.02, 0.0, 0.0), R(0.05, D, 0.12), trim)
 	st.box(R(W - 0.05, 0.0, 0.0), R(W - 0.02, D, 0.12), trim)
@@ -413,7 +459,17 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 	var trading_here := biz != null
 	var stone := Color(0.84, 0.81, 0.75) if absi(String(unit.get("id", "")).hash()) % 3 != 0 else Color(0.24, 0.25, 0.27)
 	var clad := brand.darkened(0.62) if trading_here else Color(0.15, 0.16, 0.18)
+	var sign_style := String(ident.get("sign", "painted"))
+	var accent_c: Color = ident.get("accent", Color(1.0, 0.92, 0.7))
 	var fascia := brand if trading_here else Color(0.1, 0.12, 0.16)
+	if trading_here:
+		match sign_style:
+			"lightbox":
+				fascia = accent_c if accent_c.get_luminance() > 0.6 else Color(0.96, 0.96, 0.95)
+			"neon":
+				fascia = brand.darkened(0.7)
+			"script":
+				fascia = accent_c.lerp(Color(0.97, 0.95, 0.9), 0.3)
 	for side in [[0.3, ox.x - 0.05], [ox.y + 0.05, W - 0.3]]:
 		var x0: float = side[0]
 		var x1: float = side[1]
@@ -432,9 +488,11 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 				_glow_quad(R(px0, -0.095, py0), R(px1, -0.095, py1), brand.lightened(0.12) * 0.75)
 				_glow_quad(R(px0, -0.097, py1 - 0.32), R(px1, -0.097, py1 - 0.06), Color(0.98, 0.9, 0.55))
 				var promo := Label3D.new()
-				var lines: String = PROMOS[absi(hash([unit.get("id", ""), x0])) % PROMOS.size()]
+				var plist: Array = PROMOS_BY.get(type_id, PROMOS)
+				var lines: String = plist[absi(hash([unit.get("id", ""), x0])) % plist.size()]
 				promo.text = lines
 				promo.font_size = 72
+				promo.font = ShopStyle.font(String(ident.get("face", "")))
 				promo.pixel_size = clampf((px1 - px0) / 520.0, 0.0018, 0.004)
 				promo.shaded = false
 				promo.double_sided = false
@@ -464,27 +522,47 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 		_solid(R(px, -0.22, 0.0), R(px + 0.34, 0.0, fy))
 	# Fascia and cornice.
 	st.box(R(0.3, -0.3, fy), R(W - 0.3, -0.01, fy + 0.78), fascia)
+	if trading_here and sign_style == "lightbox":
+		_glow_quad(R(0.35, -0.305, fy + 0.04), R(W - 0.35, -0.305, fy + 0.74), fascia * 0.9)
+	if trading_here and String(ident.get("initial", "")) != "":
+		# The logo: a roundel-ish badge with the initial at the fascia's left.
+		var lx0 := 0.55
+		st.box(R(lx0, -0.34, fy + 0.07), R(lx0 + 0.64, -0.29, fy + 0.71), accent_c if sign_style != "lightbox" else brand)
+		st.box(R(lx0 + 0.05, -0.35, fy + 0.12), R(lx0 + 0.59, -0.335, fy + 0.66), brand if sign_style != "lightbox" else accent_c)
+		var logo := Label3D.new()
+		logo.text = String(ident["initial"])
+		logo.font = ShopStyle.font(String(ident.get("face", "")))
+		logo.font_size = 120
+		logo.pixel_size = 0.0034
+		logo.shaded = false
+		logo.outline_size = 0
+		logo.modulate = accent_c if sign_style != "lightbox" else brand
+		logo.position = R(lx0 + 0.32, -0.36, fy + 0.39)
+		_static.add_child(logo)
 	st.box(R(0.3, -0.33, fy - 0.07), R(W - 0.3, -0.01, fy), fascia.lightened(0.3) if trading_here else Color(0.3, 0.32, 0.35))
 	st.box(R(-0.12, -0.4, fy + 0.78), R(W + 0.12, -0.01, fy + 0.94), stone.lightened(0.05))
 	if trading_here:
-		# A striped awning over the door and windows, sloping out to a valance.
+		# A striped awning over the door and windows, sloping out to a valance
+		# (painted and script fronts; lightbox and neon ones go without).
 		var c0 := ox.x - 0.45
+		var awning := sign_style in ["painted", "script"]
 		var c1 := ox.y + 0.45
 		var cream := Color(0.95, 0.92, 0.84)
 		var ay0 := fy - 0.08
 		var ay1 := fy - 0.7
 		var ad := -1.45
 		var stripes := maxi(4, int((c1 - c0) / 0.42))
-		for i in stripes:
+		for i in (stripes if awning else 0):
 			var xa := lerpf(c0, c1, float(i) / stripes)
 			var xb := lerpf(c0, c1, float(i + 1) / stripes)
-			var sc := fascia if i % 2 == 0 else cream
+			var sc := brand if i % 2 == 0 else cream
 			st.sheet(R(xa, -0.28, ay0), R(xb, -0.28, ay0), R(xb, ad, ay1), R(xa, ad, ay1), sc)
 			st.sheet(R(xa, ad, ay1), R(xb, ad, ay1), R(xb, ad, ay1 - 0.24), R(xa, ad, ay1 - 0.24), sc.darkened(0.08))
-		for ex: float in [c0, c1]:
-			st._tri(R(ex, -0.28, ay0), R(ex, ad, ay1), R(ex, -0.28, ay1), Vector3.RIGHT, fascia.darkened(0.2))
-			st._tri(R(ex, -0.28, ay0), R(ex, -0.28, ay1), R(ex, ad, ay1), Vector3.LEFT, fascia.darkened(0.2))
-		st.box(R(c0, -0.3, ay0 - 0.04), R(c1, -0.22, ay0 + 0.06), Color(0.12, 0.12, 0.13))  # roller box
+		if awning:
+			for ex: float in [c0, c1]:
+				st._tri(R(ex, -0.28, ay0), R(ex, ad, ay1), R(ex, -0.28, ay1), Vector3.RIGHT, fascia.darkened(0.2))
+				st._tri(R(ex, -0.28, ay0), R(ex, -0.28, ay1), R(ex, ad, ay1), Vector3.LEFT, fascia.darkened(0.2))
+			st.box(R(c0, -0.3, ay0 - 0.04), R(c1, -0.22, ay0 + 0.06), Color(0.12, 0.12, 0.13))  # roller box
 		if rival.get("for_sale", false):
 			# An estate agent's board on the wall over the fascia.
 			var bx0 := W - 2.3
@@ -541,7 +619,23 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 	_sign.width = (W - 1.0) / 0.0045
 	_sign.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_static.add_child(_sign)
-	if not rival.is_empty():
+	if trading_here:
+		# The brand's typeface and sign style.
+		_sign.font = ShopStyle.font(String(ident.get("face", "")))
+		_sign.position.x += 0.35  # (clear of the logo)
+		_sign.width = (W - 1.9) / _sign.pixel_size
+		match sign_style:
+			"lightbox":
+				_sign.modulate = brand
+			"neon":
+				_sign.modulate = (accent_c if accent_c.get_luminance() > 0.3 else brand.lightened(0.4)) * 2.2
+				_sign.outline_size = 18
+				_sign.outline_modulate = Color(brand.lightened(0.2), 0.55)
+			"script":
+				_sign.modulate = brand
+			_:
+				_sign.modulate = accent_c
+	if not rival.is_empty() and not rival.get("firm", false):
 		_sign.modulate = Color(1.0, 1.0, 1.0)
 	var lit := biz != null and biz.has_upgrade("signage")
 	if lit:
@@ -551,7 +645,8 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 		_sign_light.light_energy = 1.2
 		_sign_light.omni_range = 5.0
 		_static.add_child(_sign_light)
-		_sign.modulate = Color(1.4, 1.2, 0.8)
+		if sign_style != "neon":
+			_sign.modulate = _sign.modulate * 1.35
 	# OPEN / CLOSED / TO LET card in the door glass.
 	_open_sign = Label3D.new()
 	_open_sign.font_size = 64
@@ -564,7 +659,8 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 
 func _sign_text() -> String:
 	if biz:
-		return biz.name.to_upper()
+		# (Script faces read best as written; the rest in capitals.)
+		return biz.name if String(ident.get("face", "")) in ["script", "retro"] else biz.name.to_upper()
 	return "TO LET" if kind == "shop" else String(unit.get("name", "")).to_upper()
 
 
@@ -616,19 +712,33 @@ func _place_fixtures(st: _Batch, part_d: float) -> void:
 		return
 	var sites := _fixture_sites(part_d)
 	var want: Array = []
-	for k in ["fridge", "coffee", "pickmix", "shelf"]:
+	for k in ["fridge", "coffee", "hotcab", "cake", "pickmix", "techtable", "table", "rail", "shelf"]:
 		for u in int(biz.fixtures.get(k, 0)):
 			want.append([k, u])
 	var back_sites := sites.filter(func(s): return s["wall"] == "back")
-	var other_sites := sites.filter(func(s): return s["wall"] != "back")
+	var mid_sites := sites.filter(func(s): return s["wall"] == "gondola")
+	var left_sites := sites.filter(func(s): return s["wall"] == "left")
+	_mid_used = false
 	for w in want:
 		var site: Dictionary
-		if (w[0] == "fridge" or w[0] == "coffee") and not back_sites.is_empty():
+		var k: String = w[0]
+		if k in ["fridge", "coffee", "hotcab", "cake"] and not back_sites.is_empty():
 			site = back_sites.pop_front()
-		elif not other_sites.is_empty():
-			site = other_sites.pop_front()
+		elif k in ["table", "techtable"] and not mid_sites.is_empty():
+			site = mid_sites.pop_front()
+			_mid_used = true
+		elif k in ["rail", "shelf"] and not left_sites.is_empty():
+			site = left_sites.pop_front()
+		elif type_id == "convenience" and not mid_sites.is_empty():
+			site = mid_sites.pop_front()
+			_mid_used = true
+		elif not left_sites.is_empty():
+			site = left_sites.pop_front()
 		elif not back_sites.is_empty():
 			site = back_sites.pop_front()
+		elif not mid_sites.is_empty():
+			site = mid_sites.pop_front()
+			_mid_used = true
 		else:
 			push_warning("ShopInterior: no room for a %s in %s" % [w[0], unit.get("id")])
 			continue
@@ -638,7 +748,8 @@ func _place_fixtures(st: _Batch, part_d: float) -> void:
 func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 	var al: Vector3 = site["along"]
 	var out: Vector3 = site["out"]
-	var dep := FRIDGE_D if k == "fridge" else (0.75 if k == "pickmix" else SHELF_D)
+	var dep := FRIDGE_D if k == "fridge" else (0.75 if k == "pickmix" else ({"rail": 0.6, "table": 0.9, "cake": 0.75,
+		"hotcab": 0.75, "techtable": 0.95}.get(k, SHELF_D) as float))
 	var o: Vector3 = (site["back"] as Vector3) + out * dep  # the front edge (shoppers' side)
 	var tall := 2.05 if k == "fridge" else 1.85
 	# Footprint: from o along BAY, from o back (−out) by dep.
@@ -660,6 +771,55 @@ func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 			var m0 := o + al * 0.5 - out * 0.45
 			st.box(m0 + Vector3(-0.3, 0.95, -0.3).abs() * 0.0 + Vector3(0, 0.95, 0), m0 + al * 0.9 + out * 0.3 + Vector3(0, 1.65, 0), Color(0.1, 0.1, 0.11))
 			_glow_quad_v(o + al * 0.6 + Vector3.UP * 1.35, o + al * 1.2 + Vector3.UP * 1.55, out, Color(1.0, 0.6, 0.25))
+		"rail":
+			# A chrome clothes rail: two uprights, the bar, a base rail.
+			var steel := Color(0.78, 0.79, 0.8)
+			var r0 := o - out * dep * 0.5
+			for e2: float in [0.03, BAY - 0.03]:
+				var up := r0 + al * e2
+				st.box(up - Vector3(0.02, 0, 0.02), up + Vector3(0.02, 1.62, 0.02), steel)
+				st.box(up - Vector3(0.025, 0, 0.025) - out * 0.22, up + Vector3(0.025, 0.04, 0.025) + out * 0.22, steel.darkened(0.3))
+			var b0 := r0 + Vector3.UP * 1.58
+			var b1 := r0 + al * BAY + Vector3.UP * 1.62
+			st.box(b0.min(b1) - Vector3(0.012, 0, 0.012), b0.max(b1) + Vector3(0.012, 0, 0.012), steel)
+			tall = 1.65
+		"table":
+			# A low timber display table for folded stock.
+			var wood := Color(0.62, 0.45, 0.3)
+			st.box(Vector3(lo.x, 0.74, lo.z), Vector3(hi.x, 0.8, hi.z), wood)
+			for cx in [0.08, BAY - 0.08]:
+				for cz in [0.08, dep - 0.08]:
+					var lp: Vector3 = o + al * float(cx) - out * float(cz)
+					st.box(lp - Vector3(0.03, 0, 0.03), lp + Vector3(0.03, 0.74, 0.03), wood.darkened(0.35))
+			tall = 0.8
+		"cake":
+			# A glass-fronted display counter, lit inside.
+			st.box(Vector3(lo.x, 0.0, lo.z), Vector3(hi.x, 0.86, hi.z), Color(0.92, 0.9, 0.86) if type_id != "cafe" else brand.darkened(0.25))
+			st.box(Vector3(lo.x, 0.86, lo.z), Vector3(hi.x, 0.9, hi.z), Color(0.35, 0.3, 0.26))
+			st.box(Vector3(lo.x, 1.42, lo.z), Vector3(hi.x, 1.46, hi.z), Color(0.35, 0.3, 0.26))
+			var gm := o + Vector3.UP * 0.9
+			_glass_box(gm.min(gm + al * BAY - out * dep), (gm + al * BAY).max(gm - out * dep) + Vector3.UP * 0.52)
+			_glow_quad(Vector3(lo.x + 0.05, 1.415, lo.z + 0.05), Vector3(hi.x - 0.05, 1.415, hi.z - 0.05), Color(1.0, 0.93, 0.8) * 1.3, true)
+			tall = 1.46
+		"hotcab":
+			# Stainless heated cabinet on a counter, glowing orange inside.
+			var ss := Color(0.74, 0.75, 0.77)
+			st.box(Vector3(lo.x, 0.0, lo.z), Vector3(hi.x, 0.9, hi.z), ss.darkened(0.15))
+			st.box(Vector3(lo.x, 0.9, lo.z), Vector3(hi.x, 0.95, hi.z), ss)
+			st.box(Vector3(lo.x, 1.45, lo.z), Vector3(hi.x, 1.5, hi.z), ss)
+			var hm := o + Vector3.UP * 0.95
+			_glass_box(hm.min(hm + al * BAY - out * dep), (hm + al * BAY).max(hm - out * dep) + Vector3.UP * 0.5)
+			_glow_quad(Vector3(lo.x + 0.05, 1.44, lo.z + 0.05), Vector3(hi.x - 0.05, 1.44, hi.z - 0.05), Color(1.0, 0.55, 0.2) * 1.6, true)
+			# Extraction hood over it.
+			var hd0 := o - out * dep + Vector3.UP * 2.35
+			st.box(hd0.min(hd0 + al * BAY + out * 0.55), hd0.max(hd0 + al * BAY + out * 0.55) + Vector3.UP * 0.35, ss)
+			tall = 1.5
+		"techtable":
+			# A white demo table with devices laid out.
+			st.box(Vector3(lo.x, 0.82, lo.z), Vector3(hi.x, 0.9, hi.z), Color(0.97, 0.97, 0.98))
+			st.box(Vector3(lo.x + 0.2, 0.0, lo.z + 0.2), Vector3(hi.x - 0.2, 0.82, hi.z - 0.2), Color(0.9, 0.9, 0.92))
+			_glow_quad(Vector3(lo.x + 0.02, 0.81, lo.z + 0.02), Vector3(hi.x - 0.02, 0.81, hi.z - 0.02), brand.lightened(0.3) * 0.8, true)
+			tall = 0.9
 		"pickmix":
 			st.box(Vector3(lo.x, 0.0, lo.z), Vector3(hi.x, 0.9, hi.z), Color(0.95, 0.5, 0.7))
 			for i in 6:
@@ -710,6 +870,22 @@ func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 				a0 = 0.1
 				wdt = BAY - 0.2
 				y = 0.9
+			"rail":
+				a0 = 0.08 + j * (BAY * 0.5)
+				wdt = BAY * 0.5 - 0.12
+				y = 1.58
+			"table":
+				a0 = 0.08 + j * (BAY * 0.5)
+				wdt = BAY * 0.5 - 0.12
+				y = 0.8
+			"cake", "techtable":
+				a0 = 0.06 + j * (BAY / 3.0)
+				wdt = BAY / 3.0 - 0.1
+				y = 0.9
+			"hotcab":
+				a0 = 0.06 + j * (BAY * 0.5)
+				wdt = BAY * 0.5 - 0.1
+				y = 0.95
 		slot_box[si] = [o + al * a0 - out * 0.05, al, out, wdt, y, dep - 0.1]
 		var pick := o + al * (a0 + wdt * 0.5) + out * 0.75
 		pick.y = 0.0
@@ -966,9 +1142,18 @@ func _slot_goods(si: int, s: Dictionary, by_shape: Dictionary) -> void:
 	var wdt: float = sb[3]
 	var y: float = sb[4]
 	var dep: float = sb[5]
+	if shape == "garment":
+		_hanging_goods(si, s, by_shape, sb, sz)
+		return
 	var across := maxi(int(wdt / (sz.x + 0.015)), 1)
 	var rows := maxi(int(minf(dep, 0.5) / (sz.z + 0.02)), 1)
 	var stack := 2 if shape in ["can", "bar", "box"] and s["fixture"] != "coffee" else 1
+	if shape == "folded":
+		stack = 5
+	elif shape == "shoebox":
+		stack = 2
+	elif s["fixture"] in ["cake", "hotcab", "techtable"]:
+		stack = 1
 	var max_vis := across * rows * stack
 	var vis := clampi(int(ceil(float(s["qty"]) / float(s["cap"]) * max_vis)), 1, max_vis)
 	var col := EmpireData.colour(pid)
@@ -989,6 +1174,27 @@ func _slot_goods(si: int, s: Dictionary, by_shape: Dictionary) -> void:
 				n += 1
 
 
+## Clothes on a rail: side by side along it, hanging from the bar.
+func _hanging_goods(si: int, s: Dictionary, by_shape: Dictionary, sb: Array, sz: Vector3) -> void:
+	var o: Vector3 = sb[0]
+	var al: Vector3 = sb[1]
+	var out: Vector3 = sb[2]
+	var wdt: float = sb[3]
+	var y: float = sb[4]
+	var dep: float = sb[5]
+	var n := maxi(int(wdt / 0.075), 1)
+	var vis := clampi(int(ceil(float(s["qty"]) / float(s["cap"]) * n)), 1, n)
+	var col := EmpireData.colour(String(s["product"]))
+	var b := Basis.looking_at(al, Vector3.UP)  # (the garment's flat side along the rail)
+	var mid := o - out * (dep * 0.5 + 0.05)
+	if not by_shape.has("garment"):
+		by_shape["garment"] = []
+	for i in vis:
+		var p := mid + al * ((i + 0.5) * wdt / n) + Vector3.UP * (y + 0.02 - sz.y * 0.5)
+		var tint := col * (1.0 - 0.07 * float(i % 3))
+		by_shape["garment"].append([Transform3D(b, p), Color(tint.r, tint.g, tint.b, 1.0)])
+
+
 static func shape_size(shape: String) -> Vector3:
 	match shape:
 		"can": return Vector3(0.068, 0.122, 0.068)
@@ -1000,6 +1206,13 @@ static func shape_size(shape: String) -> Vector3:
 		"pack": return Vector3(0.22, 0.22, 0.11)
 		"cup": return Vector3(0.09, 0.11, 0.09)
 		"case": return Vector3(0.48, 0.32, 0.36)
+		"garment": return Vector3(0.44, 0.66, 0.05)
+		"folded": return Vector3(0.28, 0.06, 0.24)
+		"shoebox": return Vector3(0.32, 0.12, 0.2)
+		"pastry": return Vector3(0.13, 0.06, 0.09)
+		"cake": return Vector3(0.11, 0.08, 0.11)
+		"foodbox": return Vector3(0.16, 0.08, 0.12)
+		"phone": return Vector3(0.075, 0.012, 0.15)
 	return Vector3(0.12, 0.17, 0.06)  # box
 
 
@@ -1023,12 +1236,265 @@ static func shape_mesh(shape: String) -> Mesh:
 		"case":
 			b.box(-h, h, Color.WHITE)
 			b.box(Vector3(-h.x - 0.002, h.y - 0.05, -0.04), Vector3(h.x + 0.002, h.y + 0.002, 0.04), Color(0.82, 0.78, 0.62))
+		"garment":
+			# On a hanger: shoulders and body, sleeves, a hook.
+			b.box(Vector3(-h.x * 0.62, -h.y, -h.z), Vector3(h.x * 0.62, h.y - 0.04, h.z), Color.WHITE)
+			b.box(Vector3(-h.x, h.y - 0.3, -h.z * 0.8), Vector3(h.x, h.y - 0.04, h.z * 0.8), Color(0.94, 0.94, 0.94))
+			b.box(Vector3(-0.1, h.y - 0.05, -0.005), Vector3(0.1, h.y - 0.03, 0.005), Color(0.3, 0.22, 0.15))
+			b.box(Vector3(-0.005, h.y - 0.03, -0.005), Vector3(0.005, h.y + 0.04, 0.005), Color(0.7, 0.7, 0.72))
+		"folded":
+			b.box(-h, h, Color.WHITE)
+			b.box(Vector3(-h.x, -h.y * 0.2, -h.z - 0.002), Vector3(h.x, h.y * 0.2, -h.z + 0.01), Color(0.88, 0.88, 0.88))
+		"shoebox":
+			b.box(-h, h, Color.WHITE)
+			b.box(Vector3(-h.x - 0.003, h.y - 0.035, -h.z - 0.003), Vector3(h.x + 0.003, h.y + 0.003, h.z + 0.003), Color(0.25, 0.25, 0.27))
+		"pastry", "cake":
+			b.cylinder(Vector3(0, -h.y, 0), h.x, sz.y, Color.WHITE, 10)
+			b.cylinder(Vector3(0, h.y - 0.012, 0), h.x * 0.92, 0.014, Color(0.96, 0.92, 0.85), 10)
+		"foodbox":
+			b.box(-h, h, Color(0.97, 0.96, 0.94))
+			b.box(Vector3(-h.x - 0.002, -h.y * 0.4, -h.z - 0.002), Vector3(h.x + 0.002, h.y * 0.3, h.z + 0.002), Color.WHITE)
+		"phone":
+			b.box(-h, h, Color.WHITE)
+			b.box(Vector3(-h.x * 0.88, h.y, -h.z * 0.9), Vector3(h.x * 0.88, h.y + 0.002, h.z * 0.9), Color(0.05, 0.06, 0.08))
 		_:
 			b.box(-h, h, Color.WHITE)
 			b.box(Vector3(-h.x * 0.8, -h.y * 0.2, h.z - 0.004), Vector3(h.x * 0.8, h.y * 0.45, h.z + 0.002), Color(0.95, 0.95, 0.95))
 	var m := b.commit()
 	_shape_meshes[shape] = m
 	return m
+
+
+# ------------------------------------------------------------ dressing
+var _glass: _Batch
+
+
+## A transparent box (display counters, hot cabinets): one mesh per room.
+func _glass_box(lo: Vector3, hi: Vector3) -> void:
+	if _glass == null:
+		_glass = _Batch.new()
+	_glass.box(lo, hi, Color(0.75, 0.85, 0.9, 0.16))
+
+
+func _ceiling_lights(st: _Batch, part_d: float, tint: Color) -> void:
+	var kind_l := String(look.get("lights", "grid"))
+	match kind_l:
+		"pendant":
+			# Rows of pendant shades on cords, warm pools of light.
+			for ix in 3:
+				for iz in 2:
+					var px := W * (0.2 + 0.3 * ix)
+					var pd := part_d * (0.3 + 0.4 * iz)
+					var drop := 1.15
+					st.box(R(px - 0.008, pd - 0.008, H - drop + 0.2), R(px + 0.008, pd + 0.008, H), Color(0.1, 0.1, 0.1))
+					var shade := ident.get("accent", Color(0.15, 0.15, 0.16)) as Color if type_id == "bakery" else Color(0.12, 0.12, 0.13)
+					_batch_cone(st, R(px, pd, H - drop), 0.24, 0.07, 0.22, shade)
+					_glow_quad(R(px - 0.12, pd - 0.12, H - drop - 0.005), R(px + 0.12, pd + 0.12, H - drop - 0.005), tint * 1.6, true)
+		"track":
+			# Black track runs with spot heads aimed at the rails.
+			for tx: float in [W * 0.3, W * 0.68]:
+				st.box(R(tx - 0.02, 0.6, H - 0.06), R(tx + 0.02, part_d - 0.4, H - 0.01), Color(0.08, 0.08, 0.09))
+				var dd := 0.9
+				while dd < part_d - 0.5:
+					st.box(R(tx - 0.05, dd - 0.05, H - 0.24), R(tx + 0.05, dd + 0.05, H - 0.06), Color(0.1, 0.1, 0.11))
+					_glow_quad(R(tx - 0.04, dd - 0.04, H - 0.245), R(tx + 0.04, dd + 0.04, H - 0.245), tint * 2.0, true)
+					dd += 1.1
+		"linear":
+			for lx: float in [W * 0.25, W * 0.5, W * 0.75]:
+				_glow_quad(R(lx - 0.04, 0.5, H - 0.02), R(lx + 0.04, part_d - 0.4, H - 0.02), tint * 1.5, true)
+		"panel":
+			for ix in 3:
+				for iz in 2:
+					var px2 := W * (0.2 + 0.3 * ix)
+					var pd2 := part_d * (0.28 + 0.44 * iz)
+					_glow_quad(R(px2 - 0.45, pd2 - 0.45, H - 0.02), R(px2 + 0.45, pd2 + 0.45, H - 0.02), tint * 1.1, true)
+		_:
+			for ix in 2:
+				for iz in 2:
+					var px3 := W * (0.28 + 0.44 * ix)
+					var pd3 := part_d * (0.28 + 0.44 * iz)
+					_glow_quad(R(px3 - 0.6, pd3 - 0.25, H - 0.02), R(px3 + 0.6, pd3 + 0.25, H - 0.02), tint * 0.95, true)
+
+
+## A cone (lamp shade) in room space: base radius r0 at the bottom, r1 at the top.
+func _batch_cone(st: _Batch, base: Vector3, r0: float, r1: float, h: float, c: Color) -> void:
+	var seg := 10
+	for i in seg:
+		var a0 := TAU * i / seg
+		var a1 := TAU * (i + 1) / seg
+		var p0 := base + Vector3(cos(a0) * r0, 0, sin(a0) * r0)
+		var p1 := base + Vector3(cos(a1) * r0, 0, sin(a1) * r0)
+		var q0 := base + Vector3(cos(a0) * r1, h, sin(a0) * r1)
+		var q1 := base + Vector3(cos(a1) * r1, h, sin(a1) * r1)
+		st.sheet(p0, p1, q1, q0, c)
+
+
+## Café, takeaway, bakery, clothes and phone shops: a feature wall, a menu
+## board or a mirror, and the spare floor dressed for the trade.
+func _decor_trade(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float) -> void:
+	var accent: Color = ident.get("accent", Color(0.95, 0.92, 0.85))
+	# Feature wall behind the counter in the brand colour, a band under the ceiling.
+	st.box(R(W - 0.05, 0.4, 0.0), R(W - 0.03, part_d - 0.1, H - 0.4), brand.darkened(0.1))
+	st.box(R(0.03, 0.3, H - 0.55), R(0.06, part_d, H - 0.42), brand)
+	if look.get("tiles", false):
+		# White metro tiles to 1.4 m on the left wall: a pale band with grout lines.
+		st.box(R(0.03, 0.3, 0.1), R(0.055, part_d, 1.4), Color(0.97, 0.97, 0.96))
+		var ty := 0.25
+		while ty < 1.4:
+			st.box(R(0.055, 0.3, ty), R(0.058, part_d, ty + 0.012), Color(0.82, 0.82, 0.8))
+			ty += 0.15
+	elif look.get("dado", false):
+		st.box(R(0.03, 0.3, 0.1), R(0.05, part_d, 1.0), brand.lerp(Color(0.95, 0.93, 0.9), 0.55))
+		st.box(R(0.05, 0.3, 1.0), R(0.06, part_d, 1.05), Color(0.9, 0.88, 0.84))
+	# Entrance mat in the brand colour.
+	var mid := (door.x + door.y) * 0.5
+	st.box(R(mid - 0.9, 0.32, 0.0), R(mid + 0.9, 1.4, 0.018), Color(0.14, 0.14, 0.15))
+	st.box(R(mid - 0.75, 0.42, 0.018), R(mid + 0.75, 1.3, 0.022), brand.darkened(0.2))
+	var decor := String(look.get("decor", ""))
+	if decor in ["seating", "stools"]:
+		_menu_board(st, part_d)
+	# The middle of the floor, if the fixtures left it free.
+	var gx0 := 1.95
+	var gx1 := W - 3.7
+	var free_mid := not _mid_used and gx1 - gx0 >= 1.0
+	match decor:
+		"seating":
+			if free_mid:
+				var dd := 2.4
+				while dd + 1.2 < part_d - 1.2:
+					_cafe_table(st, R((gx0 + gx1) * 0.5, dd + 0.6, 0.0), accent)
+					dd += 1.9
+			_window_bar(st, accent)
+		"stools":
+			_window_bar(st, accent)
+			if free_mid:
+				var dd2 := 2.4
+				while dd2 + 1.2 < part_d - 1.2:
+					_cafe_table(st, R((gx0 + gx1) * 0.5, dd2 + 0.6, 0.0), Color(0.85, 0.85, 0.86))
+					dd2 += 1.9
+		"boutique":
+			# Mannequins in the window, a mirror, a rug.
+			_mannequin(st, R(door.y + 0.9, 0.75, 0.0))
+			if door.x - 0.9 > 0.6:
+				_mannequin(st, R(door.x - 0.9, 0.75, 0.0))
+			st.box(R(0.06, part_d - 2.6, 0.2), R(0.08, part_d - 1.6, 2.3), Color(0.75, 0.82, 0.86))
+			st.box(R(0.055, part_d - 2.65, 0.15), R(0.075, part_d - 1.55, 2.35), Color(0.75, 0.62, 0.35))
+			st.box(R(gx0 - 0.3, 1.6, 0.0), R(gx1 + 0.3, part_d - 1.4, 0.015), brand.lerp(Color(0.9, 0.86, 0.8), 0.5))
+		"plinths":
+			# White plinths with a hero device on each, a big brand screen.
+			var px := door.y + 0.9
+			if px < W - 2.8:
+				st.box(R(px - 0.3, 0.6, 0.0), R(px + 0.3, 1.2, 1.0), Color(0.97, 0.97, 0.98))
+				st.box(R(px - 0.08, 0.84, 1.0), R(px + 0.08, 0.96, 1.25), Color(0.1, 0.1, 0.12))
+				_solid(R(px - 0.3, 0.6, 0.0), R(px + 0.3, 1.2, 1.0))
+			_glow_quad(R(0.07, part_d - 2.8, 1.2), R(0.07, part_d - 0.6, 2.5), brand.lightened(0.15) * 1.1)
+	# A tall plant by the window.
+	if decor != "stools":
+		var pxp := 0.55
+		st.box(R(pxp - 0.2, 0.4, 0.0), R(pxp + 0.2, 0.8, 0.42), accent.darkened(0.3))
+		st.box(R(pxp - 0.32, 0.28, 0.42), R(pxp + 0.32, 0.92, 1.25), Color(0.2, 0.45, 0.22))
+		st.box(R(pxp - 0.2, 0.4, 1.25), R(pxp + 0.2, 0.8, 1.6), Color(0.25, 0.52, 0.25))
+		_solid(R(pxp - 0.32, 0.28, 0.0), R(pxp + 0.32, 0.92, 1.0))
+	# Card machine sign over the counter.
+	var hd := (cd0 + cd1) * 0.5
+	st.box(R(cx0 - 0.1, hd - 0.6, 2.8), R(cx0 - 0.04, hd + 0.6, 3.15), brand)
+	for e: float in [-0.45, 0.45]:
+		st.box(R(cx0 - 0.08, hd + e - 0.01, 3.15), R(cx0 - 0.06, hd + e + 0.01, H), Color(0.3, 0.3, 0.32))
+	var lab := Label3D.new()
+	lab.text = {"cafe": "ORDER HERE", "takeaway": "ORDER & COLLECT", "bakery": "PAY HERE", "clothing": "TILLS", "phones": "PAY & COLLECT"}.get(type_id, "PAY HERE")
+	lab.font = ShopStyle.font(String(ident.get("face", "")))
+	lab.font_size = 52
+	lab.pixel_size = 0.0036
+	lab.outline_size = 0
+	lab.shaded = false
+	lab.modulate = accent
+	lab.position = R(cx0 - 0.115, hd, 2.975)
+	lab.rotation.y = -PI * 0.5
+	_static.add_child(lab)
+
+
+## A menu board over the back counter: the shop's products and prices.
+func _menu_board(st: _Batch, part_d: float) -> void:
+	var x0 := 0.5
+	var x1 := minf(W - 2.8, x0 + 4.2)
+	if x1 - x0 < 1.5:
+		return
+	var neon := type_id == "takeaway"
+	st.box(R(x0, part_d - 0.06, 2.3), R(x1, part_d - 0.02, 3.35), Color(0.08, 0.08, 0.09) if not neon else brand.darkened(0.55))
+	if neon:
+		# Backlit picture panels of the food.
+		var n := 3
+		for i in n:
+			var a := lerpf(x0 + 0.1, x1 - 0.1, float(i) / n)
+			var b := lerpf(x0 + 0.1, x1 - 0.1, float(i + 1) / n) - 0.08
+			_glow_quad(R(a, part_d - 0.065, 2.85), R(b, part_d - 0.065, 3.28), [Color(1.0, 0.75, 0.3), Color(0.95, 0.45, 0.25), Color(1.0, 0.9, 0.6)][i] * 1.2)
+	var lines: Array = []
+	var seen := {}
+	if biz:
+		for sl: Dictionary in biz.slots:
+			var pid := String(sl["product"])
+			if pid == "" or seen.has(pid):
+				continue
+			seen[pid] = true
+			lines.append("%s  %s" % [String(EmpireData.product(pid)["name"]), EmpireData.money(biz.price(pid), true)])
+	var menu := Label3D.new()
+	menu.text = "\n".join(lines.slice(0, 6))
+	menu.font = ShopStyle.font("condensed")
+	menu.font_size = 64
+	menu.pixel_size = 0.0042
+	menu.shaded = false
+	menu.modulate = Color(0.97, 0.95, 0.88)
+	menu.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	menu.position = R((x0 + x1) * 0.5, part_d - 0.07, 2.62 if neon else 2.85)
+	menu.rotation.y = 0.0  # (faces into the shop)
+	_static.add_child(menu)
+
+
+func _cafe_table(st: _Batch, c: Vector3, accent: Color) -> void:
+	var top := Color(0.55, 0.38, 0.24) if type_id != "takeaway" else Color(0.92, 0.92, 0.93)
+	st.cylinder(c, 0.38, 0.74, top.darkened(0.45), 12)
+	st.cylinder(c + Vector3.UP * 0.72, 0.42, 0.04, top, 14)
+	for sx: float in [-0.62, 0.62]:
+		var cp := c + Vector3(sx, 0, 0)
+		st.box(cp + Vector3(-0.2, 0.44, -0.2), cp + Vector3(0.2, 0.48, 0.2), accent.darkened(0.2))
+		for lx: float in [-0.17, 0.17]:
+			for lz: float in [-0.17, 0.17]:
+				st.box(cp + Vector3(lx - 0.015, 0, lz - 0.015), cp + Vector3(lx + 0.015, 0.44, lz + 0.015), Color(0.15, 0.15, 0.16))
+		var back := cp + Vector3(signf(sx) * 0.19, 0.48, 0)
+		st.box(back + Vector3(-0.02, 0, -0.19), back + Vector3(0.02, 0.42, 0.19), accent.darkened(0.2))
+	_solid(c + Vector3(-0.85, 0, -0.42), c + Vector3(0.85, 0.75, 0.42))
+
+
+## A bar along the front window with stools.
+func _window_bar(st: _Batch, accent: Color) -> void:
+	var x0 := door.y + 0.3
+	var x1 := W - 0.4
+	if x1 - x0 < 1.2:
+		return
+	st.box(R(x0, 0.25, 1.02), R(x1, 0.7, 1.07), Color(0.55, 0.38, 0.24) if type_id != "takeaway" else Color(0.9, 0.9, 0.91))
+	for bx: float in [x0 + 0.1, x1 - 0.1]:
+		st.box(R(bx - 0.03, 0.4, 0.0), R(bx + 0.03, 0.55, 1.02), Color(0.15, 0.15, 0.16))
+	var sx := x0 + 0.4
+	while sx < x1 - 0.3:
+		st.cylinder(R(sx, 1.0, 0.0), 0.025, 0.72, Color(0.15, 0.15, 0.16), 6)
+		st.cylinder(R(sx, 1.0, 0.72), 0.18, 0.06, accent.darkened(0.15), 10)
+		sx += 0.7
+	_solid(R(x0, 0.25, 0.0), R(x1, 0.7, 1.07))
+
+
+## A shop-window mannequin in an outfit of the brand's colours.
+func _mannequin(st: _Batch, p: Vector3) -> void:
+	var skin := Color(0.92, 0.92, 0.9)
+	var outfit: Color = brand.lerp(Color(0.95, 0.93, 0.9), 0.15)
+	st.cylinder(p, 0.18, 0.03, Color(0.2, 0.2, 0.22), 10)
+	st.cylinder(p, 0.02, 0.8, Color(0.6, 0.6, 0.62), 6)
+	st.box(p + Vector3(-0.17, 0.8, -0.1), p + Vector3(0.17, 1.05, 0.1), Color(0.18, 0.2, 0.28))
+	st.box(p + Vector3(-0.19, 1.05, -0.11), p + Vector3(0.19, 1.5, 0.11), outfit)
+	st.box(p + Vector3(-0.24, 1.15, -0.06), p + Vector3(-0.19, 1.48, 0.06), outfit)
+	st.box(p + Vector3(0.19, 1.15, -0.06), p + Vector3(0.24, 1.48, 0.06), outfit)
+	st.cylinder(p + Vector3(0, 1.5, 0), 0.045, 0.08, skin, 8)
+	st.box(p + Vector3(-0.08, 1.58, -0.09), p + Vector3(0.08, 1.8, 0.09), skin)
+	_solid(p + Vector3(-0.25, 0, -0.2), p + Vector3(0.25, 1.8, 0.2))
 
 
 # ------------------------------------------------------------ helpers
