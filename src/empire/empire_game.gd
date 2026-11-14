@@ -51,6 +51,8 @@ var time_scale := 1.0    # 1 normal, 3 fast (only with nobody needing you)
 var minutes_per_second := 1.0
 var _stream_t := 0.0
 var _save_t := 0.0
+var _dry_pos := Vector3.INF   # the last dry ground the hero stood on (out of the sea)
+var _wet_t := 0.0
 var _last_car_pos := Vector3.ZERO
 var _km_acc := 0.0
 var _clean_t := 0.0
@@ -427,6 +429,8 @@ func _play() -> void:
 func _teleport(p: Vector3, yaw: float) -> void:
 	player.respawn(p)
 	player.last_safe_position = p
+	_dry_pos = p
+	_wet_t = 0.0
 	camera.face(yaw)
 	world.build_all_near(p, 300.0)
 
@@ -462,6 +466,8 @@ func _process(dt: float) -> void:
 	_update_carry_visual()
 	if driving != "":
 		_track_driving()
+	else:
+		_check_wading(dt)
 	_save_t += dt
 	if _save_t > 90.0:
 		_save_t = 0.0
@@ -565,7 +571,7 @@ func _refresh_signs(unit_id: String) -> void:
 	var b := empire.business_at(unit_id)
 	if not si.rival.is_empty():
 		var h := empire.hour()
-		si.update_signs(h >= 7.0 and h < (22.0 if si.rival.get("firm", false) else 23.0))
+		si.update_signs(h >= 7.0 and h < (22.0 if si.rival.get("firm", false) else 23.0), h < 6.5 or h >= 21.5)
 		return
 	si.update_signs(b != null and b.open and b.within_hours(empire.hour()))
 
@@ -1083,6 +1089,30 @@ func _track_driving() -> void:
 	player.global_position = p + Vector3.UP * 1.5
 	if c.in_water and c.water_t > 2.0:
 		_recover_car(c)
+
+
+## On foot the sea has a floor (the cars' water collision) but every quay is
+## too tall to step up: someone who walks off the edge would wade forever.
+## Remember the last dry ground and put them back on it.
+func _check_wading(dt: float) -> void:
+	var p := player.global_position
+	var wet := p.y < Car.WATER_Y + 1.2 and layout.is_water(p)
+	if not wet:
+		_wet_t = 0.0
+		if player.is_on_floor() and not player.stunned:
+			_dry_pos = p
+		return
+	_wet_t += dt
+	if _wet_t < 1.5:
+		return
+	_wet_t = 0.0
+	var back := _dry_pos
+	if back == Vector3.INF:
+		var s := starter_unit()
+		back = Premises.door_point(s) + Premises.outward(s) * 3.0
+	player.respawn(back + Vector3.UP * 0.6)
+	player.last_safe_position = back + Vector3.UP * 0.6
+	ui.toast("Back on dry land", "warn")
 
 
 func _recover_car(c: Car) -> void:

@@ -26,6 +26,7 @@ const float KIND_TRIM = 1.0;
 const float KIND_ROOF = 2.0;
 const float KIND_GLASS = 3.0;
 const float KIND_SIGN = 4.0;
+const float KIND_STONE = 6.0;  // BuildingMesher.KIND_STONE
 
 varying flat float v_kind;
 varying vec3 v_world_normal;
@@ -292,6 +293,19 @@ void fragment() {
 	} else if (v_kind == KIND_TRIM) {
 		albedo = base;
 		rough = 0.7;
+	} else if (v_kind == KIND_STONE) {
+		// Dressed-stone base course: ashlar in 0.45 m courses, joints
+		// staggered every other course, a little tone per block, and a
+		// splash line of grime where it meets the pavement. (UV: metres.)
+		float course = floor(uv.y / 0.45);
+		float bx = uv.x / 1.1 + mod(course, 2.0) * 0.5;
+		float block = hash12(vec2(floor(bx), course) + seed * 13.0);
+		float jy = step(fract(uv.y / 0.45), 0.05);
+		float jx = step(fract(bx), 0.025);
+		albedo = base * (0.9 + 0.16 * block);
+		albedo *= 1.0 - 0.32 * max(jx, jy) * detail;
+		albedo *= mix(0.72, 1.0, smoothstep(0.3, 0.75, uv.y));
+		rough = 0.9;
 	} else if (v_kind == KIND_SIGN) {
 		// Billboard: UV.y is metres up the panel. Frame, a bold headline bar
 		// broken into "words", a thinner strapline and a contrasting stripe.

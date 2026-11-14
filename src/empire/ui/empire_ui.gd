@@ -80,6 +80,34 @@ func _ready() -> void:
 	_title_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_title_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(_title_root)
+	# Keep everything clear of the notch / Dynamic Island / home indicator
+	# (in landscape the island sat on top of the minimap).
+	_safe_root = root
+	root.resized.connect(_apply_safe_area)
+	_apply_safe_area.call_deferred()
+
+
+var _safe_root: Control
+
+
+## Insets the HUD by the display's safe area (none on desktop or in a window).
+func _apply_safe_area() -> void:
+	if _safe_root == null:
+		return
+	var inset := [0.0, 0.0, 0.0, 0.0]  # left, top, right, bottom
+	var sa := DisplayServer.get_display_safe_area()
+	var win := DisplayServer.window_get_size()
+	if sa.size.x > 0 and win.x > 0 and DisplayServer.screen_get_size() == win:
+		var k := _safe_root.size / Vector2(win)
+		inset = [sa.position.x * k.x, sa.position.y * k.y, (win.x - sa.end.x) * k.x, (win.y - sa.end.y) * k.y]
+		# The home indicator inset is tall; the HUD only needs a little of it.
+		inset[3] = minf(inset[3], 14.0)
+	# (Only the HUD: panels and the title are centred, with full-screen dims
+	# that must still reach the edges; floating labels track 3-D points.)
+	hud.offset_left = inset[0]
+	hud.offset_top = inset[1]
+	hud.offset_right = -inset[2]
+	hud.offset_bottom = -inset[3]
 
 
 # ------------------------------------------------------------------ HUD

@@ -1400,6 +1400,10 @@ func _collect(budget: int) -> void:
 
 ## Blocks until every chunk within `radius` of `pos` is built (loading screen).
 func build_all_near(pos: Vector3, radius: float) -> void:
+	# Westbank streams as its own world: without this, a spawn there (the
+	# starter shop) opened on bare sea while its chunks trickled in.
+	if mainland:
+		mainland.build_all_near(pos, radius)
 	var here := Vector2(pos.x, pos.z)
 	for key in _all_keys:
 		var c := (Vector2(key) + Vector2(0.5, 0.5)) * CHUNK

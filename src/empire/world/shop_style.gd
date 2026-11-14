@@ -80,6 +80,49 @@ static func brand(name: String, type_id: String, rival := false) -> Dictionary:
 		"sign": signs[(h / 13) % signs.size()], "initial": initial}
 
 
+## Shopfront joinery, so a street of shops isn't one design repeated:
+##  * timber: painted heritage front, tall stall risers with raised panels
+##    (bakeries, cafés, independents);
+##  * aluminium: anodised frames on a polished granite riser (chains, takeaways);
+##  * steel: slim black frames, glass almost to the floor (fashion, tech).
+## Plus whether it has a roller shutter (down when it's shut at night).
+## `type_id` "" is an empty unit. Stable per unit (`h`, its id's hash).
+const HERITAGE := [Color(0.11, 0.24, 0.2), Color(0.34, 0.1, 0.1), Color(0.12, 0.16, 0.27), Color(0.09, 0.09, 0.1),
+	Color(0.86, 0.83, 0.75), Color(0.24, 0.3, 0.32)]
+static func front(type_id: String, h: int, brand_c: Color, chain := false) -> Dictionary:
+	var pick := float((h / 3) % 100) / 100.0
+	var style := "aluminium"
+	if chain or type_id == "takeaway":
+		style = "aluminium"
+	elif type_id in ["cafe", "bakery"]:
+		style = "timber" if pick < 0.75 else "steel"
+	elif type_id == "clothing":
+		style = "steel" if pick < 0.55 else "timber"
+	elif type_id == "phones":
+		style = "steel" if pick < 0.6 else "aluminium"
+	elif type_id == "convenience":
+		style = "timber" if pick < 0.4 else "aluminium"
+	else:
+		style = "timber" if pick < 0.35 else "aluminium"   # an empty unit: whatever was there
+	var f := {"style": style, "panels": false, "mullion": 0.03}
+	match style:
+		"timber":
+			# Painted in a heritage colour, or a deep shade of the brand's own.
+			var c: Color = HERITAGE[h % HERITAGE.size()] if (h / 11) % 3 != 0 or type_id == "" else brand_c.darkened(0.45)
+			if type_id == "":
+				c = c.lerp(Color(0.5, 0.5, 0.48), 0.35)  # faded paint on an empty shop
+			f.merge({"frame": c, "riser": 0.55, "riser_col": c, "panels": true, "mullion": 0.045}, true)
+		"steel":
+			f.merge({"frame": Color(0.07, 0.07, 0.08), "riser": 0.12, "riser_col": Color(0.07, 0.07, 0.08), "mullion": 0.022}, true)
+		_:
+			var al := Color(0.63, 0.65, 0.67) if (h / 7) % 3 != 0 else Color(0.33, 0.28, 0.22)  # silver or bronze
+			f.merge({"frame": al, "riser": 0.34, "riser_col": Color(0.15, 0.15, 0.16)}, true)
+	var shutter_share := 0.5 if type_id in ["takeaway", "phones", "convenience"] else 0.2
+	f["shutter"] = type_id != "" and float((h / 17) % 100) / 100.0 < shutter_share
+	f["shutter_col"] = Color(0.56, 0.58, 0.6) if (h / 5) % 2 == 0 else brand_c.darkened(0.35)
+	return f
+
+
 ## Interior finish per kind of shop.
 static func look(type_id: String) -> Dictionary:
 	match type_id:

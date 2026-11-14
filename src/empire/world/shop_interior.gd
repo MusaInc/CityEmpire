@@ -88,9 +88,11 @@ static var _shape_meshes := {}
 ## Metres the room sits above its unit's floor level (the terrain under some
 ## lots comes up to a kerb's height over it): set by the game from the ground.
 var lift := 0.0
+var _ground_fn := Callable()
 
 
 func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival := {}) -> void:
+	_ground_fn = ground_fn
 	unit = p_unit
 	biz = p_biz
 	kind = String(unit.get("kind", "shop"))
@@ -431,34 +433,83 @@ func _shell(st: _Batch, wall: Color, trim: Color) -> void:
 	_wall_box(st, ox.x, ox.y, 0.03, 0.3, oh, H, wall)
 
 
-func _shopfront(st: _Batch, trim: Color) -> void:
+func _shopfront(st: _Batch, _trim: Color) -> void:
 	var oh: float = float(unit["oy1"]) - float(unit["oy0"])
 	var gd := 0.12  # glass line, just inside the facade
-	# Frame: posts at the opening edges and the door, transom bar.
-	for x: float in [ox.x, door.x, door.y, ox.y]:
-		st.box(R(x - 0.05, gd - 0.06, 0.0), R(x + 0.05, gd + 0.06, oh), trim)
-	st.box(R(ox.x, gd - 0.06, oh - 0.12), R(ox.y, gd + 0.06, oh), trim)
-	st.box(R(ox.x, gd - 0.06, 0.0), R(door.x, gd + 0.06, 0.35), trim)  # stall risers
-	st.box(R(door.y, gd - 0.06, 0.0), R(ox.y, gd + 0.06, 0.35), trim)
-	_solid(R(ox.x, gd - 0.08, 0.0), R(door.x, gd + 0.08, oh))
-	_solid(R(door.y, gd - 0.08, 0.0), R(ox.y, gd + 0.08, oh))
-	# Glass panes (one transparent mesh).
-	var gm := _Batch.new()
-	gm.box(R(ox.x + 0.05, gd - 0.01, 0.35), R(door.x - 0.05, gd + 0.01, oh - 0.12), Color(0.6, 0.75, 0.8, 0.22))
-	gm.box(R(door.y + 0.05, gd - 0.01, 0.35), R(ox.y - 0.05, gd + 0.01, oh - 0.12), Color(0.6, 0.75, 0.8, 0.22))
-	var gi := MeshInstance3D.new()
-	gi.mesh = gm.commit()
-	gi.material_override = _mat("glass")
-	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_static.add_child(gi)
-	# The frontage across the whole unit, outside the facade: stone
-	# pilasters, display panels either side of the opening, a full-width
-	# fascia under a cornice, and (when trading) a canopy, lamps and a
-	# hanging blade sign. Offset off the wall so nothing z-fights.
-	var fy := oh + 0.15
 	var trading_here := biz != null
-	var stone := Color(0.84, 0.81, 0.75) if absi(String(unit.get("id", "")).hash()) % 3 != 0 else Color(0.24, 0.25, 0.27)
-	var clad := brand.darkened(0.62) if trading_here else Color(0.15, 0.16, 0.18)
+	var hsh := absi(String(unit.get("id", "")).hash())
+	# The joinery: painted timber, anodised aluminium or slim black steel
+	# (ShopStyle.front), its stall risers, mullions and a lobbied door.
+	var sf := ShopStyle.front(type_id if trading_here else "", hsh, brand, not rival.is_empty() and not rival.get("firm", false))
+	var fc: Color = sf["frame"]
+	var rh: float = sf["riser"]
+	var mw: float = sf["mullion"]
+	var th := oh - 0.62   # transom bar (and the door head)
+	var dr := 0.75        # the doors stand this far back, in a lobby
+	var glass_c := Color(0.6, 0.75, 0.8, 0.2)
+	if _glass == null:
+		_glass = _Batch.new()
+	# Reveals: the cut edges of the building's wall, cased in the frame colour.
+	st.box(R(0.28, -0.02, 0.0), R(ox.x + 0.06, gd + 0.08, oh), fc)
+	st.box(R(ox.y - 0.06, -0.02, 0.0), R(W - 0.28, gd + 0.08, oh), fc)
+	st.box(R(ox.x, -0.02, oh - 0.12), R(ox.y, gd + 0.08, oh), fc)
+	# Either side of the door: stall riser, sill, panes split by mullions.
+	var spans: Array = []
+	for side in [[ox.x + 0.06, door.x], [door.y, ox.y - 0.06]]:
+		var x0: float = side[0]
+		var x1: float = side[1]
+		if x1 - x0 < 0.2:
+			continue
+		spans.append([x0, x1])
+		_riser(st, x0, x1, gd, rh, fc, sf)
+		st.box(R(x0, gd - 0.13, rh), R(x1, gd + 0.06, rh + 0.05), fc.lightened(0.15))  # sill
+		var panes := maxi(1, ceili((x1 - x0) / 1.9))
+		for i in panes + 1:
+			var mx := lerpf(x0, x1, float(i) / panes)
+			st.box(R(mx - mw, gd - 0.06, rh), R(mx + mw, gd + 0.05, oh - 0.12), fc)
+		_glass.box(R(x0, gd - 0.01, rh + 0.05), R(x1, gd + 0.01, th), glass_c)
+		_solid(R(x0, gd - 0.08, 0.0), R(x1, gd + 0.08, oh))
+	# Transom bar across the whole front, glazed lights above it.
+	st.box(R(ox.x, gd - 0.07, th), R(ox.y, gd + 0.06, th + 0.07), fc)
+	_glass.box(R(ox.x + 0.06, gd - 0.01, th + 0.07), R(ox.y - 0.06, gd + 0.01, oh - 0.12), glass_c)
+	# The lobby: glazed returns either side, a mosaic floor, a soffit, and
+	# the pair of doors standing open against the returns.
+	for rx: float in [door.x, door.y]:
+		st.box(R(rx - 0.04, gd, 0.0), R(rx + 0.04, dr, rh), fc)                       # return riser
+		st.box(R(rx - 0.05, dr - 0.05, 0.0), R(rx + 0.05, dr + 0.05, th), fc)        # back post
+		st.box(R(rx - 0.04, gd, th - 0.06), R(rx + 0.04, dr, th), fc)                 # top rail
+		_glass.box(R(rx - 0.01, gd, rh), R(rx + 0.01, dr, th - 0.06), glass_c)
+		_solid(R(rx - 0.05, gd, 0.0), R(rx + 0.05, dr, th))
+		var s := 1.0 if rx == door.x else -1.0   # into the doorway
+		var lx := rx + s * 0.035
+		var leaf_c := fc.darkened(0.08)
+		var l0 := lx - 0.025
+		var l1 := lx + 0.025
+		st.box(R(l0, dr, 0.02), R(l1, dr + 0.9, 0.3), leaf_c)                         # kick rail
+		st.box(R(l0, dr, th - 0.2), R(l1, dr + 0.9, th - 0.08), leaf_c)              # top rail
+		for e: float in [dr, dr + 0.84]:
+			st.box(R(l0, e, 0.02), R(l1, e + 0.06, th - 0.08), leaf_c)                 # stiles
+		_glass.box(R(lx - 0.008, dr + 0.06, 0.3), R(lx + 0.008, dr + 0.84, th - 0.2), glass_c)
+		# Push bar (chrome) on the doorway side.
+		var bx := lx + s * 0.06
+		st.box(R(bx - 0.012, dr + 0.2, 0.98), R(bx + 0.012, dr + 0.7, 1.02), Color(0.82, 0.83, 0.85))
+	st.box(R(door.x, dr - 0.05, th - 0.1), R(door.y, dr + 0.05, th), fc)            # door head
+	st.box(R(door.x, gd, th), R(door.y, dr, th + 0.05), Color(0.9, 0.89, 0.86))      # soffit
+	var tile := Color(0.9, 0.88, 0.82)
+	st.box(R(door.x + 0.04, -0.02, 0.0), R(door.y - 0.04, dr, 0.022), tile)
+	st.box(R(door.x + 0.04, -0.02, 0.022), R(door.y - 0.04, 0.06, 0.026), brand.darkened(0.35))  # threshold border
+	st.box(R(door.x + 0.2, 0.18, 0.022), R(door.y - 0.2, dr - 0.12, 0.024), brand.darkened(0.35))
+	st.box(R(door.x + 0.26, 0.24, 0.024), R(door.y - 0.26, dr - 0.18, 0.026), tile.lerp(brand, 0.25))
+	if trading_here:
+		# A display light along the window head (lit from inside).
+		for sp in spans:
+			_glow_quad(R(float(sp[0]) + 0.1, gd + 0.12, th - 0.03), R(float(sp[1]) - 0.1, gd + 0.24, th - 0.03), Color(1.0, 0.95, 0.85) * 1.2, true)
+	# The frontage across the whole unit, outside the facade: stone
+	# pilasters, a full-width fascia under a cornice, and (when trading) a
+	# canopy, lamps and a hanging blade sign. Offset off the wall so nothing
+	# z-fights.
+	var fy := oh + 0.15
+	var stone := Color(0.84, 0.81, 0.75) if hsh % 3 != 0 else Color(0.24, 0.25, 0.27)
 	var sign_style := String(ident.get("sign", "painted"))
 	var accent_c: Color = ident.get("accent", Color(1.0, 0.92, 0.7))
 	var fascia := brand if trading_here else Color(0.1, 0.12, 0.16)
@@ -470,41 +521,41 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 				fascia = brand.darkened(0.7)
 			"script":
 				fascia = accent_c.lerp(Color(0.97, 0.95, 0.9), 0.3)
-	for side in [[0.3, ox.x - 0.05], [ox.y + 0.05, W - 0.3]]:
-		var x0: float = side[0]
-		var x1: float = side[1]
-		if x1 - x0 < 0.1:
+	# Window posters, stuck inside the glass at the outer end of each window.
+	for sp in spans:
+		var x0: float = sp[0]
+		var x1: float = sp[1]
+		var outer := x0 < door.x
+		var pw := minf(0.85, (x1 - x0) - 0.6)
+		if pw < 0.5:
 			continue
-		st.box(R(x0, -0.07, 0.0), R(x1, -0.01, fy), clad)
-		if x1 - x0 > 1.1:
-			# A lit display panel (glass over a poster) with a stall riser.
-			st.box(R(x0 + 0.18, -0.09, 0.45), R(x1 - 0.18, -0.07, oh - 0.2), Color(0.06, 0.08, 0.1))
-			if trading_here:
-				# A lit promo poster in the window.
-				var px0 := x0 + 0.35
-				var px1 := x1 - 0.35
-				var py0 := 0.75
-				var py1 := minf(oh - 0.4, py0 + (px1 - px0) * 1.25)
-				_glow_quad(R(px0, -0.095, py0), R(px1, -0.095, py1), brand.lightened(0.12) * 0.75)
-				_glow_quad(R(px0, -0.097, py1 - 0.32), R(px1, -0.097, py1 - 0.06), Color(0.98, 0.9, 0.55))
-				var promo := Label3D.new()
-				var plist: Array = PROMOS_BY.get(type_id, PROMOS)
-				var lines: String = plist[absi(hash([unit.get("id", ""), x0])) % plist.size()]
-				promo.text = lines
-				promo.font_size = 72
-				promo.font = ShopStyle.font(String(ident.get("face", "")))
-				promo.pixel_size = clampf((px1 - px0) / 520.0, 0.0018, 0.004)
-				promo.shaded = false
-				promo.double_sided = false
-				promo.modulate = Color(1.0, 0.98, 0.94)
-				promo.outline_size = 0
-				promo.position = R((px0 + px1) * 0.5, -0.1, (py0 + py1 - 0.32) * 0.5)
-				_static.add_child(promo)
-			st.box(R(x0 + 0.1, -0.12, 0.0), R(x1 - 0.1, -0.06, 0.45), stone.darkened(0.25))
-	# A stone plinth down to the pavement (no gap under the windows) and a
-	# step up to the door.
-	# (Deeper than the step: streets slope along the shopfront.)
-	st.box(R(-0.04, -0.14, -street_drop - 1.2), R(W + 0.04, -0.005, 0.02), stone.darkened(0.3))
+		var px0 := x0 + 0.25 if outer else x1 - 0.25 - pw
+		var py0 := rh + 0.45
+		var py1 := minf(th - 0.25, py0 + pw * 1.3)
+		if trading_here:
+			_poster(R(px0, gd + 0.03, py0), R(px0 + pw, gd + 0.03, py1), brand.lightened(0.12), Color(0.98, 0.9, 0.55),
+				_promo_text(x0))
+		elif kind == "shop" and outer:
+			_poster(R(px0, gd + 0.03, py0), R(px0 + pw, gd + 0.03, py1), Color(0.97, 0.96, 0.92), Color(0.75, 0.1, 0.12),
+				"TO LET\nRETAIL UNIT\n%d m²\nCITY LETTINGS" % int(unit.get("size", 0)), Color(0.15, 0.15, 0.18))
+	if trading_here:
+		# Opening hours and payment stickers on the glass beside the door.
+		var hrs := biz.hours()
+		var stk := Label3D.new()
+		stk.text = "OPEN 7 DAYS\n%s – %s\n\nCARD · CONTACTLESS" % [_clock(hrs.x), _clock(hrs.y)]
+		stk.font_size = 32
+		stk.pixel_size = 0.0028
+		stk.shaded = false
+		stk.double_sided = false
+		stk.outline_size = 0
+		stk.modulate = Color(1.0, 1.0, 1.0, 0.92)
+		stk.position = R(door.y + 0.4, gd - 0.015, 1.55)
+		_static.add_child(stk)
+	# Street level: the plinth down to the pavement and a step up to the door.
+	# (0.24 m proud: in front of the building's own base course, 0.2 m out,
+	# and just behind the pilaster bases' faces. Deeper than the step: streets
+	# slope along the shopfront.)
+	st.box(R(-0.04, -0.24, -street_drop - 1.2), R(W + 0.04, -0.005, 0.02), stone.darkened(0.3))
 	if street_drop > 0.02:
 		var sx0 := door.x - 0.35
 		var sx1 := door.y + 0.35
@@ -514,6 +565,13 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 			_solid(R(sx0 - 0.1, -1.05, -street_drop - 0.05), R(sx1 + 0.1, -0.5, mid))
 		st.box(R(sx0, -0.55, -street_drop - 0.05), R(sx1, 0.0, 0.0), stone.lightened(0.1))
 		_solid(R(sx0, -0.55, -street_drop - 0.05), R(sx1, 0.0, 0.0))
+	if trading_here:
+		_window_display(st, spans, gd)
+		_street_dressing(st, hsh, oh)
+		if bool(sf["shutter"]) and not rival.is_empty():
+			_shutters(st, oh, sf)  # (not on your own shops: you'd walk through it)
+	elif kind == "shop":
+		_vacant(st, fy)
 	# Pilasters with capitals.
 	for px: float in [-0.04, W - 0.3]:
 		st.box(R(px, -0.22, 0.0), R(px + 0.34, -0.01, fy + 0.86), stone)
@@ -657,6 +715,325 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 	update_signs(false)
 
 
+## A stall riser under a window: painted timber with raised and fielded
+## panels, or a plain polished plinth (aluminium and steel fronts).
+func _riser(st: _Batch, x0: float, x1: float, gd: float, rh: float, fc: Color, sf: Dictionary) -> void:
+	var rc: Color = sf["riser_col"]
+	st.box(R(x0, gd - 0.08, 0.0), R(x1, gd + 0.06, rh), rc)
+	st.box(R(x0, gd - 0.1, 0.0), R(x1, gd - 0.08, 0.08), rc.darkened(0.3))  # kick strip
+	if bool(sf["panels"]) and rh > 0.3:
+		var n := maxi(1, roundi((x1 - x0) / 0.95))
+		var pw := (x1 - x0) / n
+		for i in n:
+			var a := x0 + pw * i + 0.08
+			var b := x0 + pw * (i + 1) - 0.08
+			st.box(R(a, gd - 0.105, 0.14), R(b, gd - 0.08, rh - 0.08), fc.lightened(0.07))
+			st.box(R(a + 0.06, gd - 0.115, 0.2), R(b - 0.06, gd - 0.1, rh - 0.14), fc.lightened(0.03))
+	elif rh > 0.2:
+		st.box(R(x0, gd - 0.09, rh - 0.03), R(x1, gd - 0.08, rh), fc)  # a metal capping
+
+
+## A lit poster stuck inside the glass (a, b: its corners, facing the street).
+func _poster(a: Vector3, b: Vector3, col: Color, band: Color, text: String, ink := Color(1.0, 0.98, 0.94)) -> void:
+	_glow_quad(a, b, col * 0.75)
+	var lo := a.min(b)
+	var hi := a.max(b)
+	_glow_quad(Vector3(lo.x, hi.y - 0.26, lo.z + 0.002), Vector3(hi.x, hi.y - 0.06, hi.z + 0.002), band * 0.9)
+	var lab := Label3D.new()
+	lab.text = text
+	lab.font_size = 72
+	lab.font = ShopStyle.font(String(ident.get("face", ""))) if biz else EmpireStyle.font("black")
+	lab.pixel_size = clampf((hi.x - lo.x) / 520.0, 0.0016, 0.0034)
+	lab.shaded = false
+	lab.double_sided = false
+	lab.modulate = ink
+	lab.outline_size = 0
+	lab.position = Vector3((lo.x + hi.x) * 0.5, (lo.y + hi.y - 0.32) * 0.5, hi.z + 0.006)
+	_static.add_child(lab)
+
+
+func _promo_text(seed_x: float) -> String:
+	var plist: Array = PROMOS_BY.get(type_id, PROMOS)
+	return plist[absi(hash([unit.get("id", ""), seed_x])) % plist.size()]
+
+
+static func _clock(h: float) -> String:
+	var hr := int(h) % 24
+	var mn := int(round((h - floorf(h)) * 60.0))
+	var ap := "am" if hr < 12 else "pm"
+	var h12 := hr % 12
+	if h12 == 0:
+		h12 = 12
+	return ("%d%s" % [h12, ap]) if mn == 0 else ("%d:%02d%s" % [h12, mn, ap])
+
+
+## Pavement height at room point (x, d), relative to the shop floor.
+func _street_y(x: float, d: float) -> float:
+	if not _ground_fn.is_valid():
+		return -street_drop
+	var w := transform * R(x, d, 0.0)
+	return clampf(float(_ground_fn.call(w.x, w.z)) - transform.origin.y, -1.6, 0.0)
+
+
+## What the shop puts in its window, behind the glass, by kind.
+func _window_display(st: _Batch, spans: Array, gd: float) -> void:
+	var xa := 0.0
+	var xb := 0.0
+	match type_id:
+		"convenience":
+			# Right window: a stepped stand of drinks, crisps and sweets.
+			xa = door.y + 0.35
+			xb = W - 1.0
+		"bakery", "phones":
+			xa = 1.0
+			xb = door.x - 0.35
+		_:
+			return
+	if xb - xa < 0.8:
+		return
+	var d0 := gd + 0.2
+	var d1 := d0 + 0.5
+	match type_id:
+		"convenience":
+			var stand := Color(0.95, 0.95, 0.94)
+			st.box(R(xa, d0, 0.0), R(xb, d1, 0.4), stand)
+			st.box(R(xa, d0 + 0.22, 0.4), R(xb, d1, 0.75), stand.darkened(0.04))
+			st.box(R(xa, d0 - 0.005, 0.3), R(xb, d0, 0.38), brand)  # the brand's stripe
+			var cols := [Color(0.8, 0.1, 0.12), Color(0.95, 0.78, 0.15), Color(0.42, 0.2, 0.55), Color(0.2, 0.5, 0.85),
+				Color(0.2, 0.6, 0.3), Color(0.95, 0.5, 0.15)]
+			var i := 0
+			var x := xa + 0.06
+			while x + 0.13 < xb:
+				var c: Color = cols[(i + absi(String(unit.get("id", "")).hash())) % cols.size()]
+				st.box(R(x, d0 + 0.04, 0.4), R(x + 0.12, d0 + 0.18, 0.4 + 0.16 + 0.04 * (i % 3)), c)
+				st.cylinder(R(x + 0.06, d0 + 0.36, 0.75), 0.04, 0.24, cols[(i + 3) % cols.size()], 8)
+				x += 0.16
+				i += 1
+		"bakery":
+			var wood := Color(0.55, 0.38, 0.24)
+			st.box(R(xa, d0, 0.0), R(xb, d1, 0.5), wood)
+			st.box(R(xa + 0.1, d0 + 0.2, 0.5), R(xb - 0.1, d1, 0.85), wood.lightened(0.08))
+			var x2 := xa + 0.12
+			var k := 0
+			while x2 + 0.26 < xb:
+				var crust := Color(0.72, 0.45, 0.22).lerp(Color(0.85, 0.62, 0.35), float(k % 3) / 3.0)
+				st.box(R(x2, d0 + 0.04, 0.5), R(x2 + 0.24, d0 + 0.18, 0.6), crust)
+				st.box(R(x2 + 0.03, d0 + 0.06, 0.6), R(x2 + 0.21, d0 + 0.16, 0.64), crust.lightened(0.12))
+				if x2 + 0.3 < xb - 0.1:
+					st.box(R(x2 + 0.02, d0 + 0.26, 0.85), R(x2 + 0.26, d0 + 0.44, 0.93), Color(0.7, 0.55, 0.33))  # basket
+					st.box(R(x2 + 0.05, d0 + 0.29, 0.93), R(x2 + 0.23, d0 + 0.41, 0.99), crust.darkened(0.1))
+				x2 += 0.32
+				k += 1
+		"phones":
+			st.box(R(xa, d0, 0.0), R(xb, d1, 0.75), Color(0.97, 0.97, 0.98))
+			var x3 := xa + 0.15
+			while x3 + 0.2 < xb:
+				st.box(R(x3, d0 + 0.18, 0.75), R(x3 + 0.09, d0 + 0.24, 0.93), Color(0.08, 0.08, 0.1))
+				_glow_quad(R(x3 + 0.008, d0 + 0.179, 0.765), R(x3 + 0.082, d0 + 0.179, 0.92), brand.lightened(0.35) * 0.9)
+				x3 += 0.32
+	_solid(R(xa, d0, 0.0), R(xb, d1, 0.8))
+
+
+## On the pavement outside a trading shop: an A-board, planters by the door,
+## a newspaper rack at a newsagent's, a café table, now and then a bike rack.
+## All kept within ~1.3 m of the frontage and clear of the doorway.
+func _street_dressing(st: _Batch, h: int, oh: float) -> void:
+	var plants := type_id in ["cafe", "bakery", "clothing"] or h % 2 == 0
+	var dark := brand.darkened(0.55)
+	if plants:
+		for side: float in [-1.0, 1.0]:
+			var cx := (door.x - 0.85) if side < 0.0 else (door.y + 0.85)
+			if cx - 0.3 < 0.4 or cx + 0.3 > W - 0.4:
+				continue
+			var y0 := _street_y(cx, -0.37)
+			st.box(R(cx - 0.3, -0.62, y0 - 0.1), R(cx + 0.3, -0.12, y0 + 0.5), dark)
+			st.box(R(cx - 0.32, -0.64, y0 + 0.46), R(cx + 0.32, -0.1, y0 + 0.52), dark.lightened(0.15))
+			_batch_cone(st, R(cx, -0.37, y0 + 0.5), 0.3, 0.05, 0.95, Color(0.17, 0.36, 0.19))
+			_solid(R(cx - 0.3, -0.62, y0), R(cx + 0.3, -0.12, y0 + 1.0))
+	# The A-board, right of the door.
+	var xa := door.y + (1.75 if plants else 1.15)
+	if xa + 0.35 < W - 0.35:
+		var y0 := _street_y(xa, -1.0)
+		var frame := brand.darkened(0.25)
+		var chalk := Color(0.1, 0.12, 0.11)
+		for f: float in [-1.0, 1.0]:
+			var df := -1.0 + 0.25 * f   # feet; the apex is at d −1.0
+			st.sheet(R(xa - 0.3, df, y0), R(xa + 0.3, df, y0), R(xa + 0.3, -1.0, y0 + 0.95), R(xa - 0.3, -1.0, y0 + 0.95), frame)
+			var k := 0.012 * f
+			st.sheet(R(xa - 0.25, df * 0.97 + k - 0.03 * f, y0 + 0.08), R(xa + 0.25, df * 0.97 + k - 0.03 * f, y0 + 0.08),
+				R(xa + 0.25, -1.0 + 0.04 * f + k, y0 + 0.86), R(xa - 0.25, -1.0 + 0.04 * f + k, y0 + 0.86), chalk)
+		var lab := Label3D.new()
+		lab.text = _aboard_text()
+		lab.font = ShopStyle.font(String(ident.get("face", "")))
+		lab.font_size = 64
+		lab.pixel_size = 0.0021
+		lab.line_spacing = -6.0
+		lab.shaded = false
+		lab.double_sided = false
+		lab.outline_size = 0
+		lab.modulate = Color(0.97, 0.96, 0.9)
+		lab.position = R(xa, -1.13 - 0.02, y0 + 0.47)
+		lab.rotation.x = -atan(0.25 / 0.95)
+		_static.add_child(lab)
+		_solid(R(xa - 0.32, -1.27, y0), R(xa + 0.32, -0.73, y0 + 0.95))
+	# A newspaper rack outside a corner shop.
+	if type_id == "convenience":
+		var x1 := door.x - (1.3 if plants else 0.55)
+		var x0 := x1 - 0.75
+		if x0 > 0.45:
+			var y0 := _street_y((x0 + x1) * 0.5, -0.3)
+			var green := Color(0.12, 0.25, 0.18)
+			st.box(R(x0, -0.5, y0), R(x1, -0.12, y0 + 0.62), green)
+			for j in 3:
+				var px := x0 + 0.04 + j * 0.24
+				st.box(R(px, -0.46, y0 + 0.62), R(px + 0.2, -0.16, y0 + 0.68 + 0.02 * j),
+					[Color(0.93, 0.93, 0.9), Color(0.96, 0.88, 0.55), Color(0.86, 0.9, 0.96)][j])
+			st.box(R(x0, -0.16, y0 + 0.62), R(x1, -0.12, y0 + 1.05), green)
+			var hl := Label3D.new()
+			hl.text = "TODAY'S\nPAPERS"
+			hl.font_size = 40
+			hl.pixel_size = 0.0028
+			hl.shaded = false
+			hl.double_sided = false
+			hl.outline_size = 0
+			hl.modulate = Color(0.98, 0.94, 0.8)
+			hl.position = R((x0 + x1) * 0.5, -0.165, y0 + 0.84)
+			_static.add_child(hl)
+			_solid(R(x0, -0.5, y0), R(x1, -0.12, y0 + 1.05))
+	# A café table and two chairs in front of the left window.
+	if type_id in ["cafe", "bakery"]:
+		var tx := door.x - (2.15 if plants else 1.4)
+		if tx - 0.75 > 0.4:
+			var y0 := _street_y(tx, -0.85)
+			var metal := Color(0.12, 0.12, 0.13)
+			st.cylinder(R(tx, -0.85, y0), 0.22, 0.03, metal, 10)
+			st.cylinder(R(tx, -0.85, y0), 0.03, 0.72, metal, 6)
+			st.cylinder(R(tx, -0.85, y0 + 0.72), 0.32, 0.03, Color(0.9, 0.89, 0.86), 14)
+			for cs: float in [-1.0, 1.0]:
+				var cx := tx + cs * 0.55
+				st.box(R(cx - 0.2, -1.05, y0 + 0.44), R(cx + 0.2, -0.65, y0 + 0.48), brand.darkened(0.1))
+				for lx: float in [-0.17, 0.17]:
+					for ld: float in [-1.02, -0.68]:
+						st.box(R(cx + lx - 0.015, ld - 0.015, y0), R(cx + lx + 0.015, ld + 0.015, y0 + 0.44), metal)
+				var bxx := cx + cs * 0.18
+				st.box(R(bxx - 0.02, -1.05, y0 + 0.48), R(bxx + 0.02, -0.65, y0 + 0.85), brand.darkened(0.1))
+			_solid(R(tx - 0.8, -1.1, y0), R(tx + 0.8, -0.6, y0 + 0.8))
+	# Now and then a pair of Sheffield bike stands by the right pilaster.
+	if h % 5 == 1:
+		var steel := Color(0.25, 0.26, 0.28)
+		for k in 2:
+			var bx := W - 0.75 - k * 0.7
+			if bx < xa + 0.6:
+				break
+			var y0 := _street_y(bx, -0.95)
+			for e: float in [-1.3, -0.6]:
+				st.box(R(bx - 0.025, e - 0.025, y0), R(bx + 0.025, e + 0.025, y0 + 0.8), steel)
+			st.box(R(bx - 0.025, -1.3, y0 + 0.78), R(bx + 0.025, -0.6, y0 + 0.83), steel)
+			_solid(R(bx - 0.05, -1.32, y0), R(bx + 0.05, -0.58, y0 + 0.83))
+
+
+func _aboard_text() -> String:
+	if not rival.is_empty() and not rival.get("firm", false):
+		return "MEAL DEAL\n£3.50\nOPEN TILL 11"
+	return {"convenience": "OPEN\nSNACKS\nDRINKS\nLOTTERY", "cafe": "COFFEE\n& CAKE\nCOME IN!", "bakery": "FRESH\nBREAD\nDAILY",
+		"takeaway": "HOT FOOD\nOPEN\nLATE", "clothing": "NEW IN\nSALE\nINSIDE", "phones": "REPAIRS\nWHILE YOU\nWAIT"}.get(type_id, "OPEN")
+
+
+var _shutter: MeshInstance3D
+
+
+## A roller shutter: its box under the fascia and guide rails always, the
+## slatted curtain (its own mesh) only while the shop is shut at night.
+func _shutters(st: _Batch, oh: float, sf: Dictionary) -> void:
+	var sc: Color = sf["shutter_col"]
+	st.box(R(ox.x - 0.02, -0.28, oh - 0.04), R(ox.y + 0.02, -0.02, oh + 0.15), sc.darkened(0.1))
+	for gx: float in [ox.x - 0.02, ox.y - 0.06]:
+		st.box(R(gx, -0.12, 0.0), R(gx + 0.08, -0.02, oh - 0.04), sc.darkened(0.2))
+	var cb := _Batch.new()
+	var y := 0.0
+	var i := 0
+	while y < oh - 0.05:
+		var c := sc if i % 2 == 0 else sc.darkened(0.14)
+		cb.box(R(ox.x + 0.04, -0.1, y), R(ox.y - 0.04, -0.06, minf(y + 0.095, oh - 0.04)), c)
+		y += 0.1
+		i += 1
+	cb.box(R(ox.x + 0.04, -0.12, 0.0), R(ox.y - 0.04, -0.05, 0.07), sc.darkened(0.35))  # bottom rail
+	_shutter = MeshInstance3D.new()
+	_shutter.name = "Shutter"
+	_shutter.mesh = cb.commit()
+	_shutter.material_override = _mat("vc")
+	_shutter.visibility_range_end = 260.0
+	_shutter.visible = false
+	_static.add_child(_shutter)
+
+
+## An empty unit: what the last tenant left (an old shelf, dust sheets, a
+## ladder, paint tins), post on the mat, and a letting agent's board.
+func _vacant(st: _Batch, fy: float) -> void:
+	var part_d := D - BACKROOM
+	var grey := Color(0.5, 0.52, 0.54)
+	# An old shelf unit on the left wall.
+	st.box(R(0.05, 1.8, 0.0), R(0.5, 3.6, 0.12), grey.darkened(0.3))
+	st.box(R(0.05, 1.8, 0.0), R(0.1, 3.6, 1.5), grey)
+	for y: float in [0.55, 1.0, 1.45]:
+		st.box(R(0.1, 1.8, y - 0.03), R(0.5, 3.6, y), grey.lightened(0.15))
+	_solid(R(0.05, 1.8, 0.0), R(0.5, 3.6, 1.5))
+	# Dust sheets over whatever's stacked at the back.
+	var sheet := Color(0.88, 0.87, 0.83)
+	var bx := W * 0.42
+	if part_d > 4.0:
+		st.box(R(bx, part_d - 2.0, 0.0), R(bx + 1.3, part_d - 0.9, 0.7), sheet)
+		st.box(R(bx + 0.15, part_d - 1.85, 0.7), R(bx + 0.9, part_d - 1.1, 1.05), sheet.darkened(0.04))
+		st.box(R(bx - 0.08, part_d - 2.05, 0.0), R(bx + 1.38, part_d - 0.85, 0.08), sheet.darkened(0.08))
+		_solid(R(bx, part_d - 2.0, 0.0), R(bx + 1.3, part_d - 0.9, 1.05))
+	# A stepladder and paint tins mid-floor.
+	var lx := W * 0.3
+	var ld := part_d * 0.55
+	var alu := Color(0.75, 0.76, 0.78)
+	for f: float in [-1.0, 1.0]:
+		for e: float in [-0.22, 0.22]:
+			st.sheet(R(lx + e - 0.02, ld + 0.35 * f, 0.0), R(lx + e + 0.02, ld + 0.35 * f, 0.0),
+				R(lx + e + 0.02, ld + 0.05 * f, 1.6), R(lx + e - 0.02, ld + 0.05 * f, 1.6), alu)
+	for r in 4:
+		var ry := 0.35 + r * 0.38
+		var rd := ld - 0.35 + 0.3 * (ry / 1.6)
+		st.box(R(lx - 0.22, rd - 0.03, ry), R(lx + 0.22, rd + 0.03, ry + 0.03), alu)
+	st.box(R(lx - 0.24, ld - 0.08, 1.6), R(lx + 0.24, ld + 0.08, 1.65), Color(0.85, 0.2, 0.15))
+	for t in 3:
+		st.cylinder(R(lx + 0.6 + t * 0.26, ld + 0.1 * t, 0.0), 0.1, 0.22, [Color(0.85, 0.85, 0.82), Color(0.3, 0.45, 0.6), Color(0.9, 0.8, 0.5)][t], 10)
+	_solid(R(lx - 0.3, ld - 0.4, 0.0), R(lx + 0.3, ld + 0.4, 1.65))
+	# Post and flyers on the floor behind the door.
+	var mid := (door.x + door.y) * 0.5
+	for k in 7:
+		var px := mid - 0.6 + fmod(k * 0.37, 1.2)
+		var pdd := 0.9 + fmod(k * 0.23, 0.55)
+		st.box(R(px, pdd, 0.03), R(px + 0.22, pdd + 0.16, 0.035), [Color(0.97, 0.97, 0.95), Color(0.95, 0.85, 0.5), Color(0.85, 0.9, 0.97)][k % 3])
+	# The letting agent's board, projecting from the wall over the fascia.
+	var vx := W - 0.9
+	st.box(R(vx - 0.02, -1.05, fy + 1.62), R(vx + 0.02, -0.02, fy + 1.67), Color(0.15, 0.15, 0.16))  # bracket
+	st.box(R(vx - 0.03, -1.0, fy + 0.95), R(vx + 0.03, -0.2, fy + 1.58), Color(0.98, 0.98, 0.96))
+	st.box(R(vx - 0.035, -1.0, fy + 0.95), R(vx + 0.035, -0.2, fy + 1.1), Color(0.75, 0.1, 0.12))
+	for side: float in [1.0, -1.0]:
+		var t1 := Label3D.new()
+		t1.text = "TO LET"
+		t1.font = EmpireStyle.font("black")
+		t1.font_size = 96
+		t1.pixel_size = 0.0026
+		t1.shaded = false
+		t1.double_sided = false
+		t1.outline_size = 0
+		t1.modulate = Color(0.75, 0.08, 0.1)
+		t1.position = R(vx + 0.036 * side, -0.6, fy + 1.37)
+		t1.rotation.y = PI * 0.5 * side
+		_static.add_child(t1)
+		var t2 := t1.duplicate() as Label3D
+		t2.text = "CITY LETTINGS"
+		t2.font_size = 40
+		t2.modulate = Color(1, 1, 1)
+		t2.position = R(vx + 0.037 * side, -0.6, fy + 1.025)
+		_static.add_child(t2)
+
+
 func _sign_text() -> String:
 	if biz:
 		# (Script faces read best as written; the rest in capitals.)
@@ -664,7 +1041,11 @@ func _sign_text() -> String:
 	return "TO LET" if kind == "shop" else String(unit.get("name", "")).to_upper()
 
 
-func update_signs(trading: bool) -> void:
+## `night`: the street's shut for the night (other people's shops with a
+## roller shutter pull it down then).
+func update_signs(trading: bool, night := false) -> void:
+	if _shutter:
+		_shutter.visible = night and not trading
 	if _sign:
 		_sign.text = _sign_text()
 	if _open_sign:

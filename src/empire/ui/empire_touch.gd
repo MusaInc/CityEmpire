@@ -21,8 +21,17 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
+## The screen minus the notch / Dynamic Island / home indicator (the HUD's
+## rect: EmpireUI insets it by the display's safe area).
+func _safe() -> Rect2:
+	if ui != null and ui.hud != null:
+		return ui.hud.get_global_rect()
+	return get_viewport_rect()
+
+
 func _buttons() -> Dictionary:
-	var s := get_viewport_rect().size
+	var sr := _safe()
+	var s := sr.end  # (positions below are from the safe area's far corner)
 	var out := {}
 	var driving := ui.game != null and ui.game.driving != ""
 	if driving:
@@ -41,8 +50,9 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var t := event as InputEventScreenTouch
 		if t.pressed:
-			for k in _buttons():
-				if (_buttons()[k] as Rect2).grow(14).has_point(t.position):
+			var bs := _buttons()
+			for k in bs:
+				if (bs[k] as Rect2).grow(14).has_point(t.position):
 					_held[t.index] = k
 					_press(k, true)
 					get_viewport().set_input_as_handled()
@@ -118,6 +128,18 @@ func _apply_stick() -> void:
 
 
 func _process(_dt: float) -> void:
+	# A panel opening (phone, day report) or the game leaving play swallows
+	# the touch's release in _input: let go of everything held, or the stick
+	# keeps walking you (and GAS keeps driving) behind the panel.
+	var blocked := not visible or ui.panel_open() or ui.game == null or ui.game.state != "play"
+	if blocked and (_stick_id >= 0 or _look_id >= 0 or not _held.is_empty()):
+		for k in _held.values():
+			_press(k, false)
+		_held.clear()
+		_stick_id = -1
+		_look_id = -1
+		_stick_v = Vector2.ZERO
+		_apply_stick()
 	if visible:
 		queue_redraw()
 
@@ -131,8 +153,8 @@ func _draw() -> void:
 		draw_arc(_stick_o, R, 0, TAU, 48, Color(1, 1, 1, 0.3), 2.0, true)
 		draw_circle(_stick_o + _stick_v * R, 30, Color(1, 1, 1, 0.45))
 	else:
-		var s := get_viewport_rect().size
-		draw_arc(Vector2(150, s.y - 150), R, 0, TAU, 48, Color(1, 1, 1, 0.12), 2.0, true)
+		var sr := _safe()
+		draw_arc(Vector2(sr.position.x + 150, sr.end.y - 150), R, 0, TAU, 48, Color(1, 1, 1, 0.12), 2.0, true)
 	var bs := _buttons()
 	for k in bs:
 		var r: Rect2 = bs[k]

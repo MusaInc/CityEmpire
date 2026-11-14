@@ -126,3 +126,51 @@ func test_goods_shown_match_stock(t) -> void:
 			tags += 1
 	t.check(tags == 2, "two price tags show prices (%d)" % tags)
 	root.free()
+
+
+## Shops are glazed wall to wall (the interior shows from the street); the
+## opening stays centred, so the door point – and every unit's id – holds.
+func test_shopfronts_glazed_wall_to_wall(t) -> void:
+	var narrow := []
+	var moved := []
+	for u in _units():
+		if u["kind"] != "shop":
+			continue
+		var w := float(u["a1"]) - float(u["a0"])
+		if float(u["oa1"]) - float(u["oa0"]) < w - 0.81:
+			narrow.append(u["id"])
+		var d := Premises.door_point(u)
+		if Vector2(d.x, d.z).distance_to(Vector2(float(u["pos"][0]), float(u["pos"][2]))) > 0.01:
+			moved.append(u["id"])
+	t.check(narrow.is_empty(), "every shop glazed nearly wall to wall %s" % [narrow.slice(0, 5)])
+	t.check(moved.is_empty(), "door points (and ids) unchanged %s" % [moved.slice(0, 5)])
+
+
+## A building on a slope stands on a dressed-stone base course. It used to
+## be drawn as wall, so the facade shader painted windows and shop glass on
+## it: a strip of half-buried fake shops along the foot of the street.
+func test_base_course_is_stone_not_windows(t) -> void:
+	if _layout == null:
+		_layout = CityLayout.new().generate()
+	var checked := 0
+	var painted := 0
+	var stone := 0
+	for b in _layout.buildings:
+		if checked >= 40 or not BuildingMesher.base_course(b).has_volume() or BuildingMesher.shaped(b):
+			continue
+		checked += 1
+		var m := BuildingMesher.new()
+		m.add_building(b, true)
+		var a := m.arrays()
+		var verts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+		var cols: PackedColorArray = a[Mesh.ARRAY_COLOR]
+		var base := BuildingMesher.base_of(b)
+		for i in verts.size():
+			var kind := roundf(cols[i].a * 8.0)
+			if kind == BuildingMesher.KIND_STONE:
+				stone += 1
+			elif kind == BuildingMesher.KIND_WALL and verts[i].y < base - 0.05:
+				painted += 1
+	t.check(checked > 5, "buildings on slopes found (%d)" % checked)
+	t.check(stone > 0, "their base courses are stone (%d verts)" % stone)
+	t.check(painted == 0, "no facade (window-painted) wall below a lot's level (%d verts)" % painted)

@@ -11,6 +11,7 @@ const KIND_ROOF := 2.0
 const KIND_GLASS := 3.0
 const KIND_SIGN := 4.0
 const KIND_SHORE := 5.0   # rock / sand round the island (ground.gdshader shades it)
+const KIND_STONE := 6.0   # dressed-stone base course (ashlar, no windows)
 const ROOF_COLOR := Color(0.40, 0.40, 0.41)
 ## Roof finishes picked per building: gravel, tar, pale concrete, rust, green.
 const ROOF_COLORS := [Color(0.40, 0.40, 0.41), Color(0.24, 0.25, 0.27), Color(0.6, 0.59, 0.56),
@@ -334,8 +335,13 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 	if bc.has_volume():
 		# On a slope the lot is level at its uphill corner; down the hill the
 		# building stands on a dressed-stone base course to the street.
+		# (KIND_STONE, not KIND_WALL: as a wall the facade shader painted
+		# windows and shop glass on it, a strip of half-buried fake shops
+		# along the foot of every building on a slope.)
 		var stone := Color(0.56, 0.53, 0.48) if _glassy(b) else trim.darkened(0.18)
-		solid(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.position.y, bc.end.y, stone, KIND_WALL)
+		# (UV.y from 0 at its foot, 0.3 m under the street: the shader's grime line.)
+		walls(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.position.y, bc.end.y, stone, KIND_STONE, 0, seed, 0.0)
+		top(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.end.y, stone.lightened(0.05), KIND_TRIM, 0, 0)
 	if shaped(b):
 		_add_shaped(b, detailed, style, seed, col, wall_kind, trim, roof, base, glassy)
 		return

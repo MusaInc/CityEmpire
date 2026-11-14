@@ -13,7 +13,7 @@ extends RefCounted
 ## (island:district), island, size (m²), rent (£/day), price (£), b, t, face,
 ## a0, a1, y0, y1, oa0, oa1, oy0, oy1, depth, pos [x,y,z] (door, world)}.
 
-const SHOP := {"w": [9.0, 14.0], "d": [9.0, 13.0], "h": 4.2, "open_w": 6.0, "open_h": 3.1}
+const SHOP := {"w": [9.0, 14.0], "d": [9.0, 13.0], "h": 4.2, "open_w": 6.0, "open_h": 3.1, "full_front": true}
 const WAREHOUSE := {"w": [18.0, 30.0], "d": [14.0, 22.0], "h": 6.5, "open_w": 7.0, "open_h": 4.6}
 const WAREHOUSE_SMALL := {"w": [13.0, 22.0], "d": [11.0, 18.0], "h": 5.2, "open_w": 6.5, "open_h": 4.2}
 ## Shops wanted per district (the best-scoring units, spread out).
@@ -23,7 +23,7 @@ const SPACING := 110.0
 ## Second pass: smaller units along every shopping street, already trading
 ## (independent shops) or empty. Placed after the 24 originals so their ids
 ## (and old saves) don't change.
-const SHOP_SMALL := {"w": [9.0, 12.5], "d": [9.6, 12.5], "h": 4.2, "open_w": 5.0, "open_h": 3.1}
+const SHOP_SMALL := {"w": [9.0, 12.5], "d": [9.6, 12.5], "h": 4.2, "open_w": 5.0, "open_h": 3.1, "full_front": true}
 const EST_SPACING := 42.0
 const EST_QUOTA := 14
 const WHOLESALERS := {"west:waterfront": "Quayside Cash & Carry", "east:docks": "Harbour Wholesale Market"}
@@ -176,7 +176,10 @@ func _candidates(key: String, spec: Dictionary) -> Array:
 			var a0 := (flen - W) * 0.5
 			var c := {"b": b, "t": 0, "face": k, "a0": a0, "a1": a0 + W, "y0": base, "y1": base + float(spec["h"]),
 				"depth": D, "ground": true, "wins": []}
-			var ow := minf(float(spec["open_w"]), W - 2.0)
+			# Shops are glazed nearly wall to wall between their pilasters (the
+			# interior shows through); warehouses keep a trade-counter opening.
+			# (Centred either way, so the door point – and the unit's id – holds.)
+			var ow := W - 0.8 if spec.get("full_front", false) else minf(float(spec["open_w"]), W - 2.0)
 			c["oa0"] = a0 + (W - ow) * 0.5
 			c["oa1"] = float(c["oa0"]) + ow
 			c["oy0"] = base
