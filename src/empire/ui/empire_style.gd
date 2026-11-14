@@ -85,6 +85,20 @@ static func theme() -> Theme:
 	grab.set_corner_radius_all(4)
 	t.set_stylebox("grabber_area", "HSlider", grab)
 	t.set_stylebox("grabber_area_highlight", "HSlider", grab)
+	var le := StyleBoxFlat.new()
+	le.bg_color = Color(0, 0, 0, 0.3)
+	le.set_corner_radius_all(12)
+	le.content_margin_left = 16
+	le.content_margin_right = 16
+	le.border_color = Color(1, 1, 1, 0.14)
+	le.set_border_width_all(1)
+	t.set_stylebox("normal", "LineEdit", le)
+	var lef := le.duplicate()
+	lef.border_color = AMBER
+	t.set_stylebox("focus", "LineEdit", lef)
+	t.set_color("font_color", "LineEdit", PAPER)
+	t.set_color("font_placeholder_color", "LineEdit", Color(MUTED, 0.6))
+	t.set_color("caret_color", "LineEdit", AMBER)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(1, 1, 1, 0.18)
 	sb.set_corner_radius_all(4)

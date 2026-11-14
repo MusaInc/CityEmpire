@@ -51,6 +51,52 @@ const SIGN_STYLES := {
 }
 
 static var _fonts := {}
+## The player's own brand (Empire.brand, set by the game when it changes):
+## every shop you run wears it. Empty = each shop keeps its own identity.
+static var house := {}
+## Your head office's tier (0 = none): the lobby and tower crown wear your brand.
+static var hq_tier := 0
+
+## Brand studio choices: [primary, accent] pairs, typefaces, fascia styles.
+const HOUSE_PALETTES := [["#0f3d5c", "#f5b13d"], ["#141416", "#c9a45c"], ["#c8202a", "#ffffff"], ["#1f6b5c", "#f2e6b8"],
+	["#26457d", "#f4f1e8"], ["#5b2aa8", "#ffd23f"], ["#f2efe9", "#141416"], ["#e9b7c4", "#3a2a22"],
+	["#f07a1a", "#141416"], ["#2f6a6a", "#f6c9a8"], ["#121418", "#29d3e8"], ["#7a2f2a", "#f3e2c4"]]
+const HOUSE_FACES := ["display", "condensed", "round", "serif", "fat", "script", "retro", "neon"]
+const HOUSE_SIGNS := ["painted", "lightbox", "neon", "script"]
+const FACE_NAMES := {"display": "Bold", "condensed": "Modern", "round": "Friendly", "serif": "Classic", "fat": "Fashion",
+	"script": "Script", "retro": "Retro", "neon": "Neon", "": "Plain"}
+const SIGN_NAMES := {"painted": "Painted", "lightbox": "Lightbox", "neon": "Neon", "script": "Signwritten"}
+const NAME_A := ["Urban", "Golden", "Harbour", "Crown", "Bright", "Metro", "Corner", "Liberty", "Apex", "Union", "Northern",
+	"Royal", "Copper", "Silver", "Blue", "Summit"]
+const NAME_B := ["& Co", "Market", "Brothers", "Goods", "House", "Stores", "Collective", "Trading Co", "Supply", "Works",
+	"Exchange", "Group"]
+
+
+## A brand-studio suggestion (stable for a roll number).
+static func suggest_name(roll: int) -> String:
+	var r := absi(hash(roll * 7919 + 13))
+	return "%s %s" % [NAME_A[r % NAME_A.size()], NAME_B[(r / 17) % NAME_B.size()]]
+
+
+## A sensible starting brand for a new company (`name` from the brand studio).
+static func default_house(name: String) -> Dictionary:
+	return {"name": name, "primary": "#0f3d5c", "accent": "#f5b13d", "face": "display", "sign": "lightbox"}
+
+
+## The identity dictionary (as brand()) for a house brand.
+static func house_ident(h: Dictionary) -> Dictionary:
+	var nm := String(h.get("name", ""))
+	return {"primary": Color(String(h.get("primary", "#0f3d5c"))), "accent": Color(String(h.get("accent", "#f5b13d"))),
+		"face": String(h.get("face", "display")), "sign": String(h.get("sign", "lightbox")), "initial": initial_of(nm),
+		"name": nm}
+
+
+## The first letter of a name's first real word ("" for none).
+static func initial_of(name: String) -> String:
+	for w in name.split(" ", false):
+		if w.length() > 0 and w[0] != "&":
+			return w.left(1).to_upper()
+	return ""
 
 
 static func font(key: String) -> Font:
@@ -71,11 +117,7 @@ static func brand(name: String, type_id: String, rival := false) -> Dictionary:
 	var pal: Array = pals[h % pals.size()]
 	var faces: Array = TYPEFACES.get(type_id, TYPEFACES["convenience"])
 	var signs: Array = SIGN_STYLES.get(type_id, SIGN_STYLES["convenience"])
-	var initial := ""
-	for w in name.split(" ", false):
-		if w.length() > 0 and w[0] != "&":
-			initial = w.left(1).to_upper()
-			break
+	var initial := initial_of(name)
 	return {"primary": Color(pal[0]), "accent": Color(pal[1]), "face": faces[(h / 7) % faces.size()],
 		"sign": signs[(h / 13) % signs.size()], "initial": initial}
 

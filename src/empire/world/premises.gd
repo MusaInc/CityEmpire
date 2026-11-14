@@ -26,6 +26,11 @@ const SPACING := 110.0
 const SHOP_SMALL := {"w": [9.0, 12.5], "d": [9.6, 12.5], "h": 4.2, "open_w": 5.0, "open_h": 3.1, "full_front": true}
 const EST_SPACING := 42.0
 const EST_QUOTA := 14
+## Third pass: the corporate head office – a marble lobby cut into the
+## tallest CBD tower that has room on its street (placed last: every
+## earlier id holds).
+const HQ := {"w": [11.0, 16.0], "d": [9.0, 13.0], "h": 5.0, "open_w": 5.2, "open_h": 3.6}
+const HQ_DISTRICT := "east:cbd"
 const WHOLESALERS := {"west:waterfront": "Quayside Cash & Carry", "east:docks": "Harbour Wholesale Market"}
 const NAMES := ["Corner Shop", "Daily Stop", "Night & Day", "Local Store", "Mini Market", "Express", "Grab & Go",
 	"Neighbourhood Store", "Village Shop", "City Stop", "Quick Mart", "Late Shop", "Food & Wine", "The Kiosk",
@@ -87,6 +92,24 @@ static func place(layout: CityLayout) -> Premises:
 		c["est"] = true
 		P._claim(c)
 		per2[key] = int(per2.get(key, 0)) + 1
+	# The head-office tower (the island with the CBD only).
+	if HQ_DISTRICT.begins_with(island):
+		var best_hq := {}
+		for c in P._candidates(HQ_DISTRICT, HQ):
+			var b: Dictionary = c["b"]
+			if b.has("apt") or not P._far_from_others(c, 20.0):
+				continue
+			var top := 0.0
+			for t in b["tiers"]:
+				top = maxf(top, float(t[5]))
+			c["score"] = float(c["score"]) * 0.25 + (top - float(c["y0"]))
+			c["tower_h"] = top - float(c["y0"])
+			if best_hq.is_empty() or float(c["score"]) > float(best_hq["score"]):
+				best_hq = c
+		if not best_hq.is_empty():
+			best_hq["kind"] = "hq"
+			best_hq["name"] = "Meridian Tower"
+			P._claim(best_hq)
 	# Names, rents and prices.
 	var n := 0
 	for u in P.units:

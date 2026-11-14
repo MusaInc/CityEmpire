@@ -55,6 +55,10 @@ var events: Array = []
 var rivals: Array = []
 var firms: Array = []           # independent shops (CityLife firms)
 var news: Array = []
+## Your brand (ShopStyle.house): {name, primary, accent, face, sign}; {} = none.
+var brand := {}
+## Head office: {tier, paid, day}; {} = none (config hq.json).
+var hq := {}
 ## The city's shop units (set by the game from Premises; not saved).
 var market: Array = []
 
@@ -74,7 +78,8 @@ func new_game(p_seed := 1) -> void:
 	company_cash = float(st.get("company_cash", 0.0))
 	stats = {"cases_bought": 0, "units_bought": 0, "units_sold": 0, "units_stolen": 0, "units_shelved": 0,
 		"sales": 0, "revenue": 0.0, "profitable_days": 0, "upgrades": 0, "hires": 0, "km": 0.0,
-		"spent_stock": 0.0, "days": 0, "rivals_bought": 0, "inspections_passed": 0, "best_day": 0.0, "firms_bought": 0}
+		"spent_stock": 0.0, "days": 0, "rivals_bought": 0, "inspections_passed": 0, "best_day": 0.0, "firms_bought": 0,
+		"campaigns": 0}
 	candidates = Staff.candidates(day, seed)
 	add_vehicle("hatch", Vector3.ZERO, 0.0)
 	CityLife.start(self)
@@ -428,7 +433,7 @@ func buy_wholesale(wholesaler: String, order: Dictionary, price_k := 1.0) -> Str
 
 ## Today's wholesale price of one case (deals and shortages from CityLife).
 func case_price(pid: String) -> float:
-	return float(EmpireData.product(pid).get("case_cost", 0.0)) * CityLife.price_k(self, pid)
+	return float(EmpireData.product(pid).get("case_cost", 0.0)) * CityLife.price_k(self, pid) * hq_wholesale_k()
 
 
 ## Goods entering the economy at `unit_price`: updates the average cost.
@@ -827,6 +832,11 @@ func end_day() -> void:
 			personal_cash += inc
 			_book("personal", inc, "rent_in", "Tenant rent: %s" % q.get("name", ""))
 			report["personal"] = float(report["personal"]) + inc
+	if hq_tier() > 0:
+		var up := float(hq_def(hq_tier()).get("upkeep", 0.0))
+		company_cash -= up
+		_book("company", -up, "rent", "Head office upkeep")
+		report["profit"] = float(report["profit"]) - up
 	if company_cash < 0.0:
 		var od := -company_cash * 0.01
 		company_cash -= od
@@ -880,7 +890,8 @@ func net_worth() -> float:
 	var props := 0.0
 	for q in properties:
 		props += float(q.get("price", 0.0))
-	return personal_cash + company_cash + stock_value() + premises_value() + vehicles_value() + props - debt
+	return personal_cash + company_cash + stock_value() + premises_value() + vehicles_value() + props \
+		+ float(hq.get("paid", 0.0)) - debt
 
 
 # -------------------------------------------------------------- career
@@ -905,6 +916,10 @@ func stat(key: String) -> float:
 			return net_worth()
 		"rival_gone":
 			return 1.0 if flags.get("rival_gone", false) else 0.0
+		"hq_tier":
+			return float(hq_tier())
+		"branded":
+			return 1.0 if String(brand.get("name", "")) != "" else 0.0
 		"owned_both":
 			var w := businesses.any(func(b): return b.owned and b.island() == "west")
 			var e := businesses.any(func(b): return b.owned and b.island() == "east")
@@ -948,6 +963,124 @@ func current_goals(n := 3) -> Array:
 
 
 # ---------------------------------------------------------------- save
+# -------------------------------------------------- brand & head office
+## What a rebrand costs now (new signs on every shop; the first one's free
+## before you have a shop).
+func rebrand_cost() -> float:
+	return float(EmpireData.hq().get("rebrand_per_shop", 400)) * businesses.size()
+
+
+## Sets your brand (see ShopStyle.house_ident). "" = done.
+func set_brand(b: Dictionary) -> String:
+	var nm := String(b.get("name", "")).strip_edges()
+	if nm.length() < 2:
+		return "Give your company a name"
+	if nm.length() > 22:
+		return "Keep the name to 22 letters"
+	var cost := rebrand_cost() if String(brand.get("name", "")) != "" else 0.0
+	if cost > 0.0 and not pay(cost, "other", "New signs: %s" % nm):
+		return "New signs cost %s" % EmpireData.money(cost)
+	brand = b.duplicate()
+	brand["name"] = nm
+	_note("Your shops now trade as %s." % nm, "good")
+	_check_goals()
+	changed.emit()
+	return ""
+
+
+func hq_tier() -> int:
+	return int(hq.get("tier", 0))
+
+
+func hq_def(tier: int) -> Dictionary:
+	var ts: Array = EmpireData.hq().get("tiers", [])
+	return ts[tier - 1] if tier >= 1 and tier <= ts.size() else {}
+
+
+## Why the next head-office tier can't be bought ("" = it can).
+func hq_block(tier: int) -> String:
+	var d := hq_def(tier)
+	if d.is_empty():
+		return "Nothing bigger"
+	if tier != hq_tier() + 1:
+		return "Take the floors below first"
+	if businesses.size() < int(d.get("shops", 0)):
+		return "Needs %d shops (you have %d)" % [int(d["shops"]), businesses.size()]
+	if not can_afford(float(d["price"])):
+		return "Costs %s" % EmpireData.money(float(d["price"]))
+	return ""
+
+
+func buy_hq(tier: int) -> String:
+	var why := hq_block(tier)
+	if why != "":
+		return why
+	var d := hq_def(tier)
+	if not pay(float(d["price"]), "property", "Head office: %s" % d["name"]):
+		return "Not enough money"
+	hq = {"tier": tier, "paid": float(hq.get("paid", 0.0)) + float(d["price"]), "day": day}
+	_note("Head office: %s." % d["name"], "good")
+	_check_goals()
+	changed.emit()
+	return ""
+
+
+func hq_wholesale_k() -> float:
+	return 1.0 - float(hq_def(hq_tier()).get("wholesale", 0.0))
+
+
+func hq_footfall_k() -> float:
+	return 1.0 + float(hq_def(hq_tier()).get("footfall", 0.0))
+
+
+func campaign_def(id: String) -> Dictionary:
+	for c in EmpireData.hq().get("campaigns", []):
+		if c["id"] == id:
+			return c
+	return {}
+
+
+## A campaign running now (its event), or {}.
+func campaign_running() -> Dictionary:
+	for ev in events:
+		if ev.get("kind") == "campaign":
+			return ev
+	return {}
+
+
+func campaign_block(id: String) -> String:
+	var c := campaign_def(id)
+	if c.is_empty():
+		return "?"
+	if hq_tier() < int(c.get("tier", 1)):
+		return "Needs %s" % String(hq_def(int(c.get("tier", 1))).get("name", "a head office"))
+	if businesses.is_empty():
+		return "No shops to advertise"
+	if not campaign_running().is_empty():
+		return "A campaign is running"
+	if not can_afford(float(c["cost"])):
+		return "Costs %s" % EmpireData.money(float(c["cost"]))
+	return ""
+
+
+func run_campaign(id: String) -> String:
+	var why := campaign_block(id)
+	if why != "":
+		return why
+	var c := campaign_def(id)
+	if not pay(float(c["cost"]), "other", "Marketing: %s" % c["name"]):
+		return "Not enough money"
+	events.append({"kind": "campaign", "id": id, "k": 1.0 + float(c.get("footfall", 0.0)),
+		"until": day + int(c.get("days", 3)) - 1, "text": "%s: %s" % [String(brand.get("name", "Your shops")), c["name"]]})
+	for b: Business in businesses:
+		b.add_rep(float(c.get("rep", 0)))
+	stats["campaigns"] = int(stats.get("campaigns", 0)) + 1
+	_note("%s running for %d days." % [c["name"], int(c["days"])], "good")
+	_check_goals()
+	changed.emit()
+	return ""
+
+
 func to_dict() -> Dictionary:
 	var vs: Array = []
 	for v in vehicles:
@@ -968,7 +1101,7 @@ func to_dict() -> Dictionary:
 		"flags": flags.duplicate(), "id_n": _id_n, "rng_state": str(rng.state),
 		"hour_served": _hour_served.duplicate(), "carry": _carry_minutes, "weather": weather, "forecast": forecast,
 		"events": events.duplicate(true), "rivals": rivals.duplicate(true), "news": news.duplicate(true),
-		"firms": firms.duplicate(true)}
+		"firms": firms.duplicate(true), "brand": brand.duplicate(), "hq": hq.duplicate()}
 
 
 static func from_dict(src: Dictionary) -> Empire:
@@ -1018,6 +1151,8 @@ static func from_dict(src: Dictionary) -> Empire:
 	e.rivals = d.get("rivals", [])
 	e.news = d.get("news", [])
 	e.firms = d.get("firms", [])
+	e.brand = d.get("brand", {})
+	e.hq = d.get("hq", {})
 	if e.candidates.is_empty():
 		e.candidates = Staff.candidates(e.day, e.seed)
 	return e

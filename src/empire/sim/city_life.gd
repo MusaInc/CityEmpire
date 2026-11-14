@@ -238,9 +238,9 @@ static func footfall_k(e: Empire, b: Business) -> float:
 			"festival":
 				if ev.get("district") == b.district_key():
 					k *= float(ev.get("k", 1.0))
-			"payday":
+			"payday", "campaign":
 				k *= float(ev.get("k", 1.0))
-	return k
+	return k * e.hq_footfall_k()
 
 
 ## Category weights for what shoppers want today (weather).

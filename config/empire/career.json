@@ -55,7 +55,7 @@
    "goals": [
     {
      "id": "rev_2k",
-     "text": "Take £2,000 in sales",
+     "text": "Take \u00a32,000 in sales",
      "stat": "revenue",
      "value": 2000
     },
@@ -90,6 +90,12 @@
    "name": "Expansion",
    "goals": [
     {
+     "id": "brand",
+     "text": "Create your brand (phone \u2192 Brand)",
+     "stat": "branded",
+     "value": 1
+    },
+    {
      "id": "three_shops",
      "text": "Run three shops",
      "stat": "businesses",
@@ -115,13 +121,13 @@
     },
     {
      "id": "rev_25k",
-     "text": "Take £25,000 in sales",
+     "text": "Take \u00a325,000 in sales",
      "stat": "revenue",
      "value": 25000
     },
     {
      "id": "big_day",
-     "text": "Make £400 profit in one day",
+     "text": "Make \u00a3400 profit in one day",
      "stat": "best_day",
      "value": 400
     }
@@ -133,7 +139,7 @@
    "goals": [
     {
      "id": "net_100k",
-     "text": "Net worth £100,000",
+     "text": "Net worth \u00a3100,000",
      "stat": "net_worth",
      "value": 100000
     },
@@ -154,6 +160,18 @@
      "text": "Employ 15 people",
      "stat": "staff",
      "value": 15
+    },
+    {
+     "id": "hq1",
+     "text": "Open a head office in Meridian Tower",
+     "stat": "hq_tier",
+     "value": 1
+    },
+    {
+     "id": "campaign1",
+     "text": "Run a marketing campaign",
+     "stat": "campaigns",
+     "value": 1
     }
    ]
   },
@@ -181,7 +199,7 @@
     },
     {
      "id": "net_250k",
-     "text": "Net worth £250,000",
+     "text": "Net worth \u00a3250,000",
      "stat": "net_worth",
      "value": 250000
     },
@@ -190,6 +208,12 @@
      "text": "Drive QuikSave out of the city",
      "stat": "rival_gone",
      "value": 1
+    },
+    {
+     "id": "tower",
+     "text": "Take the whole tower: your name on the skyline",
+     "stat": "hq_tier",
+     "value": 3
     }
    ]
   }

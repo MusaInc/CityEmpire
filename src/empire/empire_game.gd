@@ -167,6 +167,8 @@ func _after_start() -> void:
 	if args.has("goto"):
 		var g := String(args["goto"])
 		var u: Dictionary = starter_unit() if g == "start" else (wholesaler(g.get_slice(":", 1)) if g.begins_with("wholesale") else unit_by_id.get(g, {}))
+		if g == "hq":
+			u = hq_unit()
 		if g == "rival" and not empire.rivals.is_empty():
 			u = unit_by_id.get(empire.rivals[0]["unit"], {})
 		if g.begins_with("type:"):
@@ -195,8 +197,9 @@ func _after_start() -> void:
 			var fd := float(args["front"])
 			var fu := u
 			camera.cine = func(_dt: float) -> Array:
-				var dp := Premises.door_point(fu) + Vector3.UP * 2.3
-				var from := dp + Premises.outward(fu) * fd + Premises.along_dir(fu) * fd * 0.25
+				var dp := Premises.door_point(fu) + Vector3.UP * (2.3 + float(args.get("front-up", "0")))
+				var from := dp + Premises.outward(fu) * fd + Premises.along_dir(fu) * fd * 0.25 \
+					- Vector3.UP * float(args.get("front-up", "0")) * 0.6
 				return [Transform3D(Basis.looking_at(dp - from, Vector3.UP), from), 62.0]
 		if not u.is_empty():
 			var inside := args.has("inside")
@@ -204,6 +207,13 @@ func _after_start() -> void:
 			_teleport(p, atan2(Premises.outward(u).x, Premises.outward(u).z) + (PI if not inside else 0.0))
 	if args.has("hour"):
 		empire.minute = float(args["hour"]) * 60.0
+	if args.has("brand"):
+		# Captures: a sample house brand ("1") or "name,primary,accent,face,sign".
+		var bp := String(args["brand"]).split(",")
+		empire.brand = {"name": "Harbour & Co", "primary": "#0f3d5c", "accent": "#f5b13d", "face": "serif", "sign": "painted"} \
+			if bp.size() < 5 else {"name": bp[0], "primary": "#" + bp[1], "accent": "#" + bp[2], "face": bp[3], "sign": bp[4]}
+	if args.has("hq"):
+		empire.hq = {"tier": int(args["hq"]), "paid": 0.0, "day": empire.day}
 	if args.has("demo"):
 		_demo_setup(String(args["demo"]))
 	if args.has("noworld"):
@@ -261,6 +271,10 @@ func _after_start() -> void:
 		elif pn == "firm" and not empire.firms.is_empty():
 			var fs2 := CityLife.firms_for_sale(empire)
 			ui.open_firm(unit_by_id[(fs2[0] if not fs2.is_empty() else empire.firms[0])["unit"]])
+		elif pn == "brand":
+			ui.open_brand()
+		elif pn == "hq":
+			ui.open_hq()
 		elif pn == "report":
 			empire.advance(1440.0 - empire.minute + 1.0)
 		else:
@@ -334,6 +348,79 @@ func _sync_rivals() -> void:
 			rebuild_interior(id)
 
 
+var _brand_sig := "?"
+var _crown: Node3D
+
+
+## Your brand and head office in the world: ShopStyle's house brand, your
+## shops' and the lobby's signs, and the tower crown (rebuilt when changed).
+func _sync_brand() -> void:
+	var sig := "%s|%d" % [JSON.stringify(empire.brand), empire.hq_tier()]
+	if sig == _brand_sig:
+		return
+	var first := _brand_sig == "?"
+	_brand_sig = sig
+	ShopStyle.house = empire.brand.duplicate()
+	ShopStyle.hq_tier = empire.hq_tier()
+	_update_crown()
+	if first:
+		return
+	for id in interiors.keys():
+		var u: Dictionary = unit_by_id.get(id, {})
+		if u.get("kind") == "hq" or empire.business_at(id) != null:
+			rebuild_interior(id)
+
+
+func hq_unit() -> Dictionary:
+	for u in units:
+		if u["kind"] == "hq":
+			return u
+	return {}
+
+
+## Your name in lights round the top of Meridian Tower (the whole tower).
+func _update_crown() -> void:
+	if _crown:
+		_crown.queue_free()
+		_crown = null
+	var u := hq_unit()
+	if u.is_empty() or empire.hq_tier() < 3:
+		return
+	var hi := ShopStyle.house_ident(empire.brand) if not empire.brand.is_empty() else {}
+	var text := String(hi.get("name", "")) if not hi.is_empty() else "HEAD OFFICE"
+	if text == "":
+		text = "HEAD OFFICE"
+	if String(hi.get("face", "")) not in ["script", "retro"]:
+		text = text.to_upper()
+	var b: Dictionary = u["b"]
+	var top: Array = b["tiers"][0]
+	for t in b["tiers"]:
+		if float(t[5]) > float(top[5]):
+			top = t
+	var xf := CityLayout.bxf(b)
+	_crown = Node3D.new()
+	_crown.name = "TowerCrown"
+	add_child(_crown)
+	for k in 4:
+		var f := BuildingMesher._face(top, k)
+		var flen: float = f[3]
+		var p := xf * BuildingMesher._fpt(f, flen * 0.5, 0.35, float(top[5]) - 7.0)
+		var out := (xf.basis * (f[2] as Vector3)).normalized()
+		var l := Label3D.new()
+		l.text = text
+		l.font = ShopStyle.font(String(hi.get("face", "display")))
+		l.font_size = 220
+		l.outline_size = 0
+		l.pixel_size = (flen * 0.78) / maxf(text.length() * 0.62 * 220.0, 1.0)
+		l.shaded = false
+		l.double_sided = false
+		l.modulate = (hi.get("accent", Color(1.0, 0.85, 0.5)) as Color) * 1.15
+		l.visibility_range_end = 0.0
+		_crown.add_child(l)
+		l.global_transform = Transform3D(Basis.looking_at(-out, Vector3.UP), p)
+		print("CROWN ", k, " ", p, " flen=", flen, " ps=", l.pixel_size, " door=", Premises.door_point(u))
+
+
 ## Who trades in a unit that isn't yours: the QuikSave record, or an
 ## independent's (marked "firm"), or {}.
 func occupier(unit_id: String) -> Dictionary:
@@ -377,6 +464,8 @@ func wholesaler(island: String) -> Dictionary:
 
 
 func _connect_empire() -> void:
+	_brand_sig = "?"
+	_sync_brand()
 	empire.notified.connect(func(t, k): ui.toast(t, k))
 	empire.day_ended.connect(func(r):
 		ui.day_report(r)
@@ -458,6 +547,7 @@ func _process(dt: float) -> void:
 		_stream_t = 0.4
 		_sync_weather()
 		_sync_rivals()
+		_sync_brand()
 		_stream_interiors()
 		_update_live_floor()
 	if state != "play":
@@ -640,7 +730,7 @@ func _update_spot() -> void:
 				continue
 			for s in si.world_spots():
 				var d := Vector2(p.x, p.z).distance_to(Vector2(s["world"].x, s["world"].z))
-				var reach := REACH * (1.4 if s["kind"] in ["trade", "pallet", "office"] else 1.0)
+				var reach := REACH * (1.4 if s["kind"] in ["trade", "pallet", "office", "hq_desk"] else 1.0)
 				if d < reach and absf(p.y - 0.9 - s["world"].y) < 1.6 and d < best_d:
 					best = s
 					best_d = d
@@ -739,6 +829,8 @@ func spot_prompt() -> Array:
 			return ["CLEAN FLOOR (%d%%)" % int(b.cleanliness * 100.0), true]
 		"trade":
 			return ["BUY STOCK", true]
+		"hq_desk":
+			return ["RECEPTION · %s" % ("YOUR HEAD OFFICE" if empire.hq_tier() > 0 else "OFFICE SUITES TO LET"), true]
 		"pallet":
 			var pal := _pallet(si.unit["id"])
 			if pal.is_empty():
@@ -870,6 +962,8 @@ func act() -> void:
 			si.refresh_goods()
 		"trade":
 			ui.open_wholesale(si.unit)
+		"hq_desk":
+			ui.open_hq()
 		"pallet":
 			var pal := _pallet(si.unit["id"])
 			var pid3: String = pal.units.keys()[0]

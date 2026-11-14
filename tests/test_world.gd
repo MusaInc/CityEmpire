@@ -90,6 +90,8 @@ func test_interiors_walkable_even_fully_upgraded(t) -> void:
 				goals.append(["behind till %d" % i, si.till_staff[i]])
 			goals.append(["stockroom", si.rack_pos])
 			goals.append(["office", si.office_pos])
+		elif u["kind"] == "hq":
+			goals.append(["reception", si.spots.filter(func(s): return s["kind"] == "hq_desk")[0]["pos"]])
 		else:
 			goals.append(["trade counter", si.spots.filter(func(s): return s["kind"] == "trade")[0]["pos"]])
 		for g in goals:

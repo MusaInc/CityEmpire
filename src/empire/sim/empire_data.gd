@@ -124,6 +124,10 @@ static func vehicle_models() -> Dictionary:
 	return file("vehicles").get("models", {})
 
 
+static func hq() -> Dictionary:
+	return file("hq")
+
+
 # -------------------------------------------------------------- career
 static func chapters() -> Array:
 	return file("career").get("chapters", [])

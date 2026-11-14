@@ -9,6 +9,7 @@ extends CanvasLayer
 ## Panels pause the world while open.
 
 const S = preload("res://src/empire/ui/empire_style.gd")
+const Widgets = preload("res://src/empire/ui/empire_widgets.gd")
 
 var game: EmpireGame
 var hud: Control
@@ -1000,14 +1001,185 @@ func _m_reports(v: VBoxContainer, b: Business) -> void:
 
 
 # ---------------------------------------------------------------- phone
+const PHONE_TABS := [["businesses", "Businesses"], ["company", "Company"], ["city", "City"], ["map", "Map"],
+	["bank", "Bank"], ["vehicles", "Vehicles"], ["property", "Property"], ["goals", "Goals"], ["game", "Game"]]
+const PHONE_SUB := {"businesses": "Your shops and places to trade", "company": "Brand, head office and marketing",
+	"city": "Weather, rivals and the news", "map": "Tap anywhere to set GPS", "bank": "Accounts, loans and the ledger",
+	"vehicles": "Your fleet and the dealer", "property": "Homes and premises", "goals": "Your career, chapter by chapter",
+	"game": "Save, speed and settings"}
+
+
+## The phone: a nav rail with line icons on the left, the tab's title and
+## your money across the top, the tab's content below (returned).
+func _phone_shell(tab: String) -> VBoxContainer:
+	close_panel(false)
+	get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var e := game.empire
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.42)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_panel_root.add_child(dim)
+	var W := 1220.0
+	var H := 690.0
+	_panel = PanelContainer.new()
+	var psb := (S.theme().get_stylebox("panel", "PanelContainer") as StyleBoxFlat).duplicate() as StyleBoxFlat
+	psb.content_margin_left = 0
+	psb.content_margin_top = 0
+	psb.content_margin_bottom = 0
+	psb.content_margin_right = 0
+	_panel.add_theme_stylebox_override("panel", psb)
+	_panel.custom_minimum_size = Vector2(W, H)
+	_anchor(_panel, 0.5, 0.5, -Vector2(W, H) * 0.5, Vector2(W, H))
+	_panel_root.add_child(_panel)
+	var row := S.hbox(0)
+	_panel.add_child(row)
+	# The rail.
+	var rail := PanelContainer.new()
+	var rsb := StyleBoxFlat.new()
+	rsb.bg_color = Color(0, 0, 0, 0.22)
+	rsb.corner_radius_top_left = 20
+	rsb.corner_radius_bottom_left = 20
+	rsb.content_margin_left = 14
+	rsb.content_margin_right = 14
+	rsb.content_margin_top = 20
+	rsb.content_margin_bottom = 16
+	rail.add_theme_stylebox_override("panel", rsb)
+	rail.custom_minimum_size.x = 214
+	row.add_child(rail)
+	var rv := S.vbox(4)
+	rail.add_child(rv)
+	var who := S.hbox(10)
+	var badge := _brand_badge(40)
+	who.add_child(badge)
+	var wv := S.vbox(-2)
+	var cname := String(e.brand.get("name", ""))
+	wv.add_child(S.label(cname if cname != "" else "Your company", 17, S.PAPER, "black"))
+	wv.add_child(S.label("Day %d · %s %s" % [e.day, e.weekday(), e.clock_text()], 13, S.MUTED))
+	who.add_child(wv)
+	rv.add_child(who)
+	var gap := Control.new()
+	gap.custom_minimum_size.y = 12
+	rv.add_child(gap)
+	for t in PHONE_TABS:
+		rv.add_child(_rail_button(t[0], t[1], t[0] == tab))
+	# Content.
+	var body := MarginContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for side in ["left", "right"]:
+		body.add_theme_constant_override("margin_" + side, 24)
+	body.add_theme_constant_override("margin_top", 18)
+	body.add_theme_constant_override("margin_bottom", 18)
+	row.add_child(body)
+	var v := S.vbox(14)
+	body.add_child(v)
+	var head := S.hbox(14)
+	var hv := S.vbox(-2)
+	var title := ""
+	for t in PHONE_TABS:
+		if t[0] == tab:
+			title = t[1]
+	hv.add_child(S.label(title, 30, S.PAPER, "black"))
+	hv.add_child(S.label(String(PHONE_SUB.get(tab, "")), 15, S.MUTED))
+	head.add_child(hv)
+	head.add_child(S.spacer())
+	head.add_child(_money_pill("Savings", e.personal_cash, S.PAPER))
+	head.add_child(_money_pill("Company", e.company_cash, S.RED if e.company_cash < 0.0 else S.PAPER))
+	head.add_child(_money_pill("Net worth", e.net_worth(), S.GREEN))
+	head.add_child(S.button("✕", close_panel.bind(true), false, 52))
+	v.add_child(head)
+	var rule := ColorRect.new()
+	rule.color = S.LINE
+	rule.custom_minimum_size.y = 1
+	v.add_child(rule)
+	return v
+
+
+func _rail_button(key: String, text: String, on: bool) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, 50)
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(S.AMBER, 0.14) if on else Color(0, 0, 0, 0)
+	sb.set_corner_radius_all(12)
+	sb.content_margin_left = 52
+	if on:
+		sb.border_color = S.AMBER
+		sb.border_width_left = 3
+	var hv := sb.duplicate() as StyleBoxFlat
+	hv.bg_color = Color(S.AMBER, 0.2) if on else Color(1, 1, 1, 0.05)
+	for st in ["normal", "focus", "disabled"]:
+		b.add_theme_stylebox_override(st, sb)
+	b.add_theme_stylebox_override("hover", hv)
+	b.add_theme_stylebox_override("pressed", hv)
+	b.text = text
+	b.add_theme_font_override("font", S.font("bold" if on else "semibold"))
+	b.add_theme_font_size_override("font_size", 18)
+	var col := S.AMBER if on else Color(S.PAPER, 0.78)
+	for cn in ["font_color", "font_hover_color", "font_pressed_color"]:
+		b.add_theme_color_override(cn, col if cn == "font_color" else (S.AMBER if on else S.PAPER))
+	var ic := Widgets.Icon.new(key, col, 24)
+	ic.position = Vector2(16, 13)
+	ic.size = Vector2(24, 24)
+	b.add_child(ic)
+	b.pressed.connect(func():
+		if Time.get_ticks_msec() < S.tap_block_until:
+			return
+		Sfx.play("click", -12.0)
+		open_phone(key))
+	return b
+
+
+func _money_pill(title: String, amount: float, col: Color) -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(1, 1, 1, 0.045)
+	sb.set_corner_radius_all(12)
+	sb.content_margin_left = 14
+	sb.content_margin_right = 14
+	sb.content_margin_top = 5
+	sb.content_margin_bottom = 5
+	p.add_theme_stylebox_override("panel", sb)
+	var v := S.vbox(-3)
+	v.add_child(S.label(title.to_upper(), 11, S.MUTED, "black"))
+	v.add_child(S.label(EmpireData.money(amount), 20, col, "black"))
+	p.add_child(v)
+	return p
+
+
+## Your logo: the roundel in your brand's colours (a plain CE mark before
+## you've made one).
+func _brand_badge(px: float) -> Control:
+	var e := game.empire
+	var c := _Roundel.new()
+	c.custom_minimum_size = Vector2(px, px)
+	if not e.brand.is_empty():
+		c.ident = ShopStyle.house_ident(e.brand)
+	return c
+
+
+class _Roundel extends Control:
+	var ident := {}
+
+	func _draw() -> void:
+		var r := minf(size.x, size.y) * 0.5
+		var c := size * 0.5
+		var prim: Color = ident.get("primary", EmpireStyle.INK2.lightened(0.15))
+		var acc: Color = ident.get("accent", EmpireStyle.AMBER)
+		draw_circle(c, r, acc)
+		draw_circle(c, r * 0.84, prim)
+		var t := String(ident.get("initial", "CE")) if not ident.is_empty() else "CE"
+		var f: Font = ShopStyle.font(String(ident.get("face", ""))) if not ident.is_empty() else EmpireStyle.font("black")
+		var fs := int(r * (0.95 if t.length() == 1 else 0.7))
+		var w := f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_string(f, c + Vector2(-w * 0.5, fs * 0.36), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, acc)
+
+
 func open_phone(tab := "businesses") -> void:
 	var e := game.empire
-	var v := _open("Phone", 1000, 640)
-	var tabs := S.hbox(8)
-	for t in [["businesses", "Businesses"], ["city", "City"], ["map", "Map"], ["bank", "Bank"], ["vehicles", "Vehicles"],
-			["property", "Property"], ["goals", "Goals"], ["game", "Game"]]:
-		tabs.add_child(S.button(t[1], func(): open_phone(t[0]), t[0] == tab))
-	v.add_child(tabs)
+	var v := _phone_shell(tab)
 	match tab:
 		"businesses":
 			var list := S.vbox(6)
@@ -1044,6 +1216,8 @@ func open_phone(tab := "businesses") -> void:
 			v.add_child(_scroll(list, 470))
 		"city":
 			_city_tab(v)
+		"company":
+			_company_tab(v)
 		"map":
 			var m := EmpireMap.new()
 			m.game = game
@@ -1195,6 +1369,321 @@ func open_phone(tab := "businesses") -> void:
 				game.save_game()
 				close_panel(true)
 				get_tree().reload_current_scene(), false, 280))
+
+
+# ------------------------------------------------------------ company
+func _card(minw := 0.0) -> Array:
+	var p := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(1, 1, 1, 0.04)
+	sb.set_corner_radius_all(16)
+	sb.border_color = Color(1, 1, 1, 0.06)
+	sb.set_border_width_all(1)
+	sb.content_margin_left = 18
+	sb.content_margin_right = 18
+	sb.content_margin_top = 14
+	sb.content_margin_bottom = 14
+	p.add_theme_stylebox_override("panel", sb)
+	p.custom_minimum_size.x = minw
+	var v := S.vbox(10)
+	p.add_child(v)
+	return [p, v]
+
+
+func _section(icon: String, text: String, col := S.AMBER) -> HBoxContainer:
+	var h := S.hbox(8)
+	h.add_child(Widgets.Icon.new(icon, col, 20))
+	h.add_child(S.label(text.to_upper(), 14, col, "black"))
+	return h
+
+
+func _company_tab(v: VBoxContainer) -> void:
+	var e := game.empire
+	var top := S.hbox(16)
+	v.add_child(top)
+	# Brand card.
+	var bc := _card(450)
+	top.add_child(bc[0])
+	var bv: VBoxContainer = bc[1]
+	bv.add_child(_section("brand", "Your brand"))
+	var pv := Widgets.BrandPreview.new()
+	pv.ident = ShopStyle.house_ident(e.brand if not e.brand.is_empty() else ShopStyle.default_house(""))
+	pv.custom_minimum_size = Vector2(412, 170)
+	bv.add_child(pv)
+	if e.brand.is_empty():
+		bv.add_child(S.label("Your shops each wear their own sign. Create a brand and every one trades under your name.", 15, S.MUTED))
+		bv.get_child(-1).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		bv.add_child(S.button("Create your brand", func(): open_brand(), true))
+	else:
+		var hb := S.hbox(10)
+		hb.add_child(S.label("%d shop%s wear it" % [e.businesses.size(), "" if e.businesses.size() == 1 else "s"], 15, S.MUTED))
+		hb.add_child(S.spacer())
+		hb.add_child(S.button("Edit brand", func(): open_brand(), false, 150))
+		bv.add_child(hb)
+	# Head office card.
+	var hc := _card(0)
+	(hc[0] as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(hc[0])
+	var hv: VBoxContainer = hc[1]
+	hv.add_child(_section("tower", "Head office · Meridian Tower"))
+	var tier := e.hq_tier()
+	if tier > 0:
+		var d := e.hq_def(tier)
+		hv.add_child(S.label(String(d["name"]), 26, S.PAPER, "black"))
+		hv.add_child(_perks(d))
+		hv.add_child(S.label("Upkeep %s/day" % EmpireData.money(float(d["upkeep"])), 15, S.MUTED))
+	else:
+		hv.add_child(S.label("No head office yet", 24, S.PAPER, "black"))
+		var t := S.label("Lease a floor of the city's tallest tower: bulk buying for every shop, and a marketing desk.", 15, S.MUTED)
+		t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		hv.add_child(t)
+	var nd := e.hq_def(tier + 1)
+	if not nd.is_empty():
+		var why := e.hq_block(tier + 1)
+		var nh := S.hbox(10)
+		nh.add_child(S.label("Next: %s · %s" % [nd["name"], EmpireData.money(float(nd["price"]))], 16, S.AMBER, "bold"))
+		hv.add_child(nh)
+		hv.add_child(_progress(float(e.businesses.size()), float(nd["shops"]), "%d / %d shops" % [e.businesses.size(), int(nd["shops"])]))
+		if why != "":
+			hv.add_child(S.label(why, 14, S.MUTED))
+	var gh := S.hbox(10)
+	gh.add_child(S.button("GPS to the tower", func():
+		var u := game.hq_unit()
+		if not u.is_empty():
+			game.set_gps(Premises.door_point(u), "Meridian Tower")
+		close_panel(true), tier == 0, 220))
+	hv.add_child(gh)
+	# Marketing.
+	v.add_child(_section("megaphone", "Marketing"))
+	var run := e.campaign_running()
+	var list := S.vbox(6)
+	for c in EmpireData.hq().get("campaigns", []):
+		var why2 := e.campaign_block(c["id"])
+		var live: bool = run.get("id", "") == c["id"]
+		var row: Array = [_fixed(String(c["name"]), 200, 18, S.PAPER, "bold"),
+			_fixed(String(c["blurb"]), 330, 14, S.MUTED),
+			_fixed("+%d%% shoppers · %d days" % [roundi(float(c["footfall"]) * 100.0), int(c["days"])] + (" · ★+%d" % int(c["rep"]) if int(c["rep"]) > 0 else ""), 230, 14, S.GREEN)]
+		row.append(S.spacer())
+		if live:
+			row.append(S.chip("RUNNING · %d DAY%s LEFT" % [int(run["until"]) - e.day + 1, "" if int(run["until"]) == e.day else "S"], S.GREEN))
+		else:
+			var btn := S.button(EmpireData.money(float(c["cost"])), func():
+				var err := e.run_campaign(c["id"])
+				toast(err if err != "" else "%s is running" % c["name"], "bad" if err != "" else "good")
+				if err == "":
+					Sfx.play("chime", -6.0)
+				open_phone("company"), why2 == "", 130)
+			btn.disabled = why2 != "" and not why2.begins_with("Costs")
+			if btn.disabled:
+				btn.tooltip_text = why2
+			row.append(btn)
+		list.add_child(_row(row))
+	if e.hq_tier() == 0:
+		list.add_child(S.label("Campaigns are run from your head office.", 15, S.MUTED))
+	v.add_child(_scroll(list, 150))
+
+
+func _perks(d: Dictionary) -> Label:
+	var bits: Array = []
+	if float(d.get("wholesale", 0)) > 0.0:
+		bits.append("−%d%% on every case of stock" % roundi(float(d["wholesale"]) * 100.0))
+	if float(d.get("footfall", 0)) > 0.0:
+		bits.append("+%d%% shoppers in every shop" % roundi(float(d["footfall"]) * 100.0))
+	var l := S.label(" · ".join(bits), 15, S.GREEN, "bold")
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return l
+
+
+func _progress(x: float, of: float, text: String) -> Control:
+	var h := S.hbox(10)
+	var bar := _Bar.new()
+	bar.k = clampf(x / maxf(of, 1.0), 0.0, 1.0)
+	bar.custom_minimum_size = Vector2(220, 10)
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(bar)
+	h.add_child(S.label(text, 14, S.MUTED))
+	return h
+
+
+class _Bar extends Control:
+	var k := 0.0
+
+	func _draw() -> void:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(1, 1, 1, 0.1))
+		draw_rect(Rect2(Vector2.ZERO, Vector2(size.x * k, size.y)), EmpireStyle.GREEN if k >= 1.0 else EmpireStyle.AMBER)
+
+
+# -------------------------------------------------------- brand studio
+var _draft := {}
+var _draft_roll := 0
+
+
+func open_brand() -> void:
+	var e := game.empire
+	if _draft.is_empty():
+		_draft = e.brand.duplicate() if not e.brand.is_empty() else ShopStyle.default_house("")
+	var v := _open("Brand studio", 1180, 660)
+	var row := S.hbox(22)
+	v.add_child(row)
+	# Left: the shopfront and the name.
+	var lv := S.vbox(12)
+	row.add_child(lv)
+	var pv := Widgets.BrandPreview.new()
+	pv.ident = ShopStyle.house_ident(_draft)
+	pv.custom_minimum_size = Vector2(540, 300)
+	lv.add_child(pv)
+	var nh := S.hbox(10)
+	var le := LineEdit.new()
+	le.text = String(_draft.get("name", ""))
+	le.placeholder_text = "Company name"
+	le.max_length = 22
+	le.custom_minimum_size = Vector2(380, 54)
+	le.add_theme_font_override("font", S.font("bold"))
+	le.add_theme_font_size_override("font_size", 22)
+	le.text_changed.connect(func(t: String):
+		_draft["name"] = t
+		pv.ident = ShopStyle.house_ident(_draft)
+		pv.queue_redraw())
+	nh.add_child(le)
+	nh.add_child(S.button("Suggest", func():
+		_draft_roll += 1
+		_draft["name"] = ShopStyle.suggest_name(_draft_roll + e.seed * 31)
+		open_brand(), false, 140))
+	lv.add_child(nh)
+	var cost := e.rebrand_cost() if String(e.brand.get("name", "")) != "" else 0.0
+	lv.add_child(S.label("Free: your first brand." if cost <= 0.0 else "New signs for %d shops: %s" % [e.businesses.size(), EmpireData.money(cost)], 16, S.MUTED))
+	var ah := S.hbox(10)
+	ah.add_child(S.button("Apply brand" if cost <= 0.0 else "Apply · %s" % EmpireData.money(cost), func():
+		var err := e.set_brand(_draft)
+		if err != "":
+			toast(err, "bad")
+			return
+		_draft = {}
+		Sfx.play("chime", -4.0)
+		toast("Your shops now trade as %s" % e.brand["name"], "good")
+		open_phone("company"), true, 260))
+	ah.add_child(S.button("Cancel", func():
+		_draft = {}
+		open_phone("company"), false, 140))
+	lv.add_child(ah)
+	# Right: colours, lettering, sign.
+	var rv := S.vbox(10)
+	rv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(rv)
+	rv.add_child(S.label("COLOURS", 14, S.AMBER, "black"))
+	var g := GridContainer.new()
+	g.columns = 6
+	g.add_theme_constant_override("h_separation", 10)
+	g.add_theme_constant_override("v_separation", 10)
+	for pal in ShopStyle.HOUSE_PALETTES:
+		var on: bool = String(_draft.get("primary", "")) == pal[0] and String(_draft.get("accent", "")) == pal[1]
+		g.add_child(_swatch(Color(pal[0]), Color(pal[1]), on, func():
+			_draft["primary"] = pal[0]
+			_draft["accent"] = pal[1]
+			open_brand()))
+	rv.add_child(g)
+	var sw := S.hbox(10)
+	sw.add_child(S.button("Swap colours", func():
+		var p0 = _draft["primary"]
+		_draft["primary"] = _draft["accent"]
+		_draft["accent"] = p0
+		open_brand(), false, 170))
+	rv.add_child(sw)
+	rv.add_child(S.label("LETTERING", 14, S.AMBER, "black"))
+	var fg := GridContainer.new()
+	fg.columns = 4
+	fg.add_theme_constant_override("h_separation", 8)
+	fg.add_theme_constant_override("v_separation", 8)
+	for f in ShopStyle.HOUSE_FACES:
+		var b := S.button(String(ShopStyle.FACE_NAMES.get(f, f)), func():
+			_draft["face"] = f
+			open_brand(), String(_draft.get("face", "")) == f, 128)
+		b.add_theme_font_override("font", ShopStyle.font(f))
+		b.add_theme_font_size_override("font_size", 20 if f != "neon" else 15)
+		fg.add_child(b)
+	rv.add_child(fg)
+	rv.add_child(S.label("SIGN", 14, S.AMBER, "black"))
+	var sg := S.hbox(8)
+	for sn in ShopStyle.HOUSE_SIGNS:
+		sg.add_child(S.button(String(ShopStyle.SIGN_NAMES.get(sn, sn)), func():
+			_draft["sign"] = sn
+			open_brand(), String(_draft.get("sign", "")) == sn, 120))
+	rv.add_child(sg)
+
+
+func _swatch(a: Color, b: Color, on: bool, cb: Callable) -> Button:
+	var btn := Button.new()
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.custom_minimum_size = Vector2(68, 52)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = a
+	sb.set_corner_radius_all(12)
+	sb.border_color = S.PAPER if on else Color(1, 1, 1, 0.15)
+	sb.set_border_width_all(3 if on else 1)
+	for st in ["normal", "hover", "pressed", "focus"]:
+		btn.add_theme_stylebox_override(st, sb)
+	var dot := ColorRect.new()
+	dot.color = b
+	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dot.position = Vector2(40, 24)
+	dot.size = Vector2(18, 18)
+	btn.add_child(dot)
+	btn.pressed.connect(func():
+		if Time.get_ticks_msec() < S.tap_block_until:
+			return
+		Sfx.play("click", -12.0)
+		cb.call())
+	return btn
+
+
+# ---------------------------------------------------------- head office
+## The reception desk in Meridian Tower: the three tiers side by side.
+func open_hq() -> void:
+	var e := game.empire
+	var v := _open("Meridian Tower", 1120, 560)
+	var tier := e.hq_tier()
+	v.add_child(S.label("Reception · %s" % ("welcome back" if tier > 0 else "office suites to let, from %s" % EmpireData.money(float(e.hq_def(1)["price"]))), 17, S.MUTED))
+	var h := S.hbox(14)
+	v.add_child(h)
+	for i in range(1, 4):
+		var d := e.hq_def(i)
+		var c := _card(0)
+		(c[0] as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(c[0])
+		var cv: VBoxContainer = c[1]
+		var mine := tier >= i
+		var th := S.hbox(8)
+		th.add_child(S.label("FLOOR %d" % [1, 3, 60][i - 1] if i < 3 else "ALL 60 FLOORS", 13, S.MUTED, "black"))
+		th.add_child(S.spacer())
+		if mine:
+			th.add_child(S.chip("YOURS", S.GREEN))
+		cv.add_child(th)
+		cv.add_child(S.label(String(d["name"]), 24, S.PAPER, "black"))
+		var bl := S.label(String(d["blurb"]), 15, S.MUTED)
+		bl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		bl.custom_minimum_size = Vector2(300, 64)
+		cv.add_child(bl)
+		cv.add_child(_perks(d))
+		cv.add_child(S.label("Unlocks: " + ", ".join(EmpireData.hq().get("campaigns", []).filter(func(x): return int(x["tier"]) == i).map(func(x): return String(x["name"]))), 14, S.PAPER))
+		cv.add_child(S.label("Upkeep %s/day · needs %d shops" % [EmpireData.money(float(d["upkeep"])), int(d["shops"])], 14, S.MUTED))
+		if not mine:
+			var why := e.hq_block(i)
+			var b := S.button("Take it · %s" % EmpireData.money(float(d["price"])), func():
+				var err := e.buy_hq(i)
+				if err != "":
+					toast(err, "bad")
+					return
+				Sfx.play("chime", -2.0)
+				toast("%s is yours" % d["name"], "good")
+				open_hq(), i == tier + 1)
+			b.disabled = why != ""
+			cv.add_child(b)
+			if why != "":
+				cv.add_child(S.label(why, 14, S.AMBER))
+	var fh := S.hbox(10)
+	fh.add_child(S.button("Brand studio", func(): open_brand(), false, 180))
+	fh.add_child(S.button("Marketing", func(): open_phone("company"), false, 160))
+	v.add_child(fh)
 
 
 static func _short(x: float) -> String:

@@ -1,0 +1,15 @@
+{
+ "_doc": "Head office in Meridian Tower (the CBD's tallest). Tiers are bought outright (counted in net worth at their price) and cost upkeep each day. wholesale = discount on every case; footfall = boost to every shop. Campaigns need a head office (tier) and boost every shop's footfall for `days` (and reputation once).",
+ "tiers": [
+  {"name": "Head office", "blurb": "A floor of Meridian Tower: a buying team and a marketing desk.", "price": 40000, "upkeep": 120, "shops": 3, "wholesale": 0.06, "footfall": 0.0},
+  {"name": "Corporate floors", "blurb": "Three floors: national buying contracts and a brand team.", "price": 150000, "upkeep": 380, "shops": 5, "wholesale": 0.1, "footfall": 0.05},
+  {"name": "The whole tower", "blurb": "Every floor, and your name in lights on the city's tallest tower.", "price": 300000, "upkeep": 850, "shops": 8, "wholesale": 0.14, "footfall": 0.1}
+ ],
+ "campaigns": [
+  {"id": "leaflets", "name": "Leaflet drop", "blurb": "Through every letterbox near your shops.", "cost": 600, "days": 3, "footfall": 0.12, "rep": 0, "tier": 1},
+  {"id": "radio", "name": "Radio advert", "blurb": "Drive-time slots on City FM all week.", "cost": 3500, "days": 4, "footfall": 0.18, "rep": 2, "tier": 1},
+  {"id": "billboards", "name": "Billboards", "blurb": "Posters on the bridges and the ring road.", "cost": 12000, "days": 5, "footfall": 0.25, "rep": 4, "tier": 2},
+  {"id": "tv", "name": "TV advert", "blurb": "Prime time, city-wide. Everyone knows your name.", "cost": 40000, "days": 7, "footfall": 0.35, "rep": 8, "tier": 3}
+ ],
+ "rebrand_per_shop": 400
+}

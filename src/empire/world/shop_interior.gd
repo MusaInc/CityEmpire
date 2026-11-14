@@ -107,6 +107,8 @@ func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival
 	look = ShopStyle.look(type_id)
 	if biz:
 		ident = ShopStyle.brand(biz.name, type_id, not rival.is_empty() and not rival.get("firm", false))
+		if rival.is_empty() and String(ShopStyle.house.get("name", "")) != "":
+			ident = ShopStyle.house_ident(ShopStyle.house)   # one of yours: your brand
 		brand = ident["primary"]
 	var sz := Premises.room_size(unit)
 	W = sz.x
@@ -204,6 +206,8 @@ func rebuild() -> void:
 	var st := _Batch.new()
 	if kind == "wholesale":
 		_build_warehouse(st)
+	elif kind == "hq":
+		_build_lobby(st)
 	else:
 		_build_shop(st)
 	var mi := MeshInstance3D.new()
@@ -652,7 +656,7 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 		st.box(R(0.08, -0.9, fy - 0.15), R(0.18, -0.3, fy + 0.6), fascia)
 		st.box(R(0.07, -0.92, fy - 0.17), R(0.19, -0.28, fy - 0.12), stone)
 		var blade := Label3D.new()
-		blade.text = biz.name.left(1).to_upper()
+		blade.text = String(ident.get("initial", biz.name.left(1).to_upper()))
 		blade.font_size = 120
 		blade.pixel_size = 0.004
 		blade.shaded = false
@@ -1037,7 +1041,8 @@ func _vacant(st: _Batch, fy: float) -> void:
 func _sign_text() -> String:
 	if biz:
 		# (Script faces read best as written; the rest in capitals.)
-		return biz.name if String(ident.get("face", "")) in ["script", "retro"] else biz.name.to_upper()
+		var nm := String(ident.get("name", biz.name))
+		return nm if String(ident.get("face", "")) in ["script", "retro"] else nm.to_upper()
 	return "TO LET" if kind == "shop" else String(unit.get("name", "")).to_upper()
 
 
@@ -1409,6 +1414,127 @@ func _build_warehouse(st: _Batch) -> void:
 	bay.modulate = Color(1.0, 0.85, 0.3)
 	bay.position = pb + Vector3(0, 2.2, 0)
 	_static.add_child(bay)
+
+
+# ------------------------------------------------------- head office
+## The lobby of the head-office tower: polished marble, walnut walls, a
+## reception desk (the HQ panel), lift doors and a feature wall with the
+## company's name – yours once you take the offices (ShopStyle.house_hq),
+## the tower's own while it's to let.
+func _build_lobby(st: _Batch) -> void:
+	var ours := ShopStyle.hq_tier > 0
+	var hi := ShopStyle.house_ident(ShopStyle.house) if ours and not ShopStyle.house.is_empty() else {}
+	var prim: Color = hi.get("primary", Color(0.1, 0.13, 0.17))
+	var acc: Color = hi.get("accent", Color(0.85, 0.72, 0.45))
+	var title := String(hi.get("name", "")) if not hi.is_empty() else ""
+	if title == "":
+		title = "HEAD OFFICE" if ours else "MERIDIAN TOWER"
+	var walnut := Color(0.24, 0.15, 0.1)
+	var stone := Color(0.9, 0.88, 0.84)
+	_floor(Color(0.86, 0.84, 0.8), 1)
+	look = {"ceiling": Color(0.12, 0.12, 0.13), "lights": "none"}
+	_shell(st, Color(0.8, 0.78, 0.74), Color(0.12, 0.12, 0.13))
+	# Walnut panelling on the back wall, slim bronze reveals.
+	var px := 0.0
+	while px < W - 0.01:
+		var pw := minf(1.2, W - px)
+		st.box(R(px + 0.01, D - 0.08, 0.0), R(px + pw - 0.01, D - 0.02, H), walnut.lightened(0.04 * float(int(px) % 3)))
+		st.box(R(px + pw - 0.012, D - 0.085, 0.0), R(px + pw + 0.012, D - 0.06, H), Color(0.55, 0.42, 0.25))
+		px += pw
+	# The feature wall: the name in the company's face over a lit plinth.
+	var cx := W * 0.5
+	st.box(R(cx - 3.2, D - 0.14, 2.2), R(cx + 3.2, D - 0.08, 3.9), prim if ours else Color(0.08, 0.08, 0.09))
+	_glow_quad(R(cx - 3.2, D - 0.145, 2.18), R(cx + 3.2, D - 0.145, 2.22), acc * 1.6)
+	var name_l := Label3D.new()
+	name_l.text = title if String(hi.get("face", "")) in ["script", "retro"] else title.to_upper()
+	name_l.font = ShopStyle.font(String(hi.get("face", ""))) if not hi.is_empty() else EmpireStyle.font("black")
+	name_l.font_size = 120
+	name_l.pixel_size = clampf(5.6 / maxf(name_l.text.length() * 70.0, 1.0), 0.002, 0.0065)
+	name_l.shaded = false
+	name_l.outline_size = 0
+	name_l.modulate = acc if ours else Color(0.85, 0.72, 0.45)
+	name_l.position = R(cx, D - 0.16, 3.05)
+	_static.add_child(name_l)
+	var sub := Label3D.new()
+	sub.text = ["HEAD OFFICE", "HEAD OFFICE · CORPORATE FLOORS", "HEAD OFFICE · THE WHOLE TOWER"][clampi(ShopStyle.hq_tier - 1, 0, 2)] if ours \
+		else "OFFICE SUITES TO LET · ENQUIRE AT RECEPTION"
+	sub.font_size = 40
+	sub.pixel_size = 0.0045
+	sub.shaded = false
+	sub.outline_size = 0
+	sub.modulate = Color(0.92, 0.9, 0.86)
+	sub.position = R(cx, D - 0.16, 2.45)
+	_static.add_child(sub)
+	# Reception desk: a stone-topped block with a brand-coloured front.
+	var dd := D * 0.55
+	st.box(R(cx - 2.2, dd, 0.0), R(cx + 2.2, dd + 0.8, 1.05), walnut)
+	st.box(R(cx - 2.25, dd - 0.05, 1.05), R(cx + 2.25, dd + 0.85, 1.12), stone)
+	st.box(R(cx - 2.2, dd - 0.02, 0.1), R(cx + 2.2, dd, 0.98), prim if ours else Color(0.16, 0.17, 0.19))
+	_glow_quad(R(cx - 2.15, dd - 0.025, 0.05), R(cx + 2.15, dd - 0.025, 0.08), acc * 1.4)
+	for mx: float in [-1.2, 1.2]:
+		st.box(R(cx + mx - 0.25, dd + 0.25, 1.12), R(cx + mx + 0.25, dd + 0.3, 1.45), Color(0.05, 0.05, 0.06))
+		_glow_quad(R(cx + mx - 0.23, dd + 0.245, 1.15), R(cx + mx + 0.23, dd + 0.245, 1.43), Color(0.35, 0.55, 0.85))
+	_solid(R(cx - 2.25, dd - 0.05, 0.0), R(cx + 2.25, dd + 0.85, 1.12))
+	spots.append({"kind": "hq_desk", "pos": R(cx, dd - 0.9, 0.0), "label": "RECEPTION"})
+	# Lifts on the side wall: brushed steel doors, lit call panels.
+	for i in 3:
+		var lz := D * 0.25 + i * 2.1
+		if lz + 1.0 > D - 0.4:
+			break
+		st.box(R(W - 0.1, lz - 0.62, 0.0), R(W - 0.04, lz + 0.62, 2.5), Color(0.7, 0.71, 0.72))
+		st.box(R(W - 0.105, lz - 0.01, 0.0), R(W - 0.03, lz + 0.01, 2.5), Color(0.3, 0.3, 0.31))
+		st.box(R(W - 0.12, lz - 0.7, 2.5), R(W - 0.03, lz + 0.7, 2.62), Color(0.55, 0.42, 0.25))
+		_glow_quad(R(W - 0.125, lz - 0.15, 2.66), R(W - 0.125, lz + 0.15, 2.76), Color(1.0, 0.75, 0.35) * 1.5)
+		st.box(R(W - 0.1, lz + 0.8, 1.1), R(W - 0.05, lz + 0.92, 1.35), Color(0.6, 0.6, 0.62))
+		_glow_quad(R(W - 0.105, lz + 0.83, 1.17), R(W - 0.105, lz + 0.89, 1.23), Color(0.6, 0.9, 1.0) * 1.6)
+	# Waiting area by the window: two sofas round a low table, tall plants.
+	var sx := 2.2
+	for side: float in [-1.0, 1.0]:
+		var sd := 3.2 + side * 1.1
+		st.box(R(sx - 1.0, sd - 0.4, 0.0), R(sx + 1.0, sd + 0.4, 0.42), Color(0.2, 0.22, 0.25))
+		st.box(R(sx - 1.0, sd + side * 0.25 - 0.15, 0.42), R(sx + 1.0, sd + side * 0.25 + 0.15, 0.85), Color(0.2, 0.22, 0.25))
+		_solid(R(sx - 1.0, sd - 0.4, 0.0), R(sx + 1.0, sd + 0.4, 0.85))
+	st.box(R(sx - 0.6, 2.85, 0.0), R(sx + 0.6, 3.55, 0.38), stone.darkened(0.5))
+	st.box(R(sx - 0.65, 2.8, 0.38), R(sx + 0.65, 3.6, 0.42), Color(0.08, 0.08, 0.09))
+	for pp in [R(0.7, D - 0.8, 0.0), R(W - 0.9, 0.9, 0.0), R(0.7, 0.9, 0.0)]:
+		st.box(pp + Vector3(-0.28, 0, -0.28), pp + Vector3(0.28, 0.6, 0.28), Color(0.15, 0.15, 0.16))
+		_batch_cone(st, pp + Vector3.UP * 0.6, 0.45, 0.05, 1.5, Color(0.17, 0.36, 0.18))
+		_batch_cone(st, pp + Vector3.UP * 1.1, 0.35, 0.02, 1.2, Color(0.22, 0.45, 0.2))
+	# Glazed entrance: steel mullions either side of an open doorway.
+	var oh: float = float(unit["oy1"]) - float(unit["oy0"])
+	var mid := (ox.x + ox.y) * 0.5
+	for seg in [[ox.x, mid - 1.3], [mid + 1.3, ox.y]]:
+		_glass_box(R(float(seg[0]), 0.1, 0.0), R(float(seg[1]), 0.12, oh))
+		var gx := float(seg[0])
+		while gx <= float(seg[1]) + 0.01:
+			st.box(R(gx - 0.03, 0.08, 0.0), R(gx + 0.03, 0.16, oh), Color(0.08, 0.08, 0.09))
+			gx += maxf((float(seg[1]) - float(seg[0])) / 2.0, 0.6)
+		_solid(R(float(seg[0]), 0.08, 0.0), R(float(seg[1]), 0.16, oh))
+	st.box(R(ox.x, 0.08, oh - 0.12), R(ox.y, 0.16, oh), Color(0.08, 0.08, 0.09))
+	# Canopy over the door with the name along its edge.
+	st.box(R(mid - 2.6, -2.2, oh + 0.2), R(mid + 2.6, -0.02, oh + 0.42), Color(0.1, 0.1, 0.11))
+	_glow_quad(R(mid - 2.5, -2.1, oh + 0.195), R(mid + 2.5, -0.1, oh + 0.195), Color(1.0, 0.9, 0.75) * 0.9, true)
+	st.box(R(mid - 2.6, -2.22, oh + 0.2), R(mid + 2.6, -2.2, oh + 0.42), prim if ours else Color(0.1, 0.1, 0.11))
+	var can := Label3D.new()
+	can.text = name_l.text
+	can.font = name_l.font
+	can.font_size = 64
+	can.pixel_size = clampf(4.4 / maxf(can.text.length() * 38.0, 1.0), 0.0015, 0.005)
+	can.shaded = false
+	can.outline_size = 0
+	can.modulate = acc if ours else Color(0.9, 0.8, 0.6)
+	can.position = R(mid, -2.235, oh + 0.31)
+	_static.add_child(can)
+	# Light: warm downlights and a cool wash on the feature wall.
+	_light(R(W * 0.5, D * 0.5, H - 0.4), Color(1.0, 0.92, 0.8), 1.3, maxf(W, D) * 0.9)
+	_light(R(W * 0.5, D - 1.2, H - 0.6), Color(1.0, 0.95, 0.88), 0.8, 5.0)
+	var lx := 1.5
+	while lx < W - 1.0:
+		_glow_quad(R(lx - 0.02, 1.0, H - 0.02), R(lx + 0.02, D - 1.0, H - 0.02), Color(1.0, 0.94, 0.85) * 1.4, true)
+		lx += 2.4
+	door_in = R(mid, 1.2, 0.0)
+	door_out = R(mid, -2.0, 0.0)
+	rack_pos = R(mid + 3.5, -3.2, 0.0)
 
 
 # -------------------------------------------------------------- goods
