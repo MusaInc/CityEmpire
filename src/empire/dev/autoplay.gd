@@ -60,7 +60,7 @@ func _run() -> void:
 	var w := game.wholesaler("west")
 	check(not start.is_empty() and not w.is_empty(), "starter shop %s and wholesaler %s exist" % [start.get("id"), w.get("id")])
 	# 1 — rent the shop at its TO LET board.
-	await stand_at(Premises.door_point(start) + Premises.outward(start) * 1.3)
+	await stand_at(Premises.door_point(start) + Premises.outward(start) * 1.9)
 	check(game.spot.get("kind") == "letboard", "TO LET board prompt at the shop door (%s)" % game.spot.get("kind"))
 	var cash0 := e.personal_cash
 	check(game.rent_unit(start) == "", "rented the shop")

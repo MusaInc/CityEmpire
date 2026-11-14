@@ -12,6 +12,7 @@ const S = preload("res://src/empire/ui/empire_style.gd")
 
 var game: EmpireGame
 var hud: Control
+var minimap: EmpireMinimap
 var touch: EmpireTouch
 var _money: Label
 var _company: Label
@@ -106,6 +107,10 @@ func _build_hud() -> void:
 	_strip_panel = _hud_panel(Vector2(18, 104), Vector2(250, 50))
 	_strip = S.label("", 15, S.PAPER)
 	_strip_panel.add_child(_strip)
+	# Minimap (left, under the money and shop strip).
+	minimap = EmpireMinimap.new()
+	_anchor(minimap, 0.0, 0.0, Vector2(26, 166), Vector2(176, 176))
+	hud.add_child(minimap)
 	# Objective (top right).
 	var o := _hud_panel(Vector2(0, 16), Vector2(360, 82), S.AMBER)
 	_anchor(o, 1.0, 0.0, Vector2(-442, 16), Vector2(360, 82))
@@ -219,6 +224,7 @@ func _hud_panel(pos: Vector2, size: Vector2, accent := Color(0, 0, 0, 0)) -> Pan
 
 
 func show_hud() -> void:
+	minimap.game = game
 	_title_root.visible = false
 	for c in _title_root.get_children():
 		c.queue_free()
@@ -410,7 +416,7 @@ func panel_open() -> bool:
 
 
 func _scroll(content: Control, h := 400.0) -> ScrollContainer:
-	var sc := ScrollContainer.new()
+	var sc := TouchScroll.new()
 	sc.custom_minimum_size = Vector2(0, h)
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -994,7 +1000,7 @@ func open_phone(tab := "businesses") -> void:
 		"map":
 			var m := EmpireMap.new()
 			m.game = game
-			m.custom_minimum_size = Vector2(940, 480)
+			m.custom_minimum_size = Vector2(948, 470)
 			v.add_child(m)
 		"bank":
 			var g := GridContainer.new()
@@ -1131,6 +1137,13 @@ func open_phone(tab := "businesses") -> void:
 				game.sleep_until(7.0), false, 200))
 			v.add_child(h3)
 			v.add_child(S.button("Settings", func(): _settings_panel(), false, 200))
+			# TestFlight builds: money to try things out with (remove for release).
+			v.add_child(S.button("TESTER · add £1,000,000", func():
+				e.personal_cash += 1000000.0
+				e._book("personal", 1000000.0, "other", "Tester money")
+				e.changed.emit()
+				toast("£1,000,000 added to your personal account", "good")
+				open_phone("game"), false, 340))
 			v.add_child(S.button("Save & quit to title", func():
 				game.save_game()
 				close_panel(true)

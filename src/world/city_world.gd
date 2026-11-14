@@ -773,6 +773,12 @@ static func _flatten_colors(m: Mesh) -> Array:
 ## the two pedestrian walking lines (1.7 m / 3.0 m in from the kerb).
 func _place_furniture() -> Dictionary:
 	var out := {}
+	# (City Empire: keep shop doorways clear of benches, bins and bollards.)
+	var doors: Array = []
+	if layout.get("premises") != null:
+		for u in layout.premises.units:
+			var dp := Premises.door_point(u)
+			doors.append(Vector2(dp.x, dp.z))
 	for blk in layout.blocks:
 		if blk["kind"] not in ["block", "plaza"]:
 			continue
@@ -803,6 +809,9 @@ func _place_furniture() -> Dictionary:
 				var p2 := o + along * d + inward * inset
 				if not Geometry2D.is_point_in_polygon(p2, full):
 					return
+				for dp: Vector2 in doors:
+					if dp.distance_to(p2) < 4.5:
+						return
 				var key := Vector2i(floori(p2.x / CHUNK), floori(p2.y / CHUNK))
 				if not out.has(key):
 					out[key] = []

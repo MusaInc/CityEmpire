@@ -54,6 +54,8 @@ var queue: Array = []
 var door_in := Vector3.ZERO
 var door_out := Vector3.ZERO
 var rack_pos := Vector3.ZERO
+var pile_pos := Vector3.ZERO
+var street_drop := 0.0            # m the floor stands above the pavement outside      # where cases put down on the floor stack up
 var office_pos := Vector3.ZERO
 var walk := {}            # Vector2i cell -> true when free
 
@@ -109,6 +111,10 @@ func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival
 	if bc.has_volume():
 		lift = maxf(lift, bc.end.y - float(unit["y0"]) + 0.02)
 	transform.origin.y += lift
+	# How far the shop floor stands above the pavement at the door (a step).
+	if ground_fn.is_valid() and kind == "shop":
+		var outside := transform * Vector3((ox.x + ox.y) * 0.5, 0.0, 1.4)
+		street_drop = clampf(transform.origin.y - float(ground_fn.call(outside.x, outside.z)), 0.0, 1.2)
 	name = "Interior_" + String(unit.get("id", "unit"))
 	rebuild()
 
@@ -256,6 +262,19 @@ func _build_shop(st: _Batch) -> void:
 	door_in = R((door.x + door.y) * 0.5, 0.9, 0.0)
 	door_out = R((door.x + door.y) * 0.5, -1.6, 0.0)
 	spots.append({"kind": "door", "pos": R((door.x + door.y) * 0.5, 0.55, 0.0), "label": "OPEN / CLOSE"})
+	# The floor pile: just inside, left of the door, in front of the window.
+	pile_pos = R(clampf(door.x - 1.0, 0.7, W * 0.5), 1.05, 0.0)
+	spots.append({"kind": "pile", "pos": pile_pos, "label": "FLOOR"})
+	# A sign over the stockroom door.
+	var srs := Label3D.new()
+	srs.text = "STOCKROOM"
+	srs.font_size = 64
+	srs.pixel_size = 0.004
+	srs.shaded = false
+	srs.modulate = Color(1.0, 0.85, 0.3)
+	srs.outline_size = 8
+	srs.position = R((dw0 + dw1) * 0.5, part_d - 0.03, 2.55)
+	_static.add_child(srs)
 	# Ceiling lights.
 	var bright := 1.25 if biz and biz.has_upgrade("lighting") else 0.85
 	var tint := Color(1.0, 0.93, 0.82) if biz and biz.has_upgrade("lighting") else Color(1.0, 0.97, 0.92)
@@ -424,6 +443,19 @@ func _shopfront(st: _Batch, trim: Color) -> void:
 				promo.position = R((px0 + px1) * 0.5, -0.1, (py0 + py1 - 0.32) * 0.5)
 				_static.add_child(promo)
 			st.box(R(x0 + 0.1, -0.12, 0.0), R(x1 - 0.1, -0.06, 0.45), stone.darkened(0.25))
+	# A stone plinth down to the pavement (no gap under the windows) and a
+	# step up to the door.
+	# (Deeper than the step: streets slope along the shopfront.)
+	st.box(R(-0.04, -0.14, -street_drop - 1.2), R(W + 0.04, -0.005, 0.02), stone.darkened(0.3))
+	if street_drop > 0.02:
+		var sx0 := door.x - 0.35
+		var sx1 := door.y + 0.35
+		if street_drop > 0.3:
+			var mid := -street_drop * 0.5
+			st.box(R(sx0 - 0.1, -1.05, -street_drop - 0.05), R(sx1 + 0.1, -0.5, mid), stone.lightened(0.04))
+			_solid(R(sx0 - 0.1, -1.05, -street_drop - 0.05), R(sx1 + 0.1, -0.5, mid))
+		st.box(R(sx0, -0.55, -street_drop - 0.05), R(sx1, 0.0, 0.0), stone.lightened(0.1))
+		_solid(R(sx0, -0.55, -street_drop - 0.05), R(sx1, 0.0, 0.0))
 	# Pilasters with capitals.
 	for px: float in [-0.04, W - 0.3]:
 		st.box(R(px, -0.22, 0.0), R(px + 0.34, -0.01, fy + 0.86), stone)
@@ -881,6 +913,28 @@ func refresh_goods(pallet: Stock = null) -> void:
 		mi2.multimesh = mm2
 		mi2.material_override = _mat("goods")
 		_goods.add_child(mi2)
+	# Cases put down on the shop floor, stacked by the door.
+	if biz and biz.floor_pile and not biz.floor_pile.is_empty():
+		var pl: Array = []
+		for pid in biz.floor_pile.units:
+			for c in Stock.cases_for(pid, biz.floor_pile.qty(pid)):
+				pl.append(pid)
+		var mm3 := MultiMesh.new()
+		mm3.transform_format = MultiMesh.TRANSFORM_3D
+		mm3.use_colors = true
+		mm3.mesh = shape_mesh("case")
+		mm3.instance_count = mini(pl.size(), 24)
+		for i in mm3.instance_count:
+			var col := i % 2
+			var row := (i / 2) % 2
+			var lvl := i / 4
+			var p3 := pile_pos + Vector3(-0.27 + col * 0.54, 0.2 + lvl * 0.4, -0.2 - row * 0.4)
+			mm3.set_instance_transform(i, Transform3D(Basis(Vector3.UP, 0.04 * float((i * 7) % 5 - 2)), p3))
+			mm3.set_instance_color(i, EmpireData.colour(pl[i]).lerp(Color(0.72, 0.56, 0.36), 0.55))
+		var mi3 := MultiMeshInstance3D.new()
+		mi3.multimesh = mm3
+		mi3.material_override = _mat("goods")
+		_goods.add_child(mi3)
 	# Price tags.
 	for lab in _labels.get_children():
 		var si: int = lab.get_meta("slot")

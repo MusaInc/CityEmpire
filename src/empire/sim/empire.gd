@@ -280,6 +280,7 @@ func _staff_work(b: Business, h: float) -> void:
 ## the back room that isn't on display gets an empty slot first, then the
 ## emptiest slots are topped up. Returns units moved.
 func restock_from_backroom(b: Business, n: int) -> int:
+	b.tidy_pile()
 	var moved := 0
 	var shown := b.stocked_products()
 	for pid in b.backroom.units.keys():
@@ -447,7 +448,7 @@ func total_units_of(pid: String) -> int:
 	for v in vehicles:
 		n += (v["cargo"] as Stock).qty(pid)
 	for b: Business in businesses:
-		n += b.backroom.qty(pid) + b.shelf_qty(pid)
+		n += b.backroom.qty(pid) + b.shelf_qty(pid) + b.floor_pile.qty(pid)
 	return n
 
 
@@ -765,6 +766,7 @@ func set_let(id: String, let: bool) -> void:
 func end_day() -> void:
 	var report := {"day": day, "businesses": [], "revenue": 0.0, "profit": 0.0, "personal": 0.0}
 	for b: Business in businesses:
+		b.tidy_pile()  # (cases left on the floor go into the stockroom overnight)
 		var t := b.today
 		# Shrinkage: a share of the shelf stock walks out (less with CCTV).
 		var stolen := 0

@@ -298,3 +298,28 @@ func test_old_save_gets_firms(t) -> void:
 	t.check(not e2.firms.is_empty(), "they appear once the city's units are known (%d)" % e2.firms.size())
 	var e3 := Empire.from_dict(JSON.parse_string(JSON.stringify(e2.to_dict())))
 	t.check(e3.firms.size() == e2.firms.size(), "and are saved")
+
+
+func test_cases_put_down_on_the_floor(t) -> void:
+	var e := _game()
+	var b := _stocked(e, _free(e))
+	e.personal_cash = 5000.0
+	e.buy_wholesale("w1", {"coffee_beans": 1} if EmpireData.products().has("coffee_beans") else {"cola": 3})
+	var pal: Stock = e.pallets["w1"]
+	for pid in pal.units.keys():
+		Stock.transfer(pal, e.carried, pid, pal.qty(pid))
+	var held := e.carried.total_units()
+	t.check(held > 0, "carrying %d units" % held)
+	# Fill the stockroom so nothing more fits.
+	b.backroom.case_capacity = b.backroom.cases_used()
+	for pid in e.carried.units.keys():
+		Stock.transfer(e.carried, b.floor_pile, pid, e.carried.qty(pid))
+	t.check(e.carried.is_empty() and b.floor_pile.total_units() == held, "put down on the floor (no limit)")
+	t.check(e.total_units() + int(e.stats["units_sold"]) + int(e.stats["units_stolen"]) == int(e.stats["units_bought"]), "units still balance")
+	b.tidy_pile()
+	t.check(not b.floor_pile.is_empty(), "stays on the floor while the stockroom is full (only open cases topped up)")
+	b.backroom.case_capacity += 10
+	e.advance(1440.0 - e.minute + 1.0)
+	t.check(b.floor_pile.is_empty(), "moved into the stockroom overnight")
+	var d := Empire.from_dict(JSON.parse_string(JSON.stringify(e.to_dict())))
+	t.check(d.businesses[0].floor_pile != null and d.businesses[0].floor_pile.case_capacity == 0, "the pile is saved (unlimited)")

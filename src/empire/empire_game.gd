@@ -79,6 +79,7 @@ func _ready() -> void:
 	world.name = "World"
 	add_child(world)
 	layout = world.layout
+	EmpireMinimap.bake.call_deferred(self, layout)  # (the minimap's and phone map's city image)
 	atmosphere.configure(args, world)
 	Car.water_check = layout.is_water
 	for P in [layout.mainland.premises if layout.mainland else null, layout.premises]:
@@ -629,6 +630,16 @@ func _update_spot() -> void:
 				if d2 < 2.4 and d2 < best_d:
 					best = {"kind": "letboard", "unit": id, "world": w}
 					best_d = d2
+		# Carrying cases in your own shop with nothing else at hand: put them
+		# down (they stack by the door).
+		if best.is_empty() and not empire.carried.is_empty():
+			for id in interiors:
+				var si2: ShopInterior = interiors[id]
+				if si2.kind == "shop" and si2.biz != null and si2.rival.is_empty() and empire.business_at(id) != null \
+						and si2.contains(p):
+					best = {"kind": "pile", "interior": si2, "world": p, "pos": si2.pile_pos}
+					best_d = 1.5
+					break
 		var hs := _home_spots(p, best, best_d)
 		best = hs[0]
 		best_d = hs[1]
@@ -670,6 +681,9 @@ func spot_prompt() -> Array:
 					"pickmix": "THE PICK & MIX"}.get(String(EmpireData.product(cp).get("fixture", "")), "ANOTHER SPOT") as String
 				if int(s["qty"]) >= int(s["cap"]) and b.can_hold(spot["slot"], cp):
 					return ["THIS SLOT IS FULL", false]
+				var fx := String(EmpireData.product(cp).get("fixture", ""))
+				if int(b.fixtures.get(fx, 0)) <= 0:
+					return ["NO %s YET · put it down or store it" % where.trim_prefix("THE ").trim_prefix("A "), false]
 				return ["%s GOES ON %s" % [String(EmpireData.product(cp)["name"]).to_upper(), where], false]
 			if s["product"] == "":
 				return ["EMPTY SLOT · bring stock", false]
@@ -681,6 +695,12 @@ func spot_prompt() -> Array:
 				if floor.waiting_at(spot["till"]):
 					return ["SERVE CUSTOMER", true]
 			return ["TILL · no one waiting", false]
+		"pile":
+			if not empire.carried.is_empty():
+				return ["PUT DOWN %d CASE%s" % [empire.carried.cases_used(), "" if empire.carried.cases_used() == 1 else "S"], true]
+			if b.floor_pile.is_empty():
+				return ["", false]
+			return ["PICK UP CASE (%d on the floor)" % b.floor_pile.cases_used(), true]
 		"rack":
 			if not empire.carried.is_empty():
 				return ["STORE %d CASE%s" % [empire.carried.cases_used(), "" if empire.carried.cases_used() == 1 else "S"], true]
@@ -743,6 +763,16 @@ func spot_prompt() -> Array:
 	return ["", false]
 
 
+## Puts everything you're carrying down on the shop floor (by the door).
+func _put_down(b: Business, si: ShopInterior) -> void:
+	var n := empire.carried.cases_used()
+	for pid in empire.carried.units.keys():
+		Stock.transfer(empire.carried, b.floor_pile, pid, empire.carried.qty(pid))
+	Sfx.play("drop", -6.0)
+	ui.toast("Put %d case%s down by the door. Staff move them to the stockroom when there's room (or overnight)." % [n, "" if n == 1 else "s"], "info")
+	si.refresh_goods()
+
+
 ## The product in your hands that can go on slot i (or "").
 func _carried_for(b: Business, slot_i: int) -> String:
 	for pid in empire.carried.units:
@@ -782,6 +812,17 @@ func act() -> void:
 		"till":
 			if floor and floor.player_serve(spot["till"]):
 				Sfx.play("click", -4.0)
+		"pile":
+			if not empire.carried.is_empty():
+				_put_down(b, si)
+			else:
+				var pid4: String = b.floor_pile.units.keys()[0]
+				var got := Stock.transfer(b.floor_pile, empire.carried, pid4, mini(b.floor_pile.qty(pid4), EmpireData.case_qty(pid4)))
+				if got > 0:
+					Sfx.play("pickup", -6.0)
+				else:
+					ui.toast("Your hands are full", "warn")
+				si.refresh_goods()
 		"rack":
 			if not empire.carried.is_empty():
 				var moved := 0

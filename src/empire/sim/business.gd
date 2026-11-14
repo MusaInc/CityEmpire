@@ -22,6 +22,9 @@ var slots: Array = []   # [{fixture, unit, product, qty, cap}]
 var fixtures := {}      # kind -> count
 var upgrades: Array = []
 var backroom: Stock
+## Cases put down on the shop floor (no limit): they wait by the door until
+## there's room in the stockroom (tidy_pile).
+var floor_pile: Stock
 var reputation := 40.0
 var cleanliness := 1.0
 var staff: Array = []   # employee dicts (Staff)
@@ -44,6 +47,7 @@ func _init(p_id := "", p_type := "convenience") -> void:
 	id = p_id
 	type_id = p_type
 	backroom = Stock.new(0, "backroom")
+	floor_pile = Stock.new(0, "floor")
 	reset_today()
 
 
@@ -333,7 +337,16 @@ func add_rep(v: float) -> void:
 
 
 func stock_units() -> int:
-	return shelf_units() + backroom.total_units()
+	return shelf_units() + backroom.total_units() + floor_pile.total_units()
+
+
+## Moves cases from the floor pile into the stockroom while it has room.
+## Returns units moved.
+func tidy_pile() -> int:
+	var moved := 0
+	for pid in floor_pile.units.keys():
+		moved += Stock.transfer(floor_pile, backroom, pid, floor_pile.qty(pid))
+	return moved
 
 
 # --------------------------------------------------------------- save
@@ -343,7 +356,7 @@ func to_dict() -> Dictionary:
 		sl.append({"fixture": s["fixture"], "unit": s["unit"], "product": s["product"], "qty": s["qty"], "cap": s["cap"]})
 	return {"id": id, "type": type_id, "name": name, "premises": premises.duplicate(true), "owned": owned,
 		"open": open, "prices": prices.duplicate(), "slots": sl, "fixtures": fixtures.duplicate(),
-		"upgrades": upgrades.duplicate(), "backroom": backroom.to_dict(), "reputation": reputation,
+		"upgrades": upgrades.duplicate(), "backroom": backroom.to_dict(), "floor_pile": floor_pile.to_dict(), "reputation": reputation,
 		"cleanliness": cleanliness, "staff": staff.duplicate(true), "today": today.duplicate(true),
 		"history": history.duplicate(true), "lifetime": lifetime.duplicate(), "orders": orders.duplicate(true),
 		"opened_day": opened_day}
@@ -365,6 +378,8 @@ static func from_dict(d: Dictionary) -> Business:
 		b.fixtures[k] = int(b.fixtures[k])
 	b.upgrades = d.get("upgrades", [])
 	b.backroom = Stock.from_dict(d.get("backroom", {}))
+	b.floor_pile = Stock.from_dict(d.get("floor_pile", {"cap": 0, "label": "floor"}))
+	b.floor_pile.case_capacity = 0
 	b.reputation = float(d.get("reputation", 40.0))
 	b.cleanliness = float(d.get("cleanliness", 1.0))
 	b.staff = d.get("staff", [])

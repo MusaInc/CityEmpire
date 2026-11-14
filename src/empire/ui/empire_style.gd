@@ -18,6 +18,8 @@ const PANEL := Color(0.055, 0.094, 0.125, 0.95)
 const GOLD := Color("#e9c27a")
 
 static var _theme: Theme
+## A list was being dragged: the finger lifting isn't a tap (TouchScroll).
+static var tap_block_until := 0
 
 
 static func font(weight := "bold") -> Font:
@@ -134,6 +136,8 @@ static func button(text: String, cb: Callable, primary := false, min_w := 0.0) -
 		b.add_theme_color_override("font_hover_color", INK)
 		b.add_theme_font_override("font", font("bold"))
 	b.pressed.connect(func():
+		if Time.get_ticks_msec() < tap_block_until:
+			return
 		Sfx.play("click", -10.0)
 		cb.call())
 	return b
