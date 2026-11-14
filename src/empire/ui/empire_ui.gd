@@ -596,38 +596,162 @@ func open_wholesale(unit: Dictionary) -> void:
 	_wholesale_page()
 
 
+## The shop the wholesale page is stocking for: the one you picked, else
+## your shop nearest to you.
+var _ws_for := ""
+## Showing the item-by-item list instead of the packs.
+var _ws_custom := false
+
+
+func _ws_target() -> Business:
+	var e := game.empire
+	var b := e.business(_ws_for) if _ws_for != "" else null
+	if b != null:
+		return b
+	var best := INF
+	for x: Business in e.businesses:
+		var pp: Array = x.premises.get("pos", [0, 0, 0])
+		var d := game.player.global_position.distance_to(Vector3(float(pp[0]), float(pp[1]), float(pp[2])))
+		if d < best:
+			best = d
+			b = x
+	return b
+
+
+## Units already bought but not yet in a shop: in vehicles, in your arms,
+## waiting on collection bays.
+func _in_transit() -> Dictionary:
+	var e := game.empire
+	var out := {}
+	var stocks: Array = [e.carried]
+	for veh in e.vehicles:
+		stocks.append(veh["cargo"])
+	for w in e.pallets:
+		stocks.append(e.pallets[w])
+	for st: Stock in stocks:
+		for pid in st.units:
+			out[pid] = int(out.get(pid, 0)) + st.qty(pid)
+	return out
+
+
+## A one-tap stock pack: what it gets you, the cases, the price, one button.
+func _pack_card(title: String, sub: String, plan: Dictionary, fee: float, verb: String, cb: Callable) -> PanelContainer:
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", S.row_bg())
+	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var c := S.vbox(6)
+	c.add_child(S.label(title, 21, S.PAPER, "black"))
+	var l := S.label(sub, 15, S.MUTED)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size.x = 380
+	c.add_child(l)
+	var n := int(plan["count"])
+	if n == 0:
+		c.add_child(S.chip("Nothing needed: it's all there or on its way" if plan["short"] == "" else
+			("No room left in your vehicle" if plan["short"] == "space" else "Not enough money for a case"), S.GREEN if plan["short"] == "" else S.AMBER))
+	else:
+		var lines := (plan["cases"] as Dictionary).size()
+		c.add_child(S.label("%d case%s · %d product%s · %s%s" % [n, "" if n == 1 else "s", lines, "" if lines == 1 else "s",
+			EmpireData.money(float(plan["cost"]) + fee, true), " incl. delivery" if fee > 0.0 else ""], 18, S.AMBER, "bold"))
+		c.add_child(S.button("%s · %s" % [verb, EmpireData.money(float(plan["cost"]) + fee, true)], cb, true, 0))
+	p.add_child(c)
+	return p
+
+
 func _wholesale_page() -> void:
 	var unit := _cart_unit
-	var v := _open(String(unit.get("name", "Wholesale")), 980, 640)
+	var v := _open(String(unit.get("name", "Wholesale")), 1000, 660)
 	var e := game.empire
 	var cap := 0
+	var veh_name := "car"
 	for veh in e.vehicles:
-		cap = maxi(cap, (veh["cargo"] as Stock).case_capacity)
-	var info := S.label("Trade prices by the case. Goods go to the collection bay outside — your biggest vehicle holds %d cases." % cap, 16, S.MUTED)
-	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	info.custom_minimum_size.x = 900
-	v.add_child(info)
+		if (veh["cargo"] as Stock).case_capacity > cap:
+			cap = (veh["cargo"] as Stock).case_capacity
+			veh_name = String(EmpireData.vehicle_model(veh["model"]).get("name", "car"))
+	var waiting := 0
+	if e.pallets.has(unit.get("id", "")):
+		waiting = (e.pallets[unit["id"]] as Stock).cases_used()
+	var b := _ws_target()
+	var custom := _ws_custom or b == null
+	if b != null and e.businesses.size() > 1:
+		var who := HFlowContainer.new()
+		who.add_theme_constant_override("h_separation", 8)
+		who.add_theme_constant_override("v_separation", 6)
+		who.add_child(S.label("STOCKING", 13, S.AMBER, "black"))
+		for x: Business in e.businesses:
+			who.add_child(S.chip_button(x.name, x == b, func(): _ws_for = x.id; _cart.clear(); _wholesale_page()))
+		v.add_child(who)
+	if not custom:
+		var free := maxi(cap - waiting, 0)
+		var budget := maxf(e.company_cash, 0.0) + maxf(e.personal_cash, 0.0)
+		var tr := _in_transit()
+		var top := e.restock_plan(b, false, free, budget, tr)
+		var full := e.restock_plan(b, true, free, budget, tr)
+		var info := S.label("Pick a pack for %s: it works out every line the shop sells, counting what's on the shelves, in the stockroom and already bought. Goods wait at the collection bay outside: back your %s up to it and press LOAD, then UNLOAD outside your shop." % [b.name, veh_name], 16, S.MUTED)
+		info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		info.custom_minimum_size.x = 920
+		v.add_child(info)
+		var packs := S.hbox(14)
+		var buy := func(plan: Dictionary) -> void:
+			var err := game.buy_wholesale(_cart_unit, plan["cases"])
+			if err != "":
+				toast(err, "bad")
+				return
+			toast("Paid. %d cases waiting at the collection bay: back your vehicle up to it and press LOAD." % int(plan["count"]), "good")
+			close_panel(true)
+		if full["cases"] == top["cases"]:
+			# (Cut to the same load by the vehicle or the money: one card.)
+			packs.add_child(_pack_card("Restock pack", "A spread of every line the shop is short of, as much as you can take in one trip.", top, 0.0, "BUY",
+				func(): buy.call(top)))
+		else:
+			packs.add_child(_pack_card("Top up the shelves", "Enough to fill every shelf, fridge and counter in the shop.", top, 0.0, "BUY",
+				func(): buy.call(top)))
+			packs.add_child(_pack_card("Full restock", "Full shelves and a refill of each line in the stockroom, so you don't need to come back tomorrow.", full, 0.0, "BUY",
+				func(): buy.call(full)))
+		v.add_child(packs)
+		var why := ""
+		if full["short"] == "space":
+			why = "Packs are cut to %d cases: what your %s holds%s. Order the rest from the phone (Businesses › Stock), or come back." % [free, veh_name, " with %d already on the bay" % waiting if waiting > 0 else ""]
+		elif full["short"] == "money":
+			why = "Packs are cut to what you can afford right now."
+		if why != "":
+			var wl := S.label(why, 15, S.AMBER)
+			wl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			wl.custom_minimum_size.x = 920
+			v.add_child(wl)
+		v.add_child(S.spacer())
+		var foot0 := S.hbox(12)
+		foot0.add_child(S.button("Choose items yourself", func(): _ws_custom = true; _wholesale_page(), false, 0))
+		foot0.add_child(S.spacer())
+		_sack_truck_button(foot0)
+		v.add_child(foot0)
+		return
+	var info2 := S.label("Trade prices by the case. Goods go to the collection bay outside — your biggest vehicle holds %d cases." % cap, 16, S.MUTED)
+	info2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info2.custom_minimum_size.x = 900
+	v.add_child(info2)
 	var list := S.vbox(6)
 	var cats := EmpireData.categories()
 	for cat in cats:
+		var pids: Array = EmpireData.product_ids().filter(func(q): return EmpireData.product(q)["cat"] == cat and (b == null or b.sells(q)))
+		if pids.is_empty():
+			continue
 		list.add_child(S.label(String(cats[cat]["name"]).to_upper(), 14, Color.from_string(cats[cat]["colour"], S.AMBER), "black"))
-		for pid in EmpireData.product_ids():
+		for pid in pids:
 			var p := EmpireData.product(pid)
-			if p["cat"] != cat:
-				continue
 			var n := int(_cart.get(pid, 0))
 			var unit_cost := EmpireData.unit_cost(pid)
 			var swatch := ColorRect.new()
 			swatch.color = EmpireData.colour(pid)
 			swatch.custom_minimum_size = Vector2(18, 28)
 			var note := ""
-			if p["fixture"] == "fridge":
+			if b != null:
+				note = "  · %d in the shop" % (b.shelf_qty(pid) + b.backroom.qty(pid))
+			elif p["fixture"] == "fridge":
 				note = "  · fridge"
-			elif p["fixture"] in ["coffee", "pickmix"]:
-				note = "  · needs %s" % ("Coffee Machine" if p["fixture"] == "coffee" else "Pick & Mix Wall")
 			list.add_child(_row([swatch, _fixed(String(p["name"]) + note, 330),
 				_fixed("%d per case" % int(p["case_qty"]), 110, 15, S.MUTED),
-				_fixed(EmpireData.money(float(p["case_cost"]), true), 90, 17, S.PAPER, "bold"),
+				_fixed(EmpireData.money(e.case_price(pid), true), 90, 17, S.PAPER, "bold"),
 				_fixed("%s each · RRP %s" % [EmpireData.money(unit_cost, true), EmpireData.money(float(p["rrp"]), true)], 210, 14, S.MUTED),
 				S.button("−", func(): _cart_add(pid, -1), false, 46),
 				_fixed(str(n), 34, 20, S.AMBER if n > 0 else S.PAPER, "black"),
@@ -636,21 +760,15 @@ func _wholesale_page() -> void:
 	var total := 0.0
 	var cases := 0
 	for pid in _cart:
-		total += float(EmpireData.product(pid)["case_cost"]) * int(_cart[pid])
+		total += e.case_price(pid) * int(_cart[pid])
 		cases += int(_cart[pid])
 	var foot := S.hbox(14)
 	foot.add_child(S.label("%d case%s · %s" % [cases, "" if cases == 1 else "s", EmpireData.money(total, true)], 24, S.PAPER, "black"))
 	foot.add_child(S.label("You have %s + company %s" % [EmpireData.money(e.personal_cash), EmpireData.money(e.company_cash)], 15, S.MUTED))
 	foot.add_child(S.spacer())
-	var sack := e.carried.case_capacity < 6
-	if sack:
-		foot.add_child(S.button("Sack truck £120 (carry 6)", func():
-			if e.pay(120.0, "equipment", "Sack truck"):
-				e.carried.case_capacity = 6
-				toast("Sack truck: you can carry 6 cases now", "good")
-				_wholesale_page()
-			else:
-				toast("Not enough money", "bad")))
+	if b != null:
+		foot.add_child(S.button("Packs", func(): _ws_custom = false; _wholesale_page()))
+	_sack_truck_button(foot)
 	foot.add_child(S.button("Clear", func(): _cart.clear(); _wholesale_page()))
 	foot.add_child(S.button("PAY · %s" % EmpireData.money(total, true), func():
 		var err := game.buy_wholesale(_cart_unit, _cart)
@@ -661,6 +779,19 @@ func _wholesale_page() -> void:
 		_cart.clear()
 		close_panel(true), true, 220))
 	v.add_child(foot)
+
+
+func _sack_truck_button(row: HBoxContainer) -> void:
+	var e := game.empire
+	if e.carried.case_capacity >= 6:
+		return
+	row.add_child(S.button("Sack truck £120 (carry 6)", func():
+		if e.pay(120.0, "equipment", "Sack truck"):
+			e.carried.case_capacity = 6
+			toast("Sack truck: you can carry 6 cases now", "good")
+			_wholesale_page()
+		else:
+			toast("Not enough money", "bad")))
 
 
 func _cart_add(pid: String, d: int) -> void:
@@ -783,7 +914,26 @@ func open_home(hm: Dictionary) -> void:
 
 # ----------------------------------------------------------------- rack
 func open_rack(b: Business) -> void:
-	var v := _open("Stockroom · %d/%d cases" % [b.backroom.cases_used(), b.backroom.case_capacity], 720, 520)
+	var v := _open("Stockroom · %d/%d cases" % [b.backroom.cases_used(), b.backroom.case_capacity], 720, 560)
+	# The whole job in one go: every shelf topped up from here.
+	var gaps := 0
+	for s0: Dictionary in b.slots:
+		if String(s0["product"]) != "" and b.backroom.qty(s0["product"]) > 0:
+			gaps += int(s0["cap"]) - int(s0["qty"])
+	for pid0 in b.backroom.units:
+		if b.shelf_qty(pid0) == 0 and b.slot_for(pid0) >= 0:
+			gaps += 1
+	var top := S.hbox(12)
+	if gaps > 0:
+		top.add_child(S.button("FILL THE SHELVES", func():
+			var moved := game.empire.restock_from_backroom(b, 99999)
+			_refresh_interior(b)
+			toast("Filled the shelves: %d item%s put out" % [moved, "" if moved == 1 else "s"] if moved > 0 else "Nothing here fits on the shelves", "good" if moved > 0 else "info")
+			open_rack(b), true, 260))
+		top.add_child(S.label("Puts out everything that fits,\nemptiest shelves first.", 15, S.MUTED))
+	else:
+		top.add_child(S.label("The shelves are as full as this stockroom can make them." if not b.backroom.is_empty() else "Nothing in the stockroom: order a pack from the phone (Stock & orders).", 16, S.MUTED))
+	v.add_child(top)
 	var list := S.vbox(6)
 	for pid in b.backroom.units:
 		var p := EmpireData.product(pid)
@@ -930,18 +1080,51 @@ func _m_prices(v: VBoxContainer, b: Business) -> void:
 
 func _m_stock(v: VBoxContainer, b: Business) -> void:
 	var e := game.empire
-	var list := S.vbox(6)
 	var fee := e.delivery_fee(b)
-	var head := S.label("Phone order: delivered to the stockroom by 06:00 tomorrow (%s)." % ("free with your driver" if fee == 0.0 else "%s delivery" % EmpireData.money(fee)), 16, S.MUTED)
+	var when := "by 06:00 tomorrow" if e.minute >= 360.0 else "by 06:00"
+	var head := S.label("Delivered to the stockroom %s (%s)%s" % [when, "free with your driver" if fee == 0.0 else "%s delivery" % EmpireData.money(fee),
+		" · your manager orders a full restock every night at 21:05" if b.has_role("manager") else ""], 16, S.MUTED)
+	head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	head.custom_minimum_size.x = 980
 	v.add_child(head)
-	for pid in EmpireData.product_ids():
+	if not _ws_custom:
+		var budget := maxf(e.company_cash, 0.0) + maxf(e.personal_cash, 0.0) - fee
+		var top := e.restock_plan(b, false, 9999, budget)
+		var full := e.restock_plan(b, true, 9999, budget)
+		var order := func(plan: Dictionary) -> void:
+			var err := e.order_delivery(b, plan["cases"])
+			if err != "":
+				toast(err, "bad")
+			else:
+				toast("Ordered %d cases: in the stockroom %s" % [int(plan["count"]), when], "good")
+			open_manage(b, "stock")
+		var packs := S.hbox(14)
+		packs.add_child(_pack_card("Top up the shelves", "Every shelf, fridge and counter filled, counting what's already in the stockroom and on order.", top, fee, "ORDER",
+			func(): order.call(top)))
+		packs.add_child(_pack_card("Full restock", "Full shelves and a refill of each line in the stockroom. A stacker puts it out; without one, use the stockroom's FILL THE SHELVES.", full, fee, "ORDER",
+			func(): order.call(full)))
+		v.add_child(packs)
+		var lines := S.vbox(4)
+		lines.add_child(S.label("WHAT THE SHOP HAS", 13, S.AMBER, "black"))
+		var flow := HFlowContainer.new()
+		flow.add_theme_constant_override("h_separation", 8)
+		flow.add_theme_constant_override("v_separation", 6)
+		var targets := b.shelf_targets()
+		for pid in b.sellable():
+			if not targets.has(pid):
+				continue
+			var have := b.shelf_qty(pid) + b.backroom.qty(pid)
+			var fill := float(have) / float(maxi(int(targets[pid]), 1))
+			flow.add_child(S.chip("%s %d" % [String(EmpireData.product(pid)["name"]), have], S.GREEN if fill >= 0.75 else (S.AMBER if fill > 0.0 else S.RED)))
+		lines.add_child(flow)
+		v.add_child(_scroll(lines, 170))
+		var foot := S.hbox(12)
+		foot.add_child(S.button("Choose items yourself", func(): _ws_custom = true; open_manage(b, "stock")))
+		v.add_child(foot)
+		return
+	var list := S.vbox(6)
+	for pid in b.sellable():
 		var p := EmpireData.product(pid)
-		if not p["cat"] in b.type_def().get("categories", []):
-			continue
-		if p["fixture"] == "coffee" and not b.has_upgrade("coffee"):
-			continue
-		if p["fixture"] == "pickmix" and not b.has_upgrade("pick_mix"):
-			continue
 		var pending := 0
 		for o in b.orders:
 			pending += int(o["units"].get(pid, 0))
@@ -950,26 +1133,27 @@ func _m_stock(v: VBoxContainer, b: Business) -> void:
 			_fixed("shelf %d" % b.shelf_qty(pid), 80, 15, S.MUTED),
 			_fixed("room %d" % b.backroom.qty(pid), 80, 15, S.MUTED),
 			_fixed("coming %d" % pending if pending > 0 else "", 100, 15, S.BLUE),
-			_fixed("%s/case" % EmpireData.money(float(p["case_cost"]), true), 110, 15, S.MUTED),
+			_fixed("%s/case" % EmpireData.money(e.case_price(pid), true), 110, 15, S.MUTED),
 			S.button("−", func(): _cart["o_" + pid] = maxi(n - 1, 0); open_manage(b, "stock"), false, 46),
 			_fixed(str(n), 30, 19, S.AMBER if n > 0 else S.PAPER, "black"),
 			S.button("+", func(): _cart["o_" + pid] = n + 1; open_manage(b, "stock"), false, 46)]))
 	v.add_child(_scroll(list, 380))
-	var order := {}
+	var order2 := {}
 	var total := fee
 	for k in _cart:
 		if String(k).begins_with("o_") and int(_cart[k]) > 0:
-			order[String(k).trim_prefix("o_")] = int(_cart[k])
-			total += float(EmpireData.product(String(k).trim_prefix("o_"))["case_cost"]) * int(_cart[k])
+			order2[String(k).trim_prefix("o_")] = int(_cart[k])
+			total += e.case_price(String(k).trim_prefix("o_")) * int(_cart[k])
 	var h := S.hbox(12)
-	h.add_child(S.label("Order total %s" % EmpireData.money(total if not order.is_empty() else 0.0, true), 20, S.PAPER, "black"))
+	h.add_child(S.button("Packs", func(): _ws_custom = false; open_manage(b, "stock")))
+	h.add_child(S.label("Order total %s" % EmpireData.money(total if not order2.is_empty() else 0.0, true), 20, S.PAPER, "black"))
 	h.add_child(S.spacer())
 	h.add_child(S.button("PLACE ORDER", func():
-		var err := e.order_delivery(b, order)
+		var err := e.order_delivery(b, order2)
 		if err != "":
 			toast(err, "bad")
 		else:
-			toast("Ordered: arriving by 06:00", "good")
+			toast("Ordered: arriving %s" % when, "good")
 			for k in _cart.keys():
 				if String(k).begins_with("o_"):
 					_cart.erase(k)
@@ -977,44 +1161,97 @@ func _m_stock(v: VBoxContainer, b: Business) -> void:
 	v.add_child(h)
 
 
+## Staff tab filter: a role id, or "" for everyone.
+var _staff_role := ""
+const ROLE_JOBS := {"cashier": ["Till", "only while you serve"], "stocker": ["Shelves", "you refill them"],
+	"cleaner": ["Cleaning", "gets dirty"], "manager": ["Re-orders", "you order stock"], "driver": ["Collections", "delivery fee"]}
+
+
+func _skill_dots(n: int) -> String:
+	return "●".repeat(n) + "○".repeat(5 - n)
+
+
 func _m_staff(v: VBoxContainer, b: Business) -> void:
 	var e := game.empire
+	var roles: Array = b.type_def().get("roles", ROLE_JOBS.keys())
 	var list := S.vbox(6)
-	# Who covers what (and what happens without them).
-	var cov := HFlowContainer.new()
-	cov.add_theme_constant_override("h_separation", 8)
-	cov.add_theme_constant_override("v_separation", 6)
-	for r in [["cashier", "Till", "only while you serve"], ["stocker", "Shelves", "you refill them"],
-			["cleaner", "Cleaning", "gets dirty"], ["manager", "Re-orders", "you order stock"], ["driver", "Collections", "delivery fee"]]:
-		var have := b.has_role(r[0])
-		cov.add_child(S.chip("%s %s" % ["✓" if have else "✗", r[1] if have else "%s – %s" % [r[1], r[2]]], S.GREEN if have else S.MUTED))
-	list.add_child(cov)
+	# Every job: who covers it, or a one-tap hire of today's best for it.
+	list.add_child(S.label("JOBS", 14, S.AMBER, "black"))
+	var jobs := GridContainer.new()
+	jobs.columns = 2
+	jobs.add_theme_constant_override("h_separation", 10)
+	jobs.add_theme_constant_override("v_separation", 6)
+	for r: String in roles:
+		var job: Array = ROLE_JOBS.get(r, [r, ""])
+		var cell := S.hbox(8)
+		cell.custom_minimum_size.x = 490
+		var tag: PanelContainer
+		if b.has_role(r):
+			var who: Array = b.staff_with(r).map(func(x): return String(x["name"]).get_slice(" ", 0))
+			tag = S.chip("✓ %s: %s" % [job[0], ", ".join(who)], S.GREEN)
+			cell.add_child(tag)
+		else:
+			tag = S.chip("✗ %s – %s" % [job[0], job[1]], S.MUTED)
+			cell.add_child(tag)
+			cell.add_child(S.spacer())
+			var best := e.best_candidate(r)
+			if not best.is_empty():
+				cell.add_child(S.button("Hire %s %s · %s/h" % [String(best["name"]).get_slice(" ", 0), _skill_dots(int(best["skill"])),
+					EmpireData.money(float(best["wage"]), true)], func(): game.hire(b, best); open_manage(b, "staff"), true, 0))
+		tag.custom_minimum_size.x = 210
+		tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		jobs.add_child(cell)
+	list.add_child(jobs)
 	list.add_child(S.label("ON YOUR TEAM", 14, S.AMBER, "black"))
 	if b.staff.is_empty():
 		list.add_child(S.label("Just you. Hire people to take over the routine work.", 16, S.MUTED))
 	for st in b.staff:
 		list.add_child(_row([_fixed(String(st["name"]) + (" · off today" if st.get("off", false) else ""), 200, 18, S.AMBER if st.get("off", false) else S.PAPER, "bold"),
 			_fixed(String(EmpireData.role(st["role"]).get("name", "")), 150, 16, S.MUTED),
-			_fixed("skill " + "●".repeat(int(st["skill"])) + "○".repeat(5 - int(st["skill"])), 140, 15, S.AMBER),
+			_fixed("skill " + _skill_dots(int(st["skill"])), 140, 15, S.AMBER),
 			_fixed(Staff.trait_names(st), 150, 14, S.MUTED),
 			_fixed("%s/h" % EmpireData.money(float(st["wage"]), true), 90, 16),
 			S.button("Let go", func(): game.fire(b, st); open_manage(b, "staff"), false, 100)]))
-	list.add_child(S.label("LOOKING FOR WORK TODAY", 14, S.AMBER, "black"))
-	for c in e.candidates:
+	# Today's job seekers, by role, best first.
+	var seekers: Array = e.candidates.filter(func(c): return c["role"] in roles)
+	var head := S.hbox(8)
+	head.add_child(S.label("LOOKING FOR WORK TODAY · %d" % seekers.size(), 14, S.AMBER, "black"))
+	list.add_child(head)
+	var filt := HFlowContainer.new()
+	filt.add_theme_constant_override("h_separation", 8)
+	filt.add_theme_constant_override("v_separation", 6)
+	if not _staff_role in roles:
+		_staff_role = ""
+	filt.add_child(S.chip_button("Everyone %d" % seekers.size(), _staff_role == "", func(): _staff_role = ""; open_manage(b, "staff")))
+	for r: String in roles:
+		var n := seekers.filter(func(c): return c["role"] == r).size()
+		filt.add_child(S.chip_button("%s %d" % [String(EmpireData.role(r).get("name", r)), n], _staff_role == r, func(): _staff_role = r; open_manage(b, "staff")))
+	list.add_child(filt)
+	var shown: Array = seekers.filter(func(c): return _staff_role == "" or c["role"] == _staff_role)
+	shown.sort_custom(func(x, y):
+		if x["role"] != y["role"]:
+			return roles.find(x["role"]) < roles.find(y["role"])
+		if int(x["skill"]) != int(y["skill"]):
+			return int(x["skill"]) > int(y["skill"])
+		return float(x["wage"]) < float(y["wage"]))
+	if shown.is_empty():
+		list.add_child(S.label("Nobody left for that job today: a new lot come looking tomorrow.", 16, S.MUTED))
+	for c in shown:
 		var r := EmpireData.role(c["role"])
-		var why := S.label(String(r.get("desc", "")), 14, S.MUTED)
-		why.custom_minimum_size.x = 260
+		var traits := Staff.trait_names(c)
+		var why := S.label(traits if traits != "" else String(r.get("desc", "")), 14, S.MUTED)
+		why.custom_minimum_size.x = 250
 		why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		list.add_child(_row([_fixed(String(c["name"]), 180, 18, S.PAPER, "bold"),
 			_fixed(String(r.get("name", "")), 140, 16, S.BLUE, "bold"),
-			_fixed("●".repeat(int(c["skill"])) + "○".repeat(5 - int(c["skill"])), 80, 15, S.AMBER),
-			_fixed(Staff.trait_names(c), 110, 14, S.MUTED), why,
+			_fixed(_skill_dots(int(c["skill"])), 80, 15, S.AMBER), why, S.spacer(),
 			_fixed("%s/h" % EmpireData.money(float(c["wage"]), true), 80, 16),
 			S.button("Hire", func(): game.hire(b, c); open_manage(b, "staff"), true, 90)]))
 	v.add_child(_scroll(list, 430))
 	var hrs := b.hours()
-	v.add_child(S.label("Shifts cover opening hours (%02d:00–%02d:00): a %s/h team costs about %s a day." % [int(hrs.x), int(hrs.y),
-		EmpireData.money(b.wages_per_hour(), true), EmpireData.money(b.wages_per_hour() * (hrs.y - hrs.x))], 15, S.MUTED))
+	v.add_child(S.label(("Shifts cover opening hours (%02d:00–%02d:00): a %s/h team costs about %s a day. " % [int(hrs.x), int(hrs.y),
+		EmpireData.money(b.wages_per_hour(), true), EmpireData.money(b.wages_per_hour() * (hrs.y - hrs.x))] if not b.staff.is_empty() else "")
+		+ "New people look for work every morning.", 15, S.MUTED))
 
 
 func _m_upgrades(v: VBoxContainer, b: Business) -> void:

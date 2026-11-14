@@ -44,7 +44,7 @@ static func make_shopper(b: Business, rng: RandomNumberGenerator, mix_k := {}) -
 	var allowed: Array = b.type_def().get("categories", [])
 	var wants: Array = []
 	for i in n:
-		var pid := _pick_product(mix, allowed, rng, b.fixtures)
+		var pid := _pick_product(mix, allowed, rng, b.fixtures, b.type_id)
 		if pid != "" and not wants.has(pid):
 			wants.append(pid)
 	var spread: Array = EmpireData.economy().get("wtp_spread", [0.9, 1.7])
@@ -58,7 +58,7 @@ static func make_shopper(b: Business, rng: RandomNumberGenerator, mix_k := {}) -
 		"spend_k": aff * rng.randf_range(float(spread[0]), float(spread[1]))}
 
 
-static func _pick_product(mix: Dictionary, allowed: Array, rng: RandomNumberGenerator, fixtures := {}) -> String:
+static func _pick_product(mix: Dictionary, allowed: Array, rng: RandomNumberGenerator, fixtures := {}, type_id := "") -> String:
 	var total := 0.0
 	for c in allowed:
 		total += float(mix.get(c, 0.5))
@@ -75,7 +75,8 @@ static func _pick_product(mix: Dictionary, allowed: Array, rng: RandomNumberGene
 		var p := EmpireData.product(pid)
 		# (Only things this shop could have a place for: a bakery's shelf
 		# holds loaves, not the milk that needs a fridge.)
-		if p["cat"] == cat and (fixtures.is_empty() or int(fixtures.get(String(p.get("fixture", "")), 0)) > 0):
+		if p["cat"] == cat and (fixtures.is_empty() or int(fixtures.get(String(p.get("fixture", "")), 0)) > 0) \
+				and (type_id == "" or EmpireData.type_sells(type_id, pid)):
 			pool.append(pid)
 			wsum += float(p.get("demand", 1.0))
 	var q := rng.randf() * wsum

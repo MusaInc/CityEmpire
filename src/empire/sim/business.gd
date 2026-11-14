@@ -222,6 +222,48 @@ func slot_for(pid: String) -> int:
 	return -1
 
 
+# ------------------------------------------------------------- range
+## Does this shop sell pid? Its kind's goods (less what the kind leaves out:
+## a bakery isn't a grocer), and only when there's a fixture to show it on.
+func sells(pid: String) -> bool:
+	return EmpireData.type_sells(type_id, pid) and int(fixtures.get(String(EmpireData.product(pid).get("fixture", "")), 0)) > 0
+
+
+## Everything this shop sells, most wanted first.
+func sellable() -> Array:
+	var out: Array = EmpireData.product_ids().filter(func(p): return sells(p))
+	out.sort_custom(func(a, b): return float(EmpireData.product(a).get("demand", 1.0)) > float(EmpireData.product(b).get("demand", 1.0)))
+	return out
+
+
+## Units of each product the shop floor shows when it's full: the slots a
+## product already has, and the empty slots shared out (products without a
+## place first, most wanted first).
+func shelf_targets() -> Dictionary:
+	var out := {}
+	var free := {}   # fixture -> [cap, ...]
+	for s: Dictionary in slots:
+		var pid := String(s["product"])
+		if pid != "" and (sells(pid) or int(s["qty"]) > 0):
+			out[pid] = int(out.get(pid, 0)) + int(s["cap"])
+		elif pid == "" or int(s["qty"]) == 0:
+			if not free.has(s["fixture"]):
+				free[s["fixture"]] = []
+			free[s["fixture"]].append(int(s["cap"]))
+	var range_ := sellable()
+	for fx in free:
+		var pool: Array = range_.filter(func(p): return String(EmpireData.product(p)["fixture"]) == fx)
+		if pool.is_empty():
+			continue
+		var order: Array = pool.filter(func(p): return not out.has(p)) + pool.filter(func(p): return out.has(p))
+		var i := 0
+		for cap: int in free[fx]:
+			var pid: String = order[i % order.size()]
+			out[pid] = int(out.get(pid, 0)) + cap
+			i += 1
+	return out
+
+
 # ------------------------------------------------------------ pricing
 func price(pid: String) -> float:
 	return float(prices.get(pid, EmpireData.rrp(pid)))

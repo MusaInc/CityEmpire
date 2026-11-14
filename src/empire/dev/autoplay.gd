@@ -99,11 +99,17 @@ func _run() -> void:
 	var trade := spot_of("trade", wsi)
 	await stand_at(trade["world"])
 	check(game.spot.get("kind") == "trade", "TRADE COUNTER prompt (%s)" % game.spot.get("kind"))
-	var order := {"crisps": 1, "choc_bar": 1, "cola": 1, "water": 1, "bread": 1, "milk": 1}
+	# The one-tap pack: a top-up of the new shop, cut to what the car holds.
+	var boot_cap := (e.vehicles[0]["cargo"] as Stock).case_capacity
+	var plan := e.restock_plan(b, false, boot_cap, e.personal_cash + e.company_cash)
+	var order: Dictionary = plan["cases"]
+	check(int(plan["count"]) == boot_cap and order.size() >= mini(boot_cap, 4),
+		"top-up pack fills the boot with a spread (%d cases, %d lines, cut for %s)" % [int(plan["count"]), order.size(), plan["short"]])
+	check(order.keys().all(func(p): return b.sells(p)), "the pack only has things the shop sells")
 	var money0 := e.personal_cash + e.company_cash
-	check(game.buy_wholesale(w, order) == "", "paid for 6 cases")
+	check(game.buy_wholesale(w, order) == "", "paid for the pack")
 	var pal := game._pallet(w["id"])
-	check(pal.cases_used() == 6, "6 cases on the collection bay (%d)" % pal.cases_used())
+	check(pal.cases_used() == int(plan["count"]), "%d cases on the collection bay (%d)" % [int(plan["count"]), pal.cases_used()])
 	check(money0 - (e.personal_cash + e.company_cash) > 50.0, "money left the account")
 	# 4 — pick one case up by hand, then let the yard crew load the rest.
 	var pspot := spot_of("pallet", wsi)
@@ -117,7 +123,7 @@ func _run() -> void:
 	game.act()  # load the carried case
 	check(e.carried.is_empty() and cargo.cases_used() == 1, "case loaded into the boot")
 	game.act()  # yard crew loads the bay
-	check(pal.is_empty() and cargo.cases_used() == 6, "yard crew loaded the rest (boot %d, bay %d)" % [cargo.cases_used(), pal.cases_used()])
+	check(pal.is_empty() and cargo.cases_used() == int(plan["count"]), "yard crew loaded the rest (boot %d, bay %d)" % [cargo.cases_used(), pal.cases_used()])
 	var units_total := e.total_units()
 	# 5 — drive back (teleport), unload, carry in, shelve.
 	await stand_at(car.global_transform * Vector3(-car.spec["size"].x * 0.5 - 0.6, 0.0, -0.3))
@@ -130,25 +136,31 @@ func _run() -> void:
 	game.exit_vehicle()
 	var ssi: ShopInterior = game.interiors[start["id"]]
 	var shelved := 0
-	for trip in 6:
-		await stand_at(car.global_transform * Vector3(0.0, 0.0, car.spec["size"].z * 0.5 + 0.8))
-		game.act()
-		if e.carried.is_empty():
-			break
-		var pid: String = e.carried.units.keys()[0]
-		var si := b.slot_for(pid)
-		if si < 0:
-			# No shelf for it: into the stockroom.
-			await stand_at(ssi.to_world(ssi.rack_pos))
-			game.act()
-			continue
-		await stand_at(ssi.to_world(ssi.slot_pick[si]))
+	# Parked out front: the boot unloads into the stockroom in one go.
+	await stand_at(car.global_transform * Vector3(0.0, 0.0, car.spec["size"].z * 0.5 + 0.8))
+	check(String(game.spot_prompt()[0]).begins_with("UNLOAD %d CASES INTO" % int(plan["count"])), "boot offers to unload into the shop (%s)" % game.spot_prompt()[0])
+	game.act()
+	check(b.backroom.cases_used() + b.floor_pile.cases_used() == int(plan["count"]), "unloaded into the stockroom (%d cases)" % b.backroom.cases_used())
+	# One case by hand from the stockroom to a shelf…
+	await stand_at(ssi.to_world(ssi.rack_pos))
+	var pid0: String = b.backroom.units.keys()[0]
+	game.take_case(b, pid0)
+	var si0 := b.slot_for(pid0)
+	if si0 >= 0:
+		await stand_at(ssi.to_world(ssi.slot_pick[si0]))
 		var before := b.shelf_units()
 		game.act()
 		shelved += b.shelf_units() - before
-		if not e.carried.is_empty():
-			await stand_at(ssi.to_world(ssi.rack_pos))
-			game.act()
+	if not e.carried.is_empty():
+		await stand_at(ssi.to_world(ssi.rack_pos))
+		game.act()
+	# …then FILL THE SHELVES for the rest.
+	shelved += e.restock_from_backroom(b, 99999)
+	var gaps := 0
+	for sl: Dictionary in b.slots:
+		if String(sl["product"]) != "" and b.backroom.qty(sl["product"]) > 0 and int(sl["qty"]) < int(sl["cap"]):
+			gaps += 1
+	check(gaps == 0, "nothing left in the back that would fit a shelf (%d gaps)" % gaps)
 	check(shelved > 60, "carried goods in and filled shelves (%d units)" % shelved)
 	check(e.total_units() == units_total, "no units created or lost moving them (%d)" % e.total_units())
 	check(cargo.is_empty(), "boot emptied")

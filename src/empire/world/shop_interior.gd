@@ -150,7 +150,6 @@ static func rival_display(u: Dictionary, title := "", type := "convenience") -> 
 	b.name = title if title != "" else String(CityLife.rival_cfg().get("name", "QuikSave"))
 	# Every slot stocked with something its fixture holds, from the shop's
 	# own categories (a bakery's shelf has loaves, a clothes shop's shoes).
-	var cats: Array = b.type_def().get("categories", [])
 	var used := {}
 	for s: Dictionary in b.slots:
 		var fx: String = s["fixture"]
@@ -158,7 +157,7 @@ static func rival_display(u: Dictionary, title := "", type := "convenience") -> 
 			s["qty"] = int(s["cap"])
 			continue
 		var pool: Array = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == fx \
-			and String(EmpireData.product(p)["cat"]) in cats)
+			and EmpireData.type_sells(type, p))
 		if pool.is_empty():
 			pool = EmpireData.product_ids().filter(func(p): return EmpireData.product(p)["fixture"] == fx)
 		if pool.is_empty():
@@ -1105,10 +1104,15 @@ func _place_fixtures(st: _Batch, part_d: float) -> void:
 	var mid_sites := sites.filter(func(s): return s["wall"] == "gondola")
 	var left_sites := sites.filter(func(s): return s["wall"] == "left")
 	_mid_used = false
+	# Shops with nothing made for the back wall (phones, clothes) put their
+	# wall shelving there instead: it's the wall you see from the door.
+	var back_free := not want.any(func(w): return w[0] in ["fridge", "coffee", "hotcab", "cake"])
 	for w in want:
 		var site: Dictionary
 		var k: String = w[0]
 		if k in ["fridge", "coffee", "hotcab", "cake"] and not back_sites.is_empty():
+			site = back_sites.pop_front()
+		elif back_free and k == "shelf" and not back_sites.is_empty():
 			site = back_sites.pop_front()
 		elif k in ["table", "techtable"] and not mid_sites.is_empty():
 			site = mid_sites.pop_front()
@@ -1146,12 +1150,32 @@ func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 	var body_col := Color(0.2, 0.22, 0.25)
 	match k:
 		"fridge":
-			st.box(Vector3(lo.x, 0.0, lo.z), Vector3(hi.x, tall, hi.z), Color(0.82, 0.84, 0.86))
-			# Dark lit interior on the open (front) side, top light strip.
-			var f0 := o + out * 0.005
-			var f1 := o + al * BAY + out * 0.005
-			_glow_quad_v(f0 + Vector3.UP * 0.12, f1 + Vector3.UP * (tall - 0.18), out, Color(0.55, 0.62, 0.7) * 0.35)
-			_glow_quad_v(f0 + Vector3.UP * (tall - 0.16), f1 + Vector3.UP * (tall - 0.06), out, Color(0.9, 0.95, 1.0) * 1.3)
+			# An upright drinks fridge you can see into: a pale cabinet, a dark
+			# lit interior with wire shelves at the slot heights, and two glass
+			# doors with chrome frames and handles.
+			var shell := Color(0.86, 0.88, 0.9)
+			var inner := Color(0.17, 0.2, 0.24)
+			var bk := o - out * dep
+			var bx := func(p0: Vector3, p1: Vector3, c: Color) -> void: st.box(p0.min(p1), p0.max(p1), c)
+			var base_h := 0.24
+			var top_h := tall - 0.2
+			bx.call(bk, bk + al * BAY + out * 0.05 + Vector3.UP * tall, inner)                 # back
+			for e3: float in [0.0, BAY - 0.04]:                                                 # sides
+				bx.call(bk + al * e3, o + al * (e3 + 0.04) + Vector3.UP * tall, shell)
+			bx.call(bk, o + al * BAY + Vector3.UP * base_h, shell.darkened(0.25))               # plinth
+			bx.call(bk + Vector3.UP * top_h, o + al * BAY + Vector3.UP * tall, brand)           # canopy
+			for ly: float in FRIDGE_LEVELS:                                                     # wire shelves
+				bx.call(bk + al * 0.04 + out * 0.05 + Vector3.UP * (ly - 0.018), o + al * (BAY - 0.04) - out * 0.03 + Vector3.UP * ly, Color(0.55, 0.57, 0.6))
+			# Light strip inside under the canopy, and the glow off the back.
+			_glow_quad(bk + al * 0.06 + out * 0.1 + Vector3.UP * (top_h - 0.01), o + al * (BAY - 0.06) - out * 0.08 + Vector3.UP * (top_h - 0.01), Color(0.92, 0.97, 1.0) * 1.4, true)
+			_glow_quad_v(bk + al * 0.06 + out * 0.051 + Vector3.UP * (base_h + 0.02), bk + al * (BAY - 0.06) + out * 0.051 + Vector3.UP * (top_h - 0.04), out, Color(0.35, 0.45, 0.55) * 0.45)
+			# Glass doors, frames, handles.
+			_glass_box((o - out * 0.025 + Vector3.UP * base_h).min(o + al * BAY + Vector3.UP * top_h), (o - out * 0.025 + Vector3.UP * base_h).max(o + al * BAY + Vector3.UP * top_h))
+			var chrome := Color(0.72, 0.74, 0.77)
+			for e4: float in [0.0, BAY * 0.5 - 0.015, BAY - 0.03]:
+				bx.call(o + al * e4 + Vector3.UP * base_h, o + al * (e4 + 0.03) - out * 0.03 + Vector3.UP * top_h, chrome)
+			for e5: float in [BAY * 0.5 - 0.07, BAY * 0.5 + 0.05]:
+				bx.call(o + al * e5 + out * 0.01 + Vector3.UP * 0.8, o + al * (e5 + 0.02) + out * 0.04 + Vector3.UP * 1.45, Color(0.2, 0.2, 0.22))
 		"coffee":
 			st.box(Vector3(lo.x, 0.0, lo.z), Vector3(hi.x, 0.95, hi.z), Color(0.28, 0.18, 0.12))
 			var m0 := o + al * 0.5 - out * 0.45
@@ -1920,41 +1944,78 @@ func _decor_trade(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float)
 	_static.add_child(lab)
 
 
-## A menu board over the back counter: the shop's products and prices.
+## A menu board over the back counter: what the shop sells and its prices,
+## laid out line by line in two columns so everything stays on the board.
+## Made-here things lead; bottled drinks go last.
 func _menu_board(st: _Batch, part_d: float) -> void:
 	var x0 := 0.5
 	var x1 := minf(W - 2.8, x0 + 4.2)
 	if x1 - x0 < 1.5:
 		return
 	var neon := type_id == "takeaway"
-	st.box(R(x0, part_d - 0.06, 2.3), R(x1, part_d - 0.02, 3.35), Color(0.08, 0.08, 0.09) if not neon else brand.darkened(0.55))
+	var y0 := 2.2
+	var y1 := 3.45
+	var bd := part_d - 0.06
+	st.box(R(x0, bd, y0), R(x1, part_d - 0.02, y1), Color(0.08, 0.08, 0.09) if not neon else brand.darkened(0.55))
+	# A thin frame in the brand's accent.
+	var fr: Color = ident.get("accent", Color(0.8, 0.7, 0.45))
+	st.box(R(x0 - 0.03, bd + 0.005, y1), R(x1 + 0.03, part_d - 0.02, y1 + 0.03), fr)
+	st.box(R(x0 - 0.03, bd + 0.005, y0 - 0.03), R(x1 + 0.03, part_d - 0.02, y0), fr)
+	var top := y1 - 0.12
 	if neon:
-		# Backlit picture panels of the food.
+		# Backlit picture panels of the food along the top.
 		var n := 3
 		for i in n:
 			var a := lerpf(x0 + 0.1, x1 - 0.1, float(i) / n)
 			var b := lerpf(x0 + 0.1, x1 - 0.1, float(i + 1) / n) - 0.08
-			_glow_quad(R(a, part_d - 0.065, 2.85), R(b, part_d - 0.065, 3.28), [Color(1.0, 0.75, 0.3), Color(0.95, 0.45, 0.25), Color(1.0, 0.9, 0.6)][i] * 1.2)
-	var lines: Array = []
-	var seen := {}
+			_glow_quad(R(a, bd - 0.005, y1 - 0.45), R(b, bd - 0.005, y1 - 0.08), [Color(1.0, 0.75, 0.3), Color(0.95, 0.45, 0.25), Color(1.0, 0.9, 0.6)][i] * 1.2)
+		top = y1 - 0.6
+	# What's on: the shop's own lines (or, before it has any, what its kind sells).
+	var pids: Array = []
 	if biz:
 		for sl: Dictionary in biz.slots:
 			var pid := String(sl["product"])
-			if pid == "" or seen.has(pid):
-				continue
-			seen[pid] = true
-			lines.append("%s  %s" % [String(EmpireData.product(pid)["name"]), EmpireData.money(biz.price(pid), true)])
-	var menu := Label3D.new()
-	menu.text = "\n".join(lines.slice(0, 6))
-	menu.font = ShopStyle.font("condensed")
-	menu.font_size = 64
-	menu.pixel_size = 0.0042
-	menu.shaded = false
-	menu.modulate = Color(0.97, 0.95, 0.88)
-	menu.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	menu.position = R((x0 + x1) * 0.5, part_d - 0.07, 2.62 if neon else 2.85)
-	menu.rotation.y = 0.0  # (faces into the shop)
-	_static.add_child(menu)
+			if pid != "" and not pids.has(pid):
+				pids.append(pid)
+		if pids.is_empty():
+			pids = biz.sellable()
+	var drinks := func(p: String) -> bool: return String(EmpireData.product(p).get("fixture", "")) == "fridge"
+	var ordered: Array = pids.filter(func(p): return not drinks.call(p)) + pids.filter(func(p): return drinks.call(p))
+	var line_h := 0.22
+	var rows := maxi(int(floor((top - (y0 + 0.08)) / line_h)) + 1, 1)
+	var cols := 2 if x1 - x0 >= 3.0 else 1
+	ordered = ordered.slice(0, rows * cols)
+	var font := ShopStyle.font("condensed")
+	var fs := 48
+	var px := 0.0034
+	var pad := 0.14
+	var cw := (x1 - x0 - pad * 2.0 - 0.25 * (cols - 1)) / cols
+	for i in ordered.size():
+		var pid: String = ordered[i]
+		var col := i / rows
+		var row := i % rows
+		var cx0 := x0 + pad + col * (cw + 0.25)
+		var y := top - row * line_h
+		var price := EmpireData.money(biz.price(pid) if biz else EmpireData.rrp(pid), true)
+		var pw := font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * px
+		var name := String(EmpireData.product(pid)["name"])
+		var room := cw - pw - 0.12
+		var base := name
+		while base.length() > 4 and font.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * px > room:
+			base = base.substr(0, base.length() - 1).strip_edges()
+			name = base + "…"
+		var nw := font.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * px
+		for part: Array in [[name, cx0 + nw * 0.5, Color(0.97, 0.95, 0.88)], [price, cx0 + cw - pw * 0.5, Color(1.0, 0.84, 0.42)]]:
+			var lab := Label3D.new()
+			lab.text = part[0]
+			lab.font = font
+			lab.font_size = fs
+			lab.pixel_size = px
+			lab.outline_size = 0
+			lab.shaded = false
+			lab.modulate = part[2]
+			lab.position = R(part[1], bd - 0.012, y)
+			_static.add_child(lab)
 
 
 func _cafe_table(st: _Batch, c: Vector3, accent: Color) -> void:

@@ -300,6 +300,10 @@ func _after_start() -> void:
 			ui.open_hq()
 		elif pn == "report":
 			empire.advance(1440.0 - empire.minute + 1.0)
+		elif pn == "wholesale":
+			ui.open_wholesale(wholesaler("west"))
+		elif pn in ["stock", "staff"] and not empire.businesses.is_empty():
+			ui.open_manage(empire.businesses[0], pn)
 		else:
 			ui.open_phone(pn)
 	if args.has("shot"):
@@ -903,6 +907,9 @@ func spot_prompt() -> Array:
 				return ["LOAD %d CASE%s" % [empire.carried.cases_used(), "" if empire.carried.cases_used() == 1 else "S"], true]
 			if near_bay != "" and not _pallet(near_bay).is_empty():
 				return ["YARD CREW: LOAD FROM BAY", true]
+			var near_shop := _own_shop_near(cars[spot["vehicle"]].global_position)
+			if near_shop != null and not cargo.is_empty():
+				return ["UNLOAD %d CASE%s INTO %s" % [cargo.cases_used(), "" if cargo.cases_used() == 1 else "S", near_shop.name.to_upper()], true]
 			if not cargo.is_empty():
 				return ["UNLOAD (%d/%d cases)" % [cargo.cases_used(), cargo.case_capacity], true]
 			return ["BOOT · empty (%d cases)" % cargo.case_capacity, false]
@@ -1059,6 +1066,25 @@ func _boot_action(vid: String) -> void:
 		return
 	if cargo.is_empty():
 		return
+	# Parked at one of your shops: everything goes into its stockroom (what
+	# doesn't fit is left by the door for staff to tidy away).
+	var shop := _own_shop_near(cars[vid].global_position)
+	if shop != null:
+		var cases := cargo.cases_used()
+		var to_room := 0
+		for pid3 in cargo.units.keys():
+			to_room += Stock.transfer(cargo, shop.backroom, pid3, cargo.qty(pid3))
+		var spill := 0
+		for pid4 in cargo.units.keys():
+			spill += Stock.cases_for(pid4, cargo.qty(pid4))
+			Stock.transfer(cargo, shop.floor_pile, pid4, cargo.qty(pid4))
+		ui.toast("Unloaded %d case%s into %s's stockroom%s" % [cases, "" if cases == 1 else "s", shop.name,
+			"" if spill == 0 else " (%d by the door: the stockroom's full)" % spill], "good" if spill == 0 else "warn")
+		Sfx.play("drop", -4.0, 0.8)
+		if interiors.has(shop.premises["id"]):
+			interiors[shop.premises["id"]].refresh_goods()
+		empire.changed.emit()
+		return
 	# Take one case of whatever there's most of.
 	var best := ""
 	for pid2 in cargo.units:
@@ -1067,6 +1093,21 @@ func _boot_action(vid: String) -> void:
 	var got := Stock.transfer(cargo, empire.carried, best, mini(cargo.qty(best), EmpireData.case_qty(best)))
 	if got > 0:
 		Sfx.play("pickup", -6.0)
+
+
+## Your shop whose door is within 25 m of p (a car parked out front), or null.
+func _own_shop_near(p: Vector3) -> Business:
+	var best: Business = null
+	var bd := 25.0
+	for b: Business in empire.businesses:
+		var u: Dictionary = unit_by_id.get(b.premises.get("id", ""), {})
+		if u.is_empty():
+			continue
+		var d := Premises.door_point(u).distance_to(p)
+		if d < bd:
+			bd = d
+			best = b
+	return best
 
 
 ## The wholesaler whose collection bay is within 14 m of p ("" none).
@@ -1713,9 +1754,10 @@ func _demo_setup(kind: String) -> void:
 	if kind == "carry":
 		Stock.transfer(b.backroom, empire.carried, "cola", 48)
 	if kind == "staff":
-		for c in empire.candidates.duplicate():
-			if c["role"] in ["cashier", "stocker", "cleaner"]:
-				empire.hire(b, c)
+		for role in ["cashier", "stocker", "cleaner"]:
+			var cs := empire.candidates.filter(func(x): return x["role"] == role)
+			if not cs.is_empty():
+				empire.hire(b, cs[0])
 	b.cleanliness = 0.75
 	rebuild_interior(u["id"])
 	empire.minute = maxf(empire.minute, 9.0 * 60.0)

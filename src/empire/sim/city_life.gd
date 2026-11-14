@@ -471,12 +471,11 @@ static func firm_profit(f: Dictionary) -> float:
 	var shoppers := float(d.get("footfall", 8.0)) * float(EmpireData.economy().get("footfall_scale", 1.0)) * hours \
 		* (0.5 + float(f.get("rep", 50.0)) / 100.0) * 0.8 * float(td.get("footfall_k", 1.0))
 	# What a shopper spends here, net of what it cost: the type's goods.
-	var cats: Array = td.get("categories", [])
 	var margin := 0.0
 	var wsum := 0.0
 	for pid in EmpireData.product_ids():
 		var p := EmpireData.product(pid)
-		if String(p["cat"]) in cats:
+		if EmpireData.type_sells(String(f.get("type", "convenience")), pid):
 			var w := float(p.get("demand", 1.0))
 			margin += w * (float(p["rrp"]) - float(p["case_cost"]) / float(p["case_qty"]))
 			wsum += w
@@ -561,10 +560,9 @@ static func buy_firm(e: Empire, unit: Dictionary, err := []) -> Business:
 	# The stock that came with it, on the shelves: its own kind of goods.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([e.seed, unit["id"], e.day])
-	var cats: Array = b.type_def().get("categories", [])
 	for pid in EmpireData.product_ids():
 		var p := EmpireData.product(pid)
-		if String(p["cat"]) in cats and int(b.fixtures.get(String(p["fixture"]), 0)) > 0 and rng.randf() < 0.85:
+		if b.sells(pid) and rng.randf() < 0.85:
 			e._receive(b.backroom, pid, EmpireData.case_qty(pid), float(p.get("case_cost", 0.0)) / float(EmpireData.case_qty(pid)))
 	e.restock_from_backroom(b, 999)
 	# The cashier stays on.

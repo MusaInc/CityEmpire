@@ -7,14 +7,25 @@ extends RefCounted
 ## seen happening).
 
 
-static func candidates(day: int, seed: int, count := 6) -> Array:
+## How many people are looking for work on a given day (config staff.json
+## "daily_seekers"): plenty, so every role has a choice.
+static func daily_count() -> int:
+	return int(EmpireData.file("staff").get("daily_seekers", 18))
+
+
+## The day's job seekers: at least `per_role` of every role (the cheap, the
+## keen and the experienced), then a random mix; best first within a role.
+static func candidates(day: int, seed: int, count := -1) -> Array:
+	if count < 0:
+		count = daily_count()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([seed, day, "staff"])
 	var roles := EmpireData.roles().keys()
+	var per_role := mini(int(EmpireData.file("staff").get("per_role", 3)), maxi(count / maxi(roles.size(), 1), 1))
 	var out: Array = []
 	for i in count:
-		# Every day's list covers the roles a small shop needs first.
-		var role: String = roles[i % roles.size()] if i < roles.size() else roles[rng.randi() % roles.size()]
+		# Every day's list covers each role a few times over.
+		var role: String = roles[i % roles.size()] if i < roles.size() * per_role else roles[rng.randi() % roles.size()]
 		out.append(make(rng, role, day, i))
 	return out
 

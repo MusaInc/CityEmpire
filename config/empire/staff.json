@@ -1,5 +1,8 @@
 {
   "_doc": "Employee roles. wage = pounds per hour at skill 3 (scaled 0.8..1.25 by skill 1..5). rate = work per hour at skill 3.",
+  "daily_seekers": 18,
+  "per_role": 3,
+  "_seekers": "people looking for work each day; every role appears at least per_role times",
   "roles": {
     "cashier":  {"name": "Cashier",        "wage": 6.5, "desc": "Serves the till: customers never wait for you.", "rate": 40},
     "stocker":  {"name": "Shelf Stacker",  "wage": 6.0, "desc": "Fills shelves from the back room.", "rate": 90},

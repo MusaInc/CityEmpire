@@ -31,27 +31,27 @@ func _init() -> void:
 				"rent": rent, "price": rent * 240.0, "rep": 50.0, "since": 0, "colour": "#2f7d4a", "for_sale": false, "listed": 0})
 		e.transfer_to_company(6000.0)
 		var order := {}
-		var cats: Array = b.type_def().get("categories", [])
-		for pid in EmpireData.product_ids():
-			var pp := EmpireData.product(pid)
-			if String(pp["cat"]) in cats and int(b.fixtures.get(String(pp["fixture"]), 0)) > 0:
-				order[pid] = 1
+		for pid in b.sellable():
+			order[pid] = 1
 		e.buy_wholesale("w1", order)
 		var pal: Stock = e.pallets["w1"]
 		for pid in order:
 			Stock.transfer(pal, b.backroom, pid, pal.qty(pid))
 		e.restock_from_backroom(b, 1000)
 		for role in ["cashier", "stocker", "manager"]:
-			var c: Array = e.candidates.filter(func(x): return x["role"] == role)
-			e.hire(b, c[0])
+			e.hire(b, e.best_candidate(role))
 		var tot := 0.0
+		var fees := 0.0
+		var sums := {}
 		var line := ""
 		for d in days:
 			e.advance(1440.0)
 			var r: Dictionary = b.history[-1]
 			tot += float(r["profit"])
+			for kk in ["revenue", "cogs", "fees", "theft", "stockouts", "not_stocked", "wages"]:
+				sums[kk] = float(sums.get(kk, 0.0)) + float(r[kk])
 			if d == days - 1:
 				pass
 				line += " d%d:%.0f(rev %.0f cust %d rep %.0f)" % [d + 1, r["profit"], r["revenue"], r["customers"], r["reputation"]]
-		print("%-18s rent %4.0f  total %7.0f  avg/day %6.0f |%s" % [dk, rent, tot, tot / days, line])
+		print("%-18s rent %4.0f  total %7.0f  avg/day %6.0f |%s %s" % [dk, rent, tot, tot / days, line, JSON.stringify(sums.keys().map(func(k): return "%s=%.0f" % [k, sums[k]]))])
 	quit()

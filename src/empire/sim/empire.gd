@@ -296,7 +296,7 @@ func restock_from_backroom(b: Business, n: int) -> int:
 			moved += b.shelve(b.backroom, si, pid, mini(n - moved, 6))
 			shown.append(pid)
 	var guard := 0
-	while moved < n and guard < 64:
+	while moved < n and guard < 4096:
 		guard += 1
 		var best := -1
 		var best_fill := 1.0
@@ -309,15 +309,47 @@ func restock_from_backroom(b: Business, n: int) -> int:
 			if fill < best_fill:
 				best_fill = fill
 				best = i
+		var pid2 := ""
+		if best >= 0:
+			pid2 = b.slots[best]["product"]
+		else:
+			# Every slot showing something is full: spare empty slots take
+			# whatever there's most of in the back that goes on them.
+			for i in b.slots.size():
+				var s2: Dictionary = b.slots[i]
+				if String(s2["product"]) != "" or int(s2["qty"]) > 0:
+					continue
+				var most := 0
+				for q in b.backroom.units:
+					if b.can_hold(i, q) and b.backroom.qty(q) > most:
+						most = b.backroom.qty(q)
+						pid2 = q
+				if pid2 != "":
+					best = i
+					break
 		if best < 0:
 			break
-		var pid2: String = b.slots[best]["product"]
 		var m := b.shelve(b.backroom, best, pid2, mini(n - moved, 6))
 		if m <= 0:
 			break
 		moved += m
 	stats["units_shelved"] = int(stats["units_shelved"]) + moved
 	return moved
+
+
+## Today's best job seeker for a role: most skilled, then cheapest (the
+## careless only if there's no one else). {} if nobody.
+func best_candidate(role: String) -> Dictionary:
+	var best := {}
+	var best_v := -INF
+	for c: Dictionary in candidates:
+		if c["role"] != role:
+			continue
+		var v := float(c["skill"]) * 10.0 - float(c["wage"]) - (15.0 if (c.get("traits", []) as Array).has("careless") else 0.0)
+		if v > best_v:
+			best_v = v
+			best = c
+	return best
 
 
 func hire(b: Business, cand: Dictionary) -> bool:
@@ -505,6 +537,66 @@ func order_delivery(b: Business, order: Dictionary, by_manager := false) -> Stri
 	return ""
 
 
+## One-tap stock: the cases that fill b's shelves (`full`: and put a
+## shelf's worth of each line in the stockroom as well, while it has room).
+## Counts what's already there, on order, on the floor and `in_transit`
+## ({pid: units}, e.g. in your van). Cases are taken a round at a time over
+## the range (most wanted first), so a smaller `max_cases` or `budget` still
+## gives a spread of everything rather than lots of one thing.
+## Returns {"cases": {pid: n}, "count": n, "cost": £, "short": "why it stopped early" or ""}.
+func restock_plan(b: Business, full := false, max_cases := 9999, budget := INF, in_transit := {}) -> Dictionary:
+	var targets := b.shelf_targets()
+	var order: Array = b.sellable().filter(func(p): return targets.has(p))
+	var pending := {}
+	for o: Dictionary in b.orders:
+		for pid in o["units"]:
+			pending[pid] = int(pending.get(pid, 0)) + int(o["units"][pid])
+	var need := {}   # pid -> [cases for the shelves, extra cases for the stockroom]
+	var spare_room := b.backroom.case_capacity - b.backroom.cases_used() - b.floor_pile.cases_used()
+	for pid in order:
+		var cq := EmpireData.case_qty(pid)
+		var have := b.shelf_qty(pid) + b.backroom.qty(pid) + b.floor_pile.qty(pid) + int(pending.get(pid, 0)) + int(in_transit.get(pid, 0))
+		var shelf_cases := int(ceil(float(maxi(int(targets[pid]) - have, 0)) / float(cq)))
+		# What's left over from those cases waits in the stockroom too.
+		var left := shelf_cases * cq + have - int(targets[pid])
+		var extra := 0
+		if full:
+			extra = maxi(int(ceil(float(int(targets[pid]) - maxi(left, 0)) / float(cq))), 0)
+		need[pid] = [shelf_cases, extra]
+		spare_room -= int(ceil(float(maxi(left, 0)) / float(cq)))
+	# Rounds: one case of each line that still needs one, shelves first.
+	var tickets: Array = []
+	for phase in 2:
+		var more := true
+		while more:
+			more = false
+			for pid in order:
+				if int(need[pid][phase]) > 0:
+					if phase == 1:
+						if spare_room <= 0:
+							continue
+						spare_room -= 1
+					need[pid][phase] = int(need[pid][phase]) - 1
+					tickets.append(pid)
+					more = true
+	var cases := {}
+	var count := 0
+	var cost := 0.0
+	var short := ""
+	for pid in tickets:
+		if count >= max_cases:
+			short = "space"
+			break
+		var c := case_price(pid)
+		if cost + c > budget:
+			short = "money"
+			continue
+		cases[pid] = int(cases.get(pid, 0)) + 1
+		count += 1
+		cost += c
+	return {"cases": cases, "count": count, "cost": cost, "short": short}
+
+
 ## A driver with a company van collects for free; otherwise the wholesaler delivers for a fee.
 func delivery_fee(b: Business) -> float:
 	if b.has_role("driver") and vehicles.any(func(v): return v["model"] in ["van", "box"]):
@@ -542,13 +634,15 @@ func _manager_reorders() -> void:
 	for b: Business in businesses:
 		if not b.has_role("manager"):
 			continue
+		# Any line short of a shelf-fill gets two shelf-fills' worth (deliveries
+		# stack in the aisle when the racking's full); company money only.
 		var order := {}
 		var budget := company_cash - 200.0
-		for pid in b.stocked_products():
-			var cap := 0
-			for s: Dictionary in b.slots:
-				if s["product"] == pid:
-					cap += int(s["cap"])
+		var targets := b.shelf_targets()
+		for pid in b.sellable():
+			if not targets.has(pid):
+				continue
+			var cap := int(targets[pid])
 			var pending := 0
 			for o: Dictionary in b.orders:
 				pending += int(o["units"].get(pid, 0))

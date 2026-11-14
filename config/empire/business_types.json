@@ -231,6 +231,8 @@
     "hot",
     "groceries"
    ],
+   "exclude": ["pasta", "beans", "tea"],
+   "_exclude": "a bakery sells its own bakes, bread and eggs, not tins and dry goods",
    "open": 7,
    "close": 17,
    "footfall_k": 1.3,
@@ -252,7 +254,7 @@
    },
    "slot_units": {
     "cake": 24,
-    "shelf": 12,
+    "shelf": 18,
     "coffee": 60
    },
    "slots_per": {

@@ -421,3 +421,70 @@ func test_money_format(t) -> void:
 	t.check(EmpireData.money(1234.4) == "£1,234", "thousands")
 	t.check(EmpireData.money(1.999, true) == "£2.00", "pence rounding")
 	t.check(EmpireData.money(-35.0) == "-£35", "negative")
+
+
+# ------------------------------------------------- one-tap stock, hiring
+func test_shops_only_sell_what_they_have_a_place_for(t) -> void:
+	var e := _game()
+	e.personal_cash = 9000.0
+	var bakery := e.rent_premises(STARTER, "bakery")
+	t.check(bakery.sells("croissant") and bakery.sells("bread"), "a bakery sells bakes and bread")
+	t.check(not bakery.sells("beans") and not bakery.sells("pasta"), "a bakery doesn't sell tins or pasta")
+	t.check(not bakery.sells("milk"), "no fridge, no milk")
+	t.check(not bakery.sells("coffee"), "no coffee until it has a machine")
+	bakery.apply_upgrade("coffee")
+	t.check(bakery.sells("coffee"), "the coffee machine adds coffee")
+
+
+func test_restock_pack_fills_every_slot_and_counts_what_is_there(t) -> void:
+	for type_id in ["convenience", "clothing", "cafe", "takeaway", "bakery", "phones"]:
+		var e := _game()
+		e.personal_cash = 900000.0
+		var b := e.rent_premises(STARTER, type_id)
+		var plan := e.restock_plan(b, false)
+		t.check(int(plan["count"]) > 0 and plan["short"] == "", "%s: a top-up for an empty shop (%d cases)" % [type_id, int(plan["count"])])
+		t.check((plan["cases"] as Dictionary).keys().all(func(p): return b.sells(p)), "%s: only its own goods" % type_id)
+		# Deliver it and put it out: every slot is then showing something.
+		e.order_delivery(b, plan["cases"])
+		e.minute = 23.0 * 60.0 + 59.0
+		e.advance(7.0 * 60.0)
+		e.restock_from_backroom(b, 99999)
+		var empty := b.slots.filter(func(s): return int(s["qty"]) == 0).size()
+		var low := b.slots.filter(func(s): return int(s["qty"]) < int(s["cap"])).size()
+		t.check(empty == 0, "%s: no empty slot after the top-up (%d empty, %d not full)" % [type_id, empty, low])
+		var again := e.restock_plan(b, false)
+		t.check(int(again["count"]) <= 1, "%s: a second top-up has nothing to add (%d)" % [type_id, int(again["count"])])
+		var full := e.restock_plan(b, true)
+		t.check(int(full["count"]) > 0, "%s: a full restock still adds stockroom cases (%d)" % [type_id, int(full["count"])])
+		t.check(b.backroom.cases_used() + int(full["count"]) <= b.backroom.case_capacity + 1, "%s: …that fit the stockroom" % type_id)
+
+
+func test_restock_pack_respects_space_and_money_with_a_spread(t) -> void:
+	var e := _game()
+	e.personal_cash = 900000.0
+	var b := e.rent_premises(STARTER)
+	var plan := e.restock_plan(b, true, 6)
+	t.check(int(plan["count"]) == 6 and plan["short"] == "space", "cut to 6 cases")
+	t.check((plan["cases"] as Dictionary).size() == 6, "six different lines, not six of one (%s)" % [plan["cases"]])
+	var cheap := e.restock_plan(b, true, 9999, 40.0)
+	t.check(float(cheap["cost"]) <= 40.0 and int(cheap["count"]) > 0 and cheap["short"] == "money", "cut to £40 (%s)" % EmpireData.money(float(cheap["cost"]), true))
+	# Stock already in the van counts.
+	var all := e.restock_plan(b, false)
+	var less := e.restock_plan(b, false, 9999, INF, {"crisps": 500})
+	t.check(not (less["cases"] as Dictionary).has("crisps") and int(less["count"]) < int(all["count"]), "crisps in the van aren't bought again")
+
+
+func test_plenty_of_people_looking_for_work(t) -> void:
+	var e := _game()
+	t.check(e.candidates.size() >= 15, "a long list every day (%d)" % e.candidates.size())
+	for r in EmpireData.roles():
+		var n := e.candidates.filter(func(c): return c["role"] == r).size()
+		t.check(n >= 3, "%d people want to be a %s" % [n, r])
+		t.check(not e.best_candidate(r).is_empty(), "a best %s to hire" % r)
+	var e2 := _game()
+	e2.personal_cash = 9000.0
+	var b := e2.rent_premises(STARTER)
+	for i in 3:
+		t.check(e2.hire(b, e2.best_candidate("cashier")), "hired cashier %d" % (i + 1))
+	e2.end_day()
+	t.check(e2.candidates.filter(func(c): return c["role"] == "cashier").size() >= 3, "fresh cashiers the next morning")

@@ -98,6 +98,16 @@ static func business_types() -> Dictionary:
 	return file("business_types").get("types", {})
 
 
+## A kind of shop's goods: its categories, less the products it leaves out
+## (fixtures aside: see Business.sells).
+static func type_sells(type_id: String, pid: String) -> bool:
+	var p := product(pid)
+	if p.is_empty():
+		return false
+	var td := business_type(type_id)
+	return String(p["cat"]) in td.get("categories", []) and not pid in td.get("exclude", [])
+
+
 static func upgrade(id: String) -> Dictionary:
 	return file("business_types").get("upgrades", {}).get(id, {})
 
