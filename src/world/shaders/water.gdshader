@@ -65,10 +65,13 @@ void fragment() {
 	float mid = 1.0 - smoothstep(250.0, 1600.0, dist);
 	float blow = clamp(rain, 0.0, 1.0);
 	float sw = (1.0 + 0.8 * blow) * patchy;
-	vec3 w = wave(p, normalize(vec2(1.0, 0.35)), 23.0, 0.55 * sw, 2.4);
-	w += wave(p, normalize(vec2(0.6, -1.0)), 13.0, 0.32 * sw, 1.9);
-	w += wave(p, normalize(vec2(-0.85, 0.5)), 7.3, 0.18 * sw, 1.5);
-	w += wave(p, normalize(vec2(0.2, 1.0)), 3.9, 0.09 * sw, 1.1) * near;
+	// Each train fades out once a pixel covers a good part of its
+	// wavelength (seen from altitude or far off they'd alias into moiré).
+	float fp = length(fwidth(p0)) + 0.001;
+	vec3 w = wave(p, normalize(vec2(1.0, 0.35)), 23.0, 0.55 * sw, 2.4) * (1.0 - smoothstep(1.2, 5.0, fp));
+	w += wave(p, normalize(vec2(0.6, -1.0)), 13.0, 0.32 * sw, 1.9) * (1.0 - smoothstep(0.7, 2.8, fp));
+	w += wave(p, normalize(vec2(-0.85, 0.5)), 7.3, 0.18 * sw, 1.5) * (1.0 - smoothstep(0.4, 1.6, fp));
+	w += wave(p, normalize(vec2(0.2, 1.0)), 3.9, 0.09 * sw, 1.1) * near * (1.0 - smoothstep(0.2, 0.8, fp));
 	// Chop up close (and rain pock-marks).
 	float e = 0.35;
 	vec2 q = p * 0.55 + vec2(TIME * 0.21, TIME * 0.13);
@@ -79,7 +82,7 @@ void fragment() {
 	vec2 pock = vec2(vnoise(q2 + vec2(0.3, 0.0)) - r0, vnoise(q2 + vec2(0.0, 0.3)) - r0) * 0.5 * blow;
 	// (Far off the swell's slopes fade more: seen from height the trains
 	// interfere into a regular ripple grid.)
-	vec2 slope = w.yz * mix(0.12, 1.0, mid * mid) + (chop + pock) * near;
+	vec2 slope = w.yz * mix(0.12, 1.0, mid * mid) + (chop + pock) * near * (1.0 - smoothstep(0.15, 0.6, fp));
 	vec3 nw = normalize(vec3(-slope.x, 1.0, -slope.y));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 

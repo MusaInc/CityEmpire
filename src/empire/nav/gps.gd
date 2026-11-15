@@ -180,7 +180,7 @@ func _process(dt: float) -> void:
 	if _check_t > 0.0:
 		return
 	_check_t = 0.25
-	var want_mode := "drive" if game.driving != "" else "walk"
+	var want_mode := _mode_now()
 	var here := _here()
 	var arrive := ARRIVE_DRIVE if want_mode == "drive" else ARRIVE_WALK
 	if _d2(here, dest) < arrive:
@@ -218,7 +218,7 @@ func _track(here: Vector3, dt: float) -> void:
 	progress_i = best_i
 	var seg_len := _seg_cum[best_i + 1] - _seg_cum[best_i]
 	remaining = maxf(_seg_cum[-1] - (_seg_cum[best_i] + seg_len * best_t), 0.0) + best_d
-	var off := OFF_ROUTE_DRIVE if mode == "drive" else OFF_ROUTE_WALK
+	var off := OFF_ROUTE_DRIVE if mode == "drive" else (60.0 if mode == "direct" else OFF_ROUTE_WALK)
 	if best_d > off:
 		_off_t += dt
 		if _off_t > 1.2:
@@ -239,9 +239,18 @@ func _reroute() -> void:
 
 # ------------------------------------------------------------ routing
 func _here() -> Vector3:
-	if game.driving != "" and game.cars.has(game.driving):
-		return (game.cars[game.driving] as Node3D).global_position
+	var vn := game.vehicle_node()
+	if vn != null and is_instance_valid(vn):
+		return vn.global_position
 	return game.player.global_position
+
+
+## walk / drive (roads) or direct (flying or sailing: a straight line,
+## not the road graph).
+func _mode_now() -> String:
+	if game.skyport_play and game.skyport_play.piloting != "":
+		return "direct"
+	return "drive" if game.driving != "" else "walk"
 
 
 func _heading() -> Vector3:
@@ -256,7 +265,7 @@ func _heading() -> Vector3:
 func _route_now() -> void:
 	_need_route = false
 	_last_route_t = Time.get_ticks_msec() / 1000.0
-	var m := "drive" if game.driving != "" else "walk"
+	var m := _mode_now()
 	_apply(plan(_here(), dest, m, _heading()), m)
 
 
@@ -267,7 +276,7 @@ func _route_async() -> void:
 		return
 	_need_route = false
 	_last_route_t = Time.get_ticks_msec() / 1000.0
-	var m := "drive" if game.driving != "" else "walk"
+	var m := _mode_now()
 	var from := _here()
 	var h := _heading()
 	var to := dest
@@ -293,6 +302,11 @@ func _apply(r: Dictionary, m: String) -> void:
 ## A road route from `from` to `to`: {points, length, error}. Pure (tests call it).
 func plan(from: Vector3, to: Vector3, p_mode: String, heading := Vector3.ZERO) -> Dictionary:
 	var out := {"points": PackedVector3Array(), "length": 0.0, "error": ""}
+	if p_mode == "direct":
+		# Air and sea: straight there (the map shows the line; no roads).
+		out["points"] = PackedVector3Array([from, Vector3(to.x, from.y, to.z)])
+		out["length"] = _d2(from, to)
+		return out
 	if net == null:
 		out["error"] = "Planning route…"
 		return out

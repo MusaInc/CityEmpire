@@ -93,6 +93,7 @@ func _ready() -> void:
 	skyport.name = "Skyport"
 	add_child(skyport)
 	skyport.build(layout, world)
+	skyport.viewer = func() -> Vector3: return vehicle_node().global_position if vehicle_node() else player.global_position
 	print("Skyport Island: %d ms" % (Time.get_ticks_msec() - t1))
 	EmpireMinimap.bake.call_deferred(self, layout)  # (the minimap's and phone map's city image)
 	atmosphere.configure(args, world)
@@ -287,6 +288,16 @@ func _after_start() -> void:
 			var dc: Car = cars.get(driving)
 			if dc:
 				dc.linear_velocity = -dc.global_basis.z * float(args["drive"])
+	if args.has("own"):
+		# Captures/tests: own these vehicles (free), in their usual places.
+		for om in String(args["own"]).split(","):
+			if SkyportPlay.vclass(om) == "car":
+				var ov := empire.add_vehicle(om, player.global_position + Vector3(8, 0, 8), 0.0)
+				_spawn_car(ov)
+			else:
+				var os := skyport_play.free_slot(SkyportPlay.vclass(om))
+				skyport_play._spawn(empire.add_vehicle(om, os[0], os[1]))
+		empire.personal_cash = maxf(empire.personal_cash, 250000.0)
 	if args.has("fly"):
 		# Captures/tests: own a craft (free) at its slot and get in.
 		var fm := String(args["fly"])
@@ -294,6 +305,11 @@ func _after_start() -> void:
 		var fv := empire.add_vehicle(fm, slot[0], slot[1])
 		skyport_play._spawn(fv)
 		skyport_play.enter(String(fv["id"]))
+		if args.has("fly-up"):
+			# (Captures: climb and fly on for this long first.)
+			skyport_play.script_input = {"active": true, "gas": 1.0, "kick": true, "brake": 0.0, "steer": 0.15}
+			get_tree().create_timer(float(args["fly-up"])).timeout.connect(func():
+				skyport_play.script_input = {"active": true, "gas": 1.0, "kick": false, "brake": 0.0, "steer": 0.0})
 	if args.has("hour"):
 		empire.minute = float(args["hour"]) * 60.0
 	if args.has("brand"):
@@ -638,6 +654,8 @@ func _play() -> void:
 
 
 func _teleport(p: Vector3, yaw: float) -> void:
+	if skyport and SkyportIsland.distance_to(p) < SkyportIsland.NEAR_LOAD and not skyport.near_loaded():
+		skyport.load_near_now()   # (arriving at once: its buildings must be solid now)
 	player.respawn(p)
 	player.last_safe_position = p
 	_dry_pos = p

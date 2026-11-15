@@ -219,7 +219,8 @@ func test_street_furniture_stays_on_the_pavement(t) -> void:
 					in_building += 1
 					break
 	t.note("%d furniture items %s" % [n, kinds])
-	t.check(n > 1000 and kinds.size() == CityWorld.FURNITURE.size(), "every kind of street furniture is placed")
+	# (City Empire adds clutter and banners: every original kind must still be there.)
+	t.check(n > 1000 and CityWorld.FURNITURE.all(func(fk): return kinds.has(fk)), "every kind of street furniture is placed")
 	t.check(off_block == 0, "%d items out on the road" % off_block)
 	t.check(in_building == 0, "%d items inside a building" % in_building)
 	var arr = w._furniture_arrays(w._furniture_by_chunk.keys()[0])

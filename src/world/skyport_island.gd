@@ -24,14 +24,21 @@ extends Node3D
 ##     with drop-off and parking, control tower, three hangars (the first is
 ##     the aircraft showroom), helipads, cargo terminal, stands;
 ##   marina (west shore): piers and berths off Marina Drive.
-## Streaming: one root; detailed buildings within DETAIL_RANGE, a low-detail
-## skyline beyond it; ground and roads in one mesh, culled by distance.
+## Streaming: always resident – the land and roads (one mesh, one trimesh
+## collision), the bridge and the plain skyline. Everything else (detailed
+## buildings and their collision, airport dressing, cranes and containers,
+## marina, trees, airliners) is built when the viewer comes within NEAR_LOAD
+## m of the island – one piece a frame, so there's no hitch – and freed
+## beyond NEAR_FREE. The city never pays for the island's detail.
 
 const LAND_Y := 3.0
 const SEA_Y := -1.6
 const DETAIL_RANGE := 650.0
+const NEAR_LOAD := 1200.0
+const NEAR_FREE := 2000.0
 const FAR_RANGE := 5200.0
-const BRIDGE_ISLAND_X := 1560.0        # bridge foot on the island (avenue start)
+const BRIDGE_ISLAND_X := 1560.0        # where the bridge road becomes Skyport Avenue (graph)
+const DECK_END := 1432.0               # the deck lands on the shore here (road on land beyond)
 const PYLONS := [1135.0, 1285.0]       # cable-stayed pylons (in the water)
 const PYLON_TOP := 128.0
 const RUNWAY := {"from": Vector3(1430.0, LAND_Y, 470.0), "to": Vector3(2430.0, LAND_Y, 470.0), "w": 45.0}
@@ -48,7 +55,14 @@ static var _bbox := Rect2()
 
 var plan_data := {}
 var world_ref: Node   # CityWorld (materials)
-var body: StaticBody3D
+var body: StaticBody3D          # detail collision (near content)
+var street: StaticBody3D        # land, roads, bridge deck (always)
+var near_root: Node3D           # near content, when loaded
+var _target: Node = self        # where _mesh puts meshes
+var _steps: Array = []          # near content still to build (one a frame)
+var _check_t := 0.0
+## Point the streaming measures from (the game sets it; else the camera).
+var viewer: Callable
 
 
 # ------------------------------------------------------------ geometry
@@ -136,7 +150,7 @@ static func plan(layout: CityLayout) -> Dictionary:
 	areas.append([5, _rect(1985, -150, 2160, -40), COL_APRON])             # truck yard
 	areas.append([5, _rect(2140, -610, 2450, -345), COL_APRON])            # container yard
 	for f in [[1630, 8, 1725, 96], [1745, 8, 1875, 96], [1975, 8, 2075, 96]]:
-		areas.append([5, _rect(f[0], f[1], f[2], f[3]), Color(0.8, 0.8, 0.78)])  # dealer forecourts
+		areas.append([0, _rect(f[0], f[1], f[2], f[3]), Color(0.62, 0.6, 0.57)])  # dealer forecourts (paved)
 	P["areas"] = areas
 	# Airport strips: [kind, from, to, half width].
 	var strips: Array = [
@@ -197,7 +211,7 @@ static func _city_end(layout: CityLayout) -> Vector3:
 ## Deck height along the bridge: high over the strait (ships pass under the
 ## main span), easing down onto the island.
 static func bridge_y(e: Vector3, x: float) -> float:
-	var t := clampf((x - e.x) / (BRIDGE_ISLAND_X - e.x), 0.0, 1.0)
+	var t := clampf((x - e.x) / (DECK_END - e.x), 0.0, 1.0)
 	var k := smoothstep(0.35, 1.0, t)
 	var mid := e.y + 4.0 * sin(t * PI) * (1.0 - k)
 	return lerpf(mid, LAND_Y, k)
@@ -305,21 +319,101 @@ static func _buildings(P: Dictionary) -> Array:
 func build(layout: CityLayout, world: Node) -> void:
 	world_ref = world
 	plan_data = plan(layout)
-	body = StaticBody3D.new()
-	body.name = "Collision"
-	body.collision_layer = 1 | (1 << 1)
-	add_child(body)
-	var street := StaticBody3D.new()
+	street = StaticBody3D.new()
 	street.name = "Ground"
 	street.collision_layer = 1 << 3
 	add_child(street)
 	_build_ground(street)
-	_build_buildings()
+	_build_skyline()
 	_build_bridge(street)
-	_build_airport_dressing()
-	_build_marina(street)
-	_build_industry()
-	_build_trees()
+
+
+## Is the near content loaded (all of it)?
+func near_loaded() -> bool:
+	return near_root != null and _steps.is_empty()
+
+
+## Builds the near content now, all at once (tests, teleports).
+func load_near_now() -> void:
+	if near_root == null:
+		_start_near()
+	while not _steps.is_empty():
+		(_steps.pop_front() as Callable).call()
+
+
+func _start_near() -> void:
+	near_root = Node3D.new()
+	near_root.name = "Near"
+	add_child(near_root)
+	body = StaticBody3D.new()
+	body.name = "Collision"
+	body.collision_layer = 1 | (1 << 1)
+	near_root.add_child(body)
+	var near_street := StaticBody3D.new()
+	near_street.name = "NearGround"
+	near_street.collision_layer = 1 << 3
+	near_root.add_child(near_street)
+	_steps = [
+		func(): _near(_build_detail.bind("wn")), func(): _near(_build_detail.bind("ws")),
+		func(): _near(_build_detail.bind("en")), func(): _near(_build_detail.bind("es")),
+		func(): _near(_build_airport_dressing), func(): _near(_build_marina.bind(near_street)),
+		func(): _near(_build_industry), func(): _near(_build_trees),
+		func():
+			var at := AirTraffic.new()
+			at.name = "AirTraffic"
+			near_root.add_child(at)
+			at.setup(plan_data),
+	]
+
+
+func _near(f: Callable) -> void:
+	if near_root == null:
+		return
+	_target = near_root
+	f.call()
+	_target = self
+
+
+func _free_near() -> void:
+	_steps.clear()
+	if near_root:
+		near_root.queue_free()
+	near_root = null
+	body = null
+
+
+## Distance from p to the island (0 on it).
+static func distance_to(p: Vector3) -> float:
+	outline()
+	var q := Vector2(p.x, p.z)
+	if _bbox.has_point(q):
+		return 0.0
+	return Vector2(clampf(q.x, _bbox.position.x, _bbox.end.x), clampf(q.y, _bbox.position.y, _bbox.end.y)).distance_to(q)
+
+
+func _process(_dt: float) -> void:
+	if plan_data.is_empty():
+		return
+	if not _steps.is_empty():
+		(_steps.pop_front() as Callable).call()
+		return
+	_check_t -= _dt
+	if _check_t > 0.0:
+		return
+	_check_t = 0.5
+	var p: Vector3
+	if viewer.is_valid():
+		p = viewer.call()
+	else:
+		var cam := get_viewport().get_camera_3d()
+		if cam == null:
+			return
+		p = cam.global_position
+	var d := distance_to(p)
+	if near_root == null and d < NEAR_LOAD:
+		_start_near()
+	elif near_root != null and d > NEAR_FREE:
+		_free_near()
 
 
 func _ground_mat() -> ShaderMaterial:
@@ -412,25 +506,22 @@ func _build_ground(street: StaticBody3D) -> void:
 	mi.material_override = _ground_mat()
 	mi.visibility_range_end = FAR_RANGE
 	add_child(mi)
-	# Collision: the land top as a trimesh (exactly the drawn surface), the
-	# skirt as walls.
-	var faces := PackedVector3Array()
-	var tri := Geometry2D.triangulate_polygon(o)
+	# Collision: the land as solid slabs (one convex prism per triangle of
+	# the outline, 12 m deep). A zero-thickness trimesh let a car that hit
+	# the deck/land joint sink through it and sit on its belly.
+	var o2 := outline()
+	var tri := Geometry2D.triangulate_polygon(o2)
 	for i in range(0, tri.size(), 3):
-		for j in [0, 2, 1]:
-			faces.append(Vector3(o[tri[i + j]].x, LAND_Y, o[tri[i + j]].y))
-	for i in o.size():
-		var a := o[i]
-		var b := o[(i + 1) % o.size()]
-		for v in [Vector3(a.x, LAND_Y, a.y), Vector3(b.x, LAND_Y, b.y), Vector3(b.x, -9.0, b.y),
-				Vector3(a.x, LAND_Y, a.y), Vector3(b.x, -9.0, b.y), Vector3(a.x, -9.0, a.y)]:
-			faces.append(v)
-	var shape := ConcavePolygonShape3D.new()
-	shape.set_faces(faces)
-	shape.backface_collision = true
-	var cs := CollisionShape3D.new()
-	cs.shape = shape
-	street.add_child(cs)
+		var pts := PackedVector3Array()
+		for j in 3:
+			var v := o2[tri[i + j]]
+			pts.append(Vector3(v.x, LAND_Y, v.y))
+			pts.append(Vector3(v.x, LAND_Y - 12.0, v.y))
+		var cp := ConvexPolygonShape3D.new()
+		cp.points = pts
+		var cs := CollisionShape3D.new()
+		cs.shape = cp
+		street.add_child(cs)
 
 
 static func _pad(st: SurfaceTool, c: Vector3, yv: float) -> void:
@@ -460,12 +551,10 @@ func _mesh(m: BuildingMesher, nm: String, range_begin: float, range_end: float) 
 	mi.material_override = _bmat()
 	mi.visibility_range_begin = range_begin
 	mi.visibility_range_end = range_end
-	add_child(mi)
+	_target.add_child(mi)
 
 
-func _build_buildings() -> void:
-	# Detailed up close, the plain skyline beyond (two meshes per district so
-	# each culls on its own).
+func _groups() -> Dictionary:
 	var groups := {}
 	for b: Dictionary in plan_data["buildings"]:
 		var t0: Array = b["tiers"][0]
@@ -474,32 +563,49 @@ func _build_buildings() -> void:
 		if not groups.has(key):
 			groups[key] = []
 		(groups[key] as Array).append(b)
-		for bx in BuildingMesher.collision_boxes(b):
-			CityWorld._add_box(body, bx)
+	return groups
+
+
+## The plain skyline (always resident; shows from the city).
+func _build_skyline() -> void:
+	var groups := _groups()
 	for key in groups:
-		var near := BuildingMesher.new()
 		var far := BuildingMesher.new()
 		for b: Dictionary in groups[key]:
-			near.add_building(b, true)
-			near.add_features(b)
 			far.add_building(b, false)
-		_mesh(near, "Detail_" + key, 0.0, DETAIL_RANGE)
 		_mesh(far, "Skyline_" + key, DETAIL_RANGE - 20.0, FAR_RANGE)
-	# Penthouse rooftop helipad (on the tower's top).
-	var pad: Vector3 = plan_data["penthouse"]["pad"]
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_pad(st, pad, pad.y + 0.05)
-	var mi := MeshInstance3D.new()
-	mi.mesh = st.commit()
-	mi.material_override = _ground_mat()
-	mi.visibility_range_end = 1500.0
-	add_child(mi)
+
+
+## One district's detailed buildings and their collision (near content).
+func _build_detail(key: String) -> void:
+	var near := BuildingMesher.new()
+	for b: Dictionary in _groups().get(key, []):
+		near.add_building(b, true)
+		near.add_features(b)
+		for bx in BuildingMesher.collision_boxes(b):
+			CityWorld._add_box(body, bx)
+	_mesh(near, "Detail_" + key, 0.0, DETAIL_RANGE)
+	if key == "wn":
+		# Penthouse rooftop helipad (on the tower's top).
+		var pad: Vector3 = plan_data["penthouse"]["pad"]
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_pad(st, pad, pad.y + 0.05)
+		var mi := MeshInstance3D.new()
+		mi.mesh = st.commit()
+		mi.material_override = _ground_mat()
+		mi.visibility_range_end = 1500.0
+		_target.add_child(mi)
 
 
 ## The landmark: a cable-stayed bridge on two white A-frame pylons, the
 ## deck high over the strait, easing down onto the island.
 func _build_bridge(street: StaticBody3D) -> void:
+	# (The bridge's railings, piers and pylons: always resident, like the deck.)
+	var bridge_body := StaticBody3D.new()
+	bridge_body.name = "BridgeCollision"
+	bridge_body.collision_layer = 1 | (1 << 1)
+	add_child(bridge_body)
 	var e: Vector3 = plan_data["city_end"]
 	var road: Array = plan_data["roads"][0]
 	var pts: PackedVector3Array = road[1]
@@ -510,6 +616,10 @@ func _build_bridge(street: StaticBody3D) -> void:
 	for i in pts.size() - 1:
 		var a := pts[i]
 		var b := pts[i + 1]
+		if a.x >= DECK_END - 0.5:
+			continue   # (on the island the road is on the land itself)
+		if b.x > DECK_END:
+			b = Vector3(DECK_END, bridge_y(e, DECK_END), b.z)
 		var d := (b - a).normalized()
 		var ext := d * 0.3
 		var a0 := a - ext + Vector3.DOWN * 0.8
@@ -519,16 +629,16 @@ func _build_bridge(street: StaticBody3D) -> void:
 		for sg: float in [-1.0, 1.0]:
 			var o := Vector3(0, 0, sg * 12.6)
 			m.beam(a + o + Vector3.UP * 0.55, b + o + Vector3.UP * 0.55, 0.5, 1.1, white)
-			_box_beam(body, a + o + Vector3.UP * 0.55, b + o + Vector3.UP * 0.55, 0.5, 1.1)
+			_box_beam(bridge_body, a + o + Vector3.UP * 0.55, b + o + Vector3.UP * 0.55, 0.5, 1.1)
 			m.beam(a + Vector3(0, -1.9, sg * 11.0) - ext, b + Vector3(0, -1.9, sg * 11.0) + ext, 1.2, 1.6, white)  # edge girders
 	# Approach piers on land (island side) every 30 m.
-	var x := BRIDGE_ISLAND_X - 30.0
-	while x > 1390.0:
+	var x := DECK_END - 30.0
+	while x > 1300.0:
 		var yy := bridge_y(e, x)
 		if yy - LAND_Y > 3.5:
 			for sg: float in [-1.0, 1.0]:
 				m.beam(Vector3(x, LAND_Y - 0.5, z0 + sg * 7.0), Vector3(x, yy - 1.6, z0 + sg * 7.0), 1.6, 1.6, white)
-				_box_beam(body, Vector3(x, LAND_Y - 0.5, z0 + sg * 7.0), Vector3(x, yy - 1.6, z0 + sg * 7.0), 1.6, 1.6)
+				_box_beam(bridge_body, Vector3(x, LAND_Y - 0.5, z0 + sg * 7.0), Vector3(x, yy - 1.6, z0 + sg * 7.0), 1.6, 1.6)
 		x -= 30.0
 	# Pylons: A-frames from the water, legs meeting above the deck, three
 	# crossbeams (one under the deck carries it), cables fanning to the deck.
@@ -538,20 +648,20 @@ func _build_bridge(street: StaticBody3D) -> void:
 			var foot := Vector3(px, -6.0, z0 + sg * 16.0)
 			var head := Vector3(px, PYLON_TOP, z0 + sg * 2.2)
 			m.beam(foot, head, 4.2, 4.2, white)
-			_box_beam(body, foot, head, 4.2, 4.2)
+			_box_beam(bridge_body, foot, head, 4.2, 4.2)
 		for cy: float in [dy - 2.2, dy + 34.0, PYLON_TOP - 26.0]:
 			var t := (cy + 6.0) / (PYLON_TOP + 6.0)
 			var half := lerpf(16.0, 2.2, t)
 			m.beam(Vector3(px, cy, z0 - half), Vector3(px, cy, z0 + half), 3.0, 3.0, white)
-			_box_beam(body, Vector3(px, cy, z0 - half), Vector3(px, cy, z0 + half), 3.0, 3.0)
+			_box_beam(bridge_body, Vector3(px, cy, z0 - half), Vector3(px, cy, z0 + half), 3.0, 3.0)
 		m.solid(px - 9.0, z0 - 22.0, px + 9.0, z0 + 22.0, -8.0, 0.6, Color(0.6, 0.6, 0.58))   # pier cap at the water
-		_box_beam(body, Vector3(px, -8.0, z0), Vector3(px, 0.6, z0), 18.0, 44.0)
+		_box_beam(bridge_body, Vector3(px, -8.0, z0), Vector3(px, 0.6, z0), 18.0, 44.0)
 		for sg: float in [-1.0, 1.0]:
 			for k in 11:
 				var off := 18.0 + k * 13.0
 				for dir: float in [-1.0, 1.0]:
 					var dx := px + dir * off
-					if dx < e.x + 6.0 or dx > BRIDGE_ISLAND_X - 4.0:
+					if dx < e.x + 6.0 or dx > DECK_END - 4.0:
 						continue
 					var anchor := Vector3(dx, bridge_y(e, dx) + 0.4, z0 + sg * 11.6)
 					var top := Vector3(px, PYLON_TOP - 6.0 - k * 4.2, z0 + sg * 2.6)
@@ -686,7 +796,7 @@ func _build_trees() -> void:
 	mi.name = "Trees"
 	mi.multimesh = mm
 	mi.visibility_range_end = 900.0
-	add_child(mi)
+	_target.add_child(mi)
 
 
 ## Container stacks and quay cranes in the logistics district.

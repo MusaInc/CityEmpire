@@ -12,3 +12,32 @@ Edits to shared code (all opt-in / default-off for the original games):
 - Ported from Never Stop: car.gd, car_visual.gd, car_catalog.gd, chase_camera.gd, drive_input.gd (BattleKit removed), vehicle_fx.gd (preset lookup made tolerant), road_net.gd/ai_driver.gd (unused yet).
 
 Candidates for a real shared package later: Stock/Business/DemandModel/Empire (pure data, no city deps), ShopInterior's batcher + walk grid, Premises.
+
+## Skyport Island (2026-11-15): reusable world content, opt-in
+
+Built so CitySwing / Never Stop can use the same island without City Empire's
+economy. Nothing in these files reads Empire, Business or the UI.
+- `src/world/skyport_island.gd` (SkyportIsland): outline, districts, roads, lanes,
+  runway/taxiways/aprons/helipads, buildings (CityLayout building dicts drawn by
+  the shared BuildingMesher + building.gdshader), cable-stayed bridge (A-frame
+  pylons and crossbeams at 34 m and 102 m above the deck: swing anchors),
+  quay cranes, containers, marina piers, trees, `plan(layout)` data with named
+  `sites` (games attach their own meaning). Static `enabled` (default **false**):
+  only a game that sets it gets the island in `CityLayout.is_water/ground_y`,
+  the RoadNet lanes and the map painter.
+- `src/world/shaders/island_ground.gdshader`: one material for all island
+  surfaces (kinds in vertex alpha).
+- `src/world/air_traffic.gd`: scripted airliners (no physics).
+- `src/vehicle/craft.gd`, `craft_models.gd`, `src/camera/craft_camera.gd`:
+  helicopter/plane/boat bodies, models and follow camera; input is a plain
+  dictionary (`{active, gas, kick, brake, steer}`), so Never Stop's TouchDrive
+  stick can feed it the same way City Empire's drive pad does.
+- Shared-code edits: `CityLayout.is_water/ground_y` (one early-out each, only
+  when enabled), `RoadNet._add_skyport/_stitch_skyport` (no-ops when disabled),
+  `Minimap.BOUNDS` widened to x 2520 (the baked map is ~40% wider: more
+  texture memory, see STATUS perf), `MapPainter._skyport`.
+- To use in CitySwing: set `SkyportIsland.enabled = true` before building the
+  world, add a SkyportIsland node and call `build(layout, world)`.
+
+City Empire-only (do not copy): `src/empire/skyport_play.gd`, `wardrobe.gd`,
+`sim/ventures.gd`, `ui/skyport_ui.gd`, `ui/dashboard.gd`, `ui/thumbs.gd`.

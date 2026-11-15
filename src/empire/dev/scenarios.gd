@@ -136,14 +136,28 @@ func scenario_xd() -> void:
 		var px := car.global_position.x
 		lowest = minf(lowest, car.global_position.y - SkyportIsland.bridge_y(e, clampf(px, e.x, a.x)))
 		return px > a.x + 60.0, 180.0)
+	if not reached:
+		var q := PhysicsShapeQueryParameters3D.new()
+		var bs := BoxShape3D.new()
+		bs.size = Vector3(6, 2, 4)
+		q.shape = bs
+		q.transform = Transform3D(Basis(), car.global_position + Vector3(2, 0.8, 0))
+		q.collision_mask = 0xFFFF
+		q.exclude = [car.get_rid()]
+		for h in game.get_world_3d().direct_space_state.intersect_shape(q, 8):
+			print("    blocked by ", (h["collider"] as Node).get_path(), " shape ", h["shape"])
+		print("    car at ", car.global_position, " v ", car.linear_velocity, " y_want ", SkyportIsland.bridge_y(e, car.global_position.x),
+			" frozen=", car.freeze, " disabled=", car.disabled, " health=", car.health, " wheels=", car.wheels_on_ground, " thr=", car.throttle, " sleeping=", car.sleeping, " up=", car.global_basis.y, " fwd=", -car.global_basis.z)
 	check(reached, "drove over the bridge onto the island (x %.0f)" % car.global_position.x)
 	check(lowest > -1.0, "never dropped below the deck (lowest %.2f m)" % lowest)
 	check(not game.layout.is_water(car.global_position), "the island is land, not sea")
 	car.throttle = 0.0
-	car.brake = 1.0
-	await wait(1.5)
+	await until(func():
+		car.brake = 1.0
+		return car.speed < 1.0, 30.0)
 	game.drive_input.enabled = true
 	game.exit_vehicle()
+	check(game.driving == "", "stopped and got out on the island")
 
 
 ## XB: a showroom – walk up to a display car, buy it (money once), it's
@@ -331,13 +345,14 @@ func scenario_xh() -> void:
 				n += int(sl["qty"])
 		return n
 	var units0: int = in_shop.call()
+	var bought0 := int(e.stats.get("units_bought", 0))
 	check(Ventures.import_order(e, b.id, lines, "express") == "", "ordered 8 cases by express")
 	check(absf(cash - (e.personal_cash + e.company_cash) - float(q["total"])) < 0.01, "paid the quote once (%s)" % EmpireData.money(float(q["total"])))
 	e.advance(1440.0)
-	var units1: int = in_shop.call()
-	var sold := int(b.today.get("units", 0))
-	check(units1 - units0 + sold >= 8 * EmpireData.case_qty(pid) - int(b.history[-1].get("units", 0)) if not b.history.is_empty() else units1 - units0 >= 8 * EmpireData.case_qty(pid),
-		"arrived in the shop (%d units of %d, the rest on the shelves or sold)" % [units1 - units0, 8 * EmpireData.case_qty(pid)])
+	# (A day passes before it lands: shoppers buy some, some walk out of the
+	# door. What counts is that every case was received into the shop.)
+	var received := int(e.stats.get("units_bought", 0)) - bought0
+	check(received == 8 * EmpireData.case_qty(pid) and (in_shop.call() as int) > units0, "received in the shop's stock (%d units of %d)" % [received, 8 * EmpireData.case_qty(pid)])
 	check(Ventures.imports_due(e).is_empty(), "nothing left in transit")
 
 
@@ -365,6 +380,17 @@ func scenario_xi() -> void:
 func scenario_xs() -> void:
 	print("--- XS: Skyport Island in the world")
 	var P: Dictionary = game.skyport.plan_data
+	# Streaming: away from the island its detail isn't loaded; on it, it is.
+	game.ui.close_panel(true)   # (earlier days left a day report open: panels pause the world)
+	game._teleport(Vector3(-700, game.layout.ground_y(-700, 120) + 1.0, 120), 0.0)   # (Westbank: over 2 km away)
+	await until(func(): return game.skyport.near_root == null, 40.0)
+	if game.skyport.near_root != null:
+		print("    paused=%s driving=%s piloting=%s viewer=%s d=%.0f" % [get_tree().paused, game.driving, game.skyport_play.piloting,
+			game.skyport.viewer.call(), SkyportIsland.distance_to(game.skyport.viewer.call())])
+	check(game.skyport.near_root == null, "in the city the island's detail isn't loaded")
+	game._teleport(Vector3(1700, SkyportIsland.LAND_Y + 1.0, -20), 0.0)
+	await until(func(): return game.skyport.near_loaded(), 60.0)
+	check(game.skyport.near_loaded(), "arriving on the island loads its detail")
 	check((P["buildings"] as Array).size() > 30, "buildings on the island (%d)" % (P["buildings"] as Array).size())
 	var space := game.get_world_3d().direct_space_state
 	var holes := 0

@@ -15,6 +15,7 @@ var game: EmpireGame
 var hud: Control
 var minimap: EmpireMinimap
 var touch: EmpireTouch
+var thumbs: Thumbs
 var _money: Label
 var _clock: Label
 var _speed: Label
@@ -63,6 +64,9 @@ func _ready() -> void:
 	hud.visible = false
 	root.add_child(hud)
 	_build_hud()
+	thumbs = Thumbs.new()
+	thumbs.name = "Thumbs"
+	add_child(thumbs)
 	touch = EmpireTouch.new()
 	touch.ui = self
 	touch.visible = false
@@ -321,6 +325,7 @@ func _hud_panel(pos: Vector2, size: Vector2, accent := Color(0, 0, 0, 0)) -> Pan
 
 func show_hud() -> void:
 	minimap.game = game
+	thumbs.game = game
 	_title_root.visible = false
 	for c in _title_root.get_children():
 		c.queue_free()
@@ -1401,16 +1406,17 @@ func _m_reports(v: VBoxContainer, b: Business) -> void:
 
 
 # ---------------------------------------------------------------- phone
-const PHONE_TABS := [["home", "Home"], ["businesses", "Businesses"], ["map", "Map"], ["vehicles", "Vehicles"],
-	["property", "Property"], ["bank", "Finances"], ["company", "Corporate"], ["more", "More"]]
-## Under More (the rail highlights More; a back button returns to it).
-const MORE_TABS := [["style", "Style", "Your character: face, hair and clothes"], ["city", "City", "Weather, rivals, news and the market"], ["goals", "Goals", "Your career, chapter by chapter"],
-	["game", "Game", "Save, speed, sleep and settings"]]
+const PHONE_TABS := [["home", "Home"], ["map", "Map"], ["businesses", "Businesses"], ["vehicles", "Garage"], ["more", "More"]]
+## Under More (the nav highlights More; a back button returns to it).
+const MORE_TABS := [["property", "Property", "Shops to let, businesses for sale, buildings to invest in"],
+	["bank", "Finances", "Accounts, profit, loans and the ledger"], ["company", "Corporate", "Brand, head office, offices, the club"],
+	["style", "Wardrobe", "Your character and the clothes you own"], ["city", "City", "Weather, rivals, news and the market"],
+	["goals", "Goals", "Your career, chapter by chapter"], ["game", "Game", "Save, speed, sleep and settings"]]
 const PHONE_SUB := {"home": "Your empire at a glance: what needs you, and where to go next",
 	"businesses": "Every shop, office and the club: status, stock, staff and money",
 	"company": "Brand, head office, office companies, the football club and marketing",
 	"city": "Weather, rivals and the news", "map": "Tap a place for its card · tap a street for a waypoint",
-	"bank": "Accounts, profit, loans and the ledger", "vehicles": "Where your vehicles are, and getting to them",
+	"bank": "Accounts, profit, loans and the ledger", "vehicles": "Everything you own that moves",
 	"property": "Shops to let, businesses for sale, office floors and homes", "goals": "Your career, chapter by chapter",
 	"game": "Save, speed and settings", "more": "Everything else"}
 
@@ -1427,8 +1433,9 @@ func _phone_shell(tab: String) -> VBoxContainer:
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	_panel_root.add_child(dim)
-	var W := 1220.0
-	var H := 690.0
+	var vpsz := get_viewport().get_visible_rect().size
+	var W := minf(1220.0, vpsz.x - 40.0)
+	var H := minf(700.0, vpsz.y - 24.0)
 	_panel = PanelContainer.new()
 	var psb := (S.theme().get_stylebox("panel", "PanelContainer") as StyleBoxFlat).duplicate() as StyleBoxFlat
 	psb.content_margin_left = 0
@@ -1441,36 +1448,7 @@ func _phone_shell(tab: String) -> VBoxContainer:
 	_panel_root.add_child(_panel)
 	var row := S.hbox(0)
 	_panel.add_child(row)
-	# The rail.
-	var rail := PanelContainer.new()
-	var rsb := StyleBoxFlat.new()
-	rsb.bg_color = Color(0, 0, 0, 0.22)
-	rsb.corner_radius_top_left = 20
-	rsb.corner_radius_bottom_left = 20
-	rsb.content_margin_left = 14
-	rsb.content_margin_right = 14
-	rsb.content_margin_top = 20
-	rsb.content_margin_bottom = 16
-	rail.add_theme_stylebox_override("panel", rsb)
-	rail.custom_minimum_size.x = 214
-	row.add_child(rail)
-	var rv := S.vbox(4)
-	rail.add_child(rv)
-	var who := S.hbox(10)
-	var badge := _brand_badge(40)
-	who.add_child(badge)
-	var wv := S.vbox(-2)
-	var cname := String(e.brand.get("name", ""))
-	wv.add_child(S.label(cname if cname != "" else "Your company", 17, S.PAPER, "black"))
-	wv.add_child(S.label("Day %d · %s %s" % [e.day, e.weekday(), e.clock_text()], 13, S.MUTED))
-	who.add_child(wv)
-	rv.add_child(who)
-	var gap := Control.new()
-	gap.custom_minimum_size.y = 12
-	rv.add_child(gap)
 	var in_more := MORE_TABS.any(func(t): return t[0] == tab)
-	for t in PHONE_TABS:
-		rv.add_child(_rail_button(t[0], t[1], t[0] == tab or (t[0] == "more" and in_more)))
 	# Content.
 	var body := MarginContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1482,6 +1460,7 @@ func _phone_shell(tab: String) -> VBoxContainer:
 	var v := S.vbox(14)
 	body.add_child(v)
 	var head := S.hbox(14)
+	head.add_child(_brand_badge(44))
 	var hv := S.vbox(-2)
 	var title := ""
 	for t in PHONE_TABS + MORE_TABS:
@@ -1489,15 +1468,29 @@ func _phone_shell(tab: String) -> VBoxContainer:
 			title = t[1]
 	if in_more:
 		head.add_child(S.button("‹", func(): open_phone("more"), false, 52))
-	hv.add_child(S.label(title, 30, S.PAPER, "black"))
-	hv.add_child(S.label(String(PHONE_SUB.get(tab, "")), 15, S.MUTED))
+	var cname := String(e.brand.get("name", ""))
+	hv.add_child(S.label(cname if (tab == "home" and cname != "") else (title if tab != "home" else "Your empire"), 28, S.PAPER, "black"))
+	hv.add_child(S.label("Day %d · %s %s" % [e.day, e.weekday(), e.clock_text()] if tab == "home" else String(PHONE_SUB.get(tab, "")), 14, S.MUTED))
 	head.add_child(hv)
 	head.add_child(S.spacer())
-	head.add_child(_money_pill("Savings", e.personal_cash, S.PAPER))
-	head.add_child(_money_pill("Company", e.company_cash, S.RED if e.company_cash < 0.0 else S.PAPER))
-	head.add_child(_money_pill("Net worth", e.net_worth(), S.GREEN))
+	# Money: what you can spend, net worth and yesterday's result – once.
+	var mv := S.vbox(-2)
+	var cash := S.label(EmpireData.money(e.personal_cash + maxf(e.company_cash, 0.0)), 26, S.PAPER, "black")
+	cash.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	mv.add_child(cash)
+	var yd := 0.0
+	if not e.day_reports.is_empty():
+		yd = float(e.day_reports[-1].get("profit", 0.0))
+	var subr := S.hbox(8)
+	subr.alignment = BoxContainer.ALIGNMENT_END
+	subr.add_child(S.label("Net worth %s" % EmpireData.money(e.net_worth()), 14, S.MUTED))
+	if not e.day_reports.is_empty():
+		subr.add_child(S.label(("▲ " if yd >= 0.0 else "▼ ") + EmpireData.money(absf(yd)) + " yesterday", 14, S.GREEN if yd >= 0.0 else S.RED, "bold"))
+	mv.add_child(subr)
+	head.add_child(mv)
 	head.add_child(S.button("✕", close_panel.bind(true), false, 52))
 	v.add_child(head)
+	v.add_child(Dashboard.nav(self, tab, in_more))
 	var rule := ColorRect.new()
 	rule.color = S.LINE
 	rule.custom_minimum_size.y = 1
@@ -1601,7 +1594,7 @@ func open_phone(tab := "home", focus := {}) -> void:
 	var v := _phone_shell(tab)
 	match tab:
 		"home":
-			_home_tab(v)
+			Dashboard.home(self, v)
 		"businesses":
 			_portfolio_tab(v)
 		"more":
@@ -2898,16 +2891,32 @@ func _more_tab(v: VBoxContainer) -> void:
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 14)
 	grid.add_theme_constant_override("v_separation", 14)
+	grid.columns = 3
 	for t in MORE_TABS:
 		var tile := _tile(t[0], t[1], t[2], func(): open_phone(t[0]))
-		tile.custom_minimum_size = Vector2(440, 100)
+		tile.custom_minimum_size = Vector2(350, 100)
 		(tile.get_child(2) as Label).size = Vector2(360, 44)
 		grid.add_child(tile)
 	v.add_child(grid)
 
 
 # ------------------------------------------------------------ property
+var _prop_view := "units"
+
+
 func _property_tab(v: VBoxContainer) -> void:
+	var sw := S.hbox(6)
+	for pv in [["units", "Shops & homes"], ["invest", "Invest (Skyport)"]]:
+		var key := String(pv[0])
+		sw.add_child(S.chip_button(String(pv[1]), _prop_view == key, func():
+			_prop_view = key
+			open_phone("property")))
+	v.add_child(sw)
+	if _prop_view == "invest":
+		var inner := S.vbox(8)
+		SkyportUI.estates(self, inner)
+		v.add_child(_scroll(inner, 470))
+		return
 	var e := game.empire
 	var kh := S.hbox(6)
 	for k in [["to_let", "To let"], ["sale", "For sale"], ["yours", "Yours"], ["home", "Homes"]]:
@@ -3025,8 +3034,8 @@ func _property_row(x: Dictionary, dist: float) -> PanelContainer:
 
 # ------------------------------------------------------------ vehicles
 func find_vehicle(vid: String) -> void:
-	if vid == "" or game.driving == vid:
-		toast("You're driving it", "info")
+	if vid == "" or game.driving == vid or (game.skyport_play and game.skyport_play.piloting == vid):
+		toast("You're in it", "info")
 		return
 	var p := game.vehicle_position(vid)
 	var nm := String(EmpireData.vehicle_model(game.empire.vehicle(vid).get("model", "hatch")).get("name", "Car"))
@@ -3035,6 +3044,10 @@ func find_vehicle(vid: String) -> void:
 
 
 func _vehicles_tab(v: VBoxContainer) -> void:
+	Dashboard.garage(self, v)
+
+
+func _vehicles_tab_old(v: VBoxContainer) -> void:
 	var e := game.empire
 	var list := S.vbox(10)
 	var here := game.player.global_position

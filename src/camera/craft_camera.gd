@@ -31,8 +31,8 @@ func set_target(c: Craft) -> void:
 
 func _dist() -> float:
 	var L: float = (target.spec.get("size", Vector3(3, 2, 8)) as Vector3).z
-	var base := {"heli": 14.0, "plane": 16.0, "boat": 10.0}.get(target.kind, 12.0) as float
-	return base + L * 0.9 + clampf(target.speed * 0.12, 0.0, 14.0)
+	var base := {"heli": 9.0, "plane": 11.0, "boat": 8.0}.get(target.kind, 10.0) as float
+	return base + L * 0.8 + clampf(target.speed * 0.06, 0.0, 7.0)
 
 
 func _height() -> float:
@@ -50,9 +50,11 @@ func _process(dt: float) -> void:
 		return
 	var f := target.forward()
 	var v := target.velocity
-	var want := target.global_position - f * _dist() + Vector3.UP * _height() - v * 0.08
-	_pos = _pos.lerp(want, 1.0 - exp(-4.0 * dt))
-	var ahead := target.global_position + f * (6.0 + target.speed * 0.4) + Vector3.UP * 1.5
+	var want := target.global_position - f * _dist() + Vector3.UP * _height()
+	# (Follow tight along the motion so speed doesn't open a gap; ease the turns.)
+	_pos += v * dt
+	_pos = _pos.lerp(want, 1.0 - exp(-5.0 * dt))
+	var ahead := target.global_position + f * (5.0 + target.speed * 0.15) + Vector3.UP * 1.5
 	_look = _look.lerp(ahead, 1.0 - exp(-6.0 * dt))
 	# Something solid between the craft and the camera: come in front of it.
 	var p := _pos

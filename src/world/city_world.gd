@@ -968,8 +968,8 @@ func _place_furniture() -> Dictionary:
 			continue
 		var lxf: Transform3D = pr[1]
 		var lp := lxf.origin
-		if absi(hash(Vector2i(int(lp.x), int(lp.z)))) % 2 == 1:
-			continue
+		if absi(hash(Vector2i(int(lp.x), int(lp.z)))) % 2 == 1 or layout.block_at(lp.x, lp.z) < 0:
+			continue   # (only lamps on a pavement block: not the esplanade's)
 		var dk := layout.district(lp.x, lp.z)
 		if layout.is_mainland:
 			dk = "shops" if dk != "suburb" else ""
