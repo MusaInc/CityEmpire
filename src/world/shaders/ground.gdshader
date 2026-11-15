@@ -142,6 +142,13 @@ void fragment() {
 					* step(a, hw - 1.0);
 				float stop = band(from_j - 4.8, 0.22, aa) * step(0.3, a) * step(a, hw - 0.3);
 				albedo = mix(albedo, white * wear, max(zebra, stop));
+				// Kerbside parking on the wider side streets (CityWorld parks
+				// cars 1.5 m in from the kerb on minor roads ≥ 14 m): the bay
+				// edge line, broken at junctions, and a bay mark every 13.5 m.
+				float bays = (1.0 - avenue) * step(6.9, hw) * step(8.0, from_j);
+				float bay_edge = band(a - (hw - 2.55), 0.05, aa) * bays;
+				float bay_tick = band(fract(along / 13.5) * 13.5 - 6.75, 0.05, aa) * step(hw - 2.55, a) * step(a, hw - 0.45) * bays;
+				albedo = mix(albedo, white * wear, max(bay_edge, bay_tick) * 0.9);
 				rough = mix(rough, 0.7, max(centre, max(zebra, stop)));
 			} else if (on) {
 				albedo *= 1.03;  // junctions: a touch lighter, worn smooth
@@ -160,6 +167,15 @@ void fragment() {
 				joint = max(joint, max(band(f.x - 1.0, 0.03, aa / 1.2), band(f.y - 1.0, 0.03, aa / 1.2)));
 				albedo = c * (0.93 + 0.1 * hash12(id)) * (1.0 - 0.14 * joint * near);
 				albedo *= 1.0 - 0.08 * step(0.97, hash12(id + 3.0)) * near;  // the odd stained slab
+				// Tactile paving where a zebra meets the kerb: a buff strip of
+				// raised blisters (the crossings stopped dead at grey slabs).
+				float tact = step(a - hw, 1.15) * step(1.0, other) * step(other, 4.0);
+				if (tact > 0.0) {
+					vec2 bl = fract(p / 0.066) - 0.5;
+					float blister = 1.0 - smoothstep(0.18, 0.3, length(bl));
+					albedo = vec3(0.74, 0.62, 0.42) * (0.92 + 0.08 * vnoise(p * 2.0)) * (1.0 - 0.18 * blister * near);
+					rough = 0.85;
+				}
 			} else {
 				// Courtyards, forecourts and gaps behind the pavement: big
 				// concrete slabs or warm brick paving, by area.

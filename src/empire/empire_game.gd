@@ -234,6 +234,14 @@ func _after_start() -> void:
 				var pd := si.D - ShopInterior.BACKROOM
 				var from := si.to_world(ShopInterior.R(0.35, pd - 0.3, 2.75))
 				var to := si.to_world(ShopInterior.R(si.W * 0.62, 0.6, 0.5))
+				if rv == "shelf":
+					# Close on the left-wall shelving, at eye height.
+					from = si.to_world(ShopInterior.R(2.3, 2.3, 1.6))
+					to = si.to_world(ShopInterior.R(0.2, 3.6, 0.85))
+				elif rv == "back":
+					# Square on to the back wall (fridges / counters).
+					from = si.to_world(ShopInterior.R(si.W * 0.4, pd - 3.4, 1.65))
+					to = si.to_world(ShopInterior.R(si.W * 0.4, pd, 1.0))
 				if rv == "front":
 					from = si.to_world(ShopInterior.R(si.W - 0.4, 0.4, 2.7))
 					to = si.to_world(ShopInterior.R(si.W * 0.35, pd - 0.5, 0.6))

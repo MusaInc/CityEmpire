@@ -75,6 +75,7 @@ var walk := {}            # Vector2i cell -> true when free
 var _static: Node3D
 var _goods: Node3D
 var _labels: Node3D
+var _headers: Array = []     # shelf header Label3Ds (meta "fixture" = [kind, unit])
 var _dirt: MeshInstance3D
 var _sign: Label3D
 var _sign_light: OmniLight3D
@@ -184,6 +185,7 @@ func rebuild() -> void:
 	for c in get_children():
 		c.queue_free()
 	placed.clear()
+	_headers.clear()
 	spots.clear()
 	slot_pick.clear()
 	slot_box.clear()
@@ -1203,6 +1205,45 @@ func _place_fixtures(st: _Batch, part_d: float) -> void:
 			push_warning("ShopInterior: no room for a %s in %s" % [w[0], unit.get("id")])
 			continue
 		_fixture(st, String(w[0]), int(w[1]), site)
+	# Back wall left bare (no fixture bought for it yet): a lit wall graphic
+	# instead of an empty stretch of paint, the first thing seen from the door.
+	var gi := 0
+	for site in back_sites:
+		_wall_graphic(st, site, gi)
+		gi += 1
+
+
+const WALL_LINES := {"convenience": ["OPEN LATE\nEVERY DAY", "LOCAL &\nFRIENDLY", "FRESH\nEVERY MORNING"],
+	"clothing": ["NEW\nSEASON", "STYLE\nFOR LESS"], "cafe": ["GOOD\nCOFFEE", "BAKED\nIN-HOUSE"],
+	"takeaway": ["HOT &\nFRESH", "OPEN\nTILL LATE"], "bakery": ["BAKED\nTHIS MORNING", "REAL\nBREAD"],
+	"phone": ["REPAIRS\nWHILE U WAIT", "LATEST\nDEVICES"]}
+
+
+func _wall_graphic(st: _Batch, site: Dictionary, i: int) -> void:
+	var al: Vector3 = site["along"]
+	var out: Vector3 = site["out"]
+	var bk: Vector3 = site["back"]
+	var a := bk + al * 0.2 + Vector3.UP * 0.95
+	var b := bk + al * (BAY - 0.2) + out * 0.05 + Vector3.UP * 2.2
+	st.box(a.min(b), a.max(b), brand.darkened(0.35))
+	var ga := bk + al * 0.28 + out * 0.051 + Vector3.UP * 1.03
+	var gb := bk + al * (BAY - 0.28) + out * 0.055 + Vector3.UP * 2.12
+	_glow_quad(ga.min(gb), ga.max(gb), brand * 0.8)
+	var lines: Array = WALL_LINES.get(type_id, WALL_LINES["convenience"])
+	var lab := Label3D.new()
+	lab.text = String(lines[(i + absi(hash(unit.get("id", "")))) % lines.size()])
+	lab.font = ShopStyle.font(String(ident.get("face", ""))) if biz else EmpireStyle.font("black")
+	lab.font_size = 96
+	# (Longest line ~13 characters across the ~1.3 m panel.)
+	lab.pixel_size = 0.0015
+	lab.line_spacing = -10.0
+	lab.shaded = false
+	lab.double_sided = false
+	lab.outline_size = 0
+	lab.modulate = Color(1, 0.99, 0.95)
+	lab.position = bk + al * (BAY * 0.5) + out * 0.06 + Vector3.UP * 1.58
+	lab.basis = Basis.looking_at(-out, Vector3.UP)
+	_static.add_child(lab)
 
 
 func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
@@ -1318,8 +1359,22 @@ func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 				var p0 := o + al * e - out * dep
 				var p1 := o + al * e + Vector3.UP * tall
 				st.box(p0.min(p1) - Vector3(0.025, 0, 0.025) * al.abs(), p0.max(p1) + Vector3(0.025, 0, 0.025) * al.abs(), body_col)
-			# Category header board.
+			# Category header board, printed with what the bay holds
+			# (_update_headers: it follows the stock).
 			st.box(back0 + Vector3.UP * (tall - 0.02) + out * 0.02, back0 + al * BAY + out * 0.06 + Vector3.UP * (tall + 0.22), brand)
+			var hl := Label3D.new()
+			hl.font = ShopStyle.font(String(ident.get("face", ""))) if biz else EmpireStyle.font("black")
+			hl.font_size = 64
+			hl.pixel_size = 0.0022
+			hl.shaded = false
+			hl.double_sided = false
+			hl.outline_size = 0
+			hl.modulate = Color(1, 0.99, 0.95) if brand.get_luminance() < 0.55 else Color(0.08, 0.08, 0.1)
+			hl.position = back0 + al * (BAY * 0.5) + out * 0.065 + Vector3.UP * (tall + 0.1)
+			hl.basis = Basis.looking_at(-out, Vector3.UP)
+			hl.set_meta("fixture", [k, u])
+			_headers.append(hl)
+			_static.add_child(hl)
 	_solid(Vector3(lo.x, 0.0, lo.z), Vector3(hi.x, tall, hi.z))
 	placed.append({"kind": k, "unit": u, "origin": o, "along": al, "out": out})
 	# Slots of this fixture.
@@ -1372,10 +1427,15 @@ func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 		slot_pick[si] = pick
 		spots.append({"kind": "slot", "slot": si, "pos": pick, "label": "SLOT"})
 		var lab := Label3D.new()
-		lab.font_size = 28
-		lab.pixel_size = 0.0028
+		# A shelf-edge ticket: the price large, the name small under it
+		# (sized to fit the ticket – long names used to spill off it).
+		lab.font_size = 30
+		lab.pixel_size = 0.0014
+		lab.line_spacing = -6.0
+		lab.font = EmpireStyle.font("black")
 		lab.shaded = false
-		lab.modulate = Color(0.1, 0.1, 0.1)
+		lab.double_sided = false
+		lab.modulate = Color(0.08, 0.08, 0.1)
 		lab.outline_size = 0
 		# Tag on the shelf edge, facing the aisle.
 		lab.position = o + al * (a0 + wdt * 0.5) + out * 0.02 + Vector3.UP * (y - 0.07)
@@ -1384,7 +1444,7 @@ func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 		_labels.add_child(lab)
 		var tag := MeshInstance3D.new()
 		var qm := QuadMesh.new()
-		qm.size = Vector2(minf(wdt, 0.42), 0.075)
+		qm.size = Vector2(minf(wdt, 0.42), 0.085)
 		tag.mesh = qm
 		tag.material_override = _mat("tag")
 		tag.position = lab.position - out * 0.004
@@ -1841,15 +1901,15 @@ func refresh_goods(pallet: Stock = null) -> void:
 		var items: Array = by_shape[shape]
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.use_colors = true
+		mm.use_custom_data = true
 		mm.mesh = shape_mesh(shape)
 		mm.instance_count = items.size()
 		for i in items.size():
 			mm.set_instance_transform(i, items[i][0])
-			mm.set_instance_color(i, items[i][1])
+			mm.set_instance_custom_data(i, items[i][1])
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
-		mmi.material_override = _mat("goods")
+		mmi.material_override = goods_material()
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mmi.visibility_range_end = 60.0
 		_goods.add_child(mmi)
@@ -1859,7 +1919,7 @@ func refresh_goods(pallet: Stock = null) -> void:
 		var sb: Array = slot_box[-1]
 		var mm2 := MultiMesh.new()
 		mm2.transform_format = MultiMesh.TRANSFORM_3D
-		mm2.use_colors = true
+		mm2.use_custom_data = true
 		mm2.mesh = shape_mesh("case")
 		var list: Array = []
 		for pid in src.units:
@@ -1876,10 +1936,10 @@ func refresh_goods(pallet: Stock = null) -> void:
 			var p: Vector3 = (sb[0] as Vector3) + (sb[1] as Vector3) * (0.27 + row * 0.52) \
 				+ (sb[2] as Vector3) * (0.18 + deep * 0.3) * (-1.0 if biz else 1.0) + Vector3.UP * (float(shelves[lvl]) + 0.2)
 			mm2.set_instance_transform(i, Transform3D(Basis(), p))
-			mm2.set_instance_color(i, EmpireData.colour(list[i]).lerp(Color(0.72, 0.56, 0.36), 0.55))
+			mm2.set_instance_custom_data(i, EmpireData.colour(list[i]).lerp(Color(0.72, 0.56, 0.36), 0.55))
 		var mi2 := MultiMeshInstance3D.new()
 		mi2.multimesh = mm2
-		mi2.material_override = _mat("goods")
+		mi2.material_override = goods_material()
 		_goods.add_child(mi2)
 	# Cases put down on the shop floor, stacked by the door.
 	if biz and biz.floor_pile and not biz.floor_pile.is_empty():
@@ -1889,7 +1949,7 @@ func refresh_goods(pallet: Stock = null) -> void:
 				pl.append(pid)
 		var mm3 := MultiMesh.new()
 		mm3.transform_format = MultiMesh.TRANSFORM_3D
-		mm3.use_colors = true
+		mm3.use_custom_data = true
 		mm3.mesh = shape_mesh("case")
 		mm3.instance_count = mini(pl.size(), 24)
 		for i in mm3.instance_count:
@@ -1898,10 +1958,10 @@ func refresh_goods(pallet: Stock = null) -> void:
 			var lvl := i / 4
 			var p3 := pile_pos + Vector3(-0.27 + col * 0.54, 0.2 + lvl * 0.4, -0.2 - row * 0.4)
 			mm3.set_instance_transform(i, Transform3D(Basis(Vector3.UP, 0.04 * float((i * 7) % 5 - 2)), p3))
-			mm3.set_instance_color(i, EmpireData.colour(pl[i]).lerp(Color(0.72, 0.56, 0.36), 0.55))
+			mm3.set_instance_custom_data(i, EmpireData.colour(pl[i]).lerp(Color(0.72, 0.56, 0.36), 0.55))
 		var mi3 := MultiMeshInstance3D.new()
 		mi3.multimesh = mm3
-		mi3.material_override = _mat("goods")
+		mi3.material_override = goods_material()
 		_goods.add_child(mi3)
 	# Price tags.
 	for lab in _labels.get_children():
@@ -1911,13 +1971,51 @@ func refresh_goods(pallet: Stock = null) -> void:
 			continue
 		var s: Dictionary = biz.slots[si]
 		if s["product"] == "":
-			lab.text = "— empty —"
+			lab.text = "—"
+			lab.modulate = Color(0.45, 0.45, 0.48)
 		else:
 			var p := EmpireData.product(s["product"])
-			lab.text = "%s  %s%s" % [String(p.get("name", "")), EmpireData.money(biz.price(s["product"]), true),
-				"" if int(s["qty"]) > 0 else "  · OUT"]
+			var nm := String(p.get("name", ""))
+			if nm.length() > 18:
+				nm = nm.substr(0, 17) + "…"
+			var out_of := int(s["qty"]) <= 0
+			lab.text = "%s\n%s" % [EmpireData.money(biz.price(s["product"]), true), "SOLD OUT" if out_of else nm]
+			lab.modulate = Color(0.75, 0.1, 0.1) if out_of else Color(0.08, 0.08, 0.1)
+	_update_headers()
 	if _dirt and biz:
 		(_dirt.material_override as ShaderMaterial).set_shader_parameter("dirt", 1.0 - biz.cleanliness)
+
+
+## What a shelf bay's header says: the aisle name for most of what's on it.
+const AISLES := {"crisps": "SNACKS", "pretzels": "SNACKS", "choc_bar": "SWEETS", "gummies": "SWEETS", "mints": "SWEETS",
+	"pick_mix": "SWEETS", "bread": "BAKERY", "sourdough": "BAKERY", "eggs": "GROCERY", "pasta": "GROCERY",
+	"beans": "GROCERY", "tea": "GROCERY", "loo_roll": "HOUSEHOLD", "washup": "HOUSEHOLD", "batteries": "HOUSEHOLD",
+	"cola": "DRINKS", "water": "DRINKS", "energy": "DRINKS", "juice": "DRINKS", "milk": "DAIRY",
+	"trainers": "FOOTWEAR", "boots": "FOOTWEAR", "charger": "ACCESSORIES", "earbuds": "AUDIO",
+	"phone_case": "ACCESSORIES"}
+
+
+func _update_headers() -> void:
+	if biz == null:
+		return
+	for h0 in _headers:
+		if not is_instance_valid(h0):
+			continue
+		var hl := h0 as Label3D
+		var fk: Array = hl.get_meta("fixture")
+		var count := {}
+		for sl: Dictionary in biz.slots:
+			if sl["fixture"] == fk[0] and int(sl["unit"]) == int(fk[1]) and String(sl["product"]) != "":
+				var a := String(AISLES.get(String(sl["product"]), ""))
+				if a != "":
+					count[a] = int(count.get(a, 0)) + 1
+		var best := ""
+		var bn := 0
+		for a2 in count:
+			if int(count[a2]) > bn:
+				bn = int(count[a2])
+				best = a2
+		hl.text = best if best != "" else ({"clothing": "NEW IN", "phone": "TECH", "bakery": "BAKERY"}.get(type_id, "OFFERS") as String)
 
 
 func _slot_goods(si: int, s: Dictionary, by_shape: Dictionary) -> void:
@@ -2008,50 +2106,138 @@ static func shape_size(shape: String) -> Vector3:
 	return Vector3(0.12, 0.17, 0.06)  # box
 
 
-## Pack meshes: a body in the instance colour with a white label band and a
-## dark top/cap, so a shelf of the same colour still reads as packs.
+static var _goods_mat: ShaderMaterial
+
+
+## The material for goods MultiMeshes (product colour in INSTANCE_CUSTOM).
+static func goods_material() -> ShaderMaterial:
+	if _goods_mat == null:
+		_goods_mat = ShaderMaterial.new()
+		_goods_mat.shader = load("res://src/empire/world/goods.gdshader")
+	return _goods_mat
+
+
+## Pack meshes, front (+z) to the aisle. Vertex alpha = how much of the
+## product colour a part takes (goods.gdshader): bodies 1, white labels and
+## silver rims 0, pastel print panels between. Recognisable at a glance and
+## a few dozen triangles each (hundreds share one draw call per shape).
+const _T := 1.0          # tinted body
+const _FIX := 0.0        # fixed colour
+
+
+static func _c(r: float, g: float, b: float, a: float) -> Color:
+	return Color(r, g, b, a)
+
+
 static func shape_mesh(shape: String) -> Mesh:
 	if _shape_meshes.has(shape):
 		return _shape_meshes[shape]
 	var sz := shape_size(shape)
 	var b := _Batch.new()
 	var h := sz * 0.5
+	var body := _c(1, 1, 1, _T)
+	var label := _c(0.96, 0.96, 0.94, _FIX)
+	var pastel := _c(1, 1, 1, 0.3)
+	var silver := _c(0.78, 0.79, 0.8, _FIX)
 	match shape:
-		"can", "bottle", "cup":
-			var neck := 0.0 if shape != "bottle" else sz.y * 0.28
-			b.cylinder(Vector3(0, -h.y, 0), h.x, sz.y - neck, Color.WHITE, 10)
-			b.cylinder(Vector3(0, -h.y + sz.y * 0.35, 0), h.x * 1.01, sz.y * 0.25, Color(0.92, 0.92, 0.92), 10)
-			if neck > 0.0:
-				b.cylinder(Vector3(0, h.y - neck, 0), h.x * 0.4, neck, Color(0.85, 0.85, 0.85), 8)
-			else:
-				b.cylinder(Vector3(0, h.y - 0.008, 0), h.x * 0.96, 0.008, Color(0.7, 0.7, 0.72), 10)
+		"can":
+			b.cylinder(Vector3(0, -h.y + 0.008, 0), h.x, sz.y - 0.016, body, 8)
+			b.cylinder(Vector3(0, -h.y + sz.y * 0.42, 0), h.x * 1.01, sz.y * 0.2, _c(0.72, 0.72, 0.72, _T), 8)
+			b.cylinder(Vector3(0, -h.y, 0), h.x * 0.92, 0.008, silver, 8)
+			b.cylinder(Vector3(0, h.y - 0.008, 0), h.x * 0.92, 0.008, silver, 8)
+		"bottle":
+			var r := h.x
+			b.cylinder(Vector3(0, -h.y, 0), r, sz.y * 0.56, body, 8)
+			b.cylinder(Vector3(0, -h.y + sz.y * 0.2, 0), r * 1.015, sz.y * 0.24, pastel, 8)   # label
+			b.cylinder(Vector3(0, -h.y + sz.y * 0.56, 0), r * 0.85, sz.y * 0.08, body, 8)    # shoulder
+			b.cylinder(Vector3(0, -h.y + sz.y * 0.64, 0), r * 0.58, sz.y * 0.08, body, 8)
+			b.cylinder(Vector3(0, -h.y + sz.y * 0.72, 0), r * 0.36, sz.y * 0.18, body, 8)     # neck
+			b.cylinder(Vector3(0, -h.y + sz.y * 0.9, 0), r * 0.42, sz.y * 0.1, _c(0.55, 0.55, 0.55, _T), 8)  # cap
+		"cup":
+			b.cylinder(Vector3(0, -h.y, 0), h.x * 0.78, sz.y * 0.35, label, 8)
+			b.cylinder(Vector3(0, -h.y + sz.y * 0.35, 0), h.x * 0.9, sz.y * 0.4, body, 8)     # sleeve
+			b.cylinder(Vector3(0, -h.y + sz.y * 0.75, 0), h.x * 0.95, sz.y * 0.17, label, 8)
+			b.cylinder(Vector3(0, h.y - sz.y * 0.08, 0), h.x, sz.y * 0.08, _c(0.92, 0.92, 0.9, _FIX), 8)  # lid
+		"bag":
+			# A pillow pack: crimped top and bottom, full in the middle, a
+			# white window on the front.
+			var cr := 0.02
+			var mid := Vector3(h.x, 0.0, h.z)
+			b.hull([Vector3(-h.x, -h.y + cr, -0.008), Vector3(h.x, -h.y + cr, -0.008), Vector3(mid.x, 0, -mid.z), Vector3(-mid.x, 0, -mid.z),
+				Vector3(-h.x, -h.y + cr, 0.008), Vector3(h.x, -h.y + cr, 0.008), Vector3(mid.x, 0, mid.z), Vector3(-mid.x, 0, mid.z)], body)
+			b.hull([Vector3(-mid.x, 0, -mid.z), Vector3(mid.x, 0, -mid.z), Vector3(h.x, h.y - cr, -0.008), Vector3(-h.x, h.y - cr, -0.008),
+				Vector3(-mid.x, 0, mid.z), Vector3(mid.x, 0, mid.z), Vector3(h.x, h.y - cr, 0.008), Vector3(-h.x, h.y - cr, 0.008)], body)
+			b.box(Vector3(-h.x, -h.y, -0.006), Vector3(h.x, -h.y + cr, 0.006), _c(0.85, 0.85, 0.85, _T))
+			b.box(Vector3(-h.x, h.y - cr, -0.006), Vector3(h.x, h.y, 0.006), _c(0.85, 0.85, 0.85, _T))
+			b.box(Vector3(-h.x * 0.62, -h.y * 0.32, h.z * 0.7), Vector3(h.x * 0.62, h.y * 0.3, h.z + 0.004), label)
+			b.box(Vector3(-h.x * 0.5, -h.y * 0.12, h.z + 0.004), Vector3(h.x * 0.5, h.y * 0.12, h.z + 0.007), _c(0.75, 0.75, 0.75, _T))
+		"bar":
+			b.box(Vector3(-h.x + 0.012, -h.y, -h.z), Vector3(h.x - 0.012, h.y, h.z), body)
+			for e: float in [-1.0, 1.0]:
+				b.box(Vector3(e * (h.x - 0.012), -h.y * 0.25, -h.z), Vector3(e * h.x, h.y * 0.25, h.z), _c(0.8, 0.8, 0.8, _T))
+			b.box(Vector3(-h.x * 0.45, h.y, -h.z * 0.7), Vector3(h.x * 0.45, h.y + 0.002, h.z * 0.7), label)
+			b.box(Vector3(-h.x * 0.3, h.y + 0.002, -h.z * 0.3), Vector3(h.x * 0.3, h.y + 0.003, h.z * 0.3), _c(0.6, 0.6, 0.6, _T))
+		"carton":
+			var ry := h.y - sz.y * 0.16
+			b.box(Vector3(-h.x, -h.y, -h.z), Vector3(h.x, ry, h.z), body)
+			# Gable top and its seal fin.
+			b.hull([Vector3(-h.x, ry, -h.z), Vector3(h.x, ry, -h.z), Vector3(h.x, h.y - 0.012, -0.004), Vector3(-h.x, h.y - 0.012, -0.004),
+				Vector3(-h.x, ry, h.z), Vector3(h.x, ry, h.z), Vector3(h.x, h.y - 0.012, 0.004), Vector3(-h.x, h.y - 0.012, 0.004)], _c(0.95, 0.95, 0.95, 0.6))
+			b.box(Vector3(-h.x, h.y - 0.014, -0.003), Vector3(h.x, h.y, 0.003), _c(0.95, 0.95, 0.95, 0.6))
+			b.box(Vector3(-h.x * 0.8, -h.y * 0.5, h.z), Vector3(h.x * 0.8, h.y * 0.3, h.z + 0.003), pastel)
+			b.cylinder(Vector3(h.x * 0.4, ry + 0.01, h.z * 0.4), 0.012, 0.012, _c(0.95, 0.95, 0.95, _FIX), 6)
+		"loaf":
+			# A sliced loaf in its bag: domed top, a printed band, the twist.
+			var ly := -h.y + sz.y * 0.55
+			b.box(Vector3(-h.x, -h.y, -h.z), Vector3(h.x, ly, h.z), body)
+			b.hull([Vector3(-h.x, ly, -h.z), Vector3(h.x, ly, -h.z), Vector3(h.x * 0.55, h.y, -h.z), Vector3(-h.x * 0.55, h.y, -h.z),
+				Vector3(-h.x, ly, h.z), Vector3(h.x, ly, h.z), Vector3(h.x * 0.55, h.y, h.z), Vector3(-h.x * 0.55, h.y, h.z)], _c(1, 1, 1, _T))
+			b.box(Vector3(-h.x - 0.003, -h.y * 0.7, -h.z * 0.25), Vector3(h.x + 0.003, ly + 0.01, h.z * 0.25), label)
+			b.box(Vector3(-0.012, -0.012, -h.z - 0.04), Vector3(0.012, 0.012, -h.z), _c(0.9, 0.9, 0.88, _FIX))
+		"pack":
+			# Toilet rolls: four in a printed wrap.
+			var rr := minf(h.x * 0.5, h.z) - 0.004
+			for ix in 2:
+				for iy in 2:
+					b.cylinder(Vector3((ix - 0.5) * h.x, -h.y + iy * h.y, 0), rr, h.y - 0.004, body, 8)
+			b.box(Vector3(-h.x, -h.y * 0.25, h.z - 0.01), Vector3(h.x, h.y * 0.25, h.z + 0.002), _c(0.25, 0.45, 0.8, _FIX))
+			b.box(Vector3(-h.x * 0.6, -h.y * 0.12, h.z + 0.002), Vector3(h.x * 0.6, h.y * 0.12, h.z + 0.004), label)
 		"case":
-			b.box(-h, h, Color.WHITE)
-			b.box(Vector3(-h.x - 0.002, h.y - 0.05, -0.04), Vector3(h.x + 0.002, h.y + 0.002, 0.04), Color(0.82, 0.78, 0.62))
+			b.box(-h, h, body)
+			b.box(Vector3(-h.x - 0.002, h.y - 0.05, -0.04), Vector3(h.x + 0.002, h.y + 0.002, 0.04), _c(0.78, 0.66, 0.42, _FIX))
+			b.box(Vector3(-h.x * 0.45, -h.y * 0.35, h.z), Vector3(h.x * 0.45, h.y * 0.35, h.z + 0.003), _c(0.93, 0.9, 0.82, _FIX))
+			b.box(Vector3(-h.x * 0.35, -h.y * 0.15, h.z + 0.003), Vector3(h.x * 0.35, h.y * 0.15, h.z + 0.005), _c(0.4, 0.4, 0.4, _FIX))
 		"garment":
 			# On a hanger: shoulders and body, sleeves, a hook.
-			b.box(Vector3(-h.x * 0.62, -h.y, -h.z), Vector3(h.x * 0.62, h.y - 0.04, h.z), Color.WHITE)
-			b.box(Vector3(-h.x, h.y - 0.3, -h.z * 0.8), Vector3(h.x, h.y - 0.04, h.z * 0.8), Color(0.94, 0.94, 0.94))
-			b.box(Vector3(-0.1, h.y - 0.05, -0.005), Vector3(0.1, h.y - 0.03, 0.005), Color(0.3, 0.22, 0.15))
-			b.box(Vector3(-0.005, h.y - 0.03, -0.005), Vector3(0.005, h.y + 0.04, 0.005), Color(0.7, 0.7, 0.72))
+			b.box(Vector3(-h.x * 0.62, -h.y, -h.z), Vector3(h.x * 0.62, h.y - 0.04, h.z), body)
+			b.box(Vector3(-h.x, h.y - 0.3, -h.z * 0.8), Vector3(h.x, h.y - 0.04, h.z * 0.8), _c(0.94, 0.94, 0.94, _T))
+			b.box(Vector3(-0.1, h.y - 0.05, -0.005), Vector3(0.1, h.y - 0.03, 0.005), _c(0.3, 0.22, 0.15, _FIX))
+			b.box(Vector3(-0.005, h.y - 0.03, -0.005), Vector3(0.005, h.y + 0.04, 0.005), silver)
+			b.box(Vector3(-0.03, h.y - 0.2, h.z), Vector3(0.03, h.y - 0.12, h.z + 0.004), label)   # swing tag
 		"folded":
-			b.box(-h, h, Color.WHITE)
-			b.box(Vector3(-h.x, -h.y * 0.2, -h.z - 0.002), Vector3(h.x, h.y * 0.2, -h.z + 0.01), Color(0.88, 0.88, 0.88))
+			b.box(-h, h, body)
+			b.box(Vector3(-h.x, -h.y * 0.2, -h.z - 0.002), Vector3(h.x, h.y * 0.2, -h.z + 0.01), _c(0.88, 0.88, 0.88, _T))
+			b.box(Vector3(-h.x * 0.15, h.y, h.z * 0.3), Vector3(h.x * 0.15, h.y + 0.002, h.z * 0.7), label)
 		"shoebox":
-			b.box(-h, h, Color.WHITE)
-			b.box(Vector3(-h.x - 0.003, h.y - 0.035, -h.z - 0.003), Vector3(h.x + 0.003, h.y + 0.003, h.z + 0.003), Color(0.25, 0.25, 0.27))
+			b.box(-h, h, body)
+			b.box(Vector3(-h.x - 0.003, h.y - 0.035, -h.z - 0.003), Vector3(h.x + 0.003, h.y + 0.003, h.z + 0.003), _c(0.25, 0.25, 0.27, _FIX))
+			b.box(Vector3(-h.x * 0.6, -h.y * 0.5, h.z), Vector3(h.x * 0.2, h.y * 0.2, h.z + 0.003), label)
 		"pastry", "cake":
-			b.cylinder(Vector3(0, -h.y, 0), h.x, sz.y, Color.WHITE, 10)
-			b.cylinder(Vector3(0, h.y - 0.012, 0), h.x * 0.92, 0.014, Color(0.96, 0.92, 0.85), 10)
+			b.cylinder(Vector3(0, -h.y, 0), h.x, sz.y, body, 8)
+			b.cylinder(Vector3(0, h.y - 0.012, 0), h.x * 0.92, 0.014, _c(0.96, 0.92, 0.85, _T), 8)
 		"foodbox":
-			b.box(-h, h, Color(0.97, 0.96, 0.94))
-			b.box(Vector3(-h.x - 0.002, -h.y * 0.4, -h.z - 0.002), Vector3(h.x + 0.002, h.y * 0.3, h.z + 0.002), Color.WHITE)
+			b.box(-h, h, _c(0.97, 0.96, 0.94, _FIX))
+			b.box(Vector3(-h.x - 0.002, -h.y * 0.4, -h.z - 0.002), Vector3(h.x + 0.002, h.y * 0.3, h.z + 0.002), body)
 		"phone":
-			b.box(-h, h, Color.WHITE)
-			b.box(Vector3(-h.x * 0.88, h.y, -h.z * 0.9), Vector3(h.x * 0.88, h.y + 0.002, h.z * 0.9), Color(0.05, 0.06, 0.08))
+			b.box(-h, h, body)
+			b.box(Vector3(-h.x * 0.88, h.y, -h.z * 0.9), Vector3(h.x * 0.88, h.y + 0.002, h.z * 0.9), _c(0.05, 0.06, 0.08, _FIX))
 		_:
-			b.box(-h, h, Color.WHITE)
-			b.box(Vector3(-h.x * 0.8, -h.y * 0.2, h.z - 0.004), Vector3(h.x * 0.8, h.y * 0.45, h.z + 0.002), Color(0.95, 0.95, 0.95))
+			# A printed carton: body, a white panel with the brand mark, a
+			# darker top flap.
+			b.box(-h, h, body)
+			b.box(Vector3(-h.x * 0.8, -h.y * 0.3, h.z), Vector3(h.x * 0.8, h.y * 0.45, h.z + 0.003), label)
+			b.box(Vector3(-h.x * 0.55, -h.y * 0.05, h.z + 0.003), Vector3(h.x * 0.55, h.y * 0.25, h.z + 0.005), _c(0.85, 0.85, 0.85, _T))
+			b.box(Vector3(-h.x - 0.001, h.y - h.y * 0.12, -h.z - 0.001), Vector3(h.x + 0.001, h.y + 0.001, h.z + 0.001), _c(0.7, 0.7, 0.7, _T))
 	var m := b.commit()
 	_shape_meshes[shape] = m
 	return m
@@ -2065,7 +2251,7 @@ var _glass: _Batch
 func _glass_box(lo: Vector3, hi: Vector3) -> void:
 	if _glass == null:
 		_glass = _Batch.new()
-	_glass.box(lo, hi, Color(0.75, 0.85, 0.9, 0.16))
+	_glass.box(lo, hi, Color(0.75, 0.85, 0.9, 0.1))
 
 
 func _ceiling_lights(st: _Batch, part_d: float, tint: Color) -> void:
@@ -2193,16 +2379,25 @@ func _decor_trade(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float)
 	for e: float in [-0.45, 0.45]:
 		st.box(R(cx0 - 0.08, hd + e - 0.01, 3.15), R(cx0 - 0.06, hd + e + 0.01, H), Color(0.3, 0.3, 0.32))
 	var lab := Label3D.new()
-	lab.text = {"cafe": "ORDER HERE", "takeaway": "ORDER & COLLECT", "bakery": "PAY HERE", "clothing": "TILLS", "phones": "PAY & COLLECT"}.get(type_id, "PAY HERE")
+	lab.text = {"cafe": "ORDER HERE", "takeaway": "ORDER & COLLECT", "bakery": "PAY HERE", "clothing": "TILLS", "phone": "PAY & COLLECT"}.get(type_id, "PAY HERE")
 	lab.font = ShopStyle.font(String(ident.get("face", "")))
 	lab.font_size = 52
-	lab.pixel_size = 0.0036
+	# Sized to stay on the 1.2 m board (long wording used to run off both
+	# ends and show through, mirrored, from behind).
+	lab.pixel_size = minf(0.0036, 1.05 / (float(lab.text.length()) * 52.0 * 0.6))
 	lab.outline_size = 0
 	lab.shaded = false
+	lab.double_sided = false
 	lab.modulate = accent
 	lab.position = R(cx0 - 0.115, hd, 2.975)
 	lab.rotation.y = -PI * 0.5
 	_static.add_child(lab)
+	var back := lab.duplicate() as Label3D
+	back.text = "THANK YOU"
+	back.pixel_size = minf(0.0036, 1.05 / (9.0 * 52.0 * 0.6))
+	back.position = R(cx0 - 0.025, hd, 2.975)
+	back.rotation.y = PI * 0.5
+	_static.add_child(back)
 
 
 ## A menu board over the back counter: what the shop sells and its prices,
@@ -2417,7 +2612,7 @@ static func _mat(k: String) -> Material:
 		"glass":
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			m.roughness = 0.05
-			m.metallic_specular = 0.9
+			m.metallic_specular = 0.6
 			m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		"glow":
 			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -2596,6 +2791,26 @@ class _Batch:
 			var nrm := Vector3(cos((a0 + a1) * 0.5), 0, sin((a0 + a1) * 0.5))
 			_quad(p1, p0, p0 + Vector3.UP * h, p1 + Vector3.UP * h, nrm, c)
 			_tri(base + Vector3.UP * h, p1 + Vector3.UP * h, p0 + Vector3.UP * h, Vector3.UP, c)
+
+	## A convex 8-corner solid, corners ordered like box(): the −z face
+	## (lo,lo)(hi,lo)(hi,hi)(lo,hi) then the same at +z. Tapers, gables.
+	func hull(v: Array, c: Color) -> void:
+		var faces := [[1, 0, 3, 2], [4, 5, 6, 7], [0, 4, 7, 3], [5, 1, 2, 6], [0, 1, 5, 4], [7, 6, 2, 3]]
+		var ctr := Vector3.ZERO
+		for p: Vector3 in v:
+			ctr += p / 8.0
+		for f in faces:
+			var a: Vector3 = v[f[0]]
+			var b2: Vector3 = v[f[1]]
+			var c2: Vector3 = v[f[2]]
+			var d: Vector3 = v[f[3]]
+			var nrm := (b2 - a).cross(d - a)
+			if nrm.length() < 1e-9:
+				nrm = (c2 - b2).cross(a - b2)
+			nrm = nrm.normalized()
+			if nrm.dot((a + b2 + c2 + d) * 0.25 - ctr) < 0.0:
+				nrm = -nrm
+			_quad(a, b2, c2, d, nrm, c)
 
 	## A thin two-sided quad (awning cloth): a→b→c→d round its edge.
 	func sheet(a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color) -> void:
