@@ -258,6 +258,11 @@ static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> V
 		# jog), turns are immediate and letting go stops within a step.
 		var goal := m * INDOOR_SPEED
 		var rate := 34.0 if m.length_squared() > 0.01 else 30.0
+		var spd := vh.length()
+		if spd > INDOOR_SPEED + 0.05 and m.length_squared() > 0.01:
+			# Coming in through a door at a jog: ease down to indoor pace over
+			# a couple of strides instead of stopping short on the threshold.
+			goal = m.normalized() * maxf(INDOOR_SPEED * m.length(), spd - 9.0 * h)
 		vh = vh.move_toward(goal, rate * h)
 		return Vector3(vh.x, minf(v.y, 0.0), vh.z)
 	var speed := vh.length()

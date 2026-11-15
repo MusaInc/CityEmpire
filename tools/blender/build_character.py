@@ -713,7 +713,12 @@ for sx in [-1,1]:
     active(f_);bpy.ops.object.transform_apply(location=True,rotation=True,scale=True)
     masks.append(f_)
 
-all_meshes=[top_long,top_tq,top_short,top_vest,collar]+skin_arms+[pants,shoes,gloves]+[o for ps in face_meshes.values() for o in ps]+masks
+exec(compile((ROOT/'tools/blender/empire_wardrobe.py').read_text(),'empire_wardrobe.py','exec'))
+# Bare forearms under the short sleeves of the tee and polo.
+for cut in ['Tee','Polo']:
+    src=next(o for o in skin_arms if o.name=='Skin_Arms_Short')
+    cp=src.copy();cp.data=src.data.copy();cp.name='Skin_Arms_'+cut;bpy.context.collection.objects.link(cp);skin_arms.append(cp)
+all_meshes=[top_long,top_tq,top_short,top_vest,collar]+skin_arms+[pants,shoes,gloves]+[o for ps in face_meshes.values() for o in ps]+masks+wardrobe
 for ob in [pants]:
     solid=ob.modifiers.new('Bound cloth edges','SOLIDIFY');solid.thickness=.0025;solid.offset=-1;solid.use_rim_only=True;apply(ob,solid)
 
@@ -762,7 +767,7 @@ for ob in all_meshes:
         for li in face.loop_indices:
             p=ob.data.vertices[ob.data.loops[li].vertex_index].co
             freedom=0
-            if ob in tops and abs(p.x)<.24:freedom=max(0,min(.06,(1.0-p.z)*1.2))
+            if (ob in tops or ob in loose_tops) and abs(p.x)<.24:freedom=max(0,min(.06,(1.0-p.z)*1.2))
             sole=1-max(0,min(1,(p.z-.027)/.012)) if ob==shoes else 0
             uv2.data[li].uv=(freedom,sole)
     # Some authored meshes have no UVs (signature/pockets); unwrap those.

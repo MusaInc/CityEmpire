@@ -64,6 +64,13 @@ const OTHER_ITEMS := [
 	{"id": "top_tq", "slot": "top", "name": "Three-Quarter", "cut": "tq", "price": 0},
 	{"id": "top_short", "slot": "top", "name": "Short Sleeve", "cut": "short", "price": 0},
 	{"id": "top_vest", "slot": "top", "name": "Sleeveless", "cut": "vest", "price": 150},
+	# Everyday clothes (City Empire): loose, with real collars and hems.
+	{"id": "top_tee", "slot": "top", "name": "T-Shirt", "cut": "tee", "price": 0},
+	{"id": "top_polo", "slot": "top", "name": "Polo", "cut": "polo", "price": 0},
+	{"id": "top_shirt", "slot": "top", "name": "Shirt", "cut": "shirt", "price": 0},
+	{"id": "top_jumper", "slot": "top", "name": "Jumper", "cut": "jumper", "price": 0},
+	{"id": "top_hoodie", "slot": "top", "name": "Hoodie", "cut": "hoodie", "price": 0},
+	{"id": "top_blazer", "slot": "top", "name": "Blazer & Tie", "cut": "blazer", "price": 0},
 	# Trousers
 	{"id": "pants_navy", "slot": "pants", "name": "Graphite", "color": Color(0.24, 0.26, 0.28), "price": 0},
 	{"id": "pants_black", "slot": "pants", "name": "Black", "color": Color(0.05, 0.05, 0.06), "price": 150},

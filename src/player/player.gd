@@ -60,6 +60,7 @@ const BUILDINGS_MASK := 1 | (1 << 1)
 const GRAPPLE_LAYER := 1 << 1
 const MAX_WRAPS := 4
 const STEP_MAX := 0.35  # kerbs, stairs and rooftop lips climbed while running
+const STEP_EVERYDAY := 0.45  # on foot in City Empire: kerbs, stairs, shop plinths at any pace
 ## In the air, a ledge whose walkable top is at most this far above the feet
 ## is mantled (roof edges, parapets, low roof plant) instead of stopping you.
 const MANTLE_MAX := 2.0
@@ -152,6 +153,9 @@ var _prev_pos := Vector3.ZERO
 var _bump_cool := 0.0
 ## Ground height at (x, z) (the city sets CityLayout.ground_y); flat 0 if unset.
 var ground_fn: Callable
+## On foot (everyday): bends the stick's direction (world, length kept), e.g.
+## into the middle of a doorway you're walking at.
+var steer_fn: Callable
 var stagger_t := 0.0  # > 0 while staggering back off a wall (no stick)
 var _stagger_cool := 0.0
 ## Long reach (humans only): the higher you are and the faster you fall, the
@@ -361,6 +365,8 @@ func _physics_process(dt: float) -> void:
 		_update_stun(dt)
 	var inp := _read_input(dt)
 	var move: Vector3 = inp.get("move", Vector3.ZERO)
+	if everyday and steer_fn.is_valid() and move.length_squared() > 0.0001 and (bot == null or bot.get("human_steer") == true):
+		move = steer_fn.call(move)  # (City Empire: lined up with a doorway you're heading for)
 	if wall_kick and (is_on_floor() or line_state != Line.IDLE or stunned):
 		wall_kick = false
 	stagger_t = maxf(stagger_t - dt, 0.0)
@@ -447,7 +453,10 @@ func _physics_process(dt: float) -> void:
 		rope_snapped.emit(s.snap_speed)
 	floor_snap_length = 0.0 if (s.attached or s.velocity.y > 0.5) else 0.4
 	velocity = (s.position - start) / dt
-	if s.grounded and not s.attached and s.velocity.y < 0.5:
+	if everyday and not s.attached and not stunned and (s.grounded or air_time < 0.2) and s.velocity.y < 1.0:
+		if _everyday_step(velocity * dt):
+			floor_snap_length = 0.0
+	elif s.grounded and not s.attached and s.velocity.y < 0.5:
 		_try_step_up(velocity * dt)
 	elif not s.grounded and not s.attached and not stunned:
 		_try_mantle(velocity * dt)
@@ -515,6 +524,59 @@ func _try_step_up(motion: Vector3) -> void:
 	stepped_up.emit(rise)
 
 
+## City Empire on foot: kerbs, stairs, entrance plinths. Steps up to
+## STEP_EVERYDAY at any pace (a slow walk included) and any angle. The rise
+## is found with rays a foot ahead of the capsule, so a rounded capsule meeting
+## the edge (which reads as a slope, not a floor) can't refuse it; the body is
+## lifted onto the top and carried forward over the lip.
+func _everyday_step(motion: Vector3) -> bool:
+	var h := Vector3(motion.x, 0.0, motion.z)
+	var spd := h.length()
+	if spd < 1e-4:
+		return false
+	var dir := h / spd
+	var probe := dir * maxf(spd, 0.1)
+	var blocked := KinematicCollision3D.new()
+	if not test_move(global_transform, probe, blocked):
+		return false  # nothing in the way
+	# Towards the step: square to the riser that stopped us (a kerb met at a
+	# shallow angle is still straight in front of the foot that meets it).
+	var bn := blocked.get_normal()
+	var into := -Vector3(bn.x, 0.0, bn.z)
+	into = into.normalized() if into.length() > 0.2 else dir
+	var feet := global_position.y - 0.9
+	var space := get_world_3d().direct_space_state
+	var rise := -1.0
+	var side := Vector3(-into.z, 0.0, into.x)
+	for off in [Vector3.ZERO, side * 0.18, -side * 0.18]:
+		for reach in [0.42, 0.56]:
+			var x: Vector3 = global_position + into * reach + off
+			var q := PhysicsRayQueryParameters3D.create(Vector3(x.x, feet + STEP_EVERYDAY + 0.06, x.z),
+				Vector3(x.x, feet - 0.05, x.z), collision_mask)
+			q.exclude = [get_rid()]
+			var hit := space.intersect_ray(q)
+			if hit.is_empty() or (hit["normal"] as Vector3).y < 0.7:
+				continue
+			rise = maxf(rise, (hit["position"] as Vector3).y - feet)
+		if rise > 0.0:
+			break
+	if rise < 0.03 or rise > STEP_EVERYDAY:
+		return false
+	var lift := Vector3.UP * (rise + 0.02)
+	if test_move(global_transform, lift):
+		return false  # no headroom
+	var raised := global_transform.translated(lift)
+	var ahead := dir * spd + into * 0.14
+	if test_move(raised, ahead):
+		return false  # still blocked up there: a wall, not a step
+	global_position = raised.origin + ahead
+	velocity = Vector3.ZERO
+	s.position = global_position
+	s.velocity.y = 0.0
+	stepped_up.emit(rise)
+	return true
+
+
 ## Airborne and moving into a ledge (a roof edge with its cornice and
 ## parapet, a low roof hut) whose walkable top is within MANTLE_MAX of the
 ## feet: lift onto it and keep the horizontal momentum, rather than hitting
@@ -569,14 +631,17 @@ func _resolve_contacts(dt: float) -> void:
 		if into > 0.0:
 			var pre_speed := s.velocity.length()
 			s.velocity += n * into
-			if n.y < 0.6:
+			# (On foot, a kerb or stair riser is a step, never a wall to bounce off.)
+			var low := everyday and c.get_position().y < global_position.y - 0.9 + STEP_EVERYDAY + 0.05
+			if n.y < 0.6 and not low:
 				if into > worst_into:
 					wall_n = n
 					wall_ratio = into / maxf(pre_speed, 0.001)
 				worst_into = maxf(worst_into, into)
 			elif not was_on_floor:
 				worst_into = maxf(worst_into, into * 0.5)
-		if into > 1.5 and n.y < 0.6 and _bump_cool <= 0.0 and not wall_run:
+		if into > 1.5 and n.y < 0.6 and _bump_cool <= 0.0 and not wall_run \
+				and not (everyday and c.get_position().y < global_position.y - 0.9 + STEP_EVERYDAY + 0.05):
 			bumped.emit(into, n)
 			_bump_cool = 0.15
 		if absf(n.y) < 0.6:

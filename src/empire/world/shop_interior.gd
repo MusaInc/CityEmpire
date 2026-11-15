@@ -269,12 +269,12 @@ func _build_shop(st: _Batch) -> void:
 	_shell(st, wall, trim)
 	var part_d := D - BACKROOM
 	# Back-room partition with a doorway on the right.
-	var dw0 := W - 2.1
+	var dw0 := W - 2.3
 	var dw1 := W - 0.95
 	_wall_box(st, 0.0, dw0, part_d, part_d + 0.14, 0.0, H, wall.darkened(0.04))
 	_wall_box(st, dw1, W, part_d, part_d + 0.14, 0.0, H, wall.darkened(0.04))
 	_wall_box(st, dw0, dw1, part_d, part_d + 0.14, 2.3, H, wall.darkened(0.04))
-	st.box(R(dw0 - 0.06, part_d - 0.02, 0.0), R(dw1 + 0.06, part_d + 0.16, 2.36), trim)  # door frame (drawn)
+	_stock_door(st, part_d, dw0, dw1, trim)
 	# Shopfront: glass either side of the door, frame, fascia.
 	_shopfront(st, trim)
 	# Counter + tills on the right.
@@ -311,16 +311,6 @@ func _build_shop(st: _Batch) -> void:
 	# The floor pile: just inside, left of the door, in front of the window.
 	pile_pos = R(clampf(door.x - 1.0, 0.7, W * 0.5), 1.05, 0.0)
 	spots.append({"kind": "pile", "pos": pile_pos, "label": "FLOOR"})
-	# A sign over the stockroom door.
-	var srs := Label3D.new()
-	srs.text = "STOCKROOM"
-	srs.font_size = 64
-	srs.pixel_size = 0.004
-	srs.shaded = false
-	srs.modulate = Color(1.0, 0.85, 0.3)
-	srs.outline_size = 8
-	srs.position = R((dw0 + dw1) * 0.5, part_d - 0.03, 2.55)
-	_static.add_child(srs)
 	# Ceiling lights (their kind follows the shop's).
 	var bright := 1.25 if biz and biz.has_upgrade("lighting") else 0.85
 	var tint: Color = look.get("tint", Color(1.0, 0.97, 0.92))
@@ -562,14 +552,7 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 	# slope along the shopfront.)
 	st.box(R(-0.04, -0.24, -street_drop - 1.2), R(W + 0.04, -0.005, 0.02), stone.darkened(0.3))
 	if street_drop > 0.02:
-		var sx0 := door.x - 0.35
-		var sx1 := door.y + 0.35
-		if street_drop > 0.3:
-			var mid := -street_drop * 0.5
-			st.box(R(sx0 - 0.1, -1.05, -street_drop - 0.05), R(sx1 + 0.1, -0.5, mid), stone.lightened(0.04))
-			_solid(R(sx0 - 0.1, -1.05, -street_drop - 0.05), R(sx1 + 0.1, -0.5, mid))
-		st.box(R(sx0, -0.55, -street_drop - 0.05), R(sx1, 0.0, 0.0), stone.lightened(0.1))
-		_solid(R(sx0, -0.55, -street_drop - 0.05), R(sx1, 0.0, 0.0))
+		_entrance_steps(st, stone)
 	if trading_here:
 		_window_display(st, spans, gd)
 		_street_dressing(st, hsh, oh)
@@ -722,6 +705,52 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 
 ## A stall riser under a window: painted timber with raised and fielded
 ## panels, or a plain polished plinth (aluminium and steel fronts).
+## Up from the pavement to the door: a stone landing outside the lobby and a
+## flight of even steps (risers ≤ 17 cm, so you walk up them like stairs
+## instead of hopping onto a block), each a little wider than the one above,
+## with a nosing and a brass handrail beside a flight of three or more.
+const STEP_RISE := 0.17
+
+
+func _entrance_steps(st: _Batch, stone: Color) -> void:
+	var n := ceili(street_drop / STEP_RISE - 0.15)
+	var landing := 0.5
+	var tread := clampf(1.3 / maxf(n - 1, 1), 0.27, 0.32) if n > 1 else 0.0
+	var top_c := stone.lightened(0.12)
+	var x0 := door.x - 0.35
+	var x1 := door.y + 0.35
+	var base := -street_drop - 0.05
+	# The landing (the top step), level with the shop floor.
+	st.box(R(x0, -landing, base), R(x1, 0.0, 0.0), top_c)
+	st.box(R(x0 - 0.01, -landing - 0.02, -0.035), R(x1 + 0.01, -landing + 0.02, 0.0), top_c.lightened(0.1))  # nosing
+	_solid(R(x0, -landing, base), R(x1, 0.0, 0.0))
+	for i in range(1, n):
+		var top := -street_drop * float(i) / float(n)
+		var d0 := -landing - tread * float(i)
+		var d1 := d0 + tread
+		var wid := 0.05 * float(i)
+		var c := stone.lightened(0.1 - 0.012 * i)
+		st.box(R(x0 - wid, d0, base), R(x1 + wid, d1, top), c)
+		st.box(R(x0 - wid - 0.01, d0 - 0.02, top - 0.035), R(x1 + wid + 0.01, d0 + 0.02, top), c.lightened(0.1))
+		_solid(R(x0 - wid, d0, base), R(x1 + wid, d1, top))
+	if n >= 3:
+		# A handrail on the side away from the window display's best view.
+		var hx := x1 - 0.1  # (on the treads, inside their ends)
+		var brass := Color(0.78, 0.62, 0.3)
+		var far_d := -landing - tread * float(n - 1)
+		for d: float in [-0.1, far_d + 0.1]:
+			var fy := 0.0 if d > -landing else -street_drop * float(n - 1) / float(n)
+			st.box(R(hx - 0.025, d - 0.025, fy), R(hx + 0.025, d + 0.025, fy + 0.9), brass)
+		var low := -street_drop * float(n - 1) / float(n)
+		var segs := 8
+		for k in segs:
+			var da := lerpf(-0.1, far_d + 0.1, float(k) / segs)
+			var db := lerpf(-0.1, far_d + 0.1, float(k + 1) / segs)
+			var ya := lerpf(0.9, low + 0.9, float(k) / segs)
+			var yb := lerpf(0.9, low + 0.9, float(k + 1) / segs)
+			st.box(R(hx - 0.03, db, minf(ya, yb) - 0.025), R(hx + 0.03, da, maxf(ya, yb) + 0.025), brass)
+
+
 func _riser(st: _Batch, x0: float, x1: float, gd: float, rh: float, fc: Color, sf: Dictionary) -> void:
 	var rc: Color = sf["riser_col"]
 	st.box(R(x0, gd - 0.08, 0.0), R(x1, gd + 0.06, rh), rc)
@@ -974,6 +1003,19 @@ func _shutters(st: _Batch, oh: float, sf: Dictionary) -> void:
 
 ## An empty unit: what the last tenant left (an old shelf, dust sheets, a
 ## ladder, paint tins), post on the mat, and a letting agent's board.
+## Keeps the way in clear: a prop `w` wide starting at x0 (`d0` deep) that
+## would stand in the corridor behind the door moves beside the door.
+const ENTRY_CLEAR := 3.2  # m in from the facade kept free behind the door
+
+
+func _beside_door(x0: float, w: float, d0: float) -> float:
+	if d0 > ENTRY_CLEAR or x0 > door.y + 0.5 or x0 + w < door.x - 0.5:
+		return x0
+	if door.y + 0.6 + w < W - 0.6:
+		return door.y + 0.6
+	return maxf(0.6, door.x - 0.6 - w)
+
+
 func _vacant(st: _Batch, fy: float) -> void:
 	var part_d := D - BACKROOM
 	var grey := Color(0.5, 0.52, 0.54)
@@ -985,15 +1027,15 @@ func _vacant(st: _Batch, fy: float) -> void:
 	_solid(R(0.05, 1.8, 0.0), R(0.5, 3.6, 1.5))
 	# Dust sheets over whatever's stacked at the back.
 	var sheet := Color(0.88, 0.87, 0.83)
-	var bx := W * 0.42
+	var bx := _beside_door(W * 0.42, 1.3, part_d - 2.0)
 	if part_d > 4.0:
 		st.box(R(bx, part_d - 2.0, 0.0), R(bx + 1.3, part_d - 0.9, 0.7), sheet)
 		st.box(R(bx + 0.15, part_d - 1.85, 0.7), R(bx + 0.9, part_d - 1.1, 1.05), sheet.darkened(0.04))
 		st.box(R(bx - 0.08, part_d - 2.05, 0.0), R(bx + 1.38, part_d - 0.85, 0.08), sheet.darkened(0.08))
 		_solid(R(bx, part_d - 2.0, 0.0), R(bx + 1.3, part_d - 0.9, 1.05))
 	# A stepladder and paint tins mid-floor.
-	var lx := W * 0.3
 	var ld := part_d * 0.55
+	var lx := _beside_door(W * 0.3 - 0.3, 0.6, ld - 0.4) + 0.3
 	var alu := Color(0.75, 0.76, 0.78)
 	for f: float in [-1.0, 1.0]:
 		for e: float in [-0.22, 0.22]:
@@ -1324,6 +1366,124 @@ func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 		_static.add_child(tag)
 
 
+## The stockroom door: a real frame (architrave both sides), a solid
+## swing door with a porthole, kick plate and push plate that opens on its own
+## for you and your staff (into the stockroom, away from the shop floor), and
+## a lit STOCKROOM sign above it.
+var _door_hinge: Node3D
+var _door_open := 0.0
+var _door_at := Vector3.ZERO
+const DOOR_OPEN_ANGLE := 1.75  # rad (about 100°)
+
+
+func _stock_door(st: _Batch, part_d: float, dw0: float, dw1: float, trim: Color) -> void:
+	var frame := Color(0.93, 0.92, 0.89)
+	for side: float in [-1.0, 1.0]:
+		var dd := part_d - 0.03 if side < 0.0 else part_d + 0.17
+		var d2 := part_d if side < 0.0 else part_d + 0.14
+		st.box(R(dw0 - 0.09, dd, 0.0), R(dw0, d2, 2.39), frame)
+		st.box(R(dw1, dd, 0.0), R(dw1 + 0.09, d2, 2.39), frame)
+		st.box(R(dw0 - 0.09, dd, 2.3), R(dw1 + 0.09, d2, 2.39), frame)
+	# Jamb linings (the reveal through the wall).
+	st.box(R(dw0 - 0.01, part_d, 0.0), R(dw0, part_d + 0.14, 2.3), frame.darkened(0.06))
+	st.box(R(dw1, part_d, 0.0), R(dw1 + 0.01, part_d + 0.14, 2.3), frame.darkened(0.06))
+	# Threshold strip.
+	st.box(R(dw0, part_d - 0.02, 0.0), R(dw1, part_d + 0.16, 0.012), Color(0.62, 0.6, 0.55))
+	# The sign: a dark plate proud of the wall above the frame, lettered and
+	# lit from a strip underneath.
+	var cx := (dw0 + dw1) * 0.5
+	var sw := maxf(dw1 - dw0 + 0.5, 1.7)
+	var plate := Color(0.09, 0.1, 0.12)
+	st.box(R(cx - sw * 0.5, part_d - 0.06, 2.44), R(cx + sw * 0.5, part_d - 0.005, 2.86), plate)
+	st.box(R(cx - sw * 0.5, part_d - 0.065, 2.44), R(cx + sw * 0.5, part_d - 0.06, 2.47), brand.lightened(0.15))
+	_glow_quad(R(cx - sw * 0.5 + 0.06, part_d - 0.066, 2.441), R(cx + sw * 0.5 - 0.06, part_d - 0.066, 2.462), Color(1.0, 0.86, 0.5))
+	var sgn := Label3D.new()
+	sgn.name = "StockroomSign"
+	sgn.text = "STOCKROOM"
+	sgn.font = EmpireStyle.font("black")
+	sgn.font_size = 72
+	sgn.pixel_size = 0.0036
+	sgn.shaded = false
+	sgn.double_sided = false
+	sgn.outline_size = 0
+	sgn.modulate = Color(1.0, 0.97, 0.9)
+	sgn.position = R(cx, part_d - 0.07, 2.68)
+	_static.add_child(sgn)
+	var sub := Label3D.new()
+	sub.text = "STAFF ONLY  ·  DELIVERIES"
+	sub.font = EmpireStyle.font("bold")
+	sub.font_size = 40
+	sub.pixel_size = 0.0028
+	sub.shaded = false
+	sub.double_sided = false
+	sub.outline_size = 0
+	sub.modulate = brand.lightened(0.55)
+	sub.position = R(cx, part_d - 0.07, 2.53)
+	_static.add_child(sub)
+	# The door leaf: hinged on the right jamb.
+	var lw := dw1 - dw0 - 0.02
+	var leaf_c := brand.darkened(0.35).lerp(Color(0.55, 0.57, 0.6), 0.45)
+	var own := biz != null and rival.is_empty()
+	var lb := _Batch.new()
+	lb.box(Vector3(-lw, 0.015, -0.022), Vector3(0.0, 2.28, 0.022), leaf_c)
+	for f: float in [-1.0, 1.0]:
+		var z0 := 0.022 * f
+		var z1 := 0.027 * f
+		lb.box(Vector3(-lw + 0.04, 0.02, minf(z0, z1)), Vector3(-0.04, 0.3, maxf(z0, z1)), Color(0.72, 0.73, 0.75))  # kick plate
+		lb.box(Vector3(-lw + 0.08, 1.05, minf(z0, z1)), Vector3(-lw + 0.18, 1.35, maxf(z0, z1)), Color(0.78, 0.79, 0.8))  # push plate
+		lb.box(Vector3(-lw * 0.5 - 0.17, 1.42, minf(z0, z1)), Vector3(-lw * 0.5 + 0.17, 1.76, maxf(z0, z1)), Color(0.86, 0.87, 0.88))  # window frame
+		var z2 := 0.028 * f
+		lb.box(Vector3(-lw * 0.5 - 0.13, 1.46, minf(z1, z2)), Vector3(-lw * 0.5 + 0.13, 1.72, maxf(z1, z2)), Color(0.16, 0.24, 0.3))  # vision panel
+	if own:
+		_door_hinge = Node3D.new()
+		_door_hinge.name = "StockDoor"
+		_door_hinge.position = R(dw1, part_d + 0.07, 0.0)
+		var lm := MeshInstance3D.new()
+		lm.mesh = lb.commit()
+		lm.material_override = _mat("vc")
+		_door_hinge.add_child(lm)
+		var tag := Label3D.new()
+		tag.text = "STAFF ONLY"
+		tag.font = EmpireStyle.font("black")
+		tag.font_size = 40
+		tag.pixel_size = 0.0026
+		tag.shaded = false
+		tag.outline_size = 0
+		tag.modulate = Color(1.0, 0.95, 0.85)
+		tag.position = Vector3(-lw * 0.5, 1.92, 0.03)
+		_door_hinge.add_child(tag)
+		_static.add_child(_door_hinge)
+		_door_at = R(cx, part_d + 0.07, 0.0)
+		_door_open = 0.0
+		set_process(true)
+	else:
+		# Someone else's shop: the door stays shut (part of the shell batch).
+		var o := R(dw1, part_d + 0.07, 0.0)
+		st.box(o + Vector3(-lw, 0.015, -0.022), o + Vector3(0.0, 2.28, 0.022), leaf_c)
+		st.box(o + Vector3(-lw * 0.5 - 0.13, 1.46, 0.0225), o + Vector3(-lw * 0.5 + 0.13, 1.72, 0.027), Color(0.16, 0.24, 0.3))
+		st.box(o + Vector3(-lw + 0.04, 0.02, 0.0225), o + Vector3(-0.04, 0.3, 0.027), Color(0.72, 0.73, 0.75))
+
+
+## Opens the stockroom door for anyone walking up to it (you, your staff),
+## swinging it gently shut again behind them.
+func _process(dt: float) -> void:
+	if _door_hinge == null or not is_instance_valid(_door_hinge):
+		set_process(false)
+		return
+	var at := to_world(_door_at)
+	var want := 0.0
+	for n in get_tree().get_nodes_in_group("door_openers"):
+		var p: Vector3 = (n as Node3D).global_position
+		if absf(p.y - at.y) < 2.2 and Vector2(p.x - at.x, p.z - at.z).length() < 1.7:
+			want = 1.0
+			break
+	if is_equal_approx(want, _door_open):
+		return
+	_door_open = move_toward(_door_open, want, dt * (2.6 if want > _door_open else 1.1))
+	var e := _door_open * _door_open * (3.0 - 2.0 * _door_open)
+	_door_hinge.rotation.y = -DOOR_OPEN_ANGLE * e
+
+
 func _backroom(st: _Batch, part_d: float, dw0: float, dw1: float) -> void:
 	# Racking along the back wall (cases drawn by refresh_goods).
 	var r0 := 0.3
@@ -1331,7 +1491,9 @@ func _backroom(st: _Batch, part_d: float, dw0: float, dw1: float) -> void:
 	var rd0 := D - 0.75
 	var rd1 := D - 0.08
 	for y: float in [0.1, 0.85, 1.6]:
-		st.box(R(r0, rd0, y), R(r1, rd1, y + 0.05), Color(0.85, 0.45, 0.12))
+		st.box(R(r0, rd0 + 0.04, y + 0.02), R(r1, rd1 - 0.04, y + 0.04), Color(0.62, 0.64, 0.66))  # steel decking
+		st.box(R(r0, rd0, y - 0.04), R(r1, rd0 + 0.05, y + 0.05), Color(0.92, 0.45, 0.1))  # front beam
+		st.box(R(r0, rd1 - 0.05, y - 0.04), R(r1, rd1, y + 0.05), Color(0.92, 0.45, 0.1))  # back beam
 	for x: float in [r0, (r0 + r1) * 0.5, r1]:
 		st.box(R(x - 0.04, rd0, 0.0), R(x + 0.04, rd0 + 0.08, 2.3), Color(0.15, 0.3, 0.6))
 		st.box(R(x - 0.04, rd1 - 0.08, 0.0), R(x + 0.04, rd1, 2.3), Color(0.15, 0.3, 0.6))
@@ -1347,6 +1509,68 @@ func _backroom(st: _Batch, part_d: float, dw0: float, dw1: float) -> void:
 	_solid(R(dx0, D - 1.3, 0.0), R(W - 0.1, D - 0.1, 0.76))
 	office_pos = R(dx0 + 0.8, D - 1.85, 0.0)
 	spots.append({"kind": "office", "pos": office_pos, "label": "MANAGE"})
+	_backroom_dressing(st, part_d, dw0, dw1, r0, r1, rd0, dx0)
+
+
+## A working stockroom, not a bare box: sealed grey floor with a yellow
+## walkway from the door to the racking, bay labels on the uprights, a strip
+## light, a sack truck by the door, flattened boxes, a mop bucket, and a
+## rota/notice board over the desk.
+func _backroom_dressing(st: _Batch, part_d: float, dw0: float, dw1: float, r0: float, r1: float, rd0: float, dx0: float) -> void:
+	var d0 := part_d + 0.14
+	st.box(R(0.06, d0, 0.0), R(W - 0.06, D - 0.06, 0.017), Color(0.47, 0.5, 0.52))  # sealed concrete (over the shop tiles)
+	var yel := Color(0.98, 0.78, 0.12)
+	# Walkway: through the door, then along the racking.
+	st.box(R(dw0 + 0.02, d0 + 0.05, 0.017), R(dw0 + 0.08, rd0 - 0.6, 0.021), yel)
+	st.box(R(dw1 - 0.08, d0 + 0.05, 0.017), R(dw1 - 0.02, D - 1.4, 0.021), yel)
+	st.box(R(r0, rd0 - 0.12, 0.017), R(dw0 + 0.08, rd0 - 0.06, 0.021), yel)
+	# Keep-clear hatching in front of the door.
+	for i in 4:
+		var x := dw0 + 0.15 + i * (dw1 - dw0 - 0.3) / 3.0
+		st.box(R(x - 0.03, d0 + 0.1, 0.017), R(x + 0.03, d0 + 0.75, 0.021), yel)
+	# Bay labels on the racking uprights (A, B…), yellow plates at eye level.
+	var bays := ["A", "B", "C", "D"]
+	var xs := [r0, (r0 + r1) * 0.5, r1]
+	for i in xs.size() - 1:
+		var mx := (float(xs[i]) + float(xs[i + 1])) * 0.5
+		st.box(R(mx - 0.24, rd0 - 0.035, 1.98), R(mx + 0.24, rd0 - 0.005, 2.26), yel)
+		var bl := Label3D.new()
+		bl.text = "BAY " + bays[i]
+		bl.font = EmpireStyle.font("black")
+		bl.font_size = 56
+		bl.pixel_size = 0.0034
+		bl.shaded = false
+		bl.outline_size = 0
+		bl.double_sided = false
+		bl.modulate = Color(0.08, 0.08, 0.1)
+		bl.position = R(mx, rd0 - 0.04, 2.12)
+		_static.add_child(bl)
+	# Strip light over the walkway.
+	_glow_quad(R(W * 0.25, D - 1.6, H - 0.02), R(W * 0.75, D - 1.45, H - 0.02), Color(0.95, 0.97, 1.0), true)
+	# Sack truck by the door (left of it, inside).
+	var tx := dw0 - 0.45
+	var td := d0 + 0.35
+	if tx > r1 + 0.2 or td < rd0 - 1.0:
+		var red := Color(0.75, 0.12, 0.1)
+		st.box(R(tx - 0.2, td, 0.05), R(tx - 0.17, td + 0.04, 1.25), red)
+		st.box(R(tx + 0.17, td, 0.05), R(tx + 0.2, td + 0.04, 1.25), red)
+		st.box(R(tx - 0.2, td, 1.18), R(tx + 0.2, td + 0.04, 1.22), red)
+		st.box(R(tx - 0.2, td - 0.25, 0.02), R(tx + 0.2, td, 0.05), Color(0.3, 0.3, 0.32))  # toe plate
+		for wx: float in [-0.24, 0.2]:
+			st.box(R(tx + wx, td, 0.0), R(tx + wx + 0.05, td + 0.2, 0.2), Color(0.08, 0.08, 0.09))
+	# Flattened boxes and a mop bucket in the far-left corner.
+	var kraft := Color(0.66, 0.5, 0.32)
+	if r0 > 0.2 or part_d + 1.2 < rd0:
+		for k in 4:
+			st.box(R(0.12, d0 + 0.2 + k * 0.012, 0.0 + k * 0.02), R(0.85, d0 + 0.95, 0.02 + k * 0.02), kraft.darkened(0.05 * k))
+		st.box(R(0.15, d0 + 1.15, 0.0), R(0.5, d0 + 1.45, 0.3), Color(0.95, 0.75, 0.1))  # bucket
+		st.box(R(0.3, d0 + 1.28, 0.3), R(0.33, d0 + 1.31, 1.35), Color(0.55, 0.42, 0.28))  # mop handle
+	# Rota / notice board over the desk.
+	st.box(R(W - 0.04, D - 1.25, 1.35), R(W - 0.015, D - 0.15, 2.05), Color(0.6, 0.45, 0.3))
+	var papers := [Color(0.97, 0.97, 0.95), Color(1.0, 0.92, 0.55), Color(0.75, 0.9, 1.0), Color(0.97, 0.97, 0.95)]
+	for k in papers.size():
+		var pd0 := D - 1.15 + k * 0.25
+		st.box(R(W - 0.045, pd0, 1.5 + (k % 2) * 0.18), R(W - 0.04, pd0 + 0.2, 1.78 + (k % 2) * 0.18), papers[k])
 
 
 # --------------------------------------------------------- warehouse
@@ -2300,8 +2524,8 @@ func _nearest_free(c: Vector2i) -> Vector2i:
 ## World-space interaction spots.
 func world_spots() -> Array:
 	var out: Array = []
-	if not rival.is_empty():
-		return out
+	if not rival.is_empty() or (kind == "shop" and biz == null):
+		return out  # (a shop to let has its TO LET board outside, nothing inside)
 	for s in spots:
 		var d: Dictionary = s.duplicate()
 		d["world"] = to_world(s["pos"])

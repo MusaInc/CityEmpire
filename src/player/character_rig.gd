@@ -322,9 +322,16 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 				reference = Color(0.22, 0.24, 0.26)
 			# Skin-tight tops, the face and its parts: tints are relative to
 			# the authored colour (the shop colour replaces it exactly).
-			"hero_top", "hero_top_collar", "hero_bandana":
+			"hero_top", "hero_top_collar", "hero_bandana", "hero_tee", "hero_knit", "hero_shirt", "hero_blazer", "hero_fleece":
 				region = "suit"
 				reference = source.albedo_color
+			# Ribbing and satin lapels: the same colour, a shade deeper.
+			"hero_rib":
+				region = "suit"
+				reference = source.albedo_color * 1.15
+			"hero_lapel":
+				region = "suit"
+				reference = source.albedo_color * 1.3
 			"hero_top_panel", "hero_bandana_knot":
 				region = "suit_panel"
 				reference = source.albedo_color
@@ -350,7 +357,8 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			"hero_glove":
 				region = "glove"
 				reference = Color(0.098, 0.098, 0.106)
-		_hero_materials.append({"material": material, "region": region, "reference": reference})
+		_hero_materials.append({"material": material, "region": region, "reference": reference,
+			"albedo_map": source.albedo_texture})
 
 
 func _tint_hero(region: String, color: Color) -> void:
@@ -384,6 +392,12 @@ func apply_look(look: Dictionary) -> void:
 		_tint_hero("lips", Color(skin.r * 0.82, skin.g * 0.62, skin.b * 0.6))
 		_tint_hero("hair", look["hair"])
 		_tint_hero("iris", look["eyes"])
+	# Bare hands (City Empire): the glove mesh drawn as skin, without the
+	# glove's knit texture (tinted that far, its light fibres clipped to white).
+	var bare: bool = look.get("bare_hands", false)
+	for entry in _hero_materials:
+		if entry.region == "glove":
+			entry.material.set_shader_parameter("albedo_map", null if bare else entry.get("albedo_map"))
 	_show_variants()
 	if _mat:
 		for k in [["suit", "suit_color"], ["pants", "pants_color"], ["shoe", "shoe_color"], ["sole", "sole_color"],
@@ -400,6 +414,9 @@ func set_gadget_active(on: bool) -> void:
 		_show_gear()
 
 
+const COMPRESSION_CUTS := ["long", "tq", "short", "vest"]
+
+
 ## Which of the character model's variant meshes are drawn: the top's cut
 ## (and bare forearms with short sleeves), the chosen face and its hair, the
 ## mask. A full mask hides the face under it (and its draw calls); a hat or
@@ -414,8 +431,14 @@ func _show_variants() -> void:
 	var hat: String = look_state.get("head", "")
 	for mi in skeleton.find_children("*", "MeshInstance3D", true, false):
 		var n := String(mi.name)
-		if n.begins_with("Top_") and n != "Top_Collar":
+		if n == "Top_Collar":
+			mi.visible = cut in COMPRESSION_CUTS  # the mock neck belongs to the skin-tight tops
+		elif n.begins_with("Top_"):
 			mi.visible = n.to_lower() == "top_" + cut
+		elif n.begins_with("Topx_"):
+			mi.visible = n.to_lower().begins_with("topx_" + cut + "_")
+		elif n.begins_with("Cargo_gusset"):
+			mi.visible = look_state.get("trousers", "cargo") == "cargo"
 		elif n.begins_with("Skin_Arms_"):
 			mi.visible = n.to_lower() == "skin_arms_" + cut
 		elif n.begins_with("Face_"):

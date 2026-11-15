@@ -587,7 +587,14 @@ func intro() -> void:
 	v.add_child(ctr)
 	v.add_child(S.button("LET'S GO", func():
 		game.empire.flags["intro_done"] = true
-		close_panel(true), true, 220))
+		close_panel(true)
+		if not game.empire.flags.has("styled"):
+			# A moment's play first: the welcome paused the game before the
+			# hero had landed from spawning (the editor would show the mid-air
+			# balance pose).
+			await get_tree().create_timer(0.7).timeout
+			if not panel_open() and game.state == "play":
+				open_style(true), true, 220))
 
 
 # ------------------------------------------------------------ wholesale
@@ -1300,7 +1307,7 @@ func _m_reports(v: VBoxContainer, b: Business) -> void:
 const PHONE_TABS := [["home", "Home"], ["businesses", "Businesses"], ["map", "Map"], ["vehicles", "Vehicles"],
 	["property", "Property"], ["bank", "Finances"], ["company", "Corporate"], ["more", "More"]]
 ## Under More (the rail highlights More; a back button returns to it).
-const MORE_TABS := [["city", "City", "Weather, rivals, news and the market"], ["goals", "Goals", "Your career, chapter by chapter"],
+const MORE_TABS := [["style", "Style", "Your character: face, hair and clothes"], ["city", "City", "Weather, rivals, news and the market"], ["goals", "Goals", "Your career, chapter by chapter"],
 	["game", "Game", "Save, speed, sleep and settings"]]
 const PHONE_SUB := {"home": "Your empire at a glance: what needs you, and where to go next",
 	"businesses": "Every shop, office and the club: status, stock, staff and money",
@@ -1491,6 +1498,9 @@ func open_phone(tab := "home", focus := {}) -> void:
 		e.flags["viewed_finances"] = true
 	elif tab == "property" and not e.businesses.is_empty():
 		e.flags["viewed_expansion"] = true
+	if tab == "style":
+		open_style()
+		return
 	var v := _phone_shell(tab)
 	match tab:
 		"home":
@@ -1601,6 +1611,14 @@ func open_phone(tab := "home", focus := {}) -> void:
 				game.save_game()
 				close_panel(true)
 				get_tree().reload_current_scene(), false, 280))
+			# Attribution the character's source assets ask for (art/hero/CREDITS.md).
+			v.add_child(S.label("CREDITS", 14, S.AMBER, "black"))
+			var cr := S.label("Character built on MakeHuman (CC0) · Hooded sweat jacket · Elvaerwyn · CC BY · " +
+				"Running shoes 01 · punkduck · CC BY 3.0 · Cargo pants · Cortu Johnstone · CC0 · Gloves · MRT · CC0 · " +
+				"Shop typefaces · SIL Open Font License", 13, S.MUTED)
+			cr.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			cr.custom_minimum_size.x = 640
+			v.add_child(cr)
 
 
 # ------------------------------------------------------------ company
@@ -1866,6 +1884,165 @@ func _swatch(a: Color, b: Color, on: bool, cb: Callable) -> Button:
 		Sfx.play("click", -12.0)
 		cb.call())
 	return btn
+
+
+# ---------------------------------------------------------------- style
+## Your character: the camera turns to face the hero (left of the screen),
+## the choices sit on the right and every tap shows straight away. `first`:
+## straight after the welcome, with a "Start" button.
+var _style_tab := "you"
+var _style_orbit := 0.0
+var _style_first := false
+
+
+func open_style(first := false) -> void:
+	_style_first = first
+	close_panel(false)
+	get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var e := game.empire
+	var l := HeroLook.current(e.flags)
+	_style_pose(true)
+	_style_frame()
+	var catcher := Control.new()  # (the left side stays clear: the hero is there)
+	catcher.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	catcher.mouse_filter = Control.MOUSE_FILTER_STOP
+	_panel_root.add_child(catcher)
+	var W := 600.0
+	var H := 680.0
+	_panel = PanelContainer.new()
+	_panel.custom_minimum_size = Vector2(W, H)
+	_anchor(_panel, 1.0, 0.5, Vector2(-W - 24.0, -H * 0.5), Vector2(W, H))
+	_panel_root.add_child(_panel)
+	var v := S.vbox(12)
+	_panel.add_child(v)
+	var head := S.hbox(10)
+	head.add_child(S.label("Make your character" if first else "Your style", 28, S.PAPER, "black"))
+	head.add_child(S.spacer())
+	if not first:
+		head.add_child(S.button("✕", _close_style, false, 52))
+	v.add_child(head)
+	var tabs := S.hbox(8)
+	for tb in [["you", "Face & hair"], ["clothes", "Clothes"], ["extras", "Shoes & hats"]]:
+		tabs.add_child(S.button(tb[1], func():
+			_style_tab = tb[0]
+			open_style(_style_first), _style_tab == tb[0], 170))
+	v.add_child(tabs)
+	var body := S.vbox(10)
+	match _style_tab:
+		"you":
+			_style_choices(body, "FACE", HeroLook.FACES, l, "face", 3)
+			var fc := HeroLook.face_colors(l["face"])
+			_style_colours(body, "SKIN", HeroLook.SKIN, l, "skin", fc["skin"])
+			_style_choices(body, "HAIRCUT", HeroLook.HAIRS, l, "hair", 3)
+			_style_colours(body, "HAIR COLOUR", HeroLook.HAIR, l, "hair_col", fc["hair"])
+		"clothes":
+			_style_choices(body, "TOP", HeroLook.TOPS, l, "top", 3)
+			_style_colours(body, "TOP COLOUR", HeroLook.CLOTH, l, "top_col")
+			_style_colours(body, "TROUSERS", HeroLook.TROUSERS, l, "pants_col")
+		"extras":
+			_style_choices(body, "SHOES", HeroLook.SHOES, l, "shoes", 3)
+			_style_choices(body, "HAT", HeroLook.HATS, l, "head", 4)
+			_style_choices(body, "EYEWEAR", HeroLook.EYEWEAR, l, "eyewear", 4)
+	v.add_child(_scroll(body, H - 250.0))
+	var foot := S.hbox(10)
+	foot.add_child(S.button("⟲", func():
+		_style_orbit -= 0.6
+		_style_frame(), false, 64))
+	foot.add_child(S.button("⟳", func():
+		_style_orbit += 0.6
+		_style_frame(), false, 64))
+	foot.add_child(S.button("Random", func():
+		var rng := RandomNumberGenerator.new()
+		rng.randomize()
+		var r := {}
+		for pair in [["face", HeroLook.FACES], ["hair", HeroLook.HAIRS], ["top", HeroLook.TOPS], ["shoes", HeroLook.SHOES]]:
+			var lst: Array = pair[1]
+			r[pair[0]] = lst[rng.randi() % lst.size()][0]
+		r["top_col"] = HeroLook.CLOTH[rng.randi() % HeroLook.CLOTH.size()]
+		r["pants_col"] = HeroLook.TROUSERS[rng.randi() % HeroLook.TROUSERS.size()]
+		r["hair_col"] = ""
+		r["skin"] = ""
+		r["head"] = "head_bare"
+		r["eyewear"] = "face_none"
+		_style_set(r), false, 130))
+	foot.add_child(S.spacer())
+	foot.add_child(S.button("Start" if first else "Done", _close_style, true, 160))
+	v.add_child(foot)
+
+
+func _style_set(changes: Dictionary) -> void:
+	var e := game.empire
+	var l := HeroLook.current(e.flags)
+	l.merge(changes, true)
+	e.flags["look"] = l
+	game.apply_hero_look()
+	Sfx.play("click", -12.0)
+	open_style(_style_first)
+
+
+func _style_choices(v: VBoxContainer, title: String, list: Array, l: Dictionary, key: String, cols: int) -> void:
+	v.add_child(S.label(title, 14, S.AMBER, "black"))
+	var g := GridContainer.new()
+	g.columns = cols
+	g.add_theme_constant_override("h_separation", 8)
+	g.add_theme_constant_override("v_separation", 8)
+	var w := (540.0 - 8.0 * (cols - 1)) / cols
+	for it in list:
+		g.add_child(S.button(String(it[1]), func(): _style_set({key: it[0]}), String(l.get(key, "")) == it[0], w))
+	v.add_child(g)
+
+
+## A row of colour swatches; `own` (when given) is a first swatch meaning
+## "the face's own colour" (stored as "").
+func _style_colours(v: VBoxContainer, title: String, list: Array, l: Dictionary, key: String, own = null) -> void:
+	v.add_child(S.label(title, 14, S.AMBER, "black"))
+	var g := GridContainer.new()
+	g.columns = 8
+	g.add_theme_constant_override("h_separation", 8)
+	g.add_theme_constant_override("v_separation", 8)
+	var cur := String(l.get(key, ""))
+	if own is Color:
+		g.add_child(_swatch(own, own.lightened(0.5), cur == "", func(): _style_set({key: ""})))
+	for hx in list:
+		var c := Color(String(hx))
+		g.add_child(_swatch(c, c, cur != "" and Color(cur).is_equal_approx(c), func(): _style_set({key: hx})))
+	v.add_child(g)
+
+
+## Stand the hero still (idling, animated) while the editor is open.
+func _style_pose(on: bool) -> void:
+	var p: Player = game.player
+	if on:
+		p.velocity = Vector3.ZERO
+		p.s.velocity = Vector3.ZERO
+	game.rig.process_mode = Node.PROCESS_MODE_ALWAYS if on else Node.PROCESS_MODE_INHERIT
+
+
+## The camera in front of the hero (orbiting with ⟲ ⟳), the hero on the left
+## half of the screen, clear of the panel.
+func _style_frame() -> void:
+	var p: Player = game.player
+	var fwd: Vector3 = game.rig._facing
+	fwd = fwd.rotated(Vector3.UP, _style_orbit)
+	var side := fwd.cross(Vector3.UP).normalized()
+	var chest := p.global_position + Vector3.UP * 0.35
+	var eye := chest + fwd * 3.1 + Vector3.UP * 0.25
+	var look_at := chest - side * 0.95  # look right of the hero: they sit left of centre
+	var cam: Camera3D = game.camera.cam
+	cam.global_transform = Transform3D(Basis.looking_at(look_at - eye, Vector3.UP), eye)
+	cam.fov = 50.0
+
+
+func _close_style() -> void:
+	var first := _style_first
+	_style_pose(false)
+	_style_first = false
+	if first:
+		game.empire.flags["styled"] = true
+	game.save_game()
+	close_panel(true)
+	game.camera.snap()
 
 
 # ---------------------------------------------------------- head office

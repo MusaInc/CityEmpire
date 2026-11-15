@@ -6,3 +6,4 @@ export_credentials.cfg
 __pycache__/
 *.blend1
 store/screenshots/raw/
+art/hero/courier.blend

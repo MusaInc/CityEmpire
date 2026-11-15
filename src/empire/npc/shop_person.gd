@@ -114,6 +114,10 @@ static func _carry_mat(c: Color) -> StandardMaterial3D:
 	return m
 
 
+func _enter_tree() -> void:
+	add_to_group("door_openers")  # staff through the stockroom door
+
+
 func _process(dt: float) -> void:
 	if _bubble_t > 0.0:
 		_bubble_t -= dt

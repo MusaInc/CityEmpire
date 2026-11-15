@@ -101,14 +101,13 @@ func _ready() -> void:
 	player.everyday = true
 	add_child(player)
 	player.ground_fn = layout.ground_y
+	player.add_to_group("door_openers")  # the stockroom door opens for you
+	player.steer_fn = _door_assist
 	rig = CharacterRig.new()
 	rig.name = "Rig"
 	player.add_child(rig)
 	rig.set_player(player)
-	var look := Shop.look({"face": "face_none", "head": "head_bare", "suit": "sky", "top": "top_long",
-		"pants": "pants_navy", "hero": "hero_ade", "hair": "hair_natural"})
-	look["glove"] = look["skin"]  # bare hands (the hero model always wears gloves)
-	rig.apply_look(look)
+	rig.apply_look(HeroLook.build(HeroLook.DEFAULT))
 	# The people on the pavements round you (the GPU walkers carry the far streets).
 	crowd = Crowd.new()
 	crowd.name = "Crowd"
@@ -207,6 +206,22 @@ func _after_start() -> void:
 				var from := dp + Premises.outward(fu) * fd + Premises.along_dir(fu) * fd * 0.25 \
 					- Vector3.UP * float(args.get("front-up", "0")) * 0.6
 				return [Transform3D(Basis.looking_at(dp - from, Vector3.UP), from), 62.0]
+		if not u.is_empty() and args.has("stockroom"):
+			# Captures: inside the shop, looking at the stockroom wall/door
+			# ("in": from inside the stockroom, looking at the racking).
+			var su := u
+			var sv := String(args["stockroom"])
+			camera.cine = func(_dt: float) -> Array:
+				var si: ShopInterior = interiors.get(su["id"])
+				if si == null:
+					return [camera.cam.global_transform, 62.0]
+				var pd := si.D - ShopInterior.BACKROOM
+				var from := si.to_world(ShopInterior.R(si.W * 0.5, pd - 4.2, 1.7))
+				var to := si.to_world(ShopInterior.R(si.W - 1.6, pd, 1.55))
+				if sv == "in":
+					from = si.to_world(ShopInterior.R(si.W * 0.55, pd + 0.3, 2.3))
+					to = si.to_world(ShopInterior.R(si.W * 0.3, si.D, 0.7))
+				return [Transform3D(Basis.looking_at(to - from, Vector3.UP), from), 66.0]
 		if not u.is_empty():
 			var inside := args.has("inside")
 			var p := Premises.door_point(u) + Premises.outward(u) * (-2.5 if inside else 3.0) + Vector3.UP * 1.0
@@ -294,6 +309,9 @@ func _after_start() -> void:
 		elif pn == "firm" and not empire.firms.is_empty():
 			var fs2 := CityLife.firms_for_sale(empire)
 			ui.open_firm(unit_by_id[(fs2[0] if not fs2.is_empty() else empire.firms[0])["unit"]])
+		elif pn.begins_with("style"):
+			ui._style_tab = pn.get_slice(":", 1) if ":" in pn else "you"
+			ui.open_style()
 		elif pn == "brand":
 			ui.open_brand()
 		elif pn == "hq":
@@ -497,6 +515,7 @@ func wholesaler(island: String) -> Dictionary:
 
 
 func _connect_empire() -> void:
+	apply_hero_look()
 	_brand_sig = "?"
 	_sync_brand()
 	empire.notified.connect(func(t, k): ui.toast(t, k, empire.last_ref))
@@ -509,6 +528,13 @@ func _connect_empire() -> void:
 		Sfx.play("chime", -2.0)
 		save_game()
 		ui.victory())
+
+
+## Dress the hero as the empire's saved look (HeroLook).
+func apply_hero_look(preview := {}) -> void:
+	var l := HeroLook.current(empire.flags if empire else {})
+	l.merge(preview, true)
+	rig.apply_look(HeroLook.build(l))
 
 
 func _title(_has_save: bool) -> void:
@@ -590,6 +616,7 @@ func _process(dt: float) -> void:
 	if state != "play":
 		return
 	_update_spot()
+	_update_indoors()
 	_update_carry_visual()
 	if driving != "":
 		_track_driving()
@@ -724,10 +751,6 @@ func _update_live_floor() -> void:
 					and absf(local.y) < 4.0:
 				want = id
 				break
-	player.indoors = false
-	for id in interiors:
-		if (interiors[id] as ShopInterior).contains(player.global_position):
-			player.indoors = true
 	if want == floor_unit:
 		return
 	_end_floor()
@@ -746,6 +769,107 @@ func _update_live_floor() -> void:
 		_refresh_signs(id)
 
 
+## Walking at a shop door, in or out: the direction bends towards the middle
+## of the doorway, so cutting the corner doesn't catch the door frame (and
+## stumble you at a run). Only within ~60° of the doorway and close to it;
+## walking along the pavement past a door is left alone.
+func _door_assist(move: Vector3) -> Vector3:
+	var p := player.global_position
+	var mlen := move.length()
+	for id in interiors:
+		var si: ShopInterior = interiors[id]
+		if si.kind == "hq" or si.kind == "office":
+			continue
+		var o := si.global_transform.origin
+		if absf(o.y - (p.y - 0.9)) > 1.6 or Vector2(o.x - p.x, o.z - p.z).length() > si.W + 6.0:
+			continue
+		var inv := si.global_transform.affine_inverse()
+		var l := inv * p
+		var d := -l.z  # depth into the room (negative outside)
+		var cx := (si.door.x + si.door.y) * 0.5
+		var hw := (si.door.y - si.door.x) * 0.5
+		if d < -2.8 or d > 1.8 or absf(l.x - cx) > hw + 2.0:
+			continue
+		var lm := inv.basis * move
+		lm.y = 0.0
+		var inward := lm.z < 0.0
+		# Aim: line up on the doorway's middle just before the frame, then
+		# straight through (a stride past it).
+		var aim := Vector3(cx, 0.0, -1.2 if inward else 1.5)
+		if inward and d < -0.55:
+			aim.z = 0.25
+		elif not inward and d > 1.0:
+			aim.z = -0.6
+		var to_aim := Vector3(aim.x - l.x, 0.0, aim.z - l.z)
+		if to_aim.length() < 0.3:
+			continue
+		to_aim = to_aim.normalized()
+		var md := lm.normalized()
+		var cosang := md.dot(to_aim)
+		if cosang < 0.5:
+			continue
+		# Strongest right at the frame, fading out over ~2 m either side;
+		# nothing needed when you're already well inside the opening.
+		var near := 1.0 - clampf((absf(d) - 0.4) / 2.2, 0.0, 1.0)
+		var off := clampf((absf(l.x - cx) - (hw - 0.65)) / 0.5, 0.0, 1.0)
+		var k := near * maxf(off, 0.35) * smoothstep(0.5, 0.8, cosang)
+		if k <= 0.01:
+			continue
+		var nd := md.slerp(to_aim, k).normalized()
+		return (si.global_transform.basis * nd).normalized() * mlen
+	return move
+
+
+## Inside a shop, office lobby or warehouse: indoor walking (a brisk walk,
+## quick turns) and the camera brought in under the ceiling. Every frame, so
+## the change happens as you cross the threshold, not up to 0.4 s later.
+func _update_indoors() -> void:
+	var ceiling := INF
+	if driving == "":
+		var p := player.global_position
+		for id in interiors:
+			var si: ShopInterior = interiors[id]
+			if si.global_transform.origin.distance_squared_to(p) < 2500.0 and si.contains(p):
+				ceiling = si.global_transform.origin.y + si.H
+				break
+	player.indoors = ceiling < INF
+	camera.indoor_ceiling = ceiling
+	_hero_fill(ceiling < INF)
+
+
+## Indoors the building shadows the sun and the hero (dark clothes, deep skin
+## tones) went to a silhouette against bright shelving. A soft light on the
+## camera's side that lights only the hero (its own render layer), faded in
+## while you're inside.
+const HERO_LAYER := 1 << 19
+var _fill: OmniLight3D
+var _fill_e := 0.0
+
+
+func _hero_fill(on: bool) -> void:
+	if _fill == null:
+		_fill = OmniLight3D.new()
+		_fill.name = "HeroFill"
+		_fill.light_cull_mask = HERO_LAYER
+		_fill.shadow_enabled = false
+		_fill.omni_range = 5.0
+		_fill.omni_attenuation = 0.6
+		_fill.light_color = Color(1.0, 0.96, 0.9)
+		_fill.light_specular = 0.2
+		add_child(_fill)
+	if rig.skeleton:
+		for mi in rig.skeleton.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).layers |= HERO_LAYER
+	_fill_e = move_toward(_fill_e, 1.0 if on else 0.0, get_process_delta_time() * 2.0)
+	_fill.visible = _fill_e > 0.01
+	if _fill.visible:
+		var h := player.global_position + Vector3.UP * 0.4
+		var c := camera.cam.global_position
+		var to_c := Vector3(c.x - h.x, 0.0, c.z - h.z).normalized()
+		_fill.global_position = h + to_c * 1.6 + to_c.cross(Vector3.UP) * 0.6 + Vector3.UP * 1.0
+		_fill.light_energy = 1.1 * _fill_e
+
+
 func _end_floor() -> void:
 	if floor:
 		floor.queue_free()
@@ -758,6 +882,9 @@ func current_business() -> Business:
 
 
 # ---------------------------------------------------------------- spots
+const CAR_REACH := 1.7  # metres from the bodywork that still reach a door or the boot
+
+
 func _update_spot() -> void:
 	var best := {}
 	var best_d := INF
@@ -800,17 +927,25 @@ func _update_spot() -> void:
 		if dco < 2.6 and absf(p.y - 0.9 - co.y) < 2.0 and dco < best_d:
 			best = {"kind": "club_office", "world": co}
 			best_d = dco
+		# Cars: walk up to any side of it. The back third is the boot, the
+		# rest is a door (either side, or the bonnet): no hunting for the
+		# one handle on the driver's side.
 		for vid in cars:
 			var car: Car = cars[vid]
 			var xf := car.global_transform
-			var half: float = car.spec["size"].z * 0.5
-			var door := xf * Vector3(-car.spec["size"].x * 0.5 - 0.6, 0.0, -0.3)
-			var boot := xf * Vector3(0.0, 0.0, half + 0.8)
-			for s2 in [{"kind": "car_door", "vehicle": vid, "world": door}, {"kind": "car_boot", "vehicle": vid, "world": boot}]:
-				var d3 := Vector2(p.x, p.z).distance_to(Vector2(s2["world"].x, s2["world"].z))
-				if d3 < 1.5 and d3 < best_d:
-					best = s2
-					best_d = d3
+			var lp := xf.affine_inverse() * p
+			var hw: float = car.spec["size"].x * 0.5
+			var hl: float = car.spec["size"].z * 0.5
+			var gap := Vector2(maxf(absf(lp.x) - hw, 0.0), maxf(absf(lp.z) - hl, 0.0)).length()
+			if gap > CAR_REACH or absf(lp.y) > 2.2:
+				continue
+			var at_boot := lp.z > hl * 0.45 and (lp.z > hl or absf(lp.x) < hw + 0.5)
+			var s2 := {"kind": "car_boot" if at_boot else "car_door", "vehicle": vid,
+				"world": xf * Vector3(clampf(lp.x, -hw - 0.6, hw + 0.6), 0.0, clampf(lp.z, -hl - 0.6, hl + 0.8))}
+			var d3 := gap * 0.8  # a car you're touching beats a shelf behind you
+			if d3 < best_d:
+				best = s2
+				best_d = d3
 	var changed: bool = best.get("kind", "") != spot.get("kind", "") or best.get("slot", -9) != spot.get("slot", -9) \
 		or best.get("vehicle", "") != spot.get("vehicle", "") or best.get("interior") != spot.get("interior")
 	spot = best

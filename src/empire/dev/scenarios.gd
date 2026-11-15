@@ -86,6 +86,24 @@ func _run() -> void:
 		await scenario_g()
 	if want("H"):
 		await scenario_h()
+	if _which.split(",").has("W"):
+		await scenario_w()
+	if _which.split(",").has("V"):
+		await scenario_v()
+	if _which.split(",").has("S"):
+		# The Style screen as a new player meets it (`--sc-film=<png>`): the
+		# welcome, LET'S GO, then the editor with the hero idling in it.
+		game.empire.flags.erase("styled")
+		game.ui.intro()
+		await frames(3)
+		for b in game.ui.find_children("*", "Button", true, false):
+			if (b as Button).text == "LET'S GO":
+				(b as Button).pressed.emit()
+				break
+		await until(func(): return game.ui.panel_open(), 5.0)
+		await wait(2.0)
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(String(game.args.get("sc-film", "user://style.png")))
 	print("SCENARIO DONE %d/%d passed in %.0f s" % [checks - fails, checks, (Time.get_ticks_msec() - t0) / 1000.0])
 	get_tree().quit(fails)
 
@@ -437,3 +455,175 @@ func scenario_h() -> void:
 	game.clear_gps()
 	check(not game.gps.active() and not e.flags.has("gps"), "Cancel route clears it (and the save)")
 	print("(status before: %s)" % st0[1])
+
+
+# ------------------------------------- W: walking in and out of every shop
+## Not in the default set (it walks every unit: `--scenarios=W`, add
+## `--sc-units=N` for a sample, `--sc-pace=0.45` for a stroll). The hero
+## walks from the pavement through the door to the middle of the shop floor,
+## then back out to the street, steered like a player holding the stick.
+class _Walk:
+	extends RefCounted
+	var target := Vector3.ZERO
+	var amount := 1.0
+	var human_steer := true
+	func drive(p: Player, _dt: float) -> Dictionary:
+		var d := target - p.global_position
+		d.y = 0.0
+		var mv := d.normalized() * amount if d.length() > 0.25 else Vector3.ZERO
+		return {"move": mv, "aim": mv if mv != Vector3.ZERO else Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": false}
+
+
+func _walk_to(w: _Walk, to: Vector3, secs: float) -> Dictionary:
+	var p := game.player
+	w.target = to
+	var t := 0.0
+	var stuck := 0.0
+	var last := p.global_position
+	var low := INF
+	while t < secs:
+		await get_tree().physics_frame
+		t += 1.0 / 60.0
+		var pos := p.global_position
+		low = minf(low, pos.y)
+		stuck = stuck + 1.0 / 60.0 if pos.distance_to(last) < 0.004 else 0.0
+		last = pos
+		if Vector2(pos.x - to.x, pos.z - to.z).length() < 0.45:
+			return {"ok": true, "t": t, "low": low}
+		if stuck > 1.5:
+			break
+	var hit := ""
+	for k in p.get_slide_collision_count():
+		var c := p.get_slide_collision(k)
+		var o := c.get_collider() as Node
+		hit += " [%s n=%s y=%.2f]" % [o.get_path() if o else "?", c.get_normal().snapped(Vector3.ONE * 0.01), c.get_position().y - p.global_position.y + 0.9]
+	return {"ok": false, "t": t, "low": low, "at": "%s%s" % [p.global_position, hit]}
+
+
+func scenario_w() -> void:
+	print("--- W: walking in and out of shops")
+	var p := game.player
+	var w := _Walk.new()
+	w.amount = float(game.args.get("sc-pace", "1.0"))
+	var stag := [0]
+	p.staggered.connect(func(sp, n):
+		stag[0] += 1
+		if game.args.has("sc-debug"):
+			var hit := ""
+			for k in p.get_slide_collision_count():
+				var c := p.get_slide_collision(k)
+				hit += " [%s at %s]" % [(c.get_collider() as Node).get_path() if c.get_collider() else "?", c.get_position()]
+			for sid in game.interiors:
+				var si2: ShopInterior = game.interiors[sid]
+				var lq := si2.global_transform.affine_inverse() * p.global_position
+				if lq.x > -2.0 and lq.x < si2.W + 2.0 and lq.z > -si2.D and lq.z < 4.0:
+					hit += " room %s x=%.2f d=%.2f door=%s W=%.1f" % [sid, lq.x, -lq.z, si2.door, si2.W]
+			print("    stagger %.1f m/s n=%s at %s%s" % [sp, n, p.global_position, hit]))
+	var list: Array = []
+	var only := String(game.args.get("sc-only", "")).split(",", false)
+	for u in game.units:
+		if String(u["kind"]) in ["shop", "wholesale"] and (only.is_empty() or String(u["id"]) in only):
+			list.append(u)
+	var n := int(game.args.get("sc-units", str(list.size())))
+	var step := maxf(1.0, float(list.size()) / n)
+	var bad := 0
+	var done := 0
+	var i := 0.0
+	while int(i) < list.size():
+		var u: Dictionary = list[int(i)]
+		i += step
+		var dp := Premises.door_point(u)
+		var out := Premises.outward(u)
+		# (`--sc-side=<m>`: start that far along the shopfront, to come at the door at an angle.)
+		var street := dp + out * 3.0 + Premises.along_dir(u) * float(game.args.get("sc-side", "0"))
+		street.y = float(game.layout.ground_y(street.x, street.z))
+		await stand(street)
+		p.bot = w
+		await until(func(): return game.interiors.has(u["id"]), 5.0)
+		await frames(2)
+		var si: ShopInterior = game.interiors.get(u["id"])
+		if si == null:
+			print("  (no interior for %s)" % u["id"])
+			continue
+		var drop := si.street_drop
+		# Stood on the street (its collision streamed in) before setting off.
+		w.target = p.global_position
+		await until(func(): return p.is_on_floor(), 5.0)
+		await frames(10)
+		if absf(p.global_position.y - 0.9 - street.y) > 1.5:
+			print("  (no pavement at the start point for %s: landed %.1f m off it; skipped)" % [u["id"], p.global_position.y - 0.9 - street.y])
+			p.bot = null
+			continue
+		if game.args.has("sc-debug"):
+			var bb: Dictionary = u["b"]
+			var fr := dp + out * 3.0
+			print("  unit %s dp=%s base=%.2f tier0=%s ground(front)=%.2f lifted=%s keys=%s" % [u["id"], dp, BuildingMesher.base_of(bb),
+				str(bb["tiers"][0]), game.layout.ground_y(fr.x, fr.z), bb.get("lift", "-"), bb.keys()])
+		if absf(street.y - dp.y) > 2.0:
+			street.y = dp.y - drop  # (a podium or deck the terrain doesn't know about)
+		var inside := si.to_world(si.door_in + ShopInterior.R(0.0, 0.6, 0.0))
+		var floor_y := si.global_transform.origin.y
+		stag[0] = 0
+		if game.args.has("sc-debug"):
+			var l0 := si.global_transform.affine_inverse() * p.global_position
+			print("    start x=%.2f d=%.2f  door=%s" % [l0.x, -l0.z, si.door])
+		var a: Dictionary = await _walk_to(w, inside, 12.0)
+		var in_y := p.global_position.y - 0.9 - floor_y
+		var in_ok: bool = a["ok"] and absf(in_y) < 0.1 and si.contains(p.global_position)
+		var b: Dictionary = await _walk_to(w, street + out * 0.5, 12.0)
+		var out_ok: bool = b["ok"]
+		var fell: bool = minf(a["low"], b["low"]) < minf(floor_y, street.y) + 0.9 - 0.5
+		var good: bool = in_ok and out_ok and stag[0] == 0 and not fell
+		done += 1
+		if not good:
+			bad += 1
+		if not good or game.args.has("sc-debug"):
+			print("  %s %s drop=%.2f dy=%.2f in=%s(%.1fs%s) out=%s(%.1fs%s) stag=%d fell=%s" % ["ok " if good else "BAD", u["id"], drop, in_y,
+				in_ok, a["t"], "" if a["ok"] else " at %s" % a.get("at"), out_ok, b["t"], "" if b["ok"] else " at %s" % b.get("at"), stag[0], fell])
+		p.bot = null
+	check(bad == 0, "walked into and out of %d/%d shops without getting stuck, stumbling or falling" % [done - bad, done])
+
+
+## Films one walk in and out (`--scenarios=V --sc-film=<dir> [--sc-only=<unit>]
+## [--sc-pace=…]`, under xvfb): a frame every 0.2 s of game time, the
+## camera as the player sees it.
+func scenario_v() -> void:
+	var dir := String(game.args.get("sc-film", "user://film"))
+	var p := game.player
+	var u: Dictionary = game.starter_unit()
+	if game.args.has("sc-only"):
+		u = game.unit_by_id[String(game.args["sc-only"])]
+	var dp := Premises.door_point(u)
+	var out := Premises.outward(u)
+	var street := dp + out * 4.5 + Premises.along_dir(u) * 1.5
+	street.y = float(game.layout.ground_y(street.x, street.z))
+	await stand(street)
+	await until(func(): return game.interiors.has(u["id"]), 5.0)
+	var si: ShopInterior = game.interiors[u["id"]]
+	p.rotation.y = atan2(-out.x, -out.z)
+	game.camera.snap()
+	await wait(1.0)
+	var w := _Walk.new()
+	w.amount = float(game.args.get("sc-pace", "1.0"))
+	p.bot = w
+	var legs := [si.to_world(si.door_in + ShopInterior.R(0.0, 1.4, 0.0)), dp + out * 4.0 - Premises.along_dir(u) * 1.5]
+	var n := 0
+	for leg: Vector3 in legs:
+		w.target = leg
+		var t := 0.0
+		while t < 8.0:
+			await get_tree().physics_frame
+			t += 1.0 / 60.0
+			if Engine.get_physics_frames() % 12 == 0:
+				await RenderingServer.frame_post_draw
+				get_viewport().get_texture().get_image().save_png("%s/f%03d.png" % [dir, n])
+				n += 1
+			var d: Vector3 = leg - p.global_position
+			if Vector2(d.x, d.z).length() < 0.45:
+				break
+		if leg == legs[0]:
+			w.target = p.global_position
+			for k in 30:
+				await get_tree().physics_frame
+	p.bot = null
+	print("FILM %d frames in %s" % [n, dir])

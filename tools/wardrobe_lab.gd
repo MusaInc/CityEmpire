@@ -22,6 +22,18 @@ var SETS := {
 		{"face": "face_none", "hair": "hair_bun", "head": "head_crown", "hero": "hero_theo"},
 		{"face": "face_shades", "hair": "hair_pixie", "hero": "hero_ren"},
 		{"face": "face_visor", "hair": "hair_fade", "hero": "hero_malik"}],
+	"empire": [{"top": "top_tee", "suit": "sky", "face": "face_none", "hero": "hero_ade"},
+		{"top": "top_polo", "suit": "graphite", "face": "face_none", "hero": "hero_ren", "hair": "hair_bob"},
+		{"top": "top_shirt", "suit": "mint", "face": "face_none", "hero": "hero_theo", "pants": "pants_khaki"},
+		{"top": "top_jumper", "suit": "tangerine", "face": "face_none", "hero": "hero_malik"},
+		{"top": "top_hoodie", "suit": "royal", "face": "face_none", "hero": "hero_kai", "hair": "hair_curls"},
+		{"top": "top_blazer", "suit": "onyx", "face": "face_none", "hero": "hero_ade", "pants": "pants_black"}],
+	"empiretorso": [{"top": "top_tee", "suit": "sky", "face": "face_none", "hero": "hero_ade"},
+		{"top": "top_tee", "suit": "tangerine", "face": "face_none", "hero": "hero_theo"},
+		{"top": "top_polo", "suit": "sky", "face": "face_none", "hero": "hero_ade"},
+		{"top": "top_shirt", "suit": "mint", "face": "face_none", "hero": "hero_theo"},
+		{"top": "top_jumper", "suit": "tangerine", "face": "face_none", "hero": "hero_malik"},
+		{"top": "top_blazer", "suit": "graphite", "face": "face_none", "hero": "hero_ade"}],
 	"hats": [{"head": "head_cap"}, {"head": "head_beanie"}, {"head": "head_phones"}, {"face": "face_shades"}, {"face": "face_visor"}],
 }
 
@@ -65,8 +77,8 @@ func _go() -> void:
 	cam.fov = 30.0
 	root.add_child(cam)
 	cam.make_current()
-	var close := which in ["faces", "masks", "hats", "hair", "hairback", "hairhats", "hairtheo", "hairtheoback"]
-	var mid := which == "torso"
+	var close := which in ["empireface", "faces", "masks", "hats", "hair", "hairback", "hairhats", "hairtheo", "hairtheoback"]
+	var mid := which in ["torso", "empiretorso"]
 	var feet := which == "feet"
 	var look_at := player.global_position + Vector3(0, 0.78 if close else (0.35 if mid else (-0.72 if feet else 0.05)), 0)
 	var view := Vector3(0.75, 0.12, -1.4) if which.ends_with("back") else Vector3(0.55, 0.05, 1.45)
@@ -74,7 +86,11 @@ func _go() -> void:
 	cam.look_at(look_at, Vector3.UP)
 	var i := 0
 	for preview: Dictionary in SETS[which]:
-		rig.apply_look(Shop.look(preview))
+		var lk := Shop.look(preview)
+		if which.begins_with("empire"):
+			lk["glove"] = Color(lk["skin"].r * 0.8, lk["skin"].g * 0.7, lk["skin"].b * 0.66)  # bare hands, as HeroLook.build
+			lk["bare_hands"] = true
+		rig.apply_look(lk)
 		for f in 24:
 			await process_frame
 		await RenderingServer.frame_post_draw
