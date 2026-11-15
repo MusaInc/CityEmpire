@@ -55,6 +55,32 @@ func setup(p_game: EmpireGame) -> void:
 				if ring.is_empty() or (ring[0] as PackedVector2Array).size() < 3:
 					continue
 				_add_loop(ring[0], 1 if li == 0 else -1)
+	# Skyport Island: a pavement each side of every road (walked along one
+	# side and back along the other, so nobody reaches an end and vanishes).
+	if SkyportIsland.enabled and game.skyport:
+		for rd in game.skyport.plan_data.get("roads", []):
+			if rd[3]:
+				continue  # (not on the bridge deck)
+			var rp: PackedVector3Array = (rd[1] as PackedVector3Array).duplicate()
+			var off := float(rd[2]) * 0.5 + 2.2
+			# Turn round 12 m short of each end: people cross at the junction's
+			# mouth, not through the middle of it.
+			for end in [0, 1]:
+				var i0 := 0 if end == 0 else rp.size() - 1
+				var i1 := 1 if end == 0 else rp.size() - 2
+				var dd := rp[i1] - rp[i0]
+				if dd.length() > 30.0:
+					rp[i0] = rp[i0] + dd.normalized() * 12.0
+			var ring := PackedVector2Array()
+			for side: float in [1.0, -1.0]:
+				var idxs := range(rp.size()) if side > 0.0 else range(rp.size() - 1, -1, -1)
+				for i in idxs:
+					var a := rp[maxi(i - 1, 0)]
+					var b := rp[mini(i + 1, rp.size() - 1)]
+					var d := Vector2(b.x - a.x, b.z - a.z).normalized()
+					var n := Vector2(-d.y, d.x) * off * side
+					ring.append(Vector2(rp[i].x, rp[i].z) + n)
+			_add_loop(ring, 1)
 	for u in game.units:
 		if u["kind"] == "shop":
 			_doors.append([Premises.door_point(u), Premises.outward(u), u["id"]])

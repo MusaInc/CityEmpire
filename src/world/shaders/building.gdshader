@@ -287,6 +287,8 @@ void fragment() {
 			edge = min(half_ext.x - abs(uv.x), half_ext.y - abs(uv.y));
 			seed = UV2.y;
 		}
+		bool metal_roof = seed >= 7.5;
+		seed = fract(seed);
 		// Roof membrane panels, softly varied (no per-pixel noise: it shimmers).
 		float n = hash12(floor(uv / 4.0) + seed * 91.0);
 		vec2 pf = abs(fract(uv / 4.0) - 0.5);
@@ -327,6 +329,45 @@ void fragment() {
 			albedo *= 1.0 - 0.18 * detail * (1.0 - smoothstep(0.0, 2.2, length(vec2(min(dpos.x, dpos.y), edge - 0.6))));
 		}
 		rough = 0.95;
+		if (metal_roof) {
+			// Warehouses: ribbed metal sheeting (a rib every 0.33 m across
+			// 1 m sheets, the seams darker), a little sheen, rust and dirt
+			// gathering towards the eaves on older sheds, and a row of
+			// translucent skylights on a sparse 12 x 18 m grid.
+			float rib = abs(fract(uv.x / 0.33) - 0.5);
+			float sheet = step(fract(uv.y / 6.0), 0.012) + step(fract(uv.x / 1.0), 0.02);
+			vec3 tin = mix(vec3(0.58, 0.6, 0.62), base * 0.9, 0.35) * (0.92 + 0.08 * hash12(floor(uv / vec2(1.0, 6.0)) + seed));
+			tin *= 1.0 - 0.18 * smoothstep(0.32, 0.5, rib) * detail;
+			tin *= 1.0 - 0.15 * clamp(sheet, 0.0, 1.0) * detail;
+			vec3 rust = vec3(0.42, 0.24, 0.13);
+			float rusty = age * smoothstep(0.55, 0.85, vnoise_b(uv * 0.35 + seed * 9.0)) * (1.0 - smoothstep(0.0, 6.0, edge));
+			tin = mix(tin, rust * (0.8 + 0.3 * vnoise_b(uv * 2.0)), rusty * 0.8);
+			float sky = step(abs(fract(uv.y / 18.0) - 0.5) * 18.0, 1.0) * step(abs(fract(uv.x / 12.0) - 0.5) * 12.0, 1.5) * step(4.0, edge);
+			tin = mix(tin, vec3(0.6, 0.66, 0.66), sky * 0.6);
+			albedo = tin;
+			rough = mix(0.42, 0.75, rusty);
+			metal = 0.45 * (1.0 - rusty) * (1.0 - sky);
+		}
+		if (style == 3.0) {
+			// Warehouses: profiled metal sheeting – ribs every 0.33 m along
+			// the shorter span, 1.1 m sheets with lapped seams, a few
+			// translucent roof lights, and (older buildings) rust weeping
+			// from the fixings and the edges. Catches the sun a little.
+			bool along_x = fract(seed * 9.7) < 0.5;
+			float run = along_x ? uv.x : uv.y;
+			float cross_ = along_x ? uv.y : uv.x;
+			float rib = smoothstep(0.35, 0.5, abs(fract(run / 0.33) - 0.5) * 2.0);
+			float sheet = hash12(vec2(floor(run / 1.1), floor(cross_ / 6.0)) + seed * 13.0);
+			vec3 metal_c = mix(vec3(0.55, 0.58, 0.6), base * 1.1, 0.35) * (0.9 + 0.12 * sheet);
+			albedo = metal_c * (1.0 - 0.18 * rib * detail);
+			float roof_light = step(0.86, hash12(vec2(floor(run / 4.4), floor(cross_ / 7.0)) + seed)) * step(0.15, fract(cross_ / 7.0));
+			albedo = mix(albedo, vec3(0.72, 0.76, 0.74), roof_light * 0.8);
+			float rust = smoothstep(0.55, 0.9, vnoise_b(uv * vec2(0.3, 1.6) + seed * 7.0)) * age;
+			rust = max(rust, (1.0 - smoothstep(0.0, 1.5, edge)) * age * 0.8);
+			albedo = mix(albedo, vec3(0.42, 0.24, 0.13), rust * 0.6 * detail);
+			rough = mix(0.45, 0.8, rust);
+			metal = 0.35 * (1.0 - rust);
+		}
 	} else if (v_kind == KIND_TRIM) {
 		albedo = base;
 		rough = 0.7;

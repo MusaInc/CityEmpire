@@ -82,6 +82,7 @@ func _ready() -> void:
 	add_child(atmosphere)
 	var t0 := Time.get_ticks_msec()
 	CityWorld.walker_crowd_radius = Crowd.NEAR
+	SkyportIsland.enabled = true   # (before the world: the city opens its sea wall for the bridge)
 	world = CityWorld.new()
 	world.name = "World"
 	add_child(world)
@@ -288,6 +289,14 @@ func _after_start() -> void:
 			var dc: Car = cars.get(driving)
 			if dc:
 				dc.linear_velocity = -dc.global_basis.z * float(args["drive"])
+	if args.has("home"):
+		# Captures/tests: own a home and stand in it ("home=skyport_penthouse").
+		var hm := home_by_id("home_" + String(args["home"]))
+		if not hm.is_empty():
+			if not empire.owns_property(hm["id"]):
+				empire.properties.append({"id": hm["id"], "kind": "home", "name": hm["name"], "price": hm["price"], "let": false, "income": 0.0})
+			var hh: Dictionary = hm["h"]
+			_teleport(Apartments.spawn_point(hh), atan2(Apartments.outward(hh).x, Apartments.outward(hh).z) + PI)
 	if args.has("own"):
 		# Captures/tests: own these vehicles (free), in their usual places.
 		for om in String(args["own"]).split(","):
@@ -1201,6 +1210,8 @@ func spot_prompt() -> Array:
 				if q.get("let", false):
 					return ["%s · LET TO TENANTS" % String(home["name"]).to_upper(), false]
 				return ["LIFT UP TO %s" % String(home["name"]).to_upper(), true]
+			if String(home.get("estate", "")) != "":
+				return ["%s · COMES WITH %s" % [String(home["name"]).to_upper(), String(Ventures.estate_def(home["estate"])["name"]).to_upper()], true]
 			return ["FOR SALE · %s · %s" % [home["name"], EmpireData.money(float(home["price"]))], true]
 		"home_down":
 			return ["LIFT DOWN TO THE STREET", true]
@@ -1345,6 +1356,8 @@ func act() -> void:
 				var h: Dictionary = home_by_id(spot["home"])["h"]
 				_teleport(Apartments.spawn_point(h), atan2(Apartments.outward(h).x, Apartments.outward(h).z) + PI)
 				Sfx.play("bell", -8.0)
+			elif String(home_by_id(spot["home"]).get("estate", "")) != "":
+				ui.open_phone("property")   # (the suite / flat come with their building)
 			else:
 				ui.open_home(home_by_id(spot["home"]))
 		"home_down":
@@ -1914,12 +1927,36 @@ func homes() -> Array:
 			"price": HOME_PRICES[clampi(int(h["tier"]), 0, 4)], "tier": int(h["tier"]), "h": h,
 			"floor": Apartments.floor_height(h), "district": "east:" + layout.district(Apartments.window_center(h).x,
 			Apartments.window_center(h).z)})
+	# Skyport Island's: the penthouse (a home you buy), the hotel suite and
+	# the show flat (yours with the building: Ventures.ESTATE_HOMES).
+	if skyport:
+		for h: Dictionary in skyport.plan_data.get("homes", []):
+			var est := String(Ventures.HOME_ESTATE.get(String(h["id"]), ""))
+			out.append({"id": "home_" + String(h["id"]), "kind": "home", "name": String(h["name"]),
+				"price": SKYPORT_PENTHOUSE if est == "" else float(Ventures.estate_def(est).get("price", 0.0)),
+				"tier": int(h["tier"]), "h": h, "estate": est, "floor": Apartments.floor_height(h), "district": "east:skyport"})
 	return out
+
+
+const SKYPORT_PENTHOUSE := 2500000.0
+
+
+## Saves from the first Skyport build owned the penthouse as an investment
+## ("spire_penthouse" estate): it's a home now – same price, same keys.
+func _migrate_penthouse_estate() -> void:
+	var es: Dictionary = empire.flags.get("estates", {})
+	if es.has("spire_penthouse"):
+		es.erase("spire_penthouse")
+		if not empire.owns_property("home_skyport_penthouse"):
+			empire.properties.append({"id": "home_skyport_penthouse", "kind": "home", "name": "Skyport Penthouse",
+				"price": SKYPORT_PENTHOUSE, "let": false, "income": 0.0})
 
 
 ## Street door of a home's tower (below its window, on the pavement).
 func home_lift(home: Dictionary) -> Vector3:
 	var h: Dictionary = home["h"]
+	if h.has("lift"):
+		return h["lift"]
 	var c := Apartments.window_center(h) + Apartments.outward(h) * 1.6
 	return Vector3(c.x, layout.ground_y(c.x, c.z), c.z)
 
@@ -2076,6 +2113,8 @@ func load_game() -> bool:
 	if not empire.flags.has("start_unit"):
 		empire.flags["start_unit"] = starter_unit()["id"]
 	CityLife.ensure_firms(empire)
+	Ventures._grant_homes(empire)   # (homes that come with Skyport buildings)
+	_migrate_penthouse_estate()
 	_connect_empire()
 	_rival_sig = "?"
 	_spawn_cars()

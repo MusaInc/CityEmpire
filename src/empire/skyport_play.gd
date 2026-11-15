@@ -75,6 +75,7 @@ func _spawn(v: Dictionary) -> Craft:
 	c.name = "Craft_" + String(v["id"])
 	c.setup(vclass(model), model, craft_spec(model))
 	c.water_check = game.layout.is_water
+	c.berths = game.skyport.plan_data.get("berths", []) if game.skyport else []
 	game.add_child(c)
 	var p := Vector3(float(v["pos"][0]), float(v["pos"][1]), float(v["pos"][2]))
 	c.place(Transform3D(Basis(Vector3.UP, float(v.get("yaw", 0.0))), p))
@@ -150,7 +151,9 @@ func enter(vid: String) -> void:
 	game.player.visible = false
 	game.player.process_mode = Node.PROCESS_MODE_DISABLED
 	game.player.collision_layer = 0
-	cam.set_target(c)
+	# (Ease from the walking camera to the craft's: no cut.)
+	var from := get_viewport().get_camera_3d().global_transform if get_viewport().get_camera_3d() else Transform3D()
+	cam.set_target(c, from)
 	cam.cam.make_current()
 	game.world.set_viewer(cam)
 	_last = c.global_position
@@ -317,6 +320,7 @@ func _process(dt: float) -> void:
 	if _disp_t > 0.0:
 		return
 	_disp_t = 0.5
+	update_markers()
 	var p := game.player.global_position
 	for sid in ["dealer_budget", "dealer_commercial", "dealer_luxury"]:
 		var s := site(sid)
@@ -352,6 +356,93 @@ func _display_car(sid: String, model: String, i: int) -> Car:
 	return c
 
 
+# --------------------------------------------------------- ownership
+var _own_sig := ""
+var _own_root: Node3D
+
+
+## Your buildings on Skyport Island wear a slim flag in your company's
+## colours on the roof (subtle from the street, clear from the air);
+## rebuilt when what you own changes.
+func update_markers() -> void:
+	var e := game.empire
+	var owned: Array = (e.flags.get("estates", {}) as Dictionary).keys()
+	if e.owns_property("home_skyport_penthouse"):
+		owned.append("penthouse")
+	owned.sort()
+	var cols := [Color(e.brand.get("primary", "#f5b13d")), Color(e.brand.get("accent", "#f3efe6"))] if not e.brand.is_empty() \
+		else [EmpireStyle.AMBER, EmpireStyle.PAPER]
+	var sig := str(owned) + str(cols)
+	if sig == _own_sig:
+		return
+	_own_sig = sig
+	if _own_root:
+		_own_root.queue_free()
+	_own_root = Node3D.new()
+	_own_root.name = "OwnedMarkers"
+	game.add_child(_own_root)
+	for id in owned:
+		var at: Vector3
+		if id == "penthouse":
+			at = (game.skyport.plan_data["penthouse"]["pad"] as Vector3) + Vector3(-8.0, 0.0, -11.0)
+		else:
+			var d := Ventures.estate_def(String(id))
+			if d.is_empty():
+				continue
+			at = d["at"]
+			var top := -INF
+			var corner := Vector3(at.x, 0.0, at.z)
+			for b: Dictionary in game.skyport.plan_data["buildings"]:
+				var t0: Array = b["tiers"][0]
+				if at.x >= float(t0[0]) and at.x <= float(t0[2]) and at.z >= float(t0[1]) and at.z <= float(t0[3]):
+					var tt: Array = b["tiers"][-1]
+					top = float(tt[5])
+					corner = Vector3(float(tt[0]) + 1.5, 0.0, float(tt[1]) + 1.5)
+			if top == -INF:
+				top = at.y + 1.0   # (the berths: on the pier)
+			at = Vector3(corner.x, top, corner.z)
+		_own_root.add_child(_flag(at, cols[0], cols[1]))
+
+
+static func _flag(at: Vector3, a: Color, b: Color) -> Node3D:
+	var n := Node3D.new()
+	n.position = at
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var box := func(lo: Vector3, hi: Vector3, c: Color) -> void:
+		var v := [Vector3(lo.x, lo.y, lo.z), Vector3(hi.x, lo.y, lo.z), Vector3(hi.x, hi.y, lo.z), Vector3(lo.x, hi.y, lo.z),
+			Vector3(lo.x, lo.y, hi.z), Vector3(hi.x, lo.y, hi.z), Vector3(hi.x, hi.y, hi.z), Vector3(lo.x, hi.y, hi.z)]
+		for f in [[1, 0, 3, 2], [4, 5, 6, 7], [0, 4, 7, 3], [5, 1, 2, 6], [7, 6, 2, 3]]:
+			for j in [0, 2, 1, 0, 3, 2]:
+				st.set_color(c)
+				st.add_vertex(v[f[j]])
+	box.call(Vector3(-0.06, 0.0, -0.06), Vector3(0.06, 6.0, 0.06), Color(0.8, 0.8, 0.82))
+	box.call(Vector3(0.06, 4.6, -0.02), Vector3(2.6, 5.9, 0.02), a)
+	box.call(Vector3(0.06, 5.05, -0.025), Vector3(2.6, 5.45, 0.025), b)
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = m
+	mi.visibility_range_end = 1600.0
+	n.add_child(mi)
+	return n
+
+
+## The penthouse's roof: a stair up to the helipad from the back of the
+## room, and back down from the pad. [up spot, down spot] in the world.
+func roof_spots() -> Array:
+	var hm := game.home_by_id("home_skyport_penthouse")
+	if hm.is_empty():
+		return []
+	var h: Dictionary = hm["h"]
+	var up := Apartments.face_point(h, float(h["a0"]) + 1.6, -float(h["depth"]) + 1.6, float(h["y0"]))
+	var pad: Vector3 = game.skyport.plan_data["penthouse"]["pad"]
+	return [up, pad + Vector3(6.0, 0.0, 0.0)]
+
+
 ## The nearest showroom thing / craft / site within reach of p:
 ## {kind: sky_craft | sky_display | sky_site, ...} plus its distance "d".
 func spot_near(p: Vector3) -> Dictionary:
@@ -372,6 +463,14 @@ func spot_near(p: Vector3) -> Dictionary:
 		if d2 < REACH and d2 < bd:
 			bd = d2
 			best = {"kind": "sky_display", "model": dc.get_meta("model"), "site": dc.get_meta("site"), "world": dc.global_position, "d": maxf(d2, 0.0)}
+	if game.skyport and game.empire.owns_property("home_skyport_penthouse"):
+		var rs := roof_spots()
+		for k in rs.size():
+			var q: Vector3 = rs[k]
+			var dq := p.distance_to(q + Vector3.UP * 0.95)
+			if dq < 2.0 and dq < bd:
+				bd = dq
+				best = {"kind": "sky_roof", "up": k == 0, "world": q, "d": dq}
 	if game.skyport:
 		var sites: Dictionary = game.skyport.plan_data.get("sites", {})
 		for sid in sites:
@@ -393,6 +492,8 @@ func prompt(s: Dictionary) -> Array:
 		"sky_display":
 			var md2 := EmpireData.vehicle_model(String(s["model"]))
 			return ["INSPECT %s · %s" % [String(md2.get("name", "")).to_upper(), EmpireData.money(float(md2.get("price", 0)))], true]
+		"sky_roof":
+			return ["UP TO THE HELIPAD" if s["up"] else "DOWN TO THE PENTHOUSE", true]
 		"sky_site":
 			var st := site(String(s["site"]))
 			var what := {"aviation": "AIRCRAFT SALES", "marina": "BOAT SALES", "cargo": "IMPORTS & CARGO",
@@ -407,6 +508,11 @@ func act(s: Dictionary) -> void:
 			enter(String(s["vehicle"]))
 		"sky_display":
 			SkyportUI.vehicle_card(game.ui, String(s["model"]), String(s["site"]))
+		"sky_roof":
+			var rs := roof_spots()
+			var to: Vector3 = rs[1] if s["up"] else rs[0]
+			game._teleport(to + Vector3(0.0, 1.0, 0.0) + (Vector3(-1.5, 0, 0) if s["up"] else Vector3(1.5, 0, 0)), game.camera.view_yaw())
+			Sfx.play("bell", -8.0)
 		"sky_site":
 			var sid := String(s["site"])
 			match sid:

@@ -217,7 +217,8 @@ func _run() -> void:
 	check(e2.total_units() == units_before and is_equal_approx(float(b2.lifetime["revenue"]), rev), "reloaded: stock %d, takings %.2f" % [e2.total_units(), rev])
 	# 10 — buy a home, take the lift up, sleep.
 	var homes := game.homes()
-	check(homes.size() == 5, "five homes for sale (%d)" % homes.size())
+	# Five city homes, then Skyport's penthouse, hotel suite and quay flat.
+	check(homes.size() == 5 + (3 if SkyportIsland.enabled else 0), "city + Skyport homes for sale (%d)" % homes.size())
 	var studio: Dictionary = homes[0]
 	await stand_at(game.home_lift(studio))
 	check(game.spot.get("kind") == "home_lift", "FOR SALE prompt at the tower door (%s)" % game.spot.get("kind"))

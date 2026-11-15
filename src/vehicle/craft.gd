@@ -46,6 +46,11 @@ var _visual: Node3D
 var _rotor_node: Node3D
 var _t := 0.0
 var crashed_t := 0.0
+var _gear: Node3D
+var gear_down := 1.0      # 1 down .. 0 stowed (planes)
+## Berths a boat can moor at: [[Vector3, yaw], ...] (the game sets them).
+var berths: Array = []
+var moored_at := -1
 
 
 func setup(p_kind: String, p_model: String, p_spec: Dictionary) -> void:
@@ -65,6 +70,11 @@ func setup(p_kind: String, p_model: String, p_spec: Dictionary) -> void:
 	_visual = CraftModels.build(kind, model, spec)
 	add_child(_visual)
 	_rotor_node = _visual.get_node_or_null("Rotor")
+	_gear = _visual.get_node_or_null("Gear")
+	var au := CraftAudio.new()
+	au.name = "Audio"
+	add_child(au)
+	au.setup(self)
 	floor_snap_length = 0.0
 	motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
 
@@ -121,7 +131,7 @@ func hud_text() -> String:
 func _state_word() -> String:
 	return {"landed": "LANDED", "spooling": "SPOOLING UP", "flying": "HOVER" if speed < 3.0 else "FLYING",
 		"landing": "LANDING", "parked": "PARKED", "taxi": "TAXI", "roll": "TAKEOFF ROLL", "air": "AIRBORNE",
-		"stall": "STALL – NOSE DOWN", "moored": "MOORED", "underway": "UNDER WAY", "crashed": "DAMAGED"}.get(state, state.to_upper())
+		"stall": "STALL – NOSE DOWN", "moored": "MOORED" if moored_at >= 0 else "STOPPED", "underway": "UNDER WAY", "crashed": "DAMAGED"}.get(state, state.to_upper())
 
 
 func _physics_process(dt: float) -> void:
@@ -139,6 +149,15 @@ func _physics_process(dt: float) -> void:
 	forward_speed = hv.dot(Vector2(forward().x, forward().z))
 	if _rotor_node:
 		_rotor_node.rotate_y(dt * 40.0 * rotor)
+	if _gear:
+		# Up once well clear of the runway; down for the approach (low and
+		# coming down) and always on the ground. Folds up into the body.
+		var want := 1.0
+		if state in ["air", "stall"] and (altitude > 25.0 and _vy > -1.5 or altitude > 80.0):
+			want = 0.0
+		gear_down = move_toward(gear_down, want, dt / 2.5)
+		_gear.scale = Vector3(1.0, maxf(gear_down, 0.02), 1.0)
+		_gear.visible = gear_down > 0.03
 	_apply_basis()
 
 
@@ -320,6 +339,26 @@ func _boat(dt: float) -> void:
 	move_and_slide()
 	global_position.y = SEA_Y + float(spec.get("float", 0.0)) + 0.08 * sin(_t * 1.3) + 0.04 * sin(_t * 2.9)
 	state = "underway" if absf(v) > 0.5 else "moored"
+	# Docking assist: slow, close to a free berth and nobody on the throttle
+	# – the boat eases into the berth and lines up with it.
+	moored_at = -1
+	if absf(v) < 1.8 and not bool(input.get("active", false)):
+		var best := -1
+		var bd := 12.0
+		for i in berths.size():
+			var bp: Vector3 = berths[i][0]
+			var d := Vector2(bp.x - global_position.x, bp.z - global_position.z).length()
+			if d < bd:
+				bd = d
+				best = i
+		if best >= 0:
+			var bp2: Vector3 = berths[best][0]
+			var k := 1.0 - exp(-1.2 * dt)
+			global_position.x = lerpf(global_position.x, bp2.x, k)
+			global_position.z = lerpf(global_position.z, bp2.z, k)
+			_yaw = lerp_angle(_yaw, float(berths[best][1]), k)
+			if bd < 1.2:
+				moored_at = best
 	# Steer flips with the boat's direction like a real rudder.
 	_yaw = wrapf(_yaw, -PI, PI)
 	velocity = fwd * v

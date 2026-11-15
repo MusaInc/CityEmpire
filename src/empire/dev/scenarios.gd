@@ -109,6 +109,245 @@ func scenario_b() -> void:
 
 
 # ------------------------------------------------- Skyport expansion
+## Ground height of the driving surface under (x, z), cast from `from_y`
+## down (roads, decks, land; not props). NAN = nothing.
+func _surface(x: float, z: float, from_y: float) -> float:
+	var q := PhysicsRayQueryParameters3D.create(Vector3(x, from_y, z), Vector3(x, from_y - 80.0, z), 1 | (1 << 3))
+	var hit := game.get_world_3d().direct_space_state.intersect_ray(q)
+	return float((hit["position"] as Vector3).y) if not hit.is_empty() else NAN
+
+
+## Walks a line of samples along a road; returns [steps over 0.18 m, holes,
+## worst step, where].
+func _audit_line(pts: Array, expect: Callable) -> Array:
+	var steps := 0
+	var holes := 0
+	var worst := 0.0
+	var where := Vector3.ZERO
+	var prev := NAN
+	for p: Vector3 in pts:
+		# (From just above the road: overpasses and decks overhead don't count.)
+		var y := _surface(p.x, p.z, float(expect.call(p)) + 0.3)
+		if is_nan(y) or y < float(expect.call(p)) - 1.0:
+			holes += 1
+			if game.args.has("sc-debug"):
+				print("    hole at %s (expect %.2f, got %s)" % [p, float(expect.call(p)) - 0.3, y])
+			where = p
+			prev = NAN
+			continue
+		# (Against the road's own height: a hill is a slope, not a step.)
+		var dev := y - float(expect.call(p))
+		if not is_nan(prev) and absf(dev - prev) > 0.18:
+			steps += 1
+			if game.args.has("sc-debug"):
+				print("    step %.2f at %s" % [dev - prev, p])
+			if absf(dev - prev) > worst:
+				worst = absf(dev - prev)
+				where = p
+		prev = dev
+	return [steps, holes, worst, where]
+
+
+## XA: surface audit. Every lane of the Skyport bridge from the city avenue
+## to the island (0.5 m samples), every island road, the old bridge's two
+## joints, and every city street centreline on both landmasses (2 m). A
+## road may slope; it may not step more than a kerb or have holes.
+func _probe_at(x: float, z: float, from_y: float) -> void:
+	var q := PhysicsRayQueryParameters3D.create(Vector3(x, from_y, z), Vector3(x, from_y - 80.0, z), 1 | (1 << 3))
+	var hit := game.get_world_3d().direct_space_state.intersect_ray(q)
+	print("    probe (%.1f, %.1f): %s y=%s road_y=%.2f ground_y=%.2f" % [x, z, (hit["collider"] as Node).get_path() if not hit.is_empty() else "nothing",
+		(hit["position"] as Vector3).y if not hit.is_empty() else "-", game.layout.terrain.road_y(x, z), game.layout.ground_y(x, z)])
+
+
+func scenario_xa() -> void:
+	print("--- XA: road surface audit")
+	if game.args.has("sc-debug"):
+		for pp in [[-440.6, 244.35], [-440.05, 244.35], [-439.9956, 244.35], [-439.95, 244.35], [-439.5, 244.35], [282.9, -48.0], [283.9, -48.38], [284.9, -48.7]]:
+			_probe_at(pp[0], pp[1], 1.0 if pp[0] < 0 else 6.0)
+	var P: Dictionary = game.skyport.plan_data
+	var e: Vector3 = P["city_end"]
+	game._teleport(Vector3(1700, SkyportIsland.LAND_Y + 1.0, -20), 0.0)   # (loads the island's detail)
+	await frames(5)
+	var lane_pts: Array = []
+	var exp_b := func(p: Vector3) -> float:
+		return SkyportIsland.road_y(game.layout, p.x, p.z) + 0.3
+	var tot := [0, 0, 0.0, Vector3.ZERO]
+	for dz: float in [-7.0, -3.4, 0.0, 3.4, 7.0]:
+		var lp: Array = []
+		# (From the ramp's start: before that the avenue curves away from a
+		# straight line.)
+		var x: float = SkyportIsland.ramp_points(P, game.layout)[0].x - 4.0
+		while x < 1600.0:
+			lp.append(Vector3(x, 0.0, e.z + dz))
+			x += 0.5
+		lane_pts.append_array(lp)
+		var rl := _audit_line(lp, exp_b)
+		tot[0] += int(rl[0])
+		tot[1] += int(rl[1])
+		if float(rl[2]) > float(tot[2]):
+			tot[2] = rl[2]
+			tot[3] = rl[3]
+	check(int(tot[0]) == 0 and int(tot[1]) == 0, "Skyport bridge, avenue to island, 5 lanes: %d steps, %d holes (worst %.2f m at %s)" % tot)
+	# Something solid standing up out of the road (railings, walls) on the bridge lanes.
+	var blocked := 0
+	var bwhere := Vector3.ZERO
+	for p: Vector3 in lane_pts:
+		var y := _surface(p.x, p.z, float(exp_b.call(p)) + 2.5)
+		if is_nan(y):
+			continue
+		var q := PhysicsRayQueryParameters3D.create(Vector3(p.x - 0.5, y + 0.45, p.z), Vector3(p.x + 0.5, y + 0.45, p.z), 1 | (1 << 3))
+		if not game.get_world_3d().direct_space_state.intersect_ray(q).is_empty():
+			blocked += 1
+			bwhere = p
+	check(blocked == 0, "nothing stands up in the bridge lanes (%d samples blocked, last at %s)" % [blocked, bwhere])
+	var island_pts: Array = []
+	for rd in P["roads"]:
+		if rd[3]:
+			continue
+		var rp: PackedVector3Array = rd[1]
+		for i in rp.size() - 1:
+			var L := rp[i].distance_to(rp[i + 1])
+			var k := 0.0
+			while k < L:
+				island_pts.append(rp[i].lerp(rp[i + 1], k / L))
+				k += 2.0
+	var r2 := _audit_line(island_pts, func(p): return SkyportIsland.LAND_Y + 0.3)   # (all flat)
+	check(int(r2[0]) == 0 and int(r2[1]) == 0, "island roads: %d steps, %d holes over %d samples" % [r2[0], r2[1], island_pts.size()])
+	# City streets (both landmasses), centrelines; a jump between samples on
+	# separate roads is not a step, so audit each road on its own. Where a
+	# bridge ramp carries the road (the old bridge's island ramp, the Skyport
+	# ramp) the street under it is skipped: the ramp is the road there, and
+	# it's audited above / by --scenarios=B.
+	var carried := func(q: Vector2) -> bool:
+		for rp3: Vector3 in game.layout.bridge_ramp:
+			if Vector2(rp3.x, rp3.z).distance_to(q) < 12.0:
+				return true
+		var rp4 := SkyportIsland.ramp_points(P, game.layout)
+		return q.x > rp4[0].x - 2.0 and q.x < (P["city_end"] as Vector3).x + 2.0 and absf(q.y - rp4[0].z) < 12.0
+	var bad_roads := 0
+	var worst := 0.0
+	var wpos := Vector3.ZERO
+	var n := 0
+	for L: CityLayout in [game.layout, game.layout.mainland]:
+		for rd in L.roads.roads:
+			var rp2: PackedVector2Array = rd["pts"]
+			var pts: Array = []
+			for i in rp2.size() - 1:
+				var a := rp2[i]
+				var b := rp2[i + 1]
+				var Ln := a.distance_to(b)
+				var k := 0.0
+				while k < Ln:
+					var q2 := a.lerp(b, k / Ln)
+					if not game.layout.is_water(Vector3(q2.x, 0, q2.y)) and not L.is_water(Vector3(q2.x, 0, q2.y)) and not carried.call(q2):
+						pts.append(Vector3(q2.x, 0.0, q2.y))
+					k += 2.0
+			n += pts.size()
+			var rr := _audit_line(pts, func(p): return L.terrain.road_y(p.x, p.z) + 0.3)
+			if int(rr[0]) > 0 or int(rr[1]) > 0:
+				bad_roads += 1
+				if float(rr[2]) > worst or int(rr[1]) > 0:
+					worst = maxf(worst, float(rr[2]))
+					wpos = rr[3]
+	check(bad_roads == 0, "city streets: %d of the roads have a step or hole (worst %.2f m at %s; %d samples)" % [bad_roads, worst, wpos, n])
+
+
+## XV: the Skyport bridge at 8, 20 and 34 m/s, city → island and back,
+## starting on the avenue (over the ramp and the esplanade): no stall, no
+## drop below the road, no jolt, never off the deck.
+func scenario_xv() -> void:
+	print("--- XV: bridge crossings at speed, both ways")
+	var P: Dictionary = game.skyport.plan_data
+	var e: Vector3 = P["city_end"]
+	var rp := SkyportIsland.ramp_points(P, game.layout)
+	var vid := String(game.empire.vehicles[0]["id"])
+	game.enter_vehicle(vid)
+	var car: Car = game.cars[vid]
+	game.drive_input.enabled = false
+	for v0: float in [8.0, 20.0, 34.0]:
+		for dir: int in [1, -1]:
+			var lane := e.z + 3.8 * dir
+			var x0 := rp[0].x - 25.0 if dir > 0 else 1560.0
+			var x1 := 1480.0 if dir > 0 else rp[0].x - 10.0
+			var y0 := SkyportIsland.road_y(game.layout, x0, lane)
+			if dir > 0:
+				game.skyport.load_near_now()
+			car.place(Transform3D(Basis(Vector3.UP, -PI * 0.5 * dir), Vector3(x0, y0 + 0.6, lane)), Vector3(v0 * dir, 0, 0))
+			# (Lambdas capture locals by value: keep the measurements in a dictionary.)
+			var m := {"low": 0.0, "vy": 0.0, "off": 0.0, "x": x0, "vyx": 0.0, "offx": 0.0}
+			var ok := await until(func():
+				car.steer = -clampf((car.global_position.z - lane) * 0.1, -0.3, 0.3) * dir
+				car.throttle = 1.0 if car.forward_speed < v0 else 0.0
+				car.brake = 0.0
+				var px := car.global_position.x
+				m["low"] = minf(m["low"], car.global_position.y - SkyportIsland.road_y(game.layout, px, lane))
+				if absf(car.linear_velocity.y) > float(m["vy"]):
+					m["vy"] = absf(car.linear_velocity.y)
+					m["vyx"] = px
+				if absf(car.global_position.z - lane) > float(m["off"]):
+					m["off"] = absf(car.global_position.z - lane)
+					m["offx"] = px
+				m["x"] = px
+				return (px > x1) if dir > 0 else (px < x1), 400.0)
+			check(ok and float(m["low"]) > -0.6 and float(m["vy"]) < 6.0 and float(m["off"]) < 6.0,
+				"%s at %d m/s: across=%s (x %.0f), lowest %.2f m, peak vertical %.1f m/s (x %.0f), drift %.1f m (x %.0f)" % [
+				"city → island" if dir > 0 else "island → city", int(v0), ok, m["x"], m["low"], m["vy"], m["vyx"], m["off"], m["offx"]])
+	car.throttle = 0.0
+	await until(func():
+		car.brake = 1.0
+		return car.speed < 1.0, 30.0)
+	game.drive_input.enabled = true
+	game.exit_vehicle()
+
+
+## XN: the Skyport Penthouse – buy it, lift up, up to the helipad and down,
+## reload inside, lift down. The suite comes with the hotel.
+func scenario_xn() -> void:
+	print("--- XN: penthouse and homes")
+	game.ui.close_panel(true)
+	var e := game.empire
+	e.personal_cash = 3000000.0
+	var hm := game.home_by_id("home_skyport_penthouse")
+	check(not hm.is_empty(), "the penthouse is one of the homes")
+	var lift := game.home_lift(hm)
+	game._teleport(lift + Vector3(0, 1.0, 0), 0.0)
+	await until(func(): return String(game.spot.get("kind", "")) == "home_lift", 20.0)
+	check(String(game.game_prompt() if false else game.spot_prompt()[0]).contains("FOR SALE"), "its street lift offers it for sale (%s)" % game.spot_prompt()[0])
+	var rec := hm.duplicate()
+	rec.erase("h")
+	var cash := e.personal_cash + e.company_cash
+	check(e.buy_property(rec) and absf(cash - (e.personal_cash + e.company_cash) - float(hm["price"])) < 0.01, "bought for %s, paid once" % EmpireData.money(float(hm["price"])))
+	game.act()
+	await frames(5)
+	var h: Dictionary = hm["h"]
+	check(absf(game.player.global_position.y - float(h["y0"])) < 2.5, "the lift took you up to the penthouse (%.0f m)" % game.player.global_position.y)
+	var rs: Array = game.skyport_play.roof_spots()
+	game._teleport((rs[0] as Vector3) + Vector3.UP * 1.0, 0.0)
+	await until(func(): return String(game.spot.get("kind", "")) == "sky_roof", 15.0)
+	game.act()
+	await frames(10)
+	var pad: Vector3 = game.skyport.plan_data["penthouse"]["pad"]
+	check(Vector2(game.player.global_position.x - pad.x, game.player.global_position.z - pad.z).length() < 12.0 and game.player.global_position.y > pad.y - 0.5,
+		"up the stairs onto the rooftop helipad (%.0f m)" % game.player.global_position.y)
+	await wait(1.0)
+	check(game.player.global_position.y > pad.y - 0.5, "standing on the roof, not falling through it")
+	game._teleport(Apartments.spawn_point(h), 0.0)
+	game.save_game()
+	game.load_game()
+	await frames(10)
+	check(game.empire.owns_property("home_skyport_penthouse"), "still yours after a reload")
+	check(absf(game.player.global_position.y - float(h["y0"]) - 0.95) < 2.0, "reloaded inside the penthouse (%.0f m)" % game.player.global_position.y)
+	await until(func(): return String(game.spot.get("kind", "")) == "home_down", 15.0)
+	game.act()
+	await frames(5)
+	check(game.player.global_position.y < SkyportIsland.LAND_Y + 3.0, "lift down to the street")
+	check(not game.empire.owns_property("home_skyport_suite"), "the hotel suite isn't yours without the hotel")
+	game.empire.personal_cash += 2000000.0
+	check(Ventures.buy_estate(game.empire, "skyport_hotel") == "" and game.empire.owns_property("home_skyport_suite"), "buying the hotel gives you the suite's keys")
+	Ventures.sell_estate(game.empire, "skyport_hotel")
+	check(not game.empire.owns_property("home_skyport_suite"), "selling the hotel hands the keys back")
+
+
 ## XD: drive a car over the landmark bridge onto Skyport Island, and the GPS
 ## plans a road route from the city to the airport across it.
 func scenario_xd() -> void:
@@ -116,6 +355,11 @@ func scenario_xd() -> void:
 	var P: Dictionary = game.skyport.plan_data
 	var e: Vector3 = P["city_end"]
 	var a: Vector3 = P["bridge_foot"]
+	# Start on the city avenue short of the ramp (earlier scenarios may leave
+	# us up a tower).
+	var r0: Vector3 = SkyportIsland.ramp_points(P, game.layout)[0]
+	game._teleport(Vector3(r0.x - 40.0, SkyportIsland.road_y(game.layout, r0.x - 40.0, e.z + 9.0) + 1.0, e.z + 9.0), -PI * 0.5)
+	await frames(5)
 	game.set_gps(game.skyport_play.site("terminal")["door"], "Skyport Airport", {"kind": "place", "id": "terminal"})
 	game.gps.wait_net()
 	await until(func(): return game.gps.points.size() >= 2 or game.gps.message != "", 40.0)
@@ -129,13 +373,14 @@ func scenario_xd() -> void:
 	var car: Car = game.cars[vid]
 	game.drive_input.enabled = false
 	car.place(Transform3D(Basis(Vector3.UP, -PI * 0.5), e + Vector3(6.0, 0.6, 3.8)), Vector3(16.0, 0, 0))
-	var lowest := 0.0
+	var mm := {"low": 0.0}
 	var reached := await until(func():
 		car.throttle = 0.75
 		car.steer = -clampf((car.global_position.z - (e.z + 3.8)) * 0.08, -0.3, 0.3)
 		var px := car.global_position.x
-		lowest = minf(lowest, car.global_position.y - SkyportIsland.bridge_y(e, clampf(px, e.x, a.x)))
+		mm["low"] = minf(mm["low"], car.global_position.y - SkyportIsland.road_y(game.layout, px, e.z + 3.8))
 		return px > a.x + 60.0, 180.0)
+	var lowest: float = mm["low"]
 	if not reached:
 		var q := PhysicsShapeQueryParameters3D.new()
 		var bs := BoxShape3D.new()
@@ -213,9 +458,10 @@ func scenario_xc() -> void:
 	await frames(2)
 	var un := Wardrobe.unpaid(e.flags, HeroLook.current(e.flags))
 	check(un.size() == 2, "trying on two items you don't own (%s)" % str(un))
-	var cash := e.personal_cash
+	# (Empire.pay takes company cash first: count both.)
+	var cash := e.personal_cash + e.company_cash
 	var err := Wardrobe.buy(e, un, "clothes_premium")
-	check(err == "" and absf(cash - e.personal_cash - 740.0) < 0.01, "paid £740 once (%s)" % err)
+	check(err == "" and absf(cash - e.personal_cash - e.company_cash - 740.0) < 0.01, "paid £740 once (%s)" % err)
 	Wardrobe.save_outfit(e.flags, HeroLook.current(e.flags))
 	game.ui._close_style()
 	game.save_game()
@@ -254,6 +500,7 @@ func scenario_xk() -> void:
 	var p0 := c.global_position
 	check(await _fly(c, {"active": true, "gas": 0.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.state == "flying" and c.altitude > 25.0, 90.0),
 		"took off and climbed (%.0f m)" % c.altitude)
+	check((c.get_node("Audio") as AudioStreamPlayer3D).playing, "the rotors are heard while you fly")
 	var y0 := c._yaw
 	check(await _fly(c, {"active": true, "gas": 1.0, "kick": false, "brake": 0.0, "steer": 0.6}, func(): return Vector2(c.global_position.x - p0.x, c.global_position.z - p0.z).length() > 120.0, 120.0),
 		"flew forward and turned (%.0f m)" % Vector2(c.global_position.x - p0.x, c.global_position.z - p0.z).length())
@@ -294,12 +541,15 @@ func scenario_xp() -> void:
 		"takeoff roll and lift-off (%.0f m along)" % (c.global_position.x - (rw["from"] as Vector3).x))
 	check(await _fly(c, {"active": true, "gas": 1.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.altitude > 25.0, 60.0),
 		"climbing (%.0f m)" % c.altitude)
+	check(await _fly(c, {"active": true, "gas": 1.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.gear_down < 0.05, 40.0),
+		"the gear folds away in the climb (%.2f)" % c.gear_down)
 	var air_x := c.global_position.x
 	check(await _fly(c, {"active": true, "gas": 0.0, "kick": false, "brake": 1.0, "steer": 0.0}, func(): return c.state in ["landing_roll", "taxi", "parked"], 120.0),
 		"descended and touched down (%s at x %.0f)" % [c.state, c.global_position.x])
 	check(c.global_position.x < (rw["to"] as Vector3).x + 50.0, "on the island, not in the sea")
 	check(await _fly(c, {"active": false, "gas": 0.0, "kick": false, "brake": 1.0, "steer": 0.0}, func(): return c.speed < 1.0, 90.0),
 		"braked to a stop (%.1f m/s)" % c.speed)
+	check(c.gear_down > 0.95, "the gear is down after landing (%.2f)" % c.gear_down)
 	sp.script_input = {}
 	check(sp.exit() == "", "got out on the ground")
 
@@ -320,6 +570,11 @@ func scenario_xg() -> void:
 	check(absf(c.global_position.y - Craft.SEA_Y) < 0.6, "floating at sea level (%.2f)" % c.global_position.y)
 	check(await _fly(c, {"active": true, "gas": 0.0, "kick": false, "brake": 1.0, "steer": 0.0}, func(): return absf(c.forward_speed) < 0.6, 60.0),
 		"slowed to a stop")
+	# Docking: drift in slowly near a free berth, hands off: it lines up.
+	var bth: Array = c.berths[1]
+	c.place(Transform3D(Basis(Vector3.UP, float(bth[1]) + 0.4), (bth[0] as Vector3) + Vector3(6.0, 0.0, 3.0)))
+	check(await _fly(c, {"active": false, "gas": 0.0, "kick": false, "brake": 0.0, "steer": 0.0}, func(): return c.moored_at >= 0, 60.0),
+		"eased into the berth and moored (%s)" % c.hud_text())
 	sp.script_input = {}
 	check(sp.exit() == "", "stepped off")
 	check(not game.layout.is_water(game.player.global_position) or game.player.global_position.y > 0.3, "onto a pier or dry land (y %.1f)" % game.player.global_position.y)
@@ -436,7 +691,7 @@ func _run() -> void:
 		await scenario_h()
 	if _which.split(",").has("B"):
 		await scenario_b()
-	for k in ["XD", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS"]:
+	for k in ["XA", "XV", "XN", "XD", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())
 	if _which.split(",").has("W"):

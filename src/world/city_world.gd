@@ -123,6 +123,10 @@ func _ready() -> void:
 	var t0 := Time.get_ticks_msec()
 	if layout == null:
 		layout = CityLayout.new().generate()
+	if SkyportIsland.enabled:
+		# (Before the ground is built: the sea-wall railing opens for its bridge.)
+		var sp := SkyportIsland.plan(layout)
+		BuildingMesher.rail_gaps = [sp["rail_gap"]]
 	_by_chunk = layout.buildings_by_chunk()
 	_props_by_chunk = layout.props_by_chunk()
 	var settings := get_node_or_null("/root/Settings")
@@ -1271,6 +1275,9 @@ func outer_ground_rects() -> Array:
 
 
 func _build_water() -> void:
+	# Foam along the sea walls and quays (one transparent strip).
+	if layout.coast.size() >= 3:
+		add_child(Shoreline.build(Shoreline.polygon_edges(layout.coast)))
 	var m := BuildingMesher.new()
 	for w in layout.water:
 		if w in layout.basins:

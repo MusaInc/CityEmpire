@@ -74,10 +74,20 @@ static func build(kind: String, model: String, spec: Dictionary) -> Node3D:
 					var ez := -L * 0.5 - 0.2 if ex == 0.0 else -L * 0.18
 					b.box(Vector3(ex - 0.4, wy - 0.5 if ex != 0.0 else 1.2, ez), Vector3(ex + 0.4, wy + 0.1 if ex != 0.0 else 2.0, ez + 1.6), paint)
 					rotor.box(Vector3(ex - 1.1, (wy - 0.2 if ex != 0.0 else 1.6) - 0.08, ez - 0.15), Vector3(ex + 1.1, (wy - 0.2 if ex != 0.0 else 1.6) + 0.08, ez - 0.1), trim)
-			# Undercarriage.
+			# Undercarriage (its own mesh "Gear": Craft retracts it in the air).
+			var gear := _M.new()
 			for g in [[0.0, -L * 0.36], [-1.4, L * 0.05], [1.4, L * 0.05]]:
-				b.box(Vector3(g[0] - 0.08, 0.3, g[1] - 0.08), Vector3(g[0] + 0.08, 1.0, g[1] + 0.08), trim)
-				b.box(Vector3(g[0] - 0.12, 0.0, g[1] - 0.3), Vector3(g[0] + 0.12, 0.6, g[1] + 0.3), Color(0.08, 0.08, 0.08))
+				gear.box(Vector3(g[0] - 0.08, 0.3, g[1] - 0.08), Vector3(g[0] + 0.08, 1.0, g[1] + 0.08), trim)
+				gear.box(Vector3(g[0] - 0.12, 0.0, g[1] - 0.3), Vector3(g[0] + 0.12, 0.6, g[1] + 0.3), Color(0.08, 0.08, 0.08))
+			var gn := Node3D.new()
+			gn.name = "Gear"
+			gn.position = Vector3(0, 1.0, 0)
+			var gmi := MeshInstance3D.new()
+			gmi.mesh = gear.commit()
+			gmi.material_override = material()
+			gmi.position = Vector3(0, -1.0, 0)
+			gn.add_child(gmi)
+			root.add_child(gn)
 		_:
 			var sz: Vector3 = spec.get("size", Vector3(2.2, 1.4, 6.0))
 			var w := sz.x * 0.5

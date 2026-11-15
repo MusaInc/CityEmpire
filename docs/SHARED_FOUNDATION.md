@@ -41,3 +41,26 @@ economy. Nothing in these files reads Empire, Business or the UI.
 
 City Empire-only (do not copy): `src/empire/skyport_play.gd`, `wardrobe.gd`,
 `sim/ventures.gd`, `ui/skyport_ui.gd`, `ui/dashboard.gd`, `ui/thumbs.gd`.
+
+## 0.6.1 world quality pass (2026-11-16)
+
+Shared, still opt-in through `SkyportIsland.enabled` unless noted:
+- `SkyportIsland.road_y(layout, x, z)` and `ramp_points()`: the bridge ramp
+  starts under the city avenue's lowest lane and rises over the kerb to the
+  deck (DECK_END 1432); `plan()` returns `rail_gap`, `homes`, `penthouse`.
+- `BuildingMesher.rail_gaps` (static, default empty = no change): esplanade
+  railing segments whose midpoint is in a gap are skipped (the Skyport bridge
+  crosses the esplanade). CityWorld fills it only when the island is enabled.
+- `BuildingMesher.roof_top(..., style)` / `cap_poly`: warehouse (style 3) roofs
+  add `METAL_ROOF` (8.0) to the roof seed; building.gdshader draws them as
+  ribbed metal with skylights and rust. **Affects every game's warehouses.**
+- `CityInfrastructure.bridge_landing`: ramp heights ease to the street's real
+  `road_y` per point (the old bridge's island end sat 0.43 m proud).
+- New, game-agnostic: `src/world/shoreline.gd` + `shaders/shore_foam.gdshader`
+  (foam strip along any coast polygon; CityWorld adds one for the city coast –
+  **visible in every game**), `src/world/island_traffic.gd` (MultiMesh cars on
+  the island lanes, crossing the bridge, reusing CityWorld car kinds),
+  `src/world/island_life.gd` (moored boats, cranes, airport tug, yard truck),
+  `src/audio/craft_audio.gd` (synthesised engine audio for Craft).
+- City Empire-only: island pavement loops in `empire/npc/crowd.gd`, home
+  records/ownership markers (`skyport_play.gd`, `ventures.gd` HOME_ESTATE).

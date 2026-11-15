@@ -99,6 +99,8 @@ static func plan(layout: CityLayout) -> Dictionary:
 	if not _plan.is_empty():
 		return _plan
 	var e := _city_end(layout)
+	var a_end := _avenue_end(layout, e)
+	e.y = maxf(e.y, _ramp_top(layout, a_end))   # (deck start = the ramp's top)
 	var z0 := e.z
 	var P := {}
 	var A := Vector3(BRIDGE_ISLAND_X, LAND_Y, z0)
@@ -131,6 +133,9 @@ static func plan(layout: CityLayout) -> Dictionary:
 	]
 	P["roads"] = roads
 	P["city_end"] = e
+	P["avenue_end"] = a_end
+	# The railing opening over the esplanade's sea wall, the bridge's width.
+	P["rail_gap"] = Rect2(e.x - 30.0, e.z - 13.5, 60.0, 27.0)
 	P["bridge_foot"] = A
 	# Surfaces (areas): [kind, polygon, colour]. Kinds as island_ground.gdshader.
 	var areas: Array = []
@@ -138,11 +143,6 @@ static func plan(layout: CityLayout) -> Dictionary:
 	for g in grass:
 		areas.append([1, g, COL_GRASS])
 	areas.append([1, _rect(1640, -545, 1875, -380), COL_GRASS])           # tower park
-	# Verges and parkland so the island isn't one sheet of paving.
-	for g2 in [[1400, 10, 1620, 160], [1400, -200, 1595, -40], [1720, -150, 1875, -80], [1625, -140, 1655, -80],
-			[1965, 5, 2320, 40], [2345, 20, 2465, 150], [1972, -350, 2320, -318], [1400, 170, 1555, 400],
-			[1880, -80, 1950, 100], [2140, -340, 2320, -320]]:
-		areas.append([1, _rect(g2[0], g2[1], g2[2], g2[3]), COL_GRASS])
 	areas.append([5, _rect(1560, 170, 1880, 385), COL_APRON])              # hangar apron
 	areas.append([5, _rect(1895, 242, 2330, 385), COL_APRON])              # terminal apron
 	areas.append([5, _rect(2335, 160, 2462, 385), COL_APRON])              # cargo apron
@@ -195,6 +195,56 @@ static func _rect(x0: float, z0: float, x1: float, z1: float) -> PackedVector2Ar
 	return PackedVector2Array([Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)])
 
 
+## Where the avenue's asphalt ends (the esplanade's inner edge) on the way
+## to the bridge: the ramp over the esplanade runs from here to city_end.
+static func _avenue_end(layout: CityLayout, e: Vector3) -> Vector3:
+	var x := e.x
+	while x > e.x - 60.0 and layout.block_at(x, e.z) >= 0:
+		x -= 0.5
+	return Vector3(x, layout.ground_y(x + 0.6, e.z), e.z)
+
+
+## The ramp that carries the avenue up its kerb onto the esplanade and on
+## to the deck: [start on the asphalt, top of the kerb, deck start].
+static func ramp_points(P: Dictionary, layout: CityLayout) -> PackedVector3Array:
+	var a0: Vector3 = P["avenue_end"]
+	var e: Vector3 = P["city_end"]
+	# Across its 22 m the avenue isn't level: start just under the lowest
+	# point of the asphalt (it emerges from the road, never a lip), meet the
+	# esplanade at its highest point (the pavement never pokes through).
+	var lo := INF
+	for dz: float in [-11.0, -5.5, 0.0, 5.5, 11.0]:
+		lo = minf(lo, layout.terrain.road_y(a0.x - 7.0, a0.z + dz))
+	var s0 := Vector3(a0.x - 7.0, lo - 0.03, a0.z)
+	var top := _ramp_top(layout, a0)
+	return PackedVector3Array([s0, Vector3(a0.x, top, a0.z), Vector3(e.x, e.y, e.z)])
+
+
+## The ramp's height over the esplanade: its highest point across the
+## road's width (the deck starts at this height too).
+static func _ramp_top(layout: CityLayout, a0: Vector3) -> float:
+	var hi := a0.y
+	for dz: float in [-11.0, -5.5, 0.0, 5.5, 11.0]:
+		hi = maxf(hi, layout.ground_y(a0.x + 0.6, a0.z + dz))
+	return hi + 0.01
+
+
+## The driving surface's height along the Skyport road (city avenue → ramp
+## over the esplanade → bridge deck → island). For audits and the bridge.
+static func road_y(layout: CityLayout, x: float, z: float) -> float:
+	var P := plan(layout)
+	var e: Vector3 = P["city_end"]
+	var rp := ramp_points(P, layout)
+	if x <= rp[0].x:
+		return layout.terrain.road_y(x, z)
+	if x <= rp[1].x:
+		# (The ramp emerges from the asphalt: the surface is whichever is higher.)
+		return maxf(layout.terrain.road_y(x, z), lerpf(rp[0].y, rp[1].y, (x - rp[0].x) / maxf(rp[1].x - rp[0].x, 0.01)))
+	if x <= e.x:
+		return lerpf(rp[1].y, rp[2].y, (x - rp[1].x) / maxf(rp[2].x - rp[1].x, 0.01))
+	return bridge_y(e, x)
+
+
 ## Where the bridge meets the city: the last point of the "heights" avenue
 ## that's still on the cliff top.
 static func _city_end(layout: CityLayout) -> Vector3:
@@ -203,8 +253,10 @@ static func _city_end(layout: CityLayout) -> Vector3:
 	for p in pts:
 		if not layout.is_water(Vector3(p.x, 0.0, p.y)) and p.x > e.x - 40.0:
 			e = p
-	# Step back a few metres from the cliff edge onto solid road.
-	var yv := layout.terrain.road_y(e.x - 4.0, e.y) if layout else 30.0
+	# Step back a few metres from the cliff edge; the deck starts at the
+	# esplanade's own surface there (it used to start at road level, a
+	# 0.24 m step up off the pavement).
+	var yv := layout.ground_y(e.x - 4.0, e.y) if layout else 30.0
 	return Vector3(e.x - 4.0, yv, e.y)
 
 
@@ -255,12 +307,11 @@ static func _buildings(P: Dictionary) -> Array:
 	# inland and towards the airport, gaps between them for views (and
 	# swing lines).
 	var towers := [
-		[1440, -612, 40, 40, 272, "spire", S.GLASS],
+		[1660, -628, 40, 40, 272, "spire", S.GLASS],
 		[1505, -560, 30, 34, 168, "setback", S.DARK_GLASS],
 		[1440, -540, 34, 30, 128, "podium", S.MODERN],
 		[1520, -500, 36, 28, 104, "stepped", S.GLASS],
 		[1440, -480, 30, 40, 86, "slab", S.DECO],
-		[1660, -628, 44, 36, 214, "setback", S.GLASS],          # the penthouse tower (helipad)
 		[1730, -628, 30, 34, 142, "podium", S.DARK_GLASS],
 		[1790, -630, 40, 30, 176, "stepped", S.GLASS],
 		[1850, -628, 26, 30, 96, "slab", S.MODERN],
@@ -269,12 +320,10 @@ static func _buildings(P: Dictionary) -> Array:
 		[1770, -360, 46, 34, 196, "spire", S.DARK_GLASS],
 		[1830, -350, 34, 30, 74, "stepped", S.DECO],
 		[1650, -280, 34, 36, 92, "slab", S.GLASS],
-		[1720, -270, 50, 30, 58, "podium", S.MODERN],           # hotel
 		[1800, -280, 36, 34, 132, "setback", S.GLASS],
 		[1650, -205, 70, 30, 44, "slab", S.DECO],                # mid-rise offices
 		[1760, -205, 50, 30, 64, "stepped", S.MODERN],
 		[1835, -205, 36, 36, 38, "slab", S.STONE],
-		[1430, -420, 34, 30, 64, "setback", S.MODERN],
 		[1490, -420, 30, 30, 48, "slab", S.SANDSTONE],
 	]
 	for t in towers:
@@ -283,7 +332,28 @@ static func _buildings(P: Dictionary) -> Array:
 		var b := _b(_tower(t[0], t[1], t[2], t[3], t[4], t[5]), int(t[6]), col, rng.randf())
 		b["district"] = "highrise"
 		out.append(b)
-	P["penthouse"] = {"tower": 5, "pad": Vector3(1660 + 22.0, LAND_Y + 214.0, -628 + 18.0)}
+	# Three towers with a home inside (HomeInteriors via Apartments-style
+	# records: their walls and collision are cut round the room and window):
+	#   the Skyport Penthouse on the waterfront corner, its window wall facing
+	#   west straight across the strait at the city (nothing in between);
+	#   a suite at the top of the Skyport Hotel, looking north over the park;
+	#   the Marina Quay show flat, looking west over the marina.
+	var homes: Array = []
+	var pt := _b([[1430, -630, 1474, -594, LAND_Y, LAND_Y + 130.0], [1436, -627.3, 1456.3, -600.7, LAND_Y + 130.0, LAND_Y + 145.0]],
+		S.DARK_GLASS, Color(0.5, 0.56, 0.62), 0.47)
+	out.append(pt)
+	homes.append(_home(pt, 1, 3, 4, "skyport_penthouse", "Skyport Penthouse", LAND_Y + 133.6))
+	homes[-1]["lift"] = Vector3(1426.5, LAND_Y, -614.0)   # (the window is on the narrower top: the lobby is below on the base)
+	var ht := _b([[1720, -270, 1770, -240, LAND_Y, LAND_Y + 17.0], [1730, -270, 1754.6, -251.7, LAND_Y + 17.0, LAND_Y + 61.0]],
+		S.MODERN, Color(0.82, 0.79, 0.72), 0.36)
+	out.append(ht)
+	homes.append(_home(ht, 1, 2, 3, "skyport_suite", "Skyport Hotel Suite", LAND_Y + 49.4))
+	var mq := _b([[1430, -420, 1464, -390, LAND_Y, LAND_Y + 40.0], [1430, -420, 1444.3, -403.4, LAND_Y + 40.0, LAND_Y + 52.0]],
+		S.MODERN, Color(0.74, 0.74, 0.72), 0.58)
+	out.append(mq)
+	homes.append(_home(mq, 1, 3, 1, "skyport_flat", "Marina Quay Show Flat", LAND_Y + 43.6))
+	P["homes"] = homes
+	P["penthouse"] = {"pad": Vector3(1446.15, LAND_Y + 145.0, -614.0)}
 	(P["helipads"] as Array).append(P["penthouse"]["pad"])
 	# Retail row on Skyport Avenue: dealers (glazed showrooms behind their
 	# forecourts) and two clothing stores.
@@ -313,17 +383,43 @@ static func _buildings(P: Dictionary) -> Array:
 	return out
 
 
+## An Apartments-format home in building b, tier ti, behind face k (its
+## window wall), the HomeInteriors plan `tier` (Apartments.TIERS), floor at
+## y0. Marks b with "apt" so its walls and collision are cut round it.
+static func _home(b: Dictionary, ti: int, k: int, tier: int, id: String, nm: String, y0: float) -> Dictionary:
+	var spec: Dictionary = Apartments.TIERS[tier]
+	var t: Array = b["tiers"][ti]
+	var f := BuildingMesher._face(t, k)
+	var flen: float = f[3]
+	var depth := float(t[3]) - float(t[1]) if k % 2 == 0 else float(t[2]) - float(t[0])
+	var oa0 := (flen - float(spec["open_w"])) * 0.5
+	var c := {"b": b, "t": ti, "face": k, "a0": Apartments.WALL, "a1": flen - Apartments.WALL, "y0": y0, "y1": y0 + float(spec["h"]),
+		"oa0": oa0, "oa1": oa0 + float(spec["open_w"]), "oy0": y0 + float(spec["sill"]),
+		"oy1": y0 + float(spec["sill"]) + float(spec["open_h"]), "depth": depth - Apartments.WALL,
+		"id": id, "tier": tier, "name": nm, "price": 0}
+	c["wins"] = Apartments.facade_windows(c)
+	var facade := c.duplicate()
+	facade["b"] = b.duplicate()
+	b["apt"] = facade
+	return c
+
+
 # ---------------------------------------------------------------- build
 ## Builds meshes and collision under this node. `world` gives the city's
 ## building material (so the island matches the city exactly).
+var _layout: CityLayout
+
+
 func build(layout: CityLayout, world: Node) -> void:
 	world_ref = world
+	_layout = layout
 	plan_data = plan(layout)
 	street = StaticBody3D.new()
 	street.name = "Ground"
 	street.collision_layer = 1 << 3
 	add_child(street)
 	_build_ground(street)
+	add_child(Shoreline.build(Shoreline.polygon_edges(outline())))
 	_build_skyline()
 	_build_bridge(street)
 
@@ -363,6 +459,19 @@ func _start_near() -> void:
 			at.name = "AirTraffic"
 			near_root.add_child(at)
 			at.setup(plan_data),
+		func():
+			var tr := IslandTraffic.new()
+			tr.name = "Traffic"
+			near_root.add_child(tr)
+			tr.setup(_layout, world_ref),
+		func():
+			for h: Dictionary in plan_data.get("homes", []):
+				near_root.add_child(HomeInteriors.build(h, _bmat())),
+		func():
+			var lf := IslandLife.new()
+			lf.name = "Life"
+			near_root.add_child(lf)
+			lf.setup(plan_data),
 	]
 
 
@@ -473,9 +582,25 @@ static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: fl
 func _build_ground(street: StaticBody3D) -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_poly_tris(st, outline(), LAND_Y, 0, COL_PAVE)
+	# Layers, bottom up: grass everywhere; paving (pavements along every road,
+	# forecourts round every building, the high-rise plaza and the marina
+	# quay); the planted areas on top of that; concrete aprons and yards;
+	# airport strips; roads. (It was one sheet of beige paving.)
+	_poly_tris(st, outline(), LAND_Y, 1, COL_GRASS)
+	var pave_y := LAND_Y + 0.008
+	for r in plan_data["roads"]:
+		if not r[3]:
+			_strip(st, r[1], float(r[2]) * 0.5 + 5.0, 0.008, 0, COL_PAVE)
+	for b: Dictionary in plan_data["buildings"]:
+		var t: Array = b["tiers"][0]
+		var g := 6.0 if float(t[5]) - float(t[4]) > 40.0 else 4.0
+		_poly_tris(st, _rect(float(t[0]) - g, float(t[1]) - g, float(t[2]) + g, float(t[3]) + g), pave_y, 0, COL_PAVE)
+	for pr in [[1385, -480, 1475, -200], [1955, 135, 2265, 168]]:
+		var poly := Geometry2D.intersect_polygons(_rect(pr[0], pr[1], pr[2], pr[3]), outline())
+		for q in poly:
+			_poly_tris(st, q, pave_y, 0, COL_PAVE.lightened(0.04))
 	for a in plan_data["areas"]:
-		_poly_tris(st, a[1], LAND_Y + (0.006 if int(a[0]) == 1 else 0.012), int(a[0]), a[2])
+		_poly_tris(st, a[1], LAND_Y + (0.011 if int(a[0]) == 1 else 0.014), int(a[0]), a[2])
 	for s in plan_data["strips"]:
 		_strip(st, PackedVector3Array([s[1], s[2]]), s[3], 0.025 if int(s[0]) == 3 else 0.02, int(s[0]), COL_RUNWAY if int(s[0]) == 3 else COL_APRON.darkened(0.15))
 	for r in plan_data["roads"]:
@@ -676,9 +801,19 @@ func _build_bridge(street: StaticBody3D) -> void:
 		lx += 36.0
 	_mesh(m, "Bridge", 0.0, FAR_RANGE)
 	# Road surface on the deck.
+	# The ramp from the avenue over the esplanade to the deck (collision
+	# slabs whose tops are the road line, and its road surface).
+	var rp := ramp_points(plan_data, _layout)
+	for i in rp.size() - 1:
+		var u := rp[i]
+		var v := rp[i + 1]
+		var dn := Vector3.DOWN * 0.4
+		_box_beam(street, u + dn, v + dn + (v - u).normalized() * 0.2, 22.0, 0.8)
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	_strip(st, pts, 11.0, 0.03, 7, COL_ROAD)
+	if rp.size() >= 2:
+		_strip(st, rp, 11.0, 0.03, 2, COL_ROAD)
 	var mi := MeshInstance3D.new()
 	mi.name = "BridgeRoad"
 	mi.mesh = st.commit()

@@ -55,6 +55,13 @@ void fragment() {
 		vec2 f = fract(p / 1.5);
 		float joint = max(band(f.x, 0.03, aa / 1.5), band(f.y, 0.03, aa / 1.5));
 		albedo = c * tone * (0.94 + 0.08 * hash12(floor(p / 1.5))) * (1.0 - 0.12 * joint * near);
+		// Darker granite bands every 12 m (paving laid in bays), weathered
+		// patches and drip stains, so large paved areas read as built.
+		vec2 g = abs(fract(p / 12.0 + 0.5) - 0.5) * 12.0;
+		float granite = 1.0 - smoothstep(0.2, 0.2 + aa * 2.0, min(g.x, g.y));
+		albedo = mix(albedo, c * vec3(0.62, 0.62, 0.64), granite * 0.8);
+		albedo *= 1.0 - 0.1 * smoothstep(0.6, 0.85, vnoise(p * 0.12 + 5.0));
+		albedo *= 1.0 - 0.08 * smoothstep(0.7, 0.9, vnoise(p * 0.7 + 11.0)) * near;
 	} else if (v_kind == 1.0) {
 		albedo = c * (0.82 + 0.3 * vnoise(p / 9.0)) * (0.92 + 0.12 * vnoise(p * 1.3) * near);
 		rough = 0.97;
@@ -72,6 +79,11 @@ void fragment() {
 		albedo = mix(albedo, v_kind == 7.0 ? white : yellow, centre * 0.95);
 		float tracks = band(abs(fract(abs(uv.x) / 3.5) - 0.5) * 3.5 - 0.9, 0.3, 0.2) * near;
 		albedo *= 1.0 - 0.06 * tracks;
+		// Patch repairs, the odd oil stain and a darker gutter by the kerb.
+		vec2 pc = floor(p / vec2(4.0, 2.6) + 7.0);
+		albedo *= 1.0 - 0.08 * step(0.9, hash12(pc)) * near;
+		albedo *= 1.0 - 0.15 * smoothstep(0.75, 0.88, vnoise(p * 0.55 + 3.0)) * near;
+		albedo *= 1.0 - 0.18 * smoothstep(hw - 1.0, hw - 0.2, abs(uv.x));
 	} else if (v_kind == 3.0) {
 		albedo = c * tone * (1.0 - 0.05 * step(0.5, fract(uv.y / 40.0)));
 		float len = UV2.y;

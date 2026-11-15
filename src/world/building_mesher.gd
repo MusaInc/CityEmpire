@@ -8,6 +8,7 @@ extends RefCounted
 const KIND_WALL := 0.0
 const KIND_TRIM := 1.0
 const KIND_ROOF := 2.0
+const METAL_ROOF := 8.0
 const KIND_GLASS := 3.0
 const KIND_SIGN := 4.0
 const KIND_SHORE := 5.0   # rock / sand round the island (ground.gdshader shades it)
@@ -368,7 +369,7 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 			var ch := cornice_h(b)
 			walls(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, y1 + ch * 0.5, trim, KIND_TRIM, style, seed)
 			bottom(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, trim, KIND_TRIM, style, seed)
-			roof_top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, roof, seed)
+			roof_top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, roof, seed, style)
 			if b["kind"] != "bridge":
 				_parapet(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, trim)
 				if not glassy and not has_apt:
@@ -385,7 +386,7 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 				for aw in awning_runs(b):
 					_awning(aw[0], aw[1], aw[2], aw[3], (aw[3] as Color).darkened(0.15))
 		else:
-			roof_top(x0, z0, x1, z1, y1, roof, seed)
+			roof_top(x0, z0, x1, z1, y1, roof, seed, style)
 
 
 ## Architectural features (features()) as their own mesh: CityWorld draws it
@@ -1714,7 +1715,8 @@ func _slab(T: CityTerrain, outers: Array, holes: Array, height: Callable, col: C
 ## half-extents (negative = "roof with extents"), so building.gdshader knows
 ## how far each pixel is from the parapet: grime and flashing along the edges,
 ## drains, a walkway – all without extra vertices.
-func roof_top(x0: float, z0: float, x1: float, z1: float, y: float, col: Color, seed: float) -> void:
+## Warehouse roofs (style 3) add METAL_ROOF to the seed: ribbed metal sheeting.
+func roof_top(x0: float, z0: float, x1: float, z1: float, y: float, col: Color, seed: float, style := -1.0) -> void:
 	var cx := (x0 + x1) * 0.5
 	var cz := (z0 + z1) * 0.5
 	var hx := minf(floorf((x1 - x0) * 2.0), 4095.0)  # half-extent in ¼ m
@@ -1736,7 +1738,7 @@ func roof_top(x0: float, z0: float, x1: float, z1: float, y: float, col: Color, 
 	var cc := Color(col.r, col.g, col.b, KIND_ROOF / 8.0)
 	colors.append_array([cc, cc, cc, cc])
 	uvs.append_array([Vector2(x0 - cx, z0 - cz), Vector2(x1 - cx, z0 - cz), Vector2(x1 - cx, z1 - cz), Vector2(x0 - cx, z1 - cz)])
-	var s2 := Vector2(-(1.0 + hx + hz * 4096.0), seed)
+	var s2 := Vector2(-(1.0 + hx + hz * 4096.0), seed + (METAL_ROOF if style == 3.0 else 0.0))
 	uv2s.append_array([s2, s2, s2, s2])
 	indices.append_array([i, i + 1, i + 2, i, i + 2, i + 3])
 
@@ -1818,6 +1820,9 @@ func _skirt(T: CityTerrain, layout: CityLayout, ring: PackedVector2Array, clip: 
 
 
 const SEA_WALL_LOW := -4.0   # m: sea walls run down under the water (drawn at -1.6)
+## Openings in the esplanade railing (Rect2s, x/z): where a bridge leaves
+## the coast (Skyport Island's, when a game builds it). Empty by default.
+static var rail_gaps: Array = []
 const RAIL_H := 1.1           # m: esplanade railing
 const RAIL_T := 0.5
 
@@ -1867,6 +1872,12 @@ func _coast(layout: CityLayout, clip: Rect2) -> void:
 			var Q1 := Vector3(q.x, SEA_WALL_LOW, q.y)
 			_vface(P0, Q0, Q1, P1, n3, face, KIND_WALL)
 			# Railing: a low stone wall just inside the edge, riding the slope.
+			var gap := false
+			for g: Rect2 in rail_gaps:
+				if g.has_point((p + q) * 0.5):
+					gap = true
+			if gap:
+				continue
 			var pi := p - o * RAIL_T
 			var qi := q - o * RAIL_T
 			var up := Vector3(0, RAIL_H, 0)
@@ -2356,7 +2367,7 @@ func cap_poly(pts: PackedVector2Array, y: float, col: Color, kind: float, style:
 	if roof:
 		var hx := minf(floorf((hi.x - lo.x) * 2.0), 4095.0)
 		var hz := minf(floorf((hi.y - lo.y) * 2.0), 4095.0)
-		s2 = Vector2(-(1.0 + hx + hz * 4096.0), seed)
+		s2 = Vector2(-(1.0 + hx + hz * 4096.0), seed + (METAL_ROOF if style == 3.0 else 0.0))
 		kind = KIND_ROOF
 	var nrm := Vector3.UP if up else Vector3.DOWN
 	var nw := xf.basis * nrm if _xf_on else nrm

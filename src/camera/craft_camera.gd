@@ -20,13 +20,21 @@ func _ready() -> void:
 	_ray.collision_mask = 1
 
 
-func set_target(c: Craft) -> void:
+var _blend := 0.0
+var _from := Transform3D()
+
+
+## Follow `c`; given `from` (the camera you were looking through), ease from
+## it over 0.9 s instead of cutting.
+func set_target(c: Craft, from := Transform3D()) -> void:
 	target = c
 	var f := c.forward()
 	_pos = c.global_position - f * _dist() + Vector3.UP * _height()
 	_look = c.global_position
 	cam.global_position = _pos
 	cam.look_at(_look + Vector3.UP * 0.01, Vector3.UP)
+	_from = from
+	_blend = 1.0 if from != Transform3D() else 0.0
 
 
 func _dist() -> float:
@@ -67,3 +75,7 @@ func _process(dt: float) -> void:
 	cam.global_position = p
 	if (_look - p).length() > 0.1:
 		cam.look_at(_look, Vector3.UP)
+	if _blend > 0.0:
+		_blend = maxf(_blend - dt / 0.9, 0.0)
+		var e := _blend * _blend * (3.0 - 2.0 * _blend)
+		cam.global_transform = cam.global_transform.interpolate_with(_from, e)

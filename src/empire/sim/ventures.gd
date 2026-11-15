@@ -37,20 +37,22 @@ const LOCAL_DELIVERY := 1.2
 ## hangar / berths / home. units × rent a unit a day at full occupancy.
 const ESTATES := [
 	{"id": "marina_quay", "name": "Marina Quay Apartments", "kind": "flats", "price": 420000.0, "units": 16, "rent": 30.0, "upkeep": 70.0,
-		"at": Vector3(1430, 3, -440), "desc": "Sixteen flats over the marina"},
+		"at": Vector3(1447, 3, -405), "desc": "Sixteen flats over the marina, with a show flat you can use"},
 	{"id": "tower_offices", "name": "Tower Road Offices", "kind": "offices", "price": 780000.0, "units": 8, "rent": 110.0, "upkeep": 150.0,
 		"at": Vector3(1665, 3, -200), "desc": "Eight floors of offices on Tower Road"},
 	{"id": "skyport_hotel", "name": "Skyport Hotel", "kind": "hotel", "price": 1600000.0, "units": 60, "rent": 26.0, "upkeep": 420.0,
-		"at": Vector3(1745, 3, -255), "desc": "Sixty rooms by the park; guests by the night"},
+		"at": Vector3(1745, 3, -255), "desc": "Sixty rooms by the park, guests by the night; the top-floor suite is yours to use"},
 	{"id": "logistics", "name": "Skyport Logistics Warehouse", "kind": "warehouse", "price": 260000.0, "units": 1, "rent": 0.0, "upkeep": 45.0,
 		"at": Vector3(2400, 3, -170), "desc": "Free local delivery for every import"},
 	{"id": "hangar2", "name": "Hangar 2", "kind": "hangar", "price": 350000.0, "units": 1, "rent": 0.0, "upkeep": 60.0,
 		"at": Vector3(1756, 3, 240), "desc": "Your own hangar: no hangar fees for your aircraft"},
 	{"id": "berths", "name": "Marina Berths", "kind": "berths", "price": 180000.0, "units": 12, "rent": 16.0, "upkeep": 30.0,
-		"at": Vector3(1340, 0, -300), "desc": "Twelve berths: rent them out, moor free yourself"},
-	{"id": "spire_penthouse", "name": "Spire Penthouse", "kind": "home", "price": 2500000.0, "units": 0, "rent": 0.0, "upkeep": 160.0,
-		"at": Vector3(1682, 3, -610), "desc": "Top of the Skyport tower, with its own rooftop helipad"},
+		"at": Vector3(1340, 0, -300), "desc": "Twelve berths: rent them out, moor free yourself"}
 ]
+## Homes that come with a building (the hotel's top-floor suite, the
+## flats' show flat): owning the building gives you the home's keys.
+const HOME_ESTATE := {"skyport_suite": "skyport_hotel", "skyport_flat": "marina_quay"}
+
 const RENT_LEVELS := [[0.85, "Cheap"], [1.0, "Market"], [1.2, "Premium"]]
 
 const DEALER_PRICE := 150000.0
@@ -153,8 +155,23 @@ static func buy_estate(e: Empire, id: String) -> String:
 	es[id] = {"rent_k": 1.0, "occ": 0.35 if int(d["units"]) > 0 else 0.0, "cond": 0.85, "renovated": 0, "bought_day": e.day,
 		"income": 0.0, "last": 0.0}
 	e.flags["estates"] = es
+	_grant_homes(e)
 	e._note("You own %s" % d["name"], "good")
 	return ""
+
+
+## The keys to the homes that come with buildings you own (and only those):
+## a property record per home, so the lift, bed and saving work as for any
+## home. Also run on load (saves made before the homes existed).
+static func _grant_homes(e: Empire) -> void:
+	for hid in HOME_ESTATE:
+		var pid := "home_" + String(hid)
+		var want := owns_estate(e, String(HOME_ESTATE[hid]))
+		var has := e.owns_property(pid)
+		if want and not has:
+			e.properties.append({"id": pid, "kind": "home", "name": hid, "price": 0.0, "let": false, "income": 0.0, "with_estate": true})
+		elif has and not want:
+			e.properties = e.properties.filter(func(q): return q["id"] != pid)
 
 
 static func sell_estate(e: Empire, id: String) -> String:
@@ -164,6 +181,7 @@ static func sell_estate(e: Empire, id: String) -> String:
 	e.company_cash += v
 	e._book("company", v, "property", "Sold %s" % estate_def(id)["name"])
 	(e.flags["estates"] as Dictionary).erase(id)
+	_grant_homes(e)
 	return ""
 
 
