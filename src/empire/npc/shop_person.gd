@@ -22,7 +22,10 @@ var _bubble: Label3D
 var _bubble_t := 0.0
 var _yaw_goal := 0.0
 var face_goal := Vector3.INF       # look at this (parent space) when standing
-var blocked_by: Callable           # (pos) -> bool : someone's in the way
+var blocked_by: Callable           # (pos) -> int : 0 free, 1 someone, 2 the player
+var floor_ok: Callable             # (pos) -> bool : walkable (not a fixture)
+var _wait_t := 0.0
+var _excused := false
 
 
 ## The crowd body types (person_0..), sharing the npc shader material.
@@ -75,6 +78,10 @@ func _init(seed := 0, staff := false) -> void:
 	_bubble.outline_size = 12
 	_bubble.no_depth_test = false
 	add_child(_bubble)
+
+
+func _floor_ok(at: Vector3) -> bool:
+	return not floor_ok.is_valid() or floor_ok.call(at)
 
 
 func set_path(p: PackedVector3Array) -> void:
@@ -133,13 +140,37 @@ func _process(dt: float) -> void:
 			_pi += 1
 		else:
 			var step := speed * dt
-			var ahead := position + to / dist * minf(0.45, dist)
-			if blocked_by.is_valid() and blocked_by.call(ahead):
-				step *= 0.15  # someone in the way: shuffle, don't stop dead
-			position += to / dist * minf(step, dist)
-			stride += minf(step, dist)
+			var dir := to / dist
+			var ahead := position + dir * minf(0.5, dist + 0.3)
+			var mv := dir * minf(step, dist)
+			var who: int = int(blocked_by.call(ahead)) if blocked_by.is_valid() else 0
+			if who != 0:
+				# Someone in the way: step to the left of them (as on the
+				# pavement) if that's free, else wait. Two people face to
+				# face both stepping left pass; after a second a stuck one
+				# tries the right; after a few, in a narrow aisle, they
+				# squeeze past ("excuse me") rather than stand there for ever.
+				var left := Vector3(dir.z, 0.0, -dir.x)
+				var side_at := position + (dir * 0.25 + left * 0.45)
+				_wait_t += dt
+				if int(blocked_by.call(side_at)) == 0 and _floor_ok(side_at):
+					mv = (dir * 0.35 + left * 0.65).normalized() * step * 0.6
+				elif _wait_t > 1.0 and int(blocked_by.call(position - left * 0.45)) == 0 and _floor_ok(position - left * 0.45):
+					mv = -left * step * 0.5
+				elif _wait_t > (2.5 if who == 1 else 3.5):
+					mv = dir * minf(step * 0.35, dist)
+					if who == 2 and not _excused:
+						_excused = true
+						say("Excuse me", Color(0.9, 0.9, 0.95), 1.4)
+				else:
+					mv = Vector3.ZERO
+			else:
+				_wait_t = maxf(_wait_t - dt * 2.0, 0.0)
+				_excused = false
+			position += mv
+			stride += mv.length()
 			_yaw_goal = atan2(-to.x, -to.z)
-			moving = true
+			moving = mv.length() > 0.0005
 	elif face_goal != Vector3.INF:
 		var f := face_goal - position
 		if Vector2(f.x, f.z).length() > 0.05:

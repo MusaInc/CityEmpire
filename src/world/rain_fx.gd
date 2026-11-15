@@ -34,8 +34,13 @@ func _ready() -> void:
 	visible = false
 
 
+## Under a roof (City Empire: inside a shop) the streaks round the camera
+## would fall through the ceiling: the game sets this while you're in.
+var sheltered := false
+
+
 func set_rain(amount: float, sky_lin: Color, lamps: float) -> void:
-	visible = amount > 0.02
+	visible = amount > 0.02 and not sheltered
 	if not visible:
 		return
 	_mat.set_shader_parameter("amount", amount)

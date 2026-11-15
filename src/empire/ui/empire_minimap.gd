@@ -8,7 +8,7 @@ extends Control
 ## to the rim when it's off the disc. Tap it to open the full map.
 
 const SHADER := preload("res://src/ui/shaders/minimap.gdshader")
-const R_WALK := 110.0
+const R_WALK := 125.0
 const R_DRIVE := 190.0      # at a crawl; out to R_DRIVE_FAST at speed
 const R_DRIVE_FAST := 330.0
 
@@ -56,7 +56,9 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_mat = ShaderMaterial.new()
 	_mat.shader = SHADER
-	_mat.set_shader_parameter("opacity", 0.92)
+	_mat.set_shader_parameter("opacity", 0.9)
+	# Roads read clearly against blocks at a glance (the baked map is soft).
+	_mat.set_shader_parameter("contrast", 1.35)
 	material = _mat
 	_overlay = Control.new()
 	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -132,7 +134,7 @@ func _draw_overlay() -> void:
 			for p in pts:
 				sp.append(_to_map(p))
 			for run in MapKit.clip_to_circle(sp, ctr, rad):
-				MapKit.draw_route(ov, run, 4.0)
+				MapKit.draw_route(ov, run, 5.0)
 	var near_r := rad - 4.0
 	for m in MapKit.markers(game):
 		var kind: String = m["kind"]
@@ -166,11 +168,4 @@ func _draw_overlay() -> void:
 	var n := ctr + north * (size.x * 0.5 - 10.0)
 	ov.draw_circle(n, 8.0, Color(EmpireStyle.INK, 0.9))
 	ov.draw_string(EmpireStyle.font("black"), n + Vector2(-4.5, 5), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
-	# Next turn, under the disc.
-	if gps and gps.active() and gps.turn.x != 0.0 and gps.turn.y < 400.0:
-		var f := EmpireStyle.font("black")
-		var txt := ("◀ " if gps.turn.x < 0.0 else "") + "%d m" % int(roundf(gps.turn.y / 10.0) * 10.0) + (" ▶" if gps.turn.x > 0.0 else "")
-		var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
-		var bp := Vector2(ctr.x - w * 0.5 - 10.0, size.y - 14.0)
-		ov.draw_rect(Rect2(bp, Vector2(w + 20.0, 24.0)), Gps.COLOUR)
-		ov.draw_string(f, bp + Vector2(10, 18), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
+	# (The next turn is the HUD's turn panel under the disc.)

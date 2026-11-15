@@ -16,13 +16,11 @@ var hud: Control
 var minimap: EmpireMinimap
 var touch: EmpireTouch
 var _money: Label
-var _company: Label
 var _clock: Label
 var _speed: Label
 var _obj_title: Label
 var _obj: Label
 var _gps: Label
-var _arrow: Control
 var _prompt: PanelContainer
 var _prompt_l: Label
 var _prompt_key: Label
@@ -112,111 +110,175 @@ func _apply_safe_area() -> void:
 
 
 # ------------------------------------------------------------------ HUD
+## HUD layout (inside the safe area), by corner:
+##   top left    one translucent strip: your money · day and time · weather;
+##               under it the objective (tap: its screen or route) and, only
+##               inside one of your shops, that shop's line
+##   top right   the minimap (big: roads, route, destination) with the next
+##               turn under it; the phone button beside it
+##   top centre  notifications
+##   bottom      left: the stick; right: ACTION/JUMP on foot, the drive pad
+##               in a car (EmpireTouch); the prompt and speed in the middle
+## Company money and profit live in the phone (Finances), not on screen.
+const HUD_ALPHA := 0.62
+var _turn: PanelContainer
+var _turn_icon: Control
+var _turn_dist: Label
+var _turn_sub: Label
+var _obj_panel: PanelContainer
+var _phone_btn: Button
+var _drive_panel: PanelContainer
+
+
 func _build_hud() -> void:
-	# Money (top left).
-	var m := _hud_panel(Vector2(18, 16), Vector2(250, 78), S.GREEN)
-	var mv := S.vbox(0)
-	m.add_child(mv)
-	_money = S.label("£0", 30, S.PAPER, "black")
-	_company = S.label("Company £0", 16, S.MUTED)
-	mv.add_child(_money)
-	mv.add_child(_company)
-	# Clock (top centre).
-	var c := _hud_panel(Vector2(0, 16), Vector2(270, 56))
-	_anchor(c, 0.5, 0.0, Vector2(-135, 16), Vector2(270, 56))
-	var ch := S.hbox(10)
-	c.add_child(ch)
-	_clock = S.label("Mon 07:30", 24, S.PAPER, "bold")
-	_speed = S.label("", 18, S.AMBER, "black")
-	ch.add_child(_clock)
-	ch.add_child(_speed)
+	# Money · time · weather (top left), one row.
+	var m := _hud_panel(Vector2(16, 12), Vector2(0, 46), S.GREEN)
+	_anchor(m, 0.0, 0.0, Vector2(16, 12), Vector2(0, 46))
+	var mh := S.hbox(14)
+	m.add_child(mh)
+	_money = S.label("£0", 24, S.PAPER, "black")
+	_clock = S.label("Mon 07:30", 19, S.PAPER, "bold")
+	_speed = S.label("", 17, S.AMBER, "black")
 	_weather_l = S.label("", 16, S.MUTED, "bold")
-	ch.add_child(_weather_l)
-	# The shop you're in (under the money).
-	_strip_panel = _hud_panel(Vector2(18, 104), Vector2(250, 50))
-	_strip = S.label("", 15, S.PAPER)
-	_strip_panel.add_child(_strip)
-	# Minimap (left, under the money and shop strip).
-	minimap = EmpireMinimap.new()
-	_anchor(minimap, 0.0, 0.0, Vector2(26, 166), Vector2(176, 176))
-	hud.add_child(minimap)
-	# Objective (top right).
-	var o := _hud_panel(Vector2(0, 16), Vector2(360, 82), S.AMBER)
-	_anchor(o, 1.0, 0.0, Vector2(-442, 16), Vector2(360, 82))
-	# Tap the objective: its screen, or its route.
+	mh.add_child(_money)
+	mh.add_child(_dot())
+	mh.add_child(_clock)
+	mh.add_child(_speed)
+	mh.add_child(_dot())
+	mh.add_child(_weather_l)
+	# Objective (under the strip): tap for its screen or its route.
+	var o := _hud_panel(Vector2(16, 66), Vector2(0, 0), S.AMBER)
+	_anchor(o, 0.0, 0.0, Vector2(16, 66), Vector2(0, 0))
+	_obj_panel = o
 	o.mouse_filter = Control.MOUSE_FILTER_STOP
 	o.gui_input.connect(func(ev: InputEvent):
 		var tap: bool = (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT) or (ev is InputEventScreenTouch and ev.pressed)
 		if tap and game.state == "play" and _panel == null:
 			o.accept_event()
 			objective_action())
-	var ov := S.vbox(2)
+	var ov := S.vbox(0)
 	o.add_child(ov)
-	_obj_title = S.label("OBJECTIVE", 13, S.AMBER, "black")
-	_obj = S.label("", 17, S.PAPER)
+	_obj_title = S.label("OBJECTIVE", 11, S.AMBER, "black")
+	_obj = S.label("", 15, S.PAPER)
 	_obj.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_obj.custom_minimum_size.x = 330
-	_gps = S.label("", 15, S.MUTED)
+	_obj.custom_minimum_size.x = 300
+	_gps = S.label("", 13, S.MUTED)
 	ov.add_child(_obj_title)
 	ov.add_child(_obj)
 	ov.add_child(_gps)
-	_arrow = _Arrow.new()
-	_anchor(_arrow, 0.5, 0.0, Vector2(-22, 112), Vector2(44, 44))
-	_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(_arrow)
-	# Phone button (top right corner).
-	var phone := S.button("☰", func(): open_phone(), false, 52)
-	_anchor(phone, 1.0, 0.0, Vector2(-70, 16), Vector2(52, 52))
-	phone.add_theme_font_size_override("font_size", 26)
-	hud.add_child(phone)
-	# Toasts (right, under the objective).
+	# The shop you're in (under the objective; only in your own shops).
+	_strip_panel = _hud_panel(Vector2(16, 150), Vector2(0, 0))
+	_anchor(_strip_panel, 0.0, 0.0, Vector2(16, 150), Vector2(0, 0))
+	_strip = S.label("", 14, S.PAPER)
+	_strip_panel.add_child(_strip)
+	# (The two stack: the objective's height changes with its text.)
+	var col := S.vbox(8)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_anchor(col, 0.0, 0.0, Vector2(16, 66), Vector2(0, 0))
+	hud.add_child(col)
+	for pc in [o, _strip_panel]:
+		hud.remove_child(pc)
+		(pc as Control).position = Vector2.ZERO
+		(pc as Control).size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		col.add_child(pc)
+	# Minimap (top right) and the next turn under it.
+	minimap = EmpireMinimap.new()
+	hud.add_child(minimap)
+	_turn = _hud_panel(Vector2.ZERO, Vector2(0, 52))
+	var tsb := _turn.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	tsb.bg_color = Color(Gps.COLOUR.darkened(0.55), 0.8)
+	tsb.content_margin_left = 10
+	tsb.content_margin_right = 12
+	tsb.content_margin_top = 5
+	tsb.content_margin_bottom = 5
+	_turn.add_theme_stylebox_override("panel", tsb)
+	var th := S.hbox(10)
+	_turn.add_child(th)
+	_turn_icon = _TurnIcon.new()
+	_turn_icon.custom_minimum_size = Vector2(38, 38)
+	th.add_child(_turn_icon)
+	var tv := S.vbox(-2)
+	th.add_child(tv)
+	_turn_dist = S.label("", 20, S.PAPER, "black")
+	_turn_sub = S.label("", 13, Color(S.PAPER, 0.8), "semibold")
+	_turn_sub.clip_text = true
+	_turn_sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	tv.add_child(_turn_dist)
+	tv.add_child(_turn_sub)
+	# Phone button (left of the minimap).
+	_phone_btn = S.button("☰", func(): open_phone(), false, 52)
+	_phone_btn.add_theme_font_size_override("font_size", 26)
+	hud.add_child(_phone_btn)
+	# Toasts (top centre).
 	_toasts = S.vbox(8)
-	_anchor(_toasts, 1.0, 0.0, Vector2(-442, 112), Vector2(390, 300))
+	_anchor(_toasts, 0.5, 0.0, Vector2(-200, 12), Vector2(400, 300))
 	_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE   # (tappable toasts stop clicks themselves)
 	hud.add_child(_toasts)
 	# Prompt (bottom centre).
 	_prompt = PanelContainer.new()
 	var psb := StyleBoxFlat.new()
-	psb.bg_color = Color(S.INK, 0.88)
-	psb.set_corner_radius_all(26)
+	psb.bg_color = Color(S.INK, 0.72)
+	psb.set_corner_radius_all(22)
 	psb.border_color = Color(1, 1, 1, 0.1)
 	psb.set_border_width_all(1)
-	psb.shadow_color = Color(0, 0, 0, 0.3)
-	psb.shadow_size = 12
-	psb.shadow_offset = Vector2(0, 4)
-	psb.content_margin_left = 10
-	psb.content_margin_right = 22
-	psb.content_margin_top = 8
-	psb.content_margin_bottom = 8
+	psb.content_margin_left = 8
+	psb.content_margin_right = 18
+	psb.content_margin_top = 6
+	psb.content_margin_bottom = 6
 	_prompt.add_theme_stylebox_override("panel", psb)
-	_anchor(_prompt, 0.5, 1.0, Vector2(-200, -150), Vector2(400, 50))
+	_anchor(_prompt, 0.5, 1.0, Vector2(-200, -128), Vector2(400, 42))
 	_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_prompt.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var ph := S.hbox(12)
+	var ph := S.hbox(10)
 	_prompt.add_child(ph)
-	_prompt_key = S.label(" E ", 18, S.INK, "black")
+	_prompt_key = S.label(" E ", 16, S.INK, "black")
 	var kb := StyleBoxFlat.new()
 	kb.bg_color = S.AMBER
-	kb.set_corner_radius_all(14)
-	kb.content_margin_left = 8
-	kb.content_margin_right = 8
+	kb.set_corner_radius_all(12)
+	kb.content_margin_left = 7
+	kb.content_margin_right = 7
 	_prompt_key.add_theme_stylebox_override("normal", kb)
-	_prompt_l = S.label("", 20, S.PAPER, "bold")
+	_prompt_l = S.label("", 17, S.PAPER, "bold")
 	ph.add_child(_prompt_key)
 	ph.add_child(_prompt_l)
 	hud.add_child(_prompt)
-	# Carrying (bottom left) and driving readout.
-	_carry = S.label("", 17, S.PAPER, "bold")
-	_anchor(_carry, 0.0, 1.0, Vector2(24, -64), Vector2(900, 30))
+	# Carrying (bottom centre, over the prompt) and the speed pill (driving).
+	_carry = S.label("", 15, S.PAPER, "bold")
+	_anchor(_carry, 0.5, 1.0, Vector2(-450, -78), Vector2(900, 26))
+	_carry.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_carry.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	_carry.add_theme_constant_override("outline_size", 6)
 	hud.add_child(_carry)
-	_drive = S.label("", 30, S.PAPER, "black")
-	_anchor(_drive, 0.5, 1.0, Vector2(-300, -80), Vector2(600, 40))
+	_drive_panel = _hud_panel(Vector2.ZERO, Vector2(0, 40))
+	_anchor(_drive_panel, 0.5, 1.0, Vector2(-80, -58), Vector2(160, 40))
+	_drive_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_drive = S.label("", 22, S.PAPER, "black")
 	_drive.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_drive.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-	_drive.add_theme_constant_override("outline_size", 8)
-	hud.add_child(_drive)
+	_drive_panel.add_child(_drive)
+	_layout_hud()
+	hud.resized.connect(_layout_hud)
+
+
+func _dot() -> Label:
+	return S.label("·", 18, Color(S.PAPER, 0.35), "black")
+
+
+## Minimap size follows the screen: big enough to read roads and turns on a
+## phone (≈ a third of the height), not a quarter of an iPad.
+func minimap_size() -> float:
+	var h := hud.size.y if hud.size.y > 0.0 else 720.0
+	return clampf(h * 0.31, 190.0, 290.0)
+
+
+func _layout_hud() -> void:
+	var mm := minimap_size()
+	_anchor(minimap, 1.0, 0.0, Vector2(-mm - 16.0, 12.0), Vector2(mm, mm))
+	_anchor(_turn, 1.0, 0.0, Vector2(-mm - 16.0 + 6.0, mm + 18.0), Vector2(mm - 12.0, 52))
+	_turn.size = Vector2(mm - 12.0, 52)
+	_turn_sub.custom_minimum_size.x = mm - 80.0
+	_anchor(_phone_btn, 1.0, 0.0, Vector2(-mm - 16.0 - 62.0, 12.0), Vector2(52, 52))
+	# Objective text wraps before it reaches the toasts' column.
+	_obj.custom_minimum_size.x = clampf(hud.size.x * 0.24, 260.0, 380.0)
 
 
 ## Anchors a control at (ax, ay) of the screen with its top-left `off` from
@@ -235,22 +297,20 @@ static func _anchor(c: Control, ax: float, ay: float, off: Vector2, size: Vector
 func _hud_panel(pos: Vector2, size: Vector2, accent := Color(0, 0, 0, 0)) -> PanelContainer:
 	var p := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(S.INK, 0.8)
-	sb.set_corner_radius_all(16)
+	# Translucent (no blur: it costs a full-screen pass on a phone).
+	sb.bg_color = Color(S.INK, HUD_ALPHA)
+	sb.set_corner_radius_all(14)
 	sb.border_color = Color(1, 1, 1, 0.07)
 	sb.border_width_top = 1
-	sb.shadow_color = Color(0, 0, 0, 0.25)
-	sb.shadow_size = 10
-	sb.shadow_offset = Vector2(0, 3)
 	if accent.a > 0.0:
 		# A coloured edge on the left (money green, objective amber).
 		sb.border_color = accent
 		sb.border_width_left = 4
 		sb.border_width_top = 0
-	sb.content_margin_left = 16
-	sb.content_margin_right = 16
-	sb.content_margin_top = 8
-	sb.content_margin_bottom = 8
+	sb.content_margin_left = 14
+	sb.content_margin_right = 14
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
 	p.add_theme_stylebox_override("panel", sb)
 	p.position = pos
 	p.custom_minimum_size = size
@@ -274,50 +334,48 @@ func update_hud() -> void:
 		return
 	var e := game.empire
 	_money.text = EmpireData.money(e.personal_cash)
-	_company.text = "Company %s" % EmpireData.money(e.company_cash)
-	_company.add_theme_color_override("font_color", S.RED if e.company_cash < 0.0 else S.MUTED)
 	_clock.text = "%s %s" % [e.weekday(), e.clock_text()]
-	_weather_l.text = String(CityLife.weather_def(e.weather).get("name", ""))
+	var wname := String(CityLife.weather_def(e.weather).get("name", ""))
+	var hr := e.hour()
+	if (hr < 6.0 or hr >= 20.0) and wname in ["Sunny", "Heatwave"]:
+		wname = "Clear night" if wname == "Sunny" else "Warm night"
+	_weather_l.text = wname
 	_speed.text = "×%d" % int(game.time_scale) if game.time_scale > 1.0 and game.floor == null and game.driving == "" else ""
+	_speed.visible = _speed.text != ""
 	var ob := game.objective()
 	_obj.text = String(ob[0])
-	# Route line: the GPS (purple, as on both maps): next turn and distance.
+	_obj_panel.visible = _obj.text != ""
+	# The route: the next turn (big) and what's left (small) under the
+	# minimap, purple as on both maps. One place for distances.
 	var gps: Gps = game.gps
-	var me := gps._here()
 	if gps.active():
-		var bits: Array = []
-		if String(gps.ref.get("kind", "")) != "objective" and gps.label != "":
-			bits.append("GPS: " + gps.label)
+		var to := gps.label if gps.label != "" else "destination"
 		if gps.message != "":
-			bits.append(gps.message)
+			_turn_dist.text = "No route"
+			_turn_sub.text = gps.message
+			(_turn_icon as _TurnIcon).dir = 2
+		elif gps.turn.x != 0.0 and gps.turn.y < 600.0:
+			var tm := maxi(int(roundf(gps.turn.y / 10.0) * 10.0), 10)
+			_turn_dist.text = "%d m" % tm
+			_turn_sub.text = "%s · %s to go" % ["Turn left" if gps.turn.x < 0.0 else "Turn right", gps.distance_text()]
+			(_turn_icon as _TurnIcon).dir = -1 if gps.turn.x < 0.0 else 1
 		else:
-			var tt := gps.turn_text()
-			if tt != "":
-				bits.append(tt)
-			bits.append(gps.distance_text())
-		_gps.text = "  ·  ".join(bits)
-		_gps.add_theme_color_override("font_color", Gps.COLOUR.lightened(0.35) if gps.message == "" else S.AMBER)
-		# The arrow points along the route ~30 m ahead (not through buildings).
-		var aim := gps.dest
-		var pts := gps.ahead()
-		var acc := 0.0
-		for i in range(1, pts.size()):
-			acc += pts[i].distance_to(pts[i - 1])
-			aim = pts[i]
-			if acc > 30.0:
-				break
-		var view := game.camera.view_yaw() if game.driving == "" else game.chase.view_yaw()
-		var to := atan2(-(aim.x - me.x), -(aim.z - me.z))
-		(_arrow as _Arrow).angle = wrapf(view - to, -PI, PI)
-		_arrow.visible = Vector2(me.x - gps.dest.x, me.z - gps.dest.z).length() > 8.0
+			_turn_dist.text = gps.distance_text()
+			_turn_sub.text = "Ahead to " + to
+			(_turn_icon as _TurnIcon).dir = 0
+		_turn_icon.queue_redraw()
+		_turn.visible = true
+		_gps.text = ""
 	else:
+		_turn.visible = false
 		_gps.text = "Tap for what to do" if (ob.size() > 3 and String(ob[3]) != "") else ""
-		_gps.add_theme_color_override("font_color", S.MUTED)
-		_arrow.visible = false
-	_arrow.queue_redraw()
+	_gps.visible = _gps.text != ""
+	_gps.add_theme_color_override("font_color", S.MUTED)
 	# Prompt.
 	var pr := game.spot_prompt()
-	_prompt.visible = String(pr[0]) != "" and _panel == null
+	# In a car the exit is the action button (touch) or E (shown small):
+	# no banner over the road.
+	_prompt.visible = String(pr[0]) != "" and _panel == null and not (game.driving != "" and (touch.visible or not pr[1]))
 	_prompt_l.text = String(pr[0])
 	_prompt_l.add_theme_color_override("font_color", S.PAPER if pr[1] else Color(S.PAPER, 0.5))
 	_prompt_key.visible = pr[1] and not touch.visible
@@ -351,10 +409,17 @@ func update_hud() -> void:
 	if game.driving != "":
 		var car: Car = game.cars[game.driving]
 		var v := e.vehicle(game.driving)
-		_drive.text = "%d mph   ·   %d/%d cases" % [int(car.speed * 2.237), (v["cargo"] as Stock).cases_used(),
-			(v["cargo"] as Stock).case_capacity]
+		var cargo := v["cargo"] as Stock
+		_drive.text = "%d mph" % int(absf(car.forward_speed) * 2.237)
+		if cargo.cases_used() > 0:
+			_drive.text += "  ·  %d/%d cases" % [cargo.cases_used(), cargo.case_capacity]
+		_drive_panel.visible = true
 	else:
 		_drive.text = ""
+		_drive_panel.visible = false
+	# Inside a shop the minimap shows nothing useful: it shrinks away while
+	# you're on your shop floor (the route still shows under it when set).
+	minimap.visible = game.floor == null or gps.active()
 	_update_floats()
 
 
@@ -423,18 +488,31 @@ func _update_floats() -> void:
 		l.modulate.a = clampf(2.0 - float(f["t"]) * 1.25, 0.0, 1.0)
 
 
-class _Arrow extends Control:
-	var angle := 0.0
+## The next-turn glyph: -1 left, 0 ahead, 1 right, 2 none (no route).
+class _TurnIcon extends Control:
+	var dir := 0
 
 	func _draw() -> void:
 		var c := size * 0.5
-		var pts := PackedVector2Array([Vector2(0, -18), Vector2(13, 12), Vector2(0, 5), Vector2(-13, 12)])
-		var out := PackedVector2Array()
-		for p in pts:
-			out.append(c + p.rotated(angle))
-		draw_colored_polygon(out, EmpireStyle.AMBER)
-		out.append(out[0])
-		draw_polyline(out, Color(0, 0, 0, 0.6), 2.0, true)
+		draw_circle(c, size.x * 0.5, Color(1, 1, 1, 0.14))
+		var col := EmpireStyle.PAPER
+		if dir == 2:
+			draw_line(c + Vector2(-8, -8), c + Vector2(8, 8), EmpireStyle.AMBER, 4.0, true)
+			draw_line(c + Vector2(8, -8), c + Vector2(-8, 8), EmpireStyle.AMBER, 4.0, true)
+			return
+		var s := float(dir)
+		# Stem up from the bottom, then a bend toward the turn and the head.
+		var a := c + Vector2(-5.0 * s, 13)
+		var b := c + Vector2(-5.0 * s, -2) if dir != 0 else c + Vector2(0, -8)
+		if dir == 0:
+			a = c + Vector2(0, 13)
+		draw_line(a, b, col, 5.0, true)
+		if dir == 0:
+			draw_colored_polygon(PackedVector2Array([c + Vector2(0, -15), c + Vector2(8, -5), c + Vector2(-8, -5)]), col)
+		else:
+			var tip := c + Vector2(13.0 * s, -2)
+			draw_line(b, tip - Vector2(6.0 * s, 0), col, 5.0, true)
+			draw_colored_polygon(PackedVector2Array([tip, tip + Vector2(-9.0 * s, -8), tip + Vector2(-9.0 * s, 8)]), col)
 
 
 # --------------------------------------------------------------- panels
@@ -968,7 +1046,22 @@ func open_price(b: Business, pid: String) -> void:
 		var pr := b.price(pid)
 		info.text = "%s each  ·  cost %s  ·  margin %d%%  ·  RRP %s" % [EmpireData.money(pr, true), EmpireData.money(cost, true),
 			int((pr - cost) / maxf(pr, 0.01) * 100.0), EmpireData.money(EmpireData.rrp(pid), true)]
-		share.text = "About %d%% of shoppers here would pay this." % int(DemandModel.buy_share(b, pid, pr) * 100.0)
+		# What the decision means: profit from ten shoppers who want it, and
+		# the price that would make the most (from the same demand model).
+		var per10 := 10.0 * DemandModel.buy_share(b, pid, pr) * (pr - cost)
+		var best_p := pr
+		var best_v := -INF
+		var tp := maxf(cost, 0.05)
+		while tp <= EmpireData.rrp(pid) * 2.2:
+			var tv := DemandModel.buy_share(b, pid, tp) * (tp - cost)
+			if tv > best_v:
+				best_v = tv
+				best_p = tp
+			tp += 0.05
+		share.text = "About %d%% of shoppers here would pay this: ~%s profit per 10 who want it.\n%s" % [
+			int(DemandModel.buy_share(b, pid, pr) * 100.0), EmpireData.money(per10, true),
+			"That's about the best price here." if absf(best_p - pr) < 0.11 else "Most profit here at about %s (%s per 10)." % [
+				EmpireData.money(best_p, true), EmpireData.money(10.0 * best_v, true)]]
 	refresh.call()
 	v.add_child(info)
 	v.add_child(share)

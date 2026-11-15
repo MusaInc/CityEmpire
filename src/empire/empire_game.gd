@@ -222,6 +222,22 @@ func _after_start() -> void:
 					from = si.to_world(ShopInterior.R(si.W * 0.55, pd + 0.3, 2.3))
 					to = si.to_world(ShopInterior.R(si.W * 0.3, si.D, 0.7))
 				return [Transform3D(Basis.looking_at(to - from, Vector3.UP), from), 66.0]
+		if not u.is_empty() and args.has("roomcam"):
+			# Captures: the whole shop floor from high in a back corner, looking
+			# at the door and tills ("roomcam=front": from by the door, inward).
+			var ru := u
+			var rv := String(args["roomcam"])
+			camera.cine = func(_dt: float) -> Array:
+				var si: ShopInterior = interiors.get(ru["id"])
+				if si == null:
+					return [camera.cam.global_transform, 62.0]
+				var pd := si.D - ShopInterior.BACKROOM
+				var from := si.to_world(ShopInterior.R(0.35, pd - 0.3, 2.75))
+				var to := si.to_world(ShopInterior.R(si.W * 0.62, 0.6, 0.5))
+				if rv == "front":
+					from = si.to_world(ShopInterior.R(si.W - 0.4, 0.4, 2.7))
+					to = si.to_world(ShopInterior.R(si.W * 0.35, pd - 0.5, 0.6))
+				return [Transform3D(Basis.looking_at(to - from, Vector3.UP), from), 74.0]
 		if not u.is_empty():
 			var inside := args.has("inside")
 			var p := Premises.door_point(u) + Premises.outward(u) * (-2.5 if inside else 3.0) + Vector3.UP * 1.0
@@ -232,6 +248,14 @@ func _after_start() -> void:
 		var ax := float(av[0])
 		var az := float(av[1])
 		_teleport(Vector3(ax, layout.ground_y(ax, az) + 1.0, az), deg_to_rad(float(av[2]) if av.size() > 2 else 0.0))
+	if args.has("drive") and not empire.vehicles.is_empty():
+		# Captures/tests: sit in your first vehicle ("drive=<m>" first rolls
+		# it that far up its lane so the shot isn't at the kerb).
+		enter_vehicle(String(empire.vehicles[0]["id"]))
+		if String(args["drive"]) != "" and String(args["drive"]) != "true":
+			var dc: Car = cars.get(driving)
+			if dc:
+				dc.linear_velocity = -dc.global_basis.z * float(args["drive"])
 	if args.has("hour"):
 		empire.minute = float(args["hour"]) * 60.0
 	if args.has("brand"):
@@ -617,6 +641,9 @@ func _process(dt: float) -> void:
 		return
 	_update_spot()
 	_update_indoors()
+	if floor and floor.room:
+		# (Shoppers and staff step round you.)
+		floor.hero_at = floor.room.to_local(player.global_position) if driving == "" else Vector3.INF
 	_update_carry_visual()
 	if driving != "":
 		_track_driving()
@@ -834,6 +861,8 @@ func _update_indoors() -> void:
 				break
 	player.indoors = ceiling < INF
 	camera.indoor_ceiling = ceiling
+	if atmosphere.rain_fx:
+		atmosphere.rain_fx.sheltered = ceiling < INF
 	_hero_fill(ceiling < INF)
 
 
@@ -1017,7 +1046,10 @@ func _update_stadium() -> void:
 ## The prompt for the current spot: [text, enabled].
 func spot_prompt() -> Array:
 	if driving != "":
-		return ["PARK & GET OUT", true]
+		# (Only offered once the car is slow enough to leave.)
+		var dc: Car = cars.get(driving)
+		var slow := dc == null or Vector2(dc.linear_velocity.x, dc.linear_velocity.z).length() <= 4.0
+		return ["GET OUT", slow]
 	if spot.is_empty():
 		return ["", false]
 	var si: ShopInterior = spot.get("interior")

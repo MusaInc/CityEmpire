@@ -60,6 +60,10 @@ var brake := 0.0      # 0..1 (held at a standstill = reverse)
 var steer := 0.0      # -1 left .. +1 right
 var handbrake := false
 var nitro := false
+## Kickdown: the gearbox drops a gear for full-throttle overtaking (City
+## Empire's drive pad, slide up). More pull through the mid range, no boost
+## past the car's top speed and nothing like NOS. Off everywhere else.
+var kickdown := false
 ## Driver: "player", "police", "civilian" (affects damage scale and scoring).
 var role := "player"
 
@@ -345,6 +349,10 @@ func _physics_process(dt: float) -> void:
 	if forward_speed < 0.0 and drive > 0.0:
 		curve = 1.0
 	var engine_f: float = spec["engine"] * mass * drive * curve * power_scale
+	if kickdown and drive > 0.9 and not reversing:
+		# A lower gear: strongest in the middle of the rev range, fading
+		# toward top speed (a kickdown can't add speed the car doesn't have).
+		engine_f *= 1.0 + 0.22 * clampf(1.0 - sp_t, 0.0, 1.0) * clampf(sp_t * 4.0, 0.35, 1.0)
 	# Nitro is a straight shove (not through the tyres: on a RWD muscle car
 	# the rears were already spinning, so the boost just became wheelspin).
 	var nitro_f := 0.0
@@ -626,6 +634,8 @@ func _physics_process(dt: float) -> void:
 func _update_gears(sp_t: float, thr: float, dt: float) -> void:
 	var gears: int = spec.get("gears", 6)
 	var g := clampi(int(sp_t * gears * 0.999) + 1, 1, gears)
+	if kickdown and thr > 0.9 and g > 1:
+		g -= 1  # (revs and engine note follow the dropped gear)
 	_gear_timer -= dt
 	if g != gear and _gear_timer <= 0.0:
 		gear = g

@@ -13,6 +13,7 @@ var touch_gas := 0.0
 var touch_brake := 0.0
 var touch_handbrake := false
 var touch_nitro := false
+var touch_kickdown := false
 var touch_active := false
 var touch_jump := false
 var touch_drop := false
@@ -52,6 +53,8 @@ func _physics_process(dt: float) -> void:
 	car.brake = brake
 	car.handbrake = Input.is_action_pressed("handbrake") or touch_handbrake
 	car.nitro = Input.is_action_pressed("nitro") or touch_nitro
+	# (Shift on a keyboard: the same key as Never Stop's NOS.)
+	car.kickdown = touch_kickdown or (Input.is_action_pressed("nitro") and thr > 0.9)
 	touch_jump = false
 	touch_drop = false
 	Prof.end("input")

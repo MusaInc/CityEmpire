@@ -9,6 +9,7 @@ uniform vec2 center = vec2(0.0);      // hero x/z
 uniform vec2 forward = vec2(0.0, -1.0);
 uniform float radius_m = 100.0;
 uniform float opacity = 0.88;
+uniform float contrast = 1.0;       // >1: lighter roads, darker blocks
 
 void fragment() {
 	vec2 p = UV * 2.0 - 1.0;            // -1..1, y down
@@ -20,6 +21,8 @@ void fragment() {
 	if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
 		c = vec3(0.13, 0.22, 0.3);
 	}
+	// Contrast round the map's mid-grey (roads lift, blocks and water sink).
+	c = clamp((c - 0.42) * contrast + 0.42, 0.0, 1.0);
 	// Slight vignette toward the rim keeps the centre (the hero) prominent.
 	c *= mix(1.0, 0.72, smoothstep(0.55, 1.0, r));
 	float px = fwidth(r);

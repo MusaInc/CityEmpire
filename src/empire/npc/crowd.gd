@@ -9,8 +9,11 @@ extends Node3D
 ##    (behind the camera or far off) and leave by walking out of range, so
 ##    you never see anyone pop in or out. The GPU walkers (CityWorld) are
 ##    hidden inside this radius and carry the streets beyond it.
-##  * They step round you, glance at you, stop to look in shop windows, and
-##    now and then turn in at a shop door (anyone else's shop) and go in.
+##  * They step round you and out of the camera's line of sight to you
+##    (an eased sidestep within the pavement, never a shove), keep their
+##    distance behind slower walkers instead of walking through them, glance
+##    at you, stop to look in shop windows, and now and then turn in at a
+##    shop door (anyone else's shop) and go in.
 ## One MultiMesh per body type, rebuilt each frame from the people's state.
 
 const NEAR := 62.0
@@ -28,6 +31,7 @@ var _loops: Array = []        # {pts, cum, len, dir, rect}
 var _grid := {}               # Vector2i(100 m cell) -> [loop index]
 var _people: Array = []       # see _spawn
 var _mmis: Array = []         # MultiMeshInstance3D per body
+var _blobs: MultiMeshInstance3D   # contact shadows (one draw for everyone)
 var _doors: Array = []        # [Vector3 door, Vector3 outward, unit id]
 var _rng := RandomNumberGenerator.new()
 var _acc := 0.0
@@ -76,6 +80,21 @@ func setup(p_game: EmpireGame) -> void:
 		add_child(mmi)
 		_mmis.append(mmi)
 	inst.free()
+	# Contact shadows: a soft disc under each person.
+	var q := QuadMesh.new()
+	q.size = Vector2(0.95, 0.95)
+	q.orientation = PlaneMesh.FACE_Y
+	var bm := ShaderMaterial.new()
+	bm.shader = load("res://src/empire/npc/blob_shadow.gdshader")
+	q.material = bm
+	var bmm := MultiMesh.new()
+	bmm.transform_format = MultiMesh.TRANSFORM_3D
+	bmm.use_custom_data = true
+	bmm.mesh = q
+	_blobs = MultiMeshInstance3D.new()
+	_blobs.multimesh = bmm
+	_blobs.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_blobs)
 
 
 func _add_loop(pts: PackedVector2Array, dir: int) -> void:
@@ -149,7 +168,7 @@ func _spawn(li: int, s: float) -> void:
 		"speed": _rng.randf_range(1.05, 1.5), "body": _rng.randi() % maxi(_mmis.size(), 1), "seed": _rng.randf(),
 		"top": TOPS[_rng.randi() % TOPS.size()], "scale": _rng.randf_range(0.93, 1.06), "lane": _rng.randf_range(-0.35, 0.35),
 		"stride": _rng.randf() * 3.0, "look": 0.0, "state": "walk", "t": 0.0, "goal": Vector3.ZERO, "pos": Vector3.ZERO,
-		"yaw": 0.0, "walk": 1.0, "browsed": false})
+		"yaw": 0.0, "walk": 1.0, "browsed": false, "dodge": 0.0, "pace": 1.0})
 
 
 func _populate(focus: Vector3) -> void:
@@ -192,9 +211,12 @@ func _process(dt: float) -> void:
 		_populate(focus)
 		_first = false
 	var me := game.player.global_position
+	var cam := get_viewport().get_camera_3d()
+	var eye := cam.global_position if cam else me
+	_queue_up()
 	var keep: Array = []
 	for pr in _people:
-		_step(pr, dt, me)
+		_step(pr, dt, me, eye)
 		var p: Vector3 = pr["pos"]
 		if pr["state"] == "gone":
 			continue
@@ -205,7 +227,36 @@ func _process(dt: float) -> void:
 	_draw_people()
 
 
-func _step(pr: Dictionary, dt: float, me: Vector3) -> void:
+## Walkers on the same loop and side of the pavement who are closing on
+## someone ahead slow to that person's pace (no walking through people).
+## pr["pace"] is the share of their own speed they walk at this frame.
+func _queue_up() -> void:
+	var by_loop := {}
+	for pr in _people:
+		pr["pace"] = 1.0
+		if pr["state"] != "walk":
+			continue
+		var k := Vector2i(int(pr["loop"]), int(pr["dir"]))
+		if not by_loop.has(k):
+			by_loop[k] = []
+		(by_loop[k] as Array).append(pr)
+	for k in by_loop:
+		var list: Array = by_loop[k]
+		if list.size() < 2:
+			continue
+		var ln := float((_loops[(k as Vector2i).x] as Dictionary)["len"])
+		for a: Dictionary in list:
+			for b: Dictionary in list:
+				if is_same(a, b) or absf(float(a["lane"]) - float(b["lane"])) > 0.55:
+					continue
+				# Metres from a forward to b along the walking direction.
+				var gap := fposmod((float(b["s"]) - float(a["s"])) * float(a["dir"]), ln)
+				if gap < 1.6 and float(a["speed"]) > float(b["speed"]) * float(b["pace"]):
+					var p := float(b["speed"]) * float(b["pace"]) / float(a["speed"])
+					a["pace"] = minf(float(a["pace"]), lerpf(p, 1.0, clampf((gap - 0.9) / 0.7, 0.0, 1.0)))
+
+
+func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 	var l: Dictionary = _loops[pr["loop"]]
 	var state: String = pr["state"]
 	var target_walk := 1.0
@@ -213,11 +264,14 @@ func _step(pr: Dictionary, dt: float, me: Vector3) -> void:
 	var fwd := Vector2.ZERO
 	match state:
 		"walk":
-			pr["s"] = float(pr["s"]) + float(pr["dir"]) * float(pr["speed"]) * dt
+			var v := float(pr["speed"]) * float(pr["pace"])
+			pr["s"] = float(pr["s"]) + float(pr["dir"]) * v * dt
 			var sp: Array = _sample(l, pr["s"])
 			var d: Vector2 = (sp[1] as Vector2) * float(pr["dir"])
 			var side := Vector2(-d.y, d.x)
-			var q: Vector2 = sp[0] + side * float(pr["lane"])
+			var base: Vector2 = sp[0] + side * float(pr["lane"])
+			pr["dodge"] = move_toward(float(pr["dodge"]), _dodge_for(base, d, side, me, eye, float(pr["dodge"])), dt * 1.1)
+			var q: Vector2 = base + side * float(pr["dodge"])
 			p = Vector3(q.x, 0.0, q.y)
 			fwd = d
 			# A shop door at hand: look in the window, or go in.
@@ -258,12 +312,15 @@ func _step(pr: Dictionary, dt: float, me: Vector3) -> void:
 			p += Vector3(mv.x, 0.0, mv.y)
 			pr["stride"] = float(pr["stride"]) + mv.length()
 	if state == "walk":
-		pr["stride"] = float(pr["stride"]) + float(pr["speed"]) * dt
+		# (Stride follows the distance actually walked: no skating feet.)
+		pr["stride"] = float(pr["stride"]) + float(pr["speed"]) * float(pr["pace"]) * dt
+		target_walk = clampf(float(pr["pace"]) * 1.15, 0.0, 1.0)
 	# Step round you; glance at you as you pass.
 	var rel := Vector2(me.x - p.x, me.z - p.z)
 	var dist := rel.length()
-	if dist < 1.6 and state != "enter":
-		var push := (1.6 - dist) * 0.9
+	# (Last resort only: the sidestep above normally keeps them clear.)
+	if dist < 0.75 and state != "enter":
+		var push := (0.75 - dist) * 0.9
 		p -= Vector3(rel.x, 0.0, rel.y).normalized() * push
 	var look := 0.0
 	if dist < 6.0 and fwd != Vector2.ZERO:
@@ -276,6 +333,35 @@ func _step(pr: Dictionary, dt: float, me: Vector3) -> void:
 	if fwd != Vector2.ZERO:
 		pr["yaw"] = lerp_angle(float(pr["yaw"]), atan2(-fwd.x, -fwd.y), 1.0 - exp(-8.0 * dt))
 	pr["walk"] = move_toward(float(pr["walk"]), target_walk, dt * 3.0)
+
+
+## The sidestep (m along `side`) that keeps a walker at `base` heading `d`
+## clear of you and of the line from the camera to you, for things within
+## a few metres ahead. Picks the side they're already on; within ±1.1 m.
+func _dodge_for(base: Vector2, d: Vector2, side: Vector2, me: Vector3, eye: Vector3, cur: float) -> float:
+	var want := 0.0
+	var hero := Vector2(me.x, me.z)
+	var cam := Vector2(eye.x, eye.z)
+	var obstacles: Array = [hero]
+	if game.driving == "" and hero.distance_to(cam) < 9.0:
+		# Points along the camera→you line (people crossing it fill the view).
+		obstacles.append(hero.lerp(cam, 0.4))
+		obstacles.append(hero.lerp(cam, 0.8))
+		obstacles.append(cam)
+	for o: Vector2 in obstacles:
+		var v := o - base
+		var along := v.dot(d)
+		if along < -0.8 or along > 4.5:
+			continue
+		var lat := v.dot(side)
+		var clear := 1.15
+		if absf(lat - cur) < clear:
+			var away := lat - clear if lat >= cur else lat + clear
+			if absf(away) <= 1.1 and absf(away) > absf(want):
+				want = away
+			elif absf(away) > 1.1:
+				want = clampf(away, -1.1, 1.1)
+	return want
 
 
 func _draw_people() -> void:
@@ -309,6 +395,39 @@ func _draw_people() -> void:
 			mm.buffer = buf
 		var mmi := _mmis[i] as MultiMeshInstance3D
 		mmi.custom_aabb = AABB(_focus() - Vector3(KEEP, 20, KEEP), Vector3(KEEP * 2, 60, KEEP * 2))
+	_draw_blobs()
+
+
+## Contact shadows: flat on the pavement under each person, a touch
+## lighter as they walk away out of the near range (they fade with them).
+func _draw_blobs() -> void:
+	if _blobs == null:
+		return
+	var mm := _blobs.multimesh
+	if mm.instance_count != _people.size():
+		mm.instance_count = _people.size()
+	if _people.is_empty():
+		return
+	var focus := _focus()
+	var buf := PackedFloat32Array()
+	buf.resize(_people.size() * 16)
+	var j := 0
+	for pr in _people:
+		var o: Vector3 = pr["pos"]
+		var sc := float(pr["scale"])
+		var b := Basis(Vector3.UP, float(pr["yaw"])).scaled(Vector3(sc, 1.0, sc))
+		for r in 3:
+			buf[j] = b.x[r]
+			buf[j + 1] = b.y[r]
+			buf[j + 2] = b.z[r]
+			buf[j + 3] = o[r] + (0.035 if r == 1 else 0.0)
+			j += 4
+		var d := Vector2(o.x - focus.x, o.z - focus.z).length()
+		buf[j] = clampf((NEAR + 6.0 - d) / 12.0, 0.0, 1.0)
+		buf[j + 1] = 0.0; buf[j + 2] = 0.0; buf[j + 3] = 0.0
+		j += 4
+	mm.buffer = buf
+	_blobs.custom_aabb = AABB(focus - Vector3(KEEP, 20, KEEP), Vector3(KEEP * 2, 60, KEEP * 2))
 
 
 ## How many people are out (for the debug readout / tests).

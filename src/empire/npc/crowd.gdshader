@@ -9,6 +9,7 @@ render_mode cull_back, diffuse_burley;
 
 varying vec3 v_col;
 varying float v_rough;
+varying float v_near;   // 0 at the lens .. 1 from 1.8 m: dithered out up close
 
 vec3 srgb(vec3 c) {
 	return pow(c, vec3(2.2));
@@ -52,9 +53,20 @@ void vertex() {
 	person_pose_w(v, n, person_limb(UV), UV2.x, 1.0 - UV2.y, INSTANCE_CUSTOM.x / 0.72 * 3.14159, INSTANCE_CUSTOM.z, 0.0, INSTANCE_CUSTOM.w);
 	VERTEX = v;
 	NORMAL = n;
+	// Someone right in front of the lens dissolves instead of filling the
+	// screen (the sidestep keeps it rare; this is the safety net).
+	float cd = length((MODELVIEW_MATRIX * vec4(0.0, 0.9, 0.0, 1.0)).xyz);
+	v_near = clamp((cd - 0.7) / 1.1, 0.0, 1.0);
 }
 
 void fragment() {
+	if (v_near < 0.999) {
+		vec2 g = mod(floor(FRAGCOORD.xy), 4.0);
+		float bayer = (mod(g.x + g.y * 2.0, 4.0) * 4.0 + mod(g.x * 3.0 + g.y, 4.0)) / 16.0;
+		if (v_near <= bayer) {
+			discard;
+		}
+	}
 	ALBEDO = v_col;
 	ROUGHNESS = v_rough;
 }

@@ -358,6 +358,20 @@ func _decor_corner(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float
 		st.box(R(0.06, pd, 2.75), R(0.08, pd + 0.9, 3.55), Color(0.96, 0.95, 0.92))
 		st.box(R(0.08, pd + 0.06, 2.95), R(0.09, pd + 0.84, 3.49), pcols[i % pcols.size()])
 		st.box(R(0.08, pd + 0.1, 2.8), R(0.09, pd + 0.8, 2.88), brand)
+		# Printed: an offer (the window promos), not a blank colour card.
+		var pl := Label3D.new()
+		pl.text = _promo_text(pd * 3.7 + 11.0)
+		pl.font = ShopStyle.font(String(ident.get("face", ""))) if biz else EmpireStyle.font("black")
+		pl.font_size = 64
+		pl.pixel_size = 0.0019
+		pl.line_spacing = -8.0
+		pl.shaded = false
+		pl.double_sided = false
+		pl.outline_size = 0
+		pl.modulate = Color(0.1, 0.1, 0.12) if i % pcols.size() == 0 else Color(1, 0.99, 0.96)
+		pl.position = R(0.095, pd + 0.45, 3.22)
+		pl.rotation.y = PI * 0.5
+		_static.add_child(pl)
 		pd += 2.2
 		i += 1
 	# Entrance mat.
@@ -390,6 +404,7 @@ func _decor_corner(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float
 		st.box(R(cx0 - 0.08, hd + e - 0.01, 3.15), R(cx0 - 0.06, hd + e + 0.01, H), Color(0.3, 0.3, 0.32))
 	var lab := Label3D.new()
 	lab.text = "PAY HERE"
+	lab.double_sided = false
 	lab.font_size = 56
 	lab.pixel_size = 0.004
 	lab.outline_size = 0
@@ -398,6 +413,12 @@ func _decor_corner(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float
 	lab.position = R(cx0 - 0.115, hd, 2.95)
 	lab.rotation.y = -PI * 0.5
 	_static.add_child(lab)
+	# (Both faces: from behind the counter it used to be a blank green plank.)
+	var lab2 := lab.duplicate() as Label3D
+	lab2.text = "THANK YOU"
+	lab2.position = R(cx0 - 0.025, hd, 2.95)
+	lab2.rotation.y = PI * 0.5
+	_static.add_child(lab2)
 
 
 func _shell(st: _Batch, wall: Color, trim: Color) -> void:
@@ -529,10 +550,10 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 		var py1 := minf(th - 0.25, py0 + pw * 1.3)
 		if trading_here:
 			_poster(R(px0, gd + 0.03, py0), R(px0 + pw, gd + 0.03, py1), brand.lightened(0.12), Color(0.98, 0.9, 0.55),
-				_promo_text(x0))
+				_promo_text(x0), Color(1.0, 0.98, 0.94), st)
 		elif kind == "shop" and outer:
 			_poster(R(px0, gd + 0.03, py0), R(px0 + pw, gd + 0.03, py1), Color(0.97, 0.96, 0.92), Color(0.75, 0.1, 0.12),
-				"TO LET\nRETAIL UNIT\n%d m²\nCITY LETTINGS" % int(unit.get("size", 0)), Color(0.15, 0.15, 0.18))
+				"TO LET\nRETAIL UNIT\n%d m²\nCITY LETTINGS" % int(unit.get("size", 0)), Color(0.15, 0.15, 0.18), st)
 	if trading_here:
 		# Opening hours and payment stickers on the glass beside the door.
 		var hrs := biz.hours()
@@ -768,10 +789,15 @@ func _riser(st: _Batch, x0: float, x1: float, gd: float, rh: float, fc: Color, s
 
 
 ## A lit poster stuck inside the glass (a, b: its corners, facing the street).
-func _poster(a: Vector3, b: Vector3, col: Color, band: Color, text: String, ink := Color(1.0, 0.98, 0.94)) -> void:
+func _poster(a: Vector3, b: Vector3, col: Color, band: Color, text: String, ink := Color(1.0, 0.98, 0.94), st: _Batch = null) -> void:
 	_glow_quad(a, b, col * 0.75)
 	var lo := a.min(b)
 	var hi := a.max(b)
+	if st:
+		# The back of the lightbox, seen from inside the shop: a grey case
+		# with a thin brand edge (it was a slab of glowing brand colour).
+		st.box(Vector3(lo.x - 0.02, lo.y - 0.02, lo.z - 0.05), Vector3(hi.x + 0.02, hi.y + 0.02, lo.z - 0.004), Color(0.78, 0.78, 0.76))
+		st.box(Vector3(lo.x - 0.02, hi.y - 0.04, lo.z - 0.054), Vector3(hi.x + 0.02, hi.y + 0.02, lo.z - 0.05), band.darkened(0.2))
 	_glow_quad(Vector3(lo.x, hi.y - 0.26, lo.z + 0.002), Vector3(hi.x, hi.y - 0.06, hi.z + 0.002), band * 0.9)
 	var lab := Label3D.new()
 	lab.text = text

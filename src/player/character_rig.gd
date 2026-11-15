@@ -2213,8 +2213,12 @@ func _ease_guard(a: String, b: String, ia: Quaternion, ib: Quaternion, want: flo
 		var ang := dq.get_angle()
 		var err := dq.get_axis() * ang if ang > 1e-5 else Vector3.ZERO
 		vel += (err * GUARD_W * GUARD_W - vel * 2.0 * GUARD_W) * dt
-		if vel.length() > 1e-6:
-			off = (Quaternion(vel.normalized(), vel.length() * dt) * off).normalized()
+		if not vel.is_finite() or not off.is_finite():
+			vel = Vector3.ZERO  # (a degenerate pose: start the ease again)
+			off = Quaternion.IDENTITY
+		var vn := vel.normalized()
+		if vel.length() > 1e-6 and vn.is_normalized():
+			off = (Quaternion(vn, vel.length() * dt) * off).normalized()
 		st[k * 2] = off
 		st[k * 2 + 1] = vel
 		(bones[bone] as Node3D).quaternion = off * pose

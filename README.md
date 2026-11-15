@@ -15,6 +15,6 @@ city + hero forked from CitySwing (2b8f11d), vehicles from Never Stop (e6f4bca).
 - Player journeys (onboarding, GPS, car recovery, expansion, shop generation, save/load, failures):
   `xvfb-run -a godot --rendering-method mobile res://scenes/main.tscn -- --play --new --scenarios[=A,E,D,C,F,G,H]`
   (under xvfb: the maps record the route they drew; ~3 fps there, so checks wait on conditions)
-- Capture helpers: `--gps=<unit id|wholesale:west|car>` (a route), `--at=x,z[,yaw]` (stand anywhere)
+- Capture helpers: `--gps=<unit id|wholesale:west|car>` (a route), `--at=x,z[,yaw]` (stand anywhere), `--drive[=<m/s>]` (in your car), `--roomcam[=front]` (whole shop floor), `--touch` (touch controls), `--resolution 1180x820` (iPad-shaped)
 
 See docs/STATUS.md, docs/ARCHITECTURE.md, docs/SHARED_FOUNDATION.md.

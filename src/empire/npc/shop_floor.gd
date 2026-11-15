@@ -10,6 +10,10 @@ extends Node
 ## stacker carrying cases from the stock room, a cleaner, a manager.
 ##
 ## People live in the interior's room frame (ShopInterior coordinates).
+## Nobody walks through anyone: customers, staff and you (hero_at) block,
+## and a blocked walker steps to their left to pass (UK pavement manners)
+## instead of shuffling through. Arrivals come through the door one at a
+## time (no knot of people spawning in the doorway).
 
 signal served(amount: float, items: int, at: Vector3)
 signal walked_out(at: Vector3)
@@ -30,6 +34,10 @@ var player_till := -1       # the till the player is standing at (-1 none)
 var _rng := RandomNumberGenerator.new()
 var _goods_dirty := false
 var _refresh_t := 0.0
+var _door_t := 0.0
+## The player's position in room coordinates (EmpireGame sets it each frame;
+## INF = not on this floor).
+var hero_at := Vector3.INF
 
 
 func setup(p_empire: Empire, p_biz: Business, p_room: ShopInterior) -> void:
@@ -68,15 +76,20 @@ func _process(dt: float) -> void:
 	if empire == null or biz == null:
 		return
 	var game_dt := dt * minutes_per_second  # game minutes this frame
-	# New arrivals from the street.
+	# New arrivals from the street, one through the door at a time.
+	_door_t -= dt
 	while biz.pending_arrivals > 0:
-		biz.pending_arrivals -= 1
-		if customers.size() >= MAX_INSIDE:
-			# A full shop: the model handles them if someone's on a till,
-			# else they see the crowd and walk on.
+		if customers.size() >= MAX_INSIDE or biz.pending_arrivals > 6:
+			# A full shop (or a backlog after the clock ran fast): the model
+			# handles them if someone's on a till, else they walk on.
+			biz.pending_arrivals -= 1
 			if biz.has_role("cashier"):
 				empire.visit_offscreen(biz)
 			continue
+		if _door_t > 0.0 or _doorway_busy():
+			break
+		biz.pending_arrivals -= 1
+		_door_t = 0.9
 		_spawn_customer()
 	for c in customers.duplicate():
 		_update_customer(c, dt, game_dt)
@@ -95,8 +108,9 @@ func _spawn_customer() -> void:
 	var shopper := DemandModel.make_shopper(biz, _rng, CityLife.mix_k(empire))
 	biz.today["customers"] = int(biz.today["customers"]) + 1
 	var p := ShopPerson.new(int(shopper["seed"]))
-	p.position = room.door_out + Vector3(_rng.randf_range(-1.2, 1.2), 0.0, _rng.randf_range(0.0, 1.5))
+	p.position = room.door_out + Vector3(_rng.randf_range(-0.5, 0.5), 0.0, _rng.randf_range(0.0, 0.4))
 	p.blocked_by = _blocked.bind(p)
+	p.floor_ok = _walkable
 	room.add_child(p)
 	var wants: Array = (shopper["wants"] as Array).duplicate()
 	var c := {"p": p, "shopper": shopper, "state": "enter", "wants": wants, "basket": Stock.new(0, "basket"),
@@ -105,12 +119,51 @@ func _spawn_customer() -> void:
 	p.set_path(room.path(p.position, room.door_in))
 
 
-func _blocked(at: Vector3, me: ShopPerson) -> bool:
+## Someone already in the doorway (the next arrival waits outside).
+func _doorway_busy() -> bool:
 	for c in customers:
 		var o: ShopPerson = c["p"]
-		if o != me and o.position.distance_to(at) < 0.4 and o.position.distance_to(me.position) > 0.05:
+		if o.position.distance_to(room.door_in) < 1.0 or o.position.distance_to(room.door_out) < 0.9:
 			return true
 	return false
+
+
+func _walkable(at: Vector3) -> bool:
+	return room.walk.has(room.cell_of(at))
+
+
+## Body clearance: two people's centres no closer than this (shoulders).
+const PERSONAL := 0.52
+
+
+## Who's in the spot `at` (a step ahead of `me`): 0 nobody, 1 a shopper or
+## staff, 2 you. Only people in front count (someone just behind doesn't
+## stop you walking away from them).
+func _blocked(at: Vector3, me: ShopPerson) -> int:
+	var heading := at - me.position
+	heading.y = 0.0
+	for c in customers:
+		if _blocks(c["p"], at, me, heading):
+			return 1
+	for k in staff_people:
+		if _blocks(staff_people[k]["p"], at, me, heading):
+			return 1
+	if hero_at != Vector3.INF:
+		var h := hero_at - me.position
+		h.y = 0.0
+		if Vector2(hero_at.x - at.x, hero_at.z - at.z).length() < PERSONAL + 0.1 and h.dot(heading) > 0.0:
+			return 2
+	return 0
+
+
+func _blocks(o: ShopPerson, at: Vector3, me: ShopPerson, heading: Vector3) -> bool:
+	if o == me or not o.visible:
+		return false
+	var rel := o.position - me.position
+	rel.y = 0.0
+	if rel.length() < 0.05 or rel.dot(heading) <= 0.0:
+		return false
+	return Vector2(o.position.x - at.x, o.position.z - at.z).length() < PERSONAL
 
 
 func _update_customer(c: Dictionary, dt: float, game_dt: float) -> void:
@@ -344,6 +397,8 @@ func sync_staff() -> void:
 		ids[e["id"]] = true
 		if not staff_people.has(e["id"]):
 			var p := ShopPerson.new(int(e.get("look", 7)), true)
+			p.blocked_by = _blocked.bind(p)
+			p.floor_ok = _walkable
 			p.position = room.rack_pos if e["role"] != "cashier" else room.till_staff[0]
 			room.add_child(p)
 			p.say(String(e["name"]).get_slice(" ", 0), Color(0.75, 0.95, 0.85), 2.0)
@@ -382,8 +437,12 @@ func _update_staff(dt: float) -> void:
 					p.set_path(room.path(p.position, room.rack_pos))
 					s["t"] = 1.5
 				elif open and biz.backroom.total_units() > 0 and not room.slot_pick.is_empty():
-					var keys := room.slot_pick.keys()
-					var si: int = keys[_rng.randi() % keys.size()]
+					# The emptiest shelf there's back stock for (that's the one
+					# the economy's restock fills first), else any shelf.
+					var si := _lowest_slot()
+					if si < 0:
+						var keys := room.slot_pick.keys()
+						si = keys[_rng.randi() % keys.size()]
 					s["state"] = "to_shelf"
 					var pid: String = biz.slots[si]["product"] if si < biz.slots.size() else ""
 					p.set_carry(true, EmpireData.colour(pid).lerp(Color(0.7, 0.55, 0.35), 0.5) if pid != "" else Color(0.7, 0.55, 0.35))
@@ -407,6 +466,25 @@ func _update_staff(dt: float) -> void:
 				s["t"] = _rng.randf_range(3.0, 7.0)
 			"driver":
 				p.visible = false  # out on the road with the van
+
+
+func _lowest_slot() -> int:
+	var best := -1
+	var best_fill := 0.75
+	for si in room.slot_pick:
+		if int(si) >= biz.slots.size():
+			continue
+		var sl: Dictionary = biz.slots[si]
+		var pid := String(sl["product"])
+		if pid == "" or biz.backroom.qty(pid) <= 0:
+			continue
+		var fill := float(sl["qty"]) / maxf(float(sl["cap"]), 1.0)
+		# (A little randomness: two stackers don't pick the same shelf.)
+		fill += _rng.randf_range(0.0, 0.08)
+		if fill < best_fill:
+			best_fill = fill
+			best = int(si)
+	return best
 
 
 func customer_count() -> int:
