@@ -68,6 +68,46 @@ func door_out(u: Dictionary, m := 3.0) -> Vector3:
 	return Premises.door_point(u) + Premises.outward(u) * m
 
 
+## B: drive the suspension bridge's joints at speed. A car in your hands
+## runs from the Westbank approach viaduct over the anchorage onto the deck
+## (the old 2 m hole), and from the deck's east end onto the island ramp.
+## Fails if it drops, gets thrown up, or stalls.
+func scenario_b() -> void:
+	print("--- B: bridge joints")
+	var vid := String(game.empire.vehicles[0]["id"])
+	game.enter_vehicle(vid)
+	var car: Car = game.cars[vid]
+	game.drive_input.enabled = false
+	var runs := [[CityLayout.FAR_SHORE - 70.0, CityLayout.FAR_SHORE + 60.0, "west joint (viaduct → anchorage → deck)"],
+		[20.0, 76.0, "east joint (deck → island ramp)"]]
+	for run in runs:
+		var x0: float = run[0]
+		var x1: float = run[1]
+		var y0 := CityInfrastructure.bridge_height(game.layout, x0) if x0 > 56.0 else CityLayout.approach_y(x0)
+		var z := CityLayout.BRIDGE_Z + 3.8
+		car.place(Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3(x0, y0 + 0.6, z)), Vector3(14.0, 0.0, 0.0))
+		var min_dy := 0.0
+		var max_vy := 0.0
+		var end := Time.get_ticks_msec() + 150000
+		var reached := false
+		while Time.get_ticks_msec() < end:
+			car.throttle = 0.8
+			car.brake = 0.0
+			car.steer = -clampf((car.global_position.z - z) * 0.08, -0.3, 0.3)  # (heading +x: right is +z)
+			await get_tree().physics_frame
+			var px := car.global_position.x
+			var want := CityInfrastructure.bridge_height(game.layout, px) if px > 56.0 else (CityLayout.approach_y(px) if px < CityLayout.FAR_SHORE - 2.0 else CityLayout.BRIDGE_DECK)
+			min_dy = minf(min_dy, car.global_position.y - want)
+			max_vy = maxf(max_vy, absf(car.linear_velocity.y))
+			if px > x1:
+				reached = true
+				break
+		check(reached, "%s: drove across (%.0f m/s)" % [run[2], car.speed])
+		check(min_dy > -1.0, "%s: never dropped below the road (lowest %.2f m)" % [run[2], min_dy])
+		check(max_vy < 4.0, "%s: no jolt (peak vertical speed %.1f m/s)" % [run[2], max_vy])
+	game.drive_input.enabled = true
+
+
 func _run() -> void:
 	await wait(1.0)
 	game.gps.wait_net()
@@ -86,6 +126,8 @@ func _run() -> void:
 		await scenario_g()
 	if want("H"):
 		await scenario_h()
+	if _which.split(",").has("B"):
+		await scenario_b()
 	if _which.split(",").has("W"):
 		await scenario_w()
 	if _which.split(",").has("V"):

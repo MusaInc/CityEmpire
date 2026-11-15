@@ -16,9 +16,13 @@ static func bridge_landing(l: CityLayout) -> void:
 	var cut := CityRoads._circle(first.c, float(first.r) + float(first.w) * 0.5 + 0.5, 32)
 	var sections := Geometry2D.clip_polyline_with_polygon(road, cut)
 	var approach: PackedVector2Array = sections[0]
+	# A straight lead-in off the bridge's square end (between the anchor
+	# housings) before the ramp bends onto the avenue: an angled first span
+	# left a wedge-shaped gap beside the deck's end.
 	path.append(Vector2(56.0, CityLayout.BRIDGE_Z))
+	path.append(Vector2(72.0, CityLayout.BRIDGE_Z))
 	for p in approach:
-		if p.x > 60.0:
+		if p.x > 84.0:
 			path.append(p)
 	var flat := RailNetwork._resample_open(path, 6.0)
 	var end := flat[-1]
@@ -40,7 +44,9 @@ static func bridge_landing(l: CityLayout) -> void:
 		var d := (b - a).normalized()
 		var side := Vector3(-d.z, 0, d.x).normalized()
 		var ext := d * 0.08
-		l._kbeam(k, a - ext + Vector3.DOWN * 0.65, b + ext + Vector3.DOWN * 0.65, 20.0, 1.3, Color(0.15, 0.16, 0.17))
+		# The deck spans overlap generously so bends leave no slivers.
+		var dext := d * 1.2 if i > 0 else d * 0.3
+		l._kbeam(k, a - dext + Vector3.DOWN * 0.65, b + d * 1.2 + Vector3.DOWN * 0.65, 20.0, 1.3, Color(0.15, 0.16, 0.17))
 		for sg: float in [-1.0, 1.0]:
 			var o := side * sg * 9.8
 			# End barriers before the junction mouth, leaving turning space.

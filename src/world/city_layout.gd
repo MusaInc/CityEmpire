@@ -1995,12 +1995,15 @@ func _bridge() -> void:
 	CityInfrastructure.bridge_landing(self)
 	# West anchorage: the roadway runs over it onto the approach viaduct; the
 	# cables go down into stone housings either side.
-	_add(_building([[x_west - 16.0, zc - 10.5, x_west + 2.0, zc + 10.5, -2.0, deck - 2.0]], Style.STONE,
+	# (The roadway itself is the approach viaduct's first spans, laid over the
+	# anchorage from the deck's end: the block used to stop 2 m below the
+	# road, a 16 m hole between the bridge and the viaduct.)
+	_add(_building([[x_west - 16.0, zc - 10.5, x_west + 2.0, zc + 10.5, -2.0, deck - 1.7]], Style.STONE,
 		Color(0.62, 0.58, 0.52), "plain"))
 	for sz: float in [-1.0, 1.0]:
 		_add(_building([[x_west - 16.0, minf(zc + sz * 10.5, zc + sz * 15.0), x_west + 2.0,
 			maxf(zc + sz * 10.5, zc + sz * 15.0), -2.0, deck + 3.5]], Style.STONE, Color(0.62, 0.58, 0.52), "plain"))
-	_bridge_approach(x_west - 16.0, zc, deck)
+	_bridge_approach(x_west + 0.2, zc, deck)
 	# Lamps along both sides of the deck (lit at night like the streets').
 	var lx := x_east - 12.0
 	while lx > x_west:

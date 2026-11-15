@@ -38,6 +38,14 @@ float hash12(vec2 p) {
 	return fract((p3.x + p3.y) * p3.z);
 }
 
+// Smooth value noise (weathering patterns; detail range only).
+float vnoise_b(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hash12(i), hash12(i + vec2(1, 0)), f.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), f.x), f.y);
+}
+
 void vertex() {
 	v_kind = floor(COLOR.a * 8.0 + 0.5);
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
@@ -566,6 +574,20 @@ void fragment() {
 		// and a long gradient up the facade (tops catch more sky).
 		albedo *= mix(vec3(0.56, 0.57, 0.6), vec3(1.0), smoothstep(0.0, 12.0, uv.y));
 		albedo *= mix(0.86, 1.04, smoothstep(6.0, 80.0, uv.y));
+	}
+	// Weathering on solid walls (not glass, not signs): vertical rain
+	// streaks washed down the facade, broad soot/damp patches, and a
+	// darker band where splash-back hits the lowest metre. Value noise in
+	// metres, only within the detail range (no far shimmer).
+	if ((v_kind == KIND_WALL || v_kind == KIND_STONE || v_kind == KIND_TRIM) && rough > 0.5 && detail > 0.0) {
+		vec2 sq = vec2(uv.x * 1.3, uv.y * 0.05) + seed * 37.0;
+		float streak = vnoise_b(sq) * vnoise_b(sq * vec2(2.7, 1.4) + 9.1);
+		float patches = smoothstep(0.45, 0.9, vnoise_b(uv * 0.06 + seed * 11.0));
+		float splash = 1.0 - smoothstep(0.0, 1.1, uv.y);
+		albedo *= 1.0 - detail * (0.16 * streak + 0.1 * patches + 0.12 * splash * float(v_kind != KIND_TRIM));
+		// Lit faces get a faint warm/cool drift by block of facade (repaints,
+		// different batches of brick) so long walls aren't one flat colour.
+		albedo *= 1.0 + (vnoise_b(uv * vec2(0.08, 0.03) + seed * 5.0) - 0.5) * 0.1 * detail;
 	}
 	// Rain: surfaces darken and gloss (glass is already glossy).
 	if (relief > 0.0) {

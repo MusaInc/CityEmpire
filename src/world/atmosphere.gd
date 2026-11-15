@@ -109,8 +109,8 @@ func _ready() -> void:
 	env.glow_bloom = 0.035
 	env.glow_hdr_threshold = 1.0
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.07
-	env.adjustment_contrast = 1.1
+	env.adjustment_saturation = 1.12
+	env.adjustment_contrast = 1.14
 	env.adjustment_color_correction = grade_lut()
 	var we := WorldEnvironment.new()
 	we.environment = env
