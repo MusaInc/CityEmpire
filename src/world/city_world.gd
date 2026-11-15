@@ -1706,7 +1706,7 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 	for k in CAR_KINDS.size():
 		groups.append([])
 	for i in xf.size():
-		var k := _car_kind(kind_rng.randf()) if i < moving else int(parked[i - moving][1])
+		var k := _car_kind(kind_rng.randf(), layout.is_mainland) if i < moving else int(parked[i - moving][1])
 		if car_meshes[k] == null:
 			k = 0
 		var col: Color = CAR_COLORS[rng.randi() % CAR_COLORS.size()]
@@ -1866,12 +1866,32 @@ func _walk_lift(p: Vector3) -> float:
 ## Cars parked along both kerbs of the ordinary streets (not the avenues,
 ## not near junctions), with gaps. Same MultiMesh as traffic: speed 0 and a
 ## phase in the middle of a short "segment", the transform offset to match.
-static func _car_kind(r: float) -> int:
+static func _car_kind(r: float, west := false) -> int:
+	var total := 0.0
+	for k0 in CAR_KINDS.size():
+		total += kind_weight(k0, west)
+	r *= total
 	var k := 0
-	while k < CAR_KINDS.size() - 1 and r > CAR_KINDS[k][1]:
-		r -= CAR_KINDS[k][1]
+	while k < CAR_KINDS.size() - 1 and r > kind_weight(k, west):
+		r -= kind_weight(k, west)
 		k += 1
 	return k
+
+
+## How common a kind of car is on each side of the strait (district
+## character): Westbank's yards and terraces get more vans and fewer
+## taxis; the Commercial Island more taxis and fewer vans. Weights, not
+## shares (callers normalise).
+static func kind_weight(k: int, west: bool) -> float:
+	var w := float(CAR_KINDS[k][1])
+	match String(CAR_KINDS[k][0]):
+		"car_van":
+			w *= 2.6 if west else 0.8
+		"car_taxi":
+			w *= 0.35 if west else 1.4
+		"car_hatch":
+			w *= 1.25 if west else 1.0
+	return w
 
 
 ## Parked cars in a chunk: [Transform3D of the model, CAR_KINDS index]. Own
@@ -1890,7 +1910,7 @@ func parked_cars(key: Vector2i) -> Array:
 			continue
 		# The shader shifts a parked car 5 m back along its segment (see below).
 		out.append([Transform3D((t as Transform3D).basis, (t as Transform3D).origin - (t as Transform3D).basis.z * 5.0),
-			_car_kind(rng.randf())])
+			_car_kind(rng.randf(), layout.is_mainland)])
 	return out
 
 

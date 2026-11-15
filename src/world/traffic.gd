@@ -459,10 +459,16 @@ func _spawn_cars(meshes: Array) -> void:
 			c_book.append(-1)
 			c_wait.append(-1.0)
 			var k: int = kinds[0]
-			var r := _rng.randf()
+			# (District character: CityWorld.kind_weight, by which side of
+			# the strait the lane starts.)
+			var west := lane_point(li, 0.0).x < CityLayout.RIVER_EDGE
+			var tot := 0.0
+			for kk in kinds:
+				tot += CityWorld.kind_weight(kk, west)
+			var r := _rng.randf() * tot
 			var acc := 0.0
 			for kk in kinds:
-				acc += float(CityWorld.CAR_KINDS[kk][1])
+				acc += CityWorld.kind_weight(kk, west)
 				if r <= acc:
 					k = kk
 					break

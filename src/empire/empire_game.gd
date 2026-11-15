@@ -234,6 +234,14 @@ func _after_start() -> void:
 				var pd := si.D - ShopInterior.BACKROOM
 				var from := si.to_world(ShopInterior.R(0.35, pd - 0.3, 2.75))
 				var to := si.to_world(ShopInterior.R(si.W * 0.62, 0.6, 0.5))
+				if rv == "till" and not si.queue.is_empty():
+					# The queue and tills, from just behind the line.
+					var q0: Vector3 = si.queue[0]
+					var q3: Vector3 = si.queue[mini(3, si.queue.size() - 1)]
+					# (From above the counter side: the aisle beside the queue is
+					# a gondola.)
+					from = si.to_world((q0 + q3) * 0.5 + Vector3(1.0, 2.6, 0) + (q3 - q0).normalized() * 1.5)
+					to = si.to_world(q0 - (q3 - q0).normalized() * 0.4)
 				if rv == "shelf":
 					# Close on the left-wall shelving, at eye height.
 					from = si.to_world(ShopInterior.R(2.3, 2.3, 1.6))

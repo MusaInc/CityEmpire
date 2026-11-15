@@ -295,6 +295,12 @@ func _viaduct(pts: PackedVector3Array) -> void:
 					L._kbeam(k, Vector3(p.x, gy - 0.3, p.z), Vector3(p.x, top, p.z), 1.5, 1.5, CONCRETE_DK)
 					L._kbeam(k, Vector3(p.x, top + 0.4, p.z) - ps * 2.6, Vector3(p.x, top + 0.4, p.z) + ps * 2.6, 1.6,
 						1.0, CONCRETE)
+					# Underside detail where people walk and drive beneath it
+					# (merged into the same kit: no extra draws): a footing
+					# plinth and a drainage downpipe down the column.
+					L._kbeam(k, Vector3(p.x, gy - 0.3, p.z), Vector3(p.x, gy + 0.45, p.z), 1.9, 1.9, CONCRETE, false)
+					var dp := Vector3(p.x, 0.0, p.z) + ps * 0.82 + dir * 0.55
+					L._kbeam(k, Vector3(dp.x, gy + 0.45, dp.z), Vector3(dp.x, top + 0.9, dp.z), 0.14, 0.14, Color(0.25, 0.27, 0.29), false)
 				sp += 30.0
 		run += d.length()
 		if run > 300.0:

@@ -300,6 +300,27 @@ func _build_shop(st: _Batch) -> void:
 	# Queue: back from the first till along the counter.
 	for k in 6:
 		queue.append(R(cx0 - 0.55, cd1 + 0.5 + 0.8 * k, 0.0))
+	# Queue markings on the floor: a spot per place in the line and a
+	# "please queue here" strip at its head (floor paint only: the walk
+	# grid is unchanged).
+	for k2 in 4:
+		var qd := cd1 + 0.5 + 0.8 * k2
+		st.box(R(cx0 - 0.72, qd - 0.12, 0.014), R(cx0 - 0.38, qd + 0.12, 0.019), brand.lightened(0.15) if k2 > 0 else accent_col())
+	st.box(R(cx0 - 0.95, cd1 + 0.08, 0.014), R(cx0 - 0.15, cd1 + 0.16, 0.019), Color(0.95, 0.85, 0.2))
+	var ql := Label3D.new()
+	ql.text = "PLEASE QUEUE HERE"
+	ql.font = EmpireStyle.font("black")
+	ql.font_size = 40
+	ql.pixel_size = 0.0019
+	ql.shaded = false
+	ql.double_sided = false
+	ql.outline_size = 0
+	ql.modulate = Color(0.12, 0.12, 0.14)
+	ql.position = R(cx0 - 0.55, cd1 + 0.3, 0.022)
+	# Flat on the floor, reading across the line for someone queueing
+	# (facing the till).
+	ql.rotation = Vector3(-PI * 0.5, PI, 0.0)
+	_static.add_child(ql)
 	# Cigarette-style back display behind the counter (decor) + till staff area.
 	st.box(R(W - 0.4, cd0, 0.9), R(W - 0.05, cd1, 2.2), Color(0.25, 0.27, 0.3))
 	# Fixtures.
@@ -812,6 +833,11 @@ func _poster(a: Vector3, b: Vector3, col: Color, band: Color, text: String, ink 
 	lab.outline_size = 0
 	lab.position = Vector3((lo.x + hi.x) * 0.5, (lo.y + hi.y - 0.32) * 0.5, hi.z + 0.006)
 	_static.add_child(lab)
+
+
+func accent_col() -> Color:
+	var a: Color = ident.get("accent", Color(0.95, 0.85, 0.2)) if ident is Dictionary else Color(0.95, 0.85, 0.2)
+	return a
 
 
 func _promo_text(seed_x: float) -> String:
