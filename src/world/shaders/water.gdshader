@@ -77,7 +77,9 @@ void fragment() {
 	vec2 q2 = p * 2.3 - vec2(TIME * 1.4, -TIME * 1.1);
 	float r0 = vnoise(q2);
 	vec2 pock = vec2(vnoise(q2 + vec2(0.3, 0.0)) - r0, vnoise(q2 + vec2(0.0, 0.3)) - r0) * 0.5 * blow;
-	vec2 slope = w.yz * mix(0.35, 1.0, mid) + (chop + pock) * near;
+	// (Far off the swell's slopes fade more: seen from height the trains
+	// interfere into a regular ripple grid.)
+	vec2 slope = w.yz * mix(0.12, 1.0, mid * mid) + (chop + pock) * near;
 	vec3 nw = normalize(vec3(-slope.x, 1.0, -slope.y));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 
@@ -103,7 +105,8 @@ void fragment() {
 	vec3 sun_col = mix(vec3(1.0, 0.72, 0.45), vec3(1.0, 0.96, 0.88), clamp(sun_dir.y * 2.5, 0.0, 1.0));
 
 	// Whitecaps on the steepest crests when it blows (and a few on a calm day).
-	float foam = smoothstep(0.78, 0.95, crest) * smoothstep(0.35, 0.8, vnoise(p * 0.9 + TIME * 0.3)) * (0.12 + 0.88 * blow) * mid;
+	float foam = smoothstep(0.8, 0.96, crest) * smoothstep(0.55, 0.85, vnoise(p * 0.9 + TIME * 0.3)) * smoothstep(0.4, 0.8, vnoise(p0 * 0.02))
+		* (0.04 + 0.96 * blow) * mid * near;
 
 	ALBEDO = mix(body * (1.0 - fres), vec3(0.9), foam);
 	EMISSION = (sky * fres * (1.0 - foam) * mix(1.0, 0.6, night) + sun_col * glint * day) * (1.0 - foam * 0.7);

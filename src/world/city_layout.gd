@@ -545,6 +545,8 @@ func block_at(x: float, z: float) -> int:
 ## Height of what you'd stand on at (x, z): a block's pavement or the road.
 ## (Basins are water: their quay ring is the block level.)
 func ground_y(x: float, z: float) -> float:
+	if x > BOUNDS.end.x + 200.0 and SkyportIsland.contains(x, z):
+		return SkyportIsland.LAND_Y
 	if mainland != null and x < FAR_SHORE:
 		return mainland.ground_y(x, z)
 	var i := block_at(x, z)
@@ -1069,6 +1071,8 @@ func props_by_chunk() -> Dictionary:
 
 func is_water(p: Vector3) -> bool:
 	var q := Vector2(p.x, p.z)
+	if SkyportIsland.contains(p.x, p.z):
+		return false  # (the third island, when a game builds it)
 	for w in basins:
 		if (w as Rect2).has_point(q):
 			return true

@@ -33,6 +33,8 @@ var rig: CharacterRig
 var camera: SwingCamera
 var chase: ChaseCamera
 var drive_input: DriveInput
+var skyport: SkyportIsland
+var skyport_play: SkyportPlay
 var vfx: VehicleFx
 var audio: AudioDirector
 var sfx: Sfx
@@ -84,6 +86,14 @@ func _ready() -> void:
 	world.name = "World"
 	add_child(world)
 	layout = world.layout
+	# Skyport Island (the third island: airport, logistics, high-rise, marina).
+	SkyportIsland.enabled = true
+	var t1 := Time.get_ticks_msec()
+	skyport = SkyportIsland.new()
+	skyport.name = "Skyport"
+	add_child(skyport)
+	skyport.build(layout, world)
+	print("Skyport Island: %d ms" % (Time.get_ticks_msec() - t1))
 	EmpireMinimap.bake.call_deferred(self, layout)  # (the minimap's and phone map's city image)
 	atmosphere.configure(args, world)
 	Car.water_check = layout.is_water
@@ -143,6 +153,11 @@ func _ready() -> void:
 	ui = EmpireUI.new()
 	ui.game = self
 	add_child(ui)
+	# Skyport Island's showrooms, aircraft and boats (needs the UI's touch pad).
+	skyport_play = SkyportPlay.new()
+	skyport_play.name = "SkyportPlay"
+	add_child(skyport_play)
+	skyport_play.setup(self)
 	# The one GPS route (both maps draw it); its road graph builds on a thread.
 	gps = Gps.new()
 	gps.name = "Gps"
@@ -272,6 +287,13 @@ func _after_start() -> void:
 			var dc: Car = cars.get(driving)
 			if dc:
 				dc.linear_velocity = -dc.global_basis.z * float(args["drive"])
+	if args.has("fly"):
+		# Captures/tests: own a craft (free) at its slot and get in.
+		var fm := String(args["fly"])
+		var slot := skyport_play.free_slot(SkyportPlay.vclass(fm))
+		var fv := empire.add_vehicle(fm, slot[0], slot[1])
+		skyport_play._spawn(fv)
+		skyport_play.enter(String(fv["id"]))
 	if args.has("hour"):
 		empire.minute = float(args["hour"]) * 60.0
 	if args.has("brand"):
@@ -663,6 +685,8 @@ func _process(dt: float) -> void:
 	_update_carry_visual()
 	if driving != "":
 		_track_driving()
+	elif skyport_play and skyport_play.piloting != "":
+		skyport_play.track(dt)
 	else:
 		_check_wading(dt)
 	_save_t += dt
@@ -991,6 +1015,11 @@ func _update_spot() -> void:
 			if d3 < best_d:
 				best = s2
 				best_d = d3
+	if skyport_play and not in_vehicle():
+		var sk := skyport_play.spot_near(player.global_position)
+		if not sk.is_empty() and float(sk["d"]) < best_d:
+			best = sk
+			best_d = float(sk["d"])
 	var changed: bool = best.get("kind", "") != spot.get("kind", "") or best.get("slot", -9) != spot.get("slot", -9) \
 		or best.get("vehicle", "") != spot.get("vehicle", "") or best.get("interior") != spot.get("interior")
 	spot = best
@@ -1061,6 +1090,9 @@ func _update_stadium() -> void:
 
 ## The prompt for the current spot: [text, enabled].
 func spot_prompt() -> Array:
+	if skyport_play and skyport_play.piloting != "":
+		var cr: Craft = skyport_play.crafts.get(skyport_play.piloting)
+		return ["GET OUT", cr != null and cr.can_exit()]
 	if driving != "":
 		# (Only offered once the car is slow enough to leave.)
 		var dc: Car = cars.get(driving)
@@ -1068,6 +1100,8 @@ func spot_prompt() -> Array:
 		return ["GET OUT", slow]
 	if spot.is_empty():
 		return ["", false]
+	if String(spot.get("kind", "")).begins_with("sky_"):
+		return skyport_play.prompt(spot)
 	var si: ShopInterior = spot.get("interior")
 	var b: Business = si.biz if si else null
 	match String(spot["kind"]):
@@ -1199,7 +1233,15 @@ func act() -> void:
 	if driving != "":
 		exit_vehicle()
 		return
+	if skyport_play and skyport_play.piloting != "":
+		var why := skyport_play.exit()
+		if why != "":
+			ui.toast(why, "warn")
+		return
 	if spot.is_empty():
+		return
+	if String(spot.get("kind", "")).begins_with("sky_"):
+		skyport_play.act(spot)
 		return
 	var pr := spot_prompt()
 	if not pr[1]:
@@ -1436,10 +1478,38 @@ func _spawn_cars() -> void:
 		cars[id].queue_free()
 	cars.clear()
 	for v in empire.vehicles:
-		_spawn_car(v)
+		if SkyportPlay.vclass(String(v["model"])) == "car":
+			_spawn_car(v)
+	if skyport_play:
+		skyport_play.spawn_all()   # (helicopters, planes, boats)
+
+
+## In any vehicle: a car you're driving or a craft you're piloting.
+func in_vehicle() -> bool:
+	return driving != "" or (skyport_play != null and skyport_play.piloting != "")
+
+
+## The vehicle you're in (Car or Craft), or null.
+func vehicle_node() -> Node3D:
+	if driving != "":
+		return cars.get(driving)
+	if skyport_play and skyport_play.piloting != "":
+		return skyport_play.crafts.get(skyport_play.piloting)
+	return null
+
+
+## The camera's heading, whichever camera is live.
+func view_yaw() -> float:
+	if driving != "":
+		return chase.view_yaw()
+	if skyport_play and skyport_play.piloting != "":
+		return skyport_play.cam.view_yaw()
+	return camera.view_yaw()
 
 
 func _spawn_car(v: Dictionary) -> Car:
+	if SkyportPlay.vclass(String(v["model"])) != "car":
+		return null   # (aircraft and boats: SkyportPlay)
 	var c := Car.new()
 	c.name = "Car_" + String(v["id"])
 	c.setup(_car_spec(v["model"]), "player")
@@ -1502,6 +1572,8 @@ func exit_vehicle() -> void:
 	camera.face(xf.basis.get_euler().y)
 	camera.cam.make_current()
 	world.set_viewer(camera)
+	if v.get("test", false) and skyport_play:
+		skyport_play.end_test(String(v["id"]))
 
 
 func _track_driving() -> void:
@@ -1769,6 +1841,8 @@ func vehicle_position(vid: String) -> Vector3:
 	var c: Car = cars.get(vid)
 	if c and is_instance_valid(c):
 		return c.global_position
+	if skyport_play and skyport_play.crafts.has(vid) and is_instance_valid(skyport_play.crafts[vid]):
+		return (skyport_play.crafts[vid] as Node3D).global_position
 	var v := empire.vehicle(vid) if empire else {}
 	if v.is_empty():
 		return Vector3.ZERO
@@ -1935,6 +2009,8 @@ func save_game() -> void:
 	if empire == null or state == "boot":
 		return
 	# Vehicles' positions and the hero's, then the economy.
+	if skyport_play:
+		skyport_play.sync_positions()
 	for v in empire.vehicles:
 		var c: Car = cars.get(v["id"])
 		if c and is_instance_valid(c):
@@ -1946,6 +2022,13 @@ func save_game() -> void:
 		var c2: Car = cars[driving]
 		var side := c2.global_transform * Vector3(-c2.spec["size"].x * 0.5 - 0.9, 0.9, 0.0)
 		d["player"] = [side.x, side.y, side.z, camera.view_yaw()]
+		if empire.vehicle(driving).get("test", false):
+			d["driving"] = ""
+	elif skyport_play and skyport_play.piloting != "":
+		var cr2: Craft = skyport_play.crafts.get(skyport_play.piloting)
+		if cr2:
+			var side2 := skyport_play._step_off(cr2)
+			d["player"] = [side2.x, side2.y + 1.0, side2.z, camera.view_yaw()]
 	var tmp := SAVE_PATH + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:

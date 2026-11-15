@@ -8,7 +8,8 @@
    "cargo": 8,
    "price": 0,
    "top_speed": 34.0,
-   "paint": "#c9c6bd"
+   "paint": "#c9c6bd",
+   "class": "car"
   },
   "van": {
    "name": "Courier Van",
@@ -17,7 +18,8 @@
    "cargo": 30,
    "price": 6500,
    "top_speed": 30.0,
-   "paint": "#e9e6df"
+   "paint": "#e9e6df",
+   "class": "car"
   },
   "box": {
    "name": "Box Truck",
@@ -26,7 +28,8 @@
    "cargo": 80,
    "price": 19000,
    "top_speed": 26.0,
-   "paint": "#e9e6df"
+   "paint": "#e9e6df",
+   "class": "car"
   },
   "saloon": {
    "name": "Marlin Saloon",
@@ -35,7 +38,8 @@
    "cargo": 10,
    "price": 9500,
    "top_speed": 44.0,
-   "paint": "#1a3a7a"
+   "paint": "#1a3a7a",
+   "class": "car"
   },
   "scout": {
    "name": "Scout RS",
@@ -44,7 +48,8 @@
    "cargo": 6,
    "price": 24000,
    "top_speed": 46.0,
-   "paint": "#e8a33a"
+   "paint": "#e8a33a",
+   "class": "car"
   },
   "brute": {
    "name": "Brute V8",
@@ -53,7 +58,8 @@
    "cargo": 5,
    "price": 42000,
    "top_speed": 52.0,
-   "paint": "#1d1d22"
+   "paint": "#1d1d22",
+   "class": "car"
   },
   "vanta": {
    "name": "Vanta GT",
@@ -62,7 +68,8 @@
    "cargo": 3,
    "price": 78000,
    "top_speed": 58.0,
-   "paint": "#c4202a"
+   "paint": "#c4202a",
+   "class": "car"
   },
   "goliath": {
    "name": "Goliath Pickup",
@@ -71,7 +78,8 @@
    "cargo": 24,
    "price": 36000,
    "top_speed": 42.0,
-   "paint": "#3a4a3a"
+   "paint": "#3a4a3a",
+   "class": "car"
   },
   "warden": {
    "name": "Warden 4x4",
@@ -80,7 +88,8 @@
    "cargo": 14,
    "price": 65000,
    "top_speed": 44.0,
-   "paint": "#2b2d33"
+   "paint": "#2b2d33",
+   "class": "car"
   },
   "halcyon": {
    "name": "Halcyon Supercar",
@@ -89,7 +98,8 @@
    "cargo": 2,
    "price": 185000,
    "top_speed": 64.0,
-   "paint": "#e6e8ea"
+   "paint": "#e6e8ea",
+   "class": "car"
   },
   "stiletto": {
    "name": "Stiletto Hypercar",
@@ -98,9 +108,203 @@
    "cargo": 1,
    "price": 420000,
    "top_speed": 72.0,
-   "paint": "#f2c12e"
+   "paint": "#f2c12e",
+   "class": "car"
+  },
+  "wren": {
+   "name": "Wren H1",
+   "class": "heli",
+   "price": 180000,
+   "cruise": 34,
+   "climb": 6,
+   "accel": 7,
+   "yaw": 1.0,
+   "spool": 2.0,
+   "size": [
+    2.4,
+    2.6,
+    8.5
+   ],
+   "rotor_r": 4.2,
+   "paint": "#e8e6df",
+   "trim": "#2a2f36",
+   "seats": 2,
+   "fee": 60,
+   "desc": "Two-seat trainer: easy to fly, cheap to keep"
+  },
+  "kite": {
+   "name": "Kite T4",
+   "class": "heli",
+   "price": 420000,
+   "cruise": 52,
+   "climb": 9,
+   "accel": 10,
+   "yaw": 1.25,
+   "spool": 1.5,
+   "size": [
+    2.6,
+    2.8,
+    10.0
+   ],
+   "rotor_r": 5.0,
+   "paint": "#1d3f73",
+   "trim": "#d9d9d9",
+   "seats": 4,
+   "fee": 110,
+   "desc": "Fast turbine four-seater"
+  },
+  "regent": {
+   "name": "Regent Executive",
+   "class": "heli",
+   "price": 950000,
+   "cruise": 60,
+   "climb": 9,
+   "accel": 9,
+   "yaw": 1.0,
+   "spool": 1.8,
+   "size": [
+    2.8,
+    3.0,
+    12.5
+   ],
+   "rotor_r": 6.0,
+   "paint": "#14161a",
+   "trim": "#c8a45a",
+   "seats": 7,
+   "fee": 220,
+   "desc": "Twin-engine executive cabin, leather and quiet"
+  },
+  "skylark": {
+   "name": "Skylark 4",
+   "class": "plane",
+   "price": 240000,
+   "vr": 30,
+   "stall": 24,
+   "cruise": 52,
+   "vmax": 66,
+   "thrust": 5,
+   "climb": 6,
+   "land_max": 45,
+   "size": [
+    11,
+    3,
+    8
+   ],
+   "high_wing": true,
+   "paint": "#f2efe6",
+   "trim": "#b8322a",
+   "seats": 4,
+   "fee": 120,
+   "desc": "High-wing four-seat propeller plane"
+  },
+  "merlin": {
+   "name": "Merlin Twin",
+   "class": "plane",
+   "price": 780000,
+   "vr": 40,
+   "stall": 32,
+   "cruise": 85,
+   "vmax": 110,
+   "thrust": 7,
+   "climb": 10,
+   "land_max": 58,
+   "size": [
+    14,
+    3.5,
+    12
+   ],
+   "twin": true,
+   "paint": "#f0f0f0",
+   "trim": "#1e4a8a",
+   "seats": 6,
+   "fee": 260,
+   "desc": "Fast twin-engine private aircraft"
+  },
+  "aurora": {
+   "name": "Aurora 7 Jet",
+   "class": "plane",
+   "price": 2400000,
+   "vr": 55,
+   "stall": 42,
+   "cruise": 140,
+   "vmax": 190,
+   "thrust": 9,
+   "climb": 14,
+   "land_max": 72,
+   "size": [
+    17,
+    4.5,
+    20
+   ],
+   "jet": true,
+   "paint": "#e9e9ea",
+   "trim": "#2b2f35",
+   "seats": 10,
+   "fee": 520,
+   "desc": "Business jet: the city to anywhere, in style"
+  },
+  "dart": {
+   "name": "Dart 18",
+   "class": "boat",
+   "price": 18000,
+   "vmax": 14,
+   "accel": 3,
+   "turn": 0.7,
+   "size": [
+    2.0,
+    1.2,
+    5.5
+   ],
+   "paint": "#c0392b",
+   "fee": 12,
+   "desc": "Open runabout for the bay"
+  },
+  "swift": {
+   "name": "Swift 26 Sport",
+   "class": "boat",
+   "price": 65000,
+   "vmax": 26,
+   "accel": 6,
+   "turn": 0.9,
+   "size": [
+    2.4,
+    1.3,
+    8.0
+   ],
+   "paint": "#1b2b45",
+   "fee": 30,
+   "desc": "Deep-vee speedboat"
+  },
+  "majesty": {
+   "name": "Majesty 92 Yacht",
+   "class": "boat",
+   "price": 650000,
+   "vmax": 15,
+   "accel": 1.6,
+   "turn": 0.32,
+   "size": [
+    6.5,
+    6.0,
+    28.0
+   ],
+   "paint": "#0f2340",
+   "fee": 140,
+   "float": 0.3,
+   "desc": "Two-deck motor yacht with a flybridge"
+  },
+  "used_kestrel": {
+   "name": "Kestrel Hatch (used)",
+   "class": "car",
+   "base": "kestrel",
+   "body": "kestrel",
+   "cargo": 8,
+   "price": 4200,
+   "top_speed": 32.0,
+   "paint": "#5d7a8c",
+   "desc": "Six years old, one careful owner"
   }
  },
  "service_cost": 80,
- "wear_per_km": 0.004
+ "wear_per_km": 0.004,
+ "_doc_classes": "class: car (Car/CarCatalog), heli / plane / boat (Craft). fee = hangar / marina fee per day."
 }

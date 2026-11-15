@@ -18,7 +18,7 @@ extends Control
 ## with kind "token", "ring", "next" (the next ring/goal), "job" / "crime"
 ## (contract offers) or "poi".
 
-const BOUNDS := Rect2(-1180.0, -720.0, 2260.0, 1420.0)  # world x/z covered by the texture
+const BOUNDS := Rect2(-1180.0, -720.0, 3700.0, 1420.0)  # world x/z covered by the texture (to Skyport Island)
 const M_PER_PX := 1.5
 const R_SLOW := 95.0     # m shown from the centre to the rim, standing
 const R_FAST := 175.0    # ... at full swinging speed
@@ -206,6 +206,25 @@ func _marker(ov: Control, p: Vector2, kind: String, pinned: bool) -> void:
 ## Draws the whole world once into the bake viewport (1 px = M_PER_PX m).
 class MapPainter:
 	extends Node2D
+
+	## Skyport Island: land, aprons, runway, roads, buildings.
+	func _skyport() -> void:
+		var P: Dictionary = SkyportIsland._plan
+		_poly(SkyportIsland.outline(), BLOCK)
+		for a in P["areas"]:
+			_poly(a[1], PARK if int(a[0]) == 1 else PLAZA)
+		for st in P["strips"]:
+			_line(PackedVector2Array([Vector2(st[1].x, st[1].z), Vector2(st[2].x, st[2].z)]), float(st[3]) * 2.0, ROAD)
+		for r in P["roads"]:
+			var p2 := PackedVector2Array()
+			for v: Vector3 in (r[1] as PackedVector3Array):
+				p2.append(Vector2(v.x, v.z))
+			_line(p2, float(r[2]), ROAD)
+		for b: Dictionary in P["buildings"]:
+			var t: Array = b["tiers"][0]
+			var top := float(b["tiers"][-1][5]) - float(t[4])
+			_poly(PackedVector2Array([Vector2(t[0], t[1]), Vector2(t[2], t[1]), Vector2(t[2], t[3]), Vector2(t[0], t[3])]),
+				Color(0.6, 0.6, 0.62).lerp(Color(0.9, 0.88, 0.84), clampf(top / 220.0, 0.0, 1.0)))
 	var layouts: Array = []
 	var layout: CityLayout
 
@@ -296,6 +315,8 @@ class MapPainter:
 					for v: Vector3 in (ln["pts"] as PackedVector3Array):
 						p2.append(Vector2(v.x, v.z))
 					_line(p2, 3.0, RAIL)
+		if SkyportIsland.enabled and not SkyportIsland._plan.is_empty():
+			_skyport()
 		# The suspension bridge and its approach onto Westbank.
 		var z := CityLayout.BRIDGE_Z
 		_line(PackedVector2Array([Vector2(56.0, z), Vector2(CityLayout.APPROACH_END, z)]), 20.0, BRIDGE.darkened(0.2))

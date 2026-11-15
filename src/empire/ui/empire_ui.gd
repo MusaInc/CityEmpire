@@ -340,7 +340,7 @@ func update_hud() -> void:
 	if (hr < 6.0 or hr >= 20.0) and wname in ["Sunny", "Heatwave"]:
 		wname = "Clear night" if wname == "Sunny" else "Warm night"
 	_weather_l.text = wname
-	_speed.text = "×%d" % int(game.time_scale) if game.time_scale > 1.0 and game.floor == null and game.driving == "" else ""
+	_speed.text = "×%d" % int(game.time_scale) if game.time_scale > 1.0 and game.floor == null and not game.in_vehicle() else ""
 	_speed.visible = _speed.text != ""
 	var ob := game.objective()
 	_obj.text = String(ob[0])
@@ -375,7 +375,7 @@ func update_hud() -> void:
 	var pr := game.spot_prompt()
 	# In a car the exit is the action button (touch) or E (shown small):
 	# no banner over the road.
-	_prompt.visible = String(pr[0]) != "" and _panel == null and not (game.driving != "" and (touch.visible or not pr[1]))
+	_prompt.visible = String(pr[0]) != "" and _panel == null and not (game.in_vehicle() and (touch.visible or not pr[1]))
 	_prompt_l.text = String(pr[0])
 	_prompt_l.add_theme_color_override("font_color", S.PAPER if pr[1] else Color(S.PAPER, 0.5))
 	_prompt_key.visible = pr[1] and not touch.visible
@@ -406,7 +406,11 @@ func update_hud() -> void:
 	else:
 		_strip.text = ""
 		_strip_panel.visible = false
-	if game.driving != "":
+	var cr = game.vehicle_node()
+	if cr is Craft:
+		_drive.text = (cr as Craft).hud_text()
+		_drive_panel.visible = true
+	elif game.driving != "":
 		var car: Car = game.cars[game.driving]
 		var v := e.vehicle(game.driving)
 		var cargo := v["cargo"] as Stock
@@ -2010,13 +2014,21 @@ func open_style(first := false) -> void:
 	var v := S.vbox(12)
 	_panel.add_child(v)
 	var head := S.hbox(10)
-	head.add_child(S.label("Make your character" if first else "Your style", 28, S.PAPER, "black"))
+	var shop := style_shop
+	head.add_child(S.label("Make your character" if first else (String(Wardrobe.STORES[shop]["name"]) if shop != "" else "Your wardrobe"), 28, S.PAPER, "black"))
 	head.add_child(S.spacer())
 	if not first:
 		head.add_child(S.button("✕", _close_style, false, 52))
 	v.add_child(head)
 	var tabs := S.hbox(8)
-	for tb in [["you", "Face & hair"], ["clothes", "Clothes"], ["extras", "Shoes & hats"]]:
+	var tab_list := [["you", "Face & hair"], ["clothes", "Clothes"], ["extras", "Shoes & hats"]]
+	if shop != "":
+		tab_list = [["clothes", "Clothes"], ["extras", "Shoes & more"]]
+		if _style_tab == "you":
+			_style_tab = "clothes"
+	elif not first:
+		tab_list.append(["outfits", "Outfits"])
+	for tb in tab_list:
 		tabs.add_child(S.button(tb[1], func():
 			_style_tab = tb[0]
 			open_style(_style_first), _style_tab == tb[0], 170))
@@ -2030,13 +2042,26 @@ func open_style(first := false) -> void:
 			_style_choices(body, "HAIRCUT", HeroLook.HAIRS, l, "hair", 3)
 			_style_colours(body, "HAIR COLOUR", HeroLook.HAIR, l, "hair_col", fc["hair"])
 		"clothes":
-			_style_choices(body, "TOP", HeroLook.TOPS, l, "top", 3)
+			_style_choices(body, "TOP", _style_list(HeroLook.TOPS, first), l, "top", 3)
 			_style_colours(body, "TOP COLOUR", HeroLook.CLOTH, l, "top_col")
 			_style_colours(body, "TROUSERS", HeroLook.TROUSERS, l, "pants_col")
 		"extras":
-			_style_choices(body, "SHOES", HeroLook.SHOES, l, "shoes", 3)
-			_style_choices(body, "HAT", HeroLook.HATS, l, "head", 4)
-			_style_choices(body, "EYEWEAR", HeroLook.EYEWEAR, l, "eyewear", 4)
+			_style_choices(body, "SHOES", _style_list(HeroLook.SHOES, first), l, "shoes", 3)
+			_style_choices(body, "HAT", _style_list(HeroLook.HATS, first), l, "head", 4)
+			_style_choices(body, "EYEWEAR", _style_list(HeroLook.EYEWEAR, first), l, "eyewear", 4)
+		"outfits":
+			body.add_child(S.label("SAVED OUTFITS", 14, S.AMBER, "black"))
+			var outs: Array = e.flags.get("outfits", [])
+			if outs.is_empty():
+				body.add_child(S.label("Dress up, then save the look here to wear it again in one tap.", 16, S.MUTED))
+			for o in outs:
+				var od: Dictionary = o
+				body.add_child(_row([_fixed("%s · %s" % [HeroLook.label(HeroLook.TOPS, String(od.get("top", ""))),
+					HeroLook.label(HeroLook.SHOES, String(od.get("shoes", "")))], 300, 17, S.PAPER, "bold"), S.spacer(),
+					S.button("Wear", func(): _style_set(od), true, 110)]))
+			body.add_child(S.button("Save what I'm wearing", func():
+				Wardrobe.save_outfit(e.flags, HeroLook.current(e.flags))
+				open_style(false), false, 300))
 	v.add_child(_scroll(body, H - 250.0))
 	var foot := S.hbox(10)
 	foot.add_child(S.button("⟲", func():
@@ -2060,8 +2085,53 @@ func open_style(first := false) -> void:
 		r["eyewear"] = "face_none"
 		_style_set(r), false, 130))
 	foot.add_child(S.spacer())
-	foot.add_child(S.button("Start" if first else "Done", _close_style, true, 160))
+	var unpaid := Wardrobe.unpaid(e.flags, l) if (shop != "" and not first) else []
+	if not unpaid.is_empty():
+		var tot := 0
+		for it in unpaid:
+			tot += Wardrobe.price(String(it))
+		foot.add_child(S.button("Buy look · %s" % EmpireData.money(float(tot)), func():
+			var err := Wardrobe.buy(e, unpaid, shop)
+			if err != "":
+				toast(err, "bad")
+			else:
+				Sfx.play("cash", -4.0)
+				toast("Bought – it's in your wardrobe", "good")
+			open_style(false), true, 220))
+	foot.add_child(S.button("Start" if first else ("Leave" if shop != "" else "Done"), _close_style, unpaid.is_empty(), 140))
 	v.add_child(foot)
+
+
+## The Style screen as a store (`style_shop` = a Wardrobe.STORES key) or
+## your wardrobe. Look on entering a store (put back if you leave unpaid).
+var style_shop := ""
+var _style_entry := {}
+
+
+## The choices for a list: the store's stock (priced) in a store, what you
+## own in your wardrobe, everything when making your character.
+func _style_list(list: Array, first: bool) -> Array:
+	var flags := game.empire.flags
+	var out: Array = []
+	for it in list:
+		var id := String(it[0])
+		if first or style_shop == "" and Wardrobe.owns(flags, id):
+			out.append(it)
+		elif style_shop != "" and (id in Wardrobe.STORES[style_shop]["items"] or id in Wardrobe.FREE):
+			var lbl := String(it[1])
+			if not Wardrobe.owns(flags, id):
+				lbl += " · " + EmpireData.money(float(Wardrobe.price(id)))
+			else:
+				lbl += " ✓"
+			out.append([id, lbl])
+	return out
+
+
+func open_store(store: String) -> void:
+	style_shop = store
+	_style_entry = HeroLook.current(game.empire.flags).duplicate()
+	_style_tab = "clothes"
+	open_style(false)
 
 
 func _style_set(changes: Dictionary) -> void:
@@ -2131,8 +2201,24 @@ func _close_style() -> void:
 	var first := _style_first
 	_style_pose(false)
 	_style_first = false
+	var e := game.empire
 	if first:
-		game.empire.flags["styled"] = true
+		e.flags["styled"] = true
+		# (Your starting outfit is yours.)
+		var lk := HeroLook.current(e.flags)
+		var o := Wardrobe.owned(e.flags)
+		for k in ["top", "shoes", "head", "eyewear"]:
+			if not String(lk[k]) in o:
+				o.append(String(lk[k]))
+	elif style_shop != "" and not Wardrobe.unpaid(e.flags, HeroLook.current(e.flags)).is_empty():
+		# Left the store without paying: back into what you came in wearing.
+		var back := HeroLook.current(e.flags)
+		for k in ["top", "shoes", "head", "eyewear"]:
+			if not Wardrobe.owns(e.flags, String(back[k])):
+				back[k] = _style_entry.get(k, HeroLook.DEFAULT[k])
+		e.flags["look"] = back
+		game.apply_hero_look()
+	style_shop = ""
 	game.save_game()
 	close_panel(true)
 	game.camera.snap()

@@ -73,11 +73,28 @@ func ui_k() -> float:
 
 
 func _driving() -> bool:
-	return ui.game != null and ui.game.driving != ""
+	return ui.game != null and ui.game.in_vehicle()
 
 
-func _car() -> Car:
-	return ui.game.cars.get(ui.game.driving) if _driving() else null
+## The vehicle you're in (Car or Craft: both have forward_speed / drift_angle).
+func _car() -> Node3D:
+	return ui.game.vehicle_node() if _driving() else null
+
+
+## What the pad's directions mean for the vehicle you're in.
+func profile() -> Dictionary:
+	var v := _car()
+	var k := String(v.get("kind")) if v is Craft else "car"
+	match k:
+		"heli":
+			return {"up": "CLIMB", "down": "DESCEND", "side": "TURN", "hold": "FLY", "idle": "HOVER"}
+		"plane":
+			var air := String(v.get("state")) in ["air", "stall"]
+			return {"up": "CLIMB" if air else "TAKE OFF", "down": "DESCEND" if air else "BRAKE", "side": "BANK" if air else "STEER",
+				"hold": "CRUISE" if air else "TAXI", "idle": "LEVEL" if air else "IDLE"}
+		"boat":
+			return {"up": "FULL AHEAD", "down": "ASTERN", "side": "RUDDER", "hold": "AHEAD", "idle": "DRIFT"}
+	return {"up": "KICKDOWN", "down": "BRAKE", "side": "DRIFT", "hold": "DRIVE", "idle": "DRIVE"}
 
 
 func pad_home() -> Vector2:
@@ -232,13 +249,15 @@ func _apply_pad() -> void:
 	var di: DriveInput = ui.game.drive_input if ui.game else null
 	if di == null:
 		return
-	var car := _car()
+	var car = _car()
 	if _pad_id < 0 or car == null:
 		pad = {"gas": 0.0, "brake": 0.0, "kick": false, "drift": false, "steer": 0.0, "zone": ""}
 		_drifting = false
 		_pad_zone = ""
 	else:
-		pad = read_pad(_pad_p - _pad_o, ui_k(), absf(car.forward_speed), _drifting)
+		pad = read_pad(_pad_p - _pad_o, ui_k(), absf(float(car.get("forward_speed"))), _drifting if car is Car else false)
+		if not car is Car:
+			pad["drift"] = false   # (craft steer with the sideways slide, no handbrake)
 		_drifting = pad["drift"]
 		if String(pad["zone"]) != _pad_zone:
 			if _pad_zone != "":
@@ -266,9 +285,9 @@ func _physics_process(_dt: float) -> void:
 	var di: DriveInput = ui.game.drive_input if ui != null and ui.game else null
 	if di == null:
 		return
-	var car := _car()
-	if car != null and pad["drift"]:
-		di.touch_handbrake = absf(car.drift_angle) < deg_to_rad(20.0)
+	var car = _car()
+	if car is Car and pad["drift"]:
+		di.touch_handbrake = absf((car as Car).drift_angle) < deg_to_rad(20.0)
 	else:
 		di.touch_handbrake = false
 
@@ -377,12 +396,13 @@ func _draw_pad(f: Font, k: float) -> void:
 		var on: bool = z[2]
 		draw_arc(c, r + 4.0, float(z[0]) - 0.5, float(z[0]) + 0.5, 16, Color(z[1] as Color, 0.95 if on else 0.38 * a), 6.0 if on else 3.0, true)
 	var fs := maxi(11, int(13 * k))
-	var car := _car()
-	var rev := car != null and float(pad["brake"]) > 0.5 and car.forward_speed < 1.5
-	_label(f, c + Vector2(0, -r - 12 * k), "KICKDOWN", fs, Color(1, 1, 1, 0.65 * a))
-	_label(f, c + Vector2(0, r + 22 * k), "REVERSE" if rev else "BRAKE", fs, Color(1, 1, 1, 0.65 * a))
-	_label(f, c + Vector2(-r - 30 * k, 4), "DRIFT", fs, Color(1, 1, 1, 0.5 * a))
-	_label(f, c + Vector2(r + 30 * k, 4), "DRIFT", fs, Color(1, 1, 1, 0.5 * a))
+	var car = _car()
+	var prof := profile()
+	var rev := car is Car and float(pad["brake"]) > 0.5 and float(car.get("forward_speed")) < 1.5
+	_label(f, c + Vector2(0, -r - 12 * k), String(prof["up"]), fs, Color(1, 1, 1, 0.65 * a))
+	_label(f, c + Vector2(0, r + 22 * k), "REVERSE" if rev else String(prof["down"]), fs, Color(1, 1, 1, 0.65 * a))
+	_label(f, c + Vector2(-r - 30 * k, 4), String(prof["side"]), fs, Color(1, 1, 1, 0.5 * a))
+	_label(f, c + Vector2(r + 30 * k, 4), String(prof["side"]), fs, Color(1, 1, 1, 0.5 * a))
 	# Brake depth as a fill down the lower arc.
 	if float(pad["brake"]) > 0.0:
 		var bd := float(pad["brake"])
@@ -393,20 +413,20 @@ func _draw_pad(f: Font, k: float) -> void:
 	var kr := 44.0 * k
 	var z := String(pad["zone"])
 	var kc := Color(1, 1, 1, 0.14)
-	var txt := "DRIVE"
+	var txt := String(prof["idle"])
 	if live:
 		if z.begins_with("B"):
 			kc = EmpireStyle.RED
-			txt = "REV" if rev else "BRAKE"
+			txt = "REV" if rev else String(prof["down"]).get_slice(" ", 0)
 		elif z.begins_with("C"):
 			kc = EmpireStyle.MUTED
-			txt = "COAST"
+			txt = "COAST" if car is Car else String(prof["idle"])
 		elif z.begins_with("K"):
 			kc = EmpireStyle.GREEN
-			txt = "KICK"
+			txt = "KICK" if car is Car else String(prof["up"]).get_slice(" ", 0)
 		else:
 			kc = EmpireStyle.AMBER
-			txt = "DRIVE"
+			txt = String(prof["hold"])
 		if pad["drift"]:
 			txt = "DRIFT"
 		kc = Color(kc, 0.88)

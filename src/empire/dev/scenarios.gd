@@ -108,6 +108,288 @@ func scenario_b() -> void:
 	game.drive_input.enabled = true
 
 
+# ------------------------------------------------- Skyport expansion
+## XD: drive a car over the landmark bridge onto Skyport Island, and the GPS
+## plans a road route from the city to the airport across it.
+func scenario_xd() -> void:
+	print("--- XD: Skyport bridge and GPS")
+	var P: Dictionary = game.skyport.plan_data
+	var e: Vector3 = P["city_end"]
+	var a: Vector3 = P["bridge_foot"]
+	game.set_gps(game.skyport_play.site("terminal")["door"], "Skyport Airport", {"kind": "place", "id": "terminal"})
+	game.gps.wait_net()
+	await until(func(): return game.gps.points.size() >= 2 or game.gps.message != "", 40.0)
+	var crosses := false
+	for q in game.gps.points:
+		if q.x > 1150.0 and q.x < 1500.0:
+			crosses = true
+	check(game.gps.points.size() >= 2 and crosses, "GPS from the city to the airport crosses the bridge (%d points, %s)" % [game.gps.points.size(), game.gps.message])
+	var vid := String(game.empire.vehicles[0]["id"])
+	game.enter_vehicle(vid)
+	var car: Car = game.cars[vid]
+	game.drive_input.enabled = false
+	car.place(Transform3D(Basis(Vector3.UP, -PI * 0.5), e + Vector3(6.0, 0.6, 3.8)), Vector3(16.0, 0, 0))
+	var lowest := 0.0
+	var reached := await until(func():
+		car.throttle = 0.75
+		car.steer = -clampf((car.global_position.z - (e.z + 3.8)) * 0.08, -0.3, 0.3)
+		var px := car.global_position.x
+		lowest = minf(lowest, car.global_position.y - SkyportIsland.bridge_y(e, clampf(px, e.x, a.x)))
+		return px > a.x + 60.0, 180.0)
+	check(reached, "drove over the bridge onto the island (x %.0f)" % car.global_position.x)
+	check(lowest > -1.0, "never dropped below the deck (lowest %.2f m)" % lowest)
+	check(not game.layout.is_water(car.global_position), "the island is land, not sea")
+	car.throttle = 0.0
+	car.brake = 1.0
+	await wait(1.5)
+	game.drive_input.enabled = true
+	game.exit_vehicle()
+
+
+## XB: a showroom – walk up to a display car, buy it (money once), it's
+## parked on the forecourt, and it survives a save and reload.
+func scenario_xb() -> void:
+	print("--- XB: dealership")
+	var sp: SkyportPlay = game.skyport_play
+	var door: Vector3 = sp.site("dealer_budget")["door"]
+	game._teleport(door + Vector3(0, 1, 2), PI)
+	await until(func(): return sp.displays.size() >= 3, 20.0)
+	check(sp.displays.size() >= 3, "display cars on the forecourts (%d)" % sp.displays.size())
+	var dk: String = sp.displays.keys()[0]
+	var dc: Car = sp.displays[dk]
+	game._teleport(dc.global_position + Vector3(0, 1.0, 3.6), PI)
+	await until(func(): return String(game.spot.get("kind", "")) == "sky_display", 15.0)
+	check(String(game.spot.get("kind", "")) == "sky_display", "walking up to a display car offers INSPECT (%s)" % game.spot_prompt()[0])
+	game.empire.personal_cash = 30000.0
+	var before := game.empire.personal_cash + game.empire.company_cash
+	var n0 := game.empire.vehicles.size()
+	var err := sp.buy_car("saloon", "dealer_budget")
+	var price := float(EmpireData.vehicle_model("saloon")["price"])
+	check(err == "" and game.empire.vehicles.size() == n0 + 1, "bought a saloon (%s)" % err)
+	check(absf(before - (game.empire.personal_cash + game.empire.company_cash) - price) < 0.01, "paid exactly once (%s)" % EmpireData.money(price))
+	var vid := String(game.empire.vehicles[-1]["id"])
+	check(game.cars.has(vid), "it's parked on the forecourt")
+	# Test drive: no charge, no extra record after.
+	var cash := game.empire.personal_cash
+	sp.start_test("vanta", "dealer_luxury")
+	await frames(5)
+	check(game.driving != "" and game.empire.vehicle(game.driving).get("test", false), "test drive started")
+	game.exit_vehicle()
+	await frames(5)
+	check(game.empire.vehicles.size() == n0 + 1 and game.empire.personal_cash == cash, "test drive ended: nothing kept, nothing paid")
+	game.save_game()
+	game.load_game()
+	await frames(10)
+	var found := false
+	for v in game.empire.vehicles:
+		if String(v["id"]) == vid:
+			found = true
+	check(found and game.cars.has(vid), "the saloon is still yours after a reload")
+
+
+## XC: clothes – try on in a store, pay, it's owned and worn, a saved
+## outfit, all after a reload.
+func scenario_xc() -> void:
+	print("--- XC: clothing store")
+	var e := game.empire
+	e.personal_cash = 5000.0
+	game.ui.open_store("clothes_premium")
+	await frames(3)
+	game.ui._style_set({"top": "top_blazer", "shoes": "shoes_royal"})
+	await frames(2)
+	var un := Wardrobe.unpaid(e.flags, HeroLook.current(e.flags))
+	check(un.size() == 2, "trying on two items you don't own (%s)" % str(un))
+	var cash := e.personal_cash
+	var err := Wardrobe.buy(e, un, "clothes_premium")
+	check(err == "" and absf(cash - e.personal_cash - 740.0) < 0.01, "paid £740 once (%s)" % err)
+	Wardrobe.save_outfit(e.flags, HeroLook.current(e.flags))
+	game.ui._close_style()
+	game.save_game()
+	game.load_game()
+	await frames(5)
+	var l := HeroLook.current(game.empire.flags)
+	check(l["top"] == "top_blazer" and Wardrobe.owns(game.empire.flags, "shoes_royal"), "wearing and owning them after a reload")
+	check((game.empire.flags.get("outfits", []) as Array).size() >= 1, "the saved outfit is there")
+	# Leaving a store without paying puts your own clothes back.
+	game.ui.open_store("clothes_premium")
+	await frames(2)
+	game.ui._style_set({"shoes": "shoes_gold"})
+	game.ui._close_style()
+	check(HeroLook.current(game.empire.flags)["shoes"] != "shoes_gold", "walked out unpaid: the gold trainers stay in the shop")
+
+
+## Drives a craft with scripted controls until cond (or timeout).
+func _fly(c: Craft, inp: Dictionary, cond: Callable, secs: float) -> bool:
+	game.skyport_play.script_input = inp
+	var ok := await until(cond, secs)
+	return ok
+
+
+## XK: a helicopter – buy, take off, climb, fly, turn, descend, land, get
+## out, save and reload: it's where you left it.
+func scenario_xk() -> void:
+	print("--- XK: helicopter")
+	var sp: SkyportPlay = game.skyport_play
+	game.empire.personal_cash = 300000.0
+	var err := sp.buy("wren")
+	check(err == "", "bought a Wren on the helipad (%s)" % err)
+	var vid := String(game.empire.vehicles[-1]["id"])
+	var c: Craft = sp.crafts[vid]
+	sp.enter(vid)
+	await frames(3)
+	var p0 := c.global_position
+	check(await _fly(c, {"active": true, "gas": 0.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.state == "flying" and c.altitude > 25.0, 90.0),
+		"took off and climbed (%.0f m)" % c.altitude)
+	var y0 := c._yaw
+	check(await _fly(c, {"active": true, "gas": 1.0, "kick": false, "brake": 0.0, "steer": 0.6}, func(): return Vector2(c.global_position.x - p0.x, c.global_position.z - p0.z).length() > 120.0, 120.0),
+		"flew forward and turned (%.0f m)" % Vector2(c.global_position.x - p0.x, c.global_position.z - p0.z).length())
+	check(absf(wrapf(c._yaw - y0, -PI, PI)) > 0.3, "the yaw follows the stick")
+	await _fly(c, {"active": false, "gas": 0.0, "kick": false, "brake": 0.0, "steer": 0.0}, func(): return c.speed < 2.0, 40.0)
+	check(c.speed < 2.5 and c.state == "flying", "let go: it hovers (%.1f m/s)" % c.speed)
+	check(await _fly(c, {"active": true, "gas": 0.0, "kick": false, "brake": 1.0, "steer": 0.0}, func(): return c.state == "landed", 150.0),
+		"descended and landed (%s, %.1f m)" % [c.state, c.altitude])
+	sp.script_input = {}
+	var where := c.global_position
+	check(sp.exit() == "", "got out")
+	game.save_game()
+	game.load_game()
+	await frames(10)
+	var c2: Craft = sp.crafts.get(vid)
+	check(c2 != null and c2.global_position.distance_to(where) < 3.0, "after a reload it's where it landed")
+	var n := 0
+	for v in game.empire.vehicles:
+		if String(v["id"]) == vid:
+			n += 1
+	check(n == 1, "exactly one record (no duplicates)")
+
+
+## XP: a plane – from the runway threshold: takeoff roll, rotate, climb,
+## descend onto the runway, roll out, brake, get out.
+func scenario_xp() -> void:
+	print("--- XP: plane")
+	var sp: SkyportPlay = game.skyport_play
+	game.empire.personal_cash = 300000.0
+	check(sp.buy("skylark") == "", "bought a Skylark (on a stand)")
+	var vid := String(game.empire.vehicles[-1]["id"])
+	var c: Craft = sp.crafts[vid]
+	var rw: Dictionary = SkyportIsland.RUNWAY
+	c.place(Transform3D(Basis(Vector3.UP, -PI * 0.5), (rw["from"] as Vector3) + Vector3(30, 0.05, 0)))
+	sp.enter(vid)
+	await frames(3)
+	check(await _fly(c, {"active": true, "gas": 1.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.state == "air", 120.0),
+		"takeoff roll and lift-off (%.0f m along)" % (c.global_position.x - (rw["from"] as Vector3).x))
+	check(await _fly(c, {"active": true, "gas": 1.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.altitude > 25.0, 60.0),
+		"climbing (%.0f m)" % c.altitude)
+	var air_x := c.global_position.x
+	check(await _fly(c, {"active": true, "gas": 0.0, "kick": false, "brake": 1.0, "steer": 0.0}, func(): return c.state in ["landing_roll", "taxi", "parked"], 120.0),
+		"descended and touched down (%s at x %.0f)" % [c.state, c.global_position.x])
+	check(c.global_position.x < (rw["to"] as Vector3).x + 50.0, "on the island, not in the sea")
+	check(await _fly(c, {"active": false, "gas": 0.0, "kick": false, "brake": 1.0, "steer": 0.0}, func(): return c.speed < 1.0, 90.0),
+		"braked to a stop (%.1f m/s)" % c.speed)
+	sp.script_input = {}
+	check(sp.exit() == "", "got out on the ground")
+
+
+## XG: a boat – buy at the marina, sail out, turn, stop, step off onto a pier.
+func scenario_xg() -> void:
+	print("--- XG: boat")
+	var sp: SkyportPlay = game.skyport_play
+	game.empire.personal_cash = 100000.0
+	check(sp.buy("dart") == "", "bought a Dart (in a berth)")
+	var vid := String(game.empire.vehicles[-1]["id"])
+	var c: Craft = sp.crafts[vid]
+	sp.enter(vid)
+	await frames(3)
+	var p0 := c.global_position
+	check(await _fly(c, {"active": true, "gas": 1.0, "kick": false, "brake": 0.0, "steer": 0.3}, func(): return c.global_position.distance_to(p0) > 60.0, 120.0),
+		"under way (%.0f m)" % c.global_position.distance_to(p0))
+	check(absf(c.global_position.y - Craft.SEA_Y) < 0.6, "floating at sea level (%.2f)" % c.global_position.y)
+	check(await _fly(c, {"active": true, "gas": 0.0, "kick": false, "brake": 1.0, "steer": 0.0}, func(): return absf(c.forward_speed) < 0.6, 60.0),
+		"slowed to a stop")
+	sp.script_input = {}
+	check(sp.exit() == "", "stepped off")
+	check(not game.layout.is_water(game.player.global_position) or game.player.global_position.y > 0.3, "onto a pier or dry land (y %.1f)" % game.player.global_position.y)
+
+
+## XH: airport imports into a shop: paid once, goods arrive in the stockroom.
+func scenario_xh() -> void:
+	print("--- XH: imports")
+	var e := game.empire
+	if e.businesses.is_empty():
+		e.personal_cash = 6000.0
+		game.rent_unit(game.starter_unit())
+	var b: Business = e.businesses[0]
+	e.personal_cash = 10000.0
+	var pid: String = b.sellable()[0]
+	var lines := {pid: 8}
+	var q := Ventures.import_quote(e, lines, "express")
+	var cash := e.personal_cash + e.company_cash
+	var in_shop := func() -> int:
+		var n := b.backroom.qty(pid) + b.floor_pile.qty(pid)
+		for sl: Dictionary in b.slots:
+			if String(sl["product"]) == pid:
+				n += int(sl["qty"])
+		return n
+	var units0: int = in_shop.call()
+	check(Ventures.import_order(e, b.id, lines, "express") == "", "ordered 8 cases by express")
+	check(absf(cash - (e.personal_cash + e.company_cash) - float(q["total"])) < 0.01, "paid the quote once (%s)" % EmpireData.money(float(q["total"])))
+	e.advance(1440.0)
+	var units1: int = in_shop.call()
+	var sold := int(b.today.get("units", 0))
+	check(units1 - units0 + sold >= 8 * EmpireData.case_qty(pid) - int(b.history[-1].get("units", 0)) if not b.history.is_empty() else units1 - units0 >= 8 * EmpireData.case_qty(pid),
+		"arrived in the shop (%d units of %d, the rest on the shelves or sold)" % [units1 - units0, 8 * EmpireData.case_qty(pid)])
+	check(Ventures.imports_due(e).is_empty(), "nothing left in transit")
+
+
+## XI: property – buy flats, set the rent, a week passes: tenants move in,
+## rent is booked once a day, upkeep paid, valuation follows.
+func scenario_xi() -> void:
+	print("--- XI: property portfolio")
+	var e := game.empire
+	e.personal_cash = 2000000.0
+	check(Ventures.buy_estate(e, "marina_quay") == "", "bought Marina Quay Apartments")
+	check(Ventures.buy_estate(e, "marina_quay") != "", "can't buy it twice")
+	Ventures.set_rent(e, "marina_quay", 0.85)
+	var n0 := e.ledger.filter(func(l): return String(l.get("memo", "")).begins_with("Rent: Marina")).size()
+	for i in 7:
+		e.end_day()
+	var st: Dictionary = e.flags["estates"]["marina_quay"]
+	var n1 := e.ledger.filter(func(l): return String(l.get("memo", "")).begins_with("Rent: Marina")).size()
+	check(float(st["occ"]) > 0.6, "tenants moved in (%d%% let)" % int(float(st["occ"]) * 100.0))
+	check(n1 - n0 == 7, "rent booked once a day (%d entries in 7 days)" % (n1 - n0))
+	check(Ventures.renovate(e, "marina_quay") == "" and float(st["cond"]) == 1.0, "renovated")
+	check(Ventures.valuation(e, "marina_quay") > 300000.0, "valued (%s)" % EmpireData.money(Ventures.valuation(e, "marina_quay")))
+
+
+## XS: the island is in the world: land collision, buildings, the map.
+func scenario_xs() -> void:
+	print("--- XS: Skyport Island in the world")
+	var P: Dictionary = game.skyport.plan_data
+	check((P["buildings"] as Array).size() > 30, "buildings on the island (%d)" % (P["buildings"] as Array).size())
+	var space := game.get_world_3d().direct_space_state
+	var holes := 0
+	for x in range(1420, 2440, 40):
+		for z in range(-600, 560, 40):
+			if not (SkyportIsland.contains(x - 3, z - 3) and SkyportIsland.contains(x + 3, z + 3) and SkyportIsland.contains(x - 3, z + 3) and SkyportIsland.contains(x + 3, z - 3)):
+				continue   # (samples on the shoreline itself)
+			var q := PhysicsRayQueryParameters3D.create(Vector3(x, 400, z), Vector3(x, -20, z), 1 | (1 << 3))
+			var hit := space.intersect_ray(q)
+			if hit.is_empty() or (hit["position"] as Vector3).y < SkyportIsland.LAND_Y - 0.5:
+				holes += 1
+				print("    hole at ", x, ", ", z, " hit ", hit.get("position", "none"))
+	check(holes == 0, "no holes in the island's collision (%d)" % holes)
+	var rw: Dictionary = SkyportIsland.RUNWAY
+	var bad := 0
+	for x in range(int((rw["from"] as Vector3).x), int((rw["to"] as Vector3).x), 25):
+		for dz: float in [-20.0, 0.0, 20.0]:
+			var q2 := PhysicsRayQueryParameters3D.create(Vector3(x, 50, 470 + dz), Vector3(x, -5, 470 + dz), 1 | (1 << 3))
+			var h2 := space.intersect_ray(q2)
+			if h2.is_empty() or absf((h2["position"] as Vector3).y - SkyportIsland.LAND_Y) > 0.05:
+				bad += 1
+	check(bad == 0, "the runway is one continuous flat surface (%d bad samples)" % bad)
+	check(not game.layout.is_water(Vector3(2000, 0, 0)) and game.layout.is_water(Vector3(1250, 0, 300)), "is_water knows the island")
+
+
 func _run() -> void:
 	await wait(1.0)
 	game.gps.wait_net()
@@ -128,6 +410,9 @@ func _run() -> void:
 		await scenario_h()
 	if _which.split(",").has("B"):
 		await scenario_b()
+	for k in ["XD", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS"]:
+		if _which.split(",").has(k) or _which.split(",").has("X"):
+			await call("scenario_" + k.to_lower())
 	if _which.split(",").has("W"):
 		await scenario_w()
 	if _which.split(",").has("V"):

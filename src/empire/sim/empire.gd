@@ -122,6 +122,8 @@ func _minute_tick() -> void:
 		_hour_served.clear()
 	if int(minute) == 360:
 		_deliver_orders()
+	if int(minute) == 360 or int(minute) == 19 * 60 or int(minute) == 13 * 60:
+		Ventures.deliver_imports(self)
 	if int(minute) == 21 * 60 + 5:
 		_manager_reorders()
 	if int(minute) == 19 * 60:
@@ -809,7 +811,7 @@ func vehicle(id: String) -> Dictionary:
 
 ## Driving costs fuel and wears the vehicle (km since the last call).
 func drive(v: Dictionary, km: float) -> void:
-	if km <= 0.0:
+	if km <= 0.0 or v.get("test", false):
 		return
 	v["km"] = float(v["km"]) + km
 	stats["km"] = float(stats["km"]) + km
@@ -983,6 +985,8 @@ func end_day() -> void:
 		"company": company_cash, "personal": personal_cash, "net_worth": net_worth()})
 	if day_reports.size() > 30:
 		day_reports = day_reports.slice(day_reports.size() - 30)
+	# Skyport ventures: rents, upkeep, the dealership, hangar/marina fees.
+	report["ventures"] = Ventures.end_day(self)
 	day += 1
 	candidates = fresh_candidates()
 	report["weather"] = weather
@@ -1227,6 +1231,8 @@ func run_campaign(id: String) -> String:
 func to_dict() -> Dictionary:
 	var vs: Array = []
 	for v in vehicles:
+		if v.get("test", false):
+			continue  # (a test drive is never saved)
 		var d: Dictionary = v.duplicate(true)
 		d["cargo"] = (v["cargo"] as Stock).to_dict()
 		vs.append(d)

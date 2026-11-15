@@ -75,8 +75,9 @@ func _gui_input(e: InputEvent) -> void:
 
 
 func _focus() -> Vector3:
-	if game.driving != "" and game.cars.has(game.driving):
-		return (game.cars[game.driving] as Node3D).global_position
+	var vn := game.vehicle_node()
+	if vn != null and is_instance_valid(vn):
+		return vn.global_position
 	return game.player.global_position
 
 
@@ -87,12 +88,15 @@ func _process(dt: float) -> void:
 		_mat.set_shader_parameter("map", map_tex)
 		_mat.set_shader_parameter("origin", Minimap.BOUNDS.position)
 		_mat.set_shader_parameter("extent", Minimap.BOUNDS.size)
-	var view := game.chase.view_yaw() if game.driving != "" else game.camera.view_yaw()
+	var view := game.view_yaw()
 	_yaw = lerp_angle(_yaw, view, 1.0 - exp(-10.0 * dt))
 	var want := R_WALK
-	if game.driving != "" and game.cars.has(game.driving):
-		var spd := absf((game.cars[game.driving] as Car).speed)
+	var vn2 := game.vehicle_node()
+	if vn2 != null and is_instance_valid(vn2):
+		var spd := absf(float(vn2.get("speed")))
 		want = lerpf(R_DRIVE, R_DRIVE_FAST, clampf(spd / 30.0, 0.0, 1.0))
+		if vn2 is Craft and (vn2 as Craft).kind != "boat":
+			want = lerpf(R_DRIVE_FAST, 900.0, clampf((vn2 as Craft).altitude / 150.0, 0.0, 1.0))  # (flying: see further)
 	_radius = lerpf(_radius, want, 1.0 - exp(-1.5 * dt))
 	var c := _focus()
 	_mat.set_shader_parameter("center", Vector2(c.x, c.z))
@@ -141,7 +145,7 @@ func _draw_overlay() -> void:
 		var pri := MapKit.priority(kind)
 		if pri > 1 or m["world"] == Vector3.ZERO:
 			continue
-		if kind == "car" and String(m["id"]) == game.driving:
+		if kind == "car" and (String(m["id"]) == game.driving or (game.skyport_play and String(m["id"]) == game.skyport_play.piloting)):
 			continue
 		var sp2 := _to_map(m["world"])
 		var dc := sp2.distance_to(ctr)

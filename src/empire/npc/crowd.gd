@@ -137,8 +137,9 @@ func _sample(l: Dictionary, s: float) -> Array:
 
 
 func _focus() -> Vector3:
-	if game.driving != "" and game.cars.has(game.driving):
-		return (game.cars[game.driving] as Node3D).global_position
+	var vn := game.vehicle_node()
+	if vn != null and is_instance_valid(vn):
+		return vn.global_position
 	return game.player.global_position
 
 

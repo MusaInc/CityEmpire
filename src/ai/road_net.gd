@@ -65,12 +65,80 @@ func build(layout: CityLayout) -> RoadNet:
 					ch.append([float(tr.l_len[li]), int(c) + o, 0.0])
 			if tr.l_next[li] >= 0:
 				ch.append([float(tr.l_len[li]), tr.l_next[li] + o, float(tr.l_snext[li])])
+	_add_skyport(layout)
 	_index()
 	_stitch()
+	_stitch_skyport()
 	for tr in nets:
 		tr.free()
 	_build_graph()
 	return self
+
+
+var _sky_base := -1
+var _sky: Array = []
+
+
+## Skyport Island's lanes (SkyportIsland.lanes), when a game builds it.
+func _add_skyport(layout: CityLayout) -> void:
+	if not SkyportIsland.enabled:
+		return
+	_sky = SkyportIsland.lanes(layout, STEP)
+	_sky_base = lanes.size()
+	for l: Dictionary in _sky:
+		var lp: PackedVector3Array = l["pts"]
+		var L := 0.0
+		for i in range(1, lp.size()):
+			L += lp[i].distance_to(lp[i - 1])
+		lanes.append(lp)
+		lane_len.append(L)
+		lane_loop.append(0)
+		lane_speed.append(float(l["speed"]))
+		lane_conn.append(0)
+		var ch: Array = []
+		for j in l["next"]:
+			ch.append([L, _sky_base + int(j), 0.0])
+		lane_next_choices.append(ch)
+
+
+## Joins the bridge to the city's lanes at the cliff-top avenue: the lane
+## arriving from the island carries on into the nearest city lane heading
+## on; city lanes passing the bridge end can turn onto it.
+func _stitch_skyport() -> void:
+	if _sky_base < 0:
+		return
+	for k in _sky.size():
+		var l: Dictionary = _sky[k]
+		var li := _sky_base + k
+		if l["city_end"]:
+			var e: Vector3 = (lanes[li] as PackedVector3Array)[-1]
+			var de := lane_dir(li, lane_len[li] - 1.5)
+			var best := _nearest_city(e, de, 45.0)
+			if not best.is_empty():
+				(lane_next_choices[li] as Array).append([lane_len[li], int(best[0]), minf(float(best[1]) + 3.0, lane_len[int(best[0])])])
+		if l["city_start"]:
+			var s0: Vector3 = (lanes[li] as PackedVector3Array)[0]
+			var ds := lane_dir(li, 1.5)
+			var best2 := _nearest_city(s0, ds, 45.0)
+			if not best2.is_empty():
+				var cl := int(best2[0])
+				(lane_next_choices[cl] as Array).append([maxf(float(best2[1]) - 3.0, 0.0), li, 0.0])
+
+
+## [lane, s] of the nearest city lane point within max_d heading roughly dir.
+func _nearest_city(p: Vector3, dir: Vector3, max_d: float) -> Array:
+	var best: Array = []
+	var bd := max_d
+	for lj in _sky_base:
+		if lane_conn[lj] == 1:
+			continue
+		var lq: PackedVector3Array = lanes[lj]
+		for k in lq.size():
+			var dd := Vector2(lq[k].x - p.x, lq[k].z - p.z).length()
+			if dd < bd and lane_dir(lj, k * STEP).dot(dir) > 0.3:
+				bd = dd
+				best = [lj, k * STEP]
+	return best
 
 
 func _index() -> void:
