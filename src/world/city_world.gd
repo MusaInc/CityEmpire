@@ -715,6 +715,9 @@ func _load_props() -> void:
 		var fm := _load_mesh(k)
 		if fm:
 			_furn_src[k] = _flatten_colors(fm)
+	# Procedural street clutter and district banners (StreetClutter).
+	for k in StreetClutter.kinds():
+		_furn_src[k] = StreetClutter.build(k)
 	furniture_mat = StandardMaterial3D.new()
 	furniture_mat.vertex_color_use_as_albedo = true
 	furniture_mat.vertex_color_is_srgb = true
@@ -884,6 +887,11 @@ func _place_furniture() -> Dictionary:
 		var c := CityRoads._centroid(poly)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ 0xf00d
+		# (Clutter has its own stream: the furniture above stays where it was.)
+		var rng2 := RandomNumberGenerator.new()
+		rng2.seed = hash(Vector2i(int(c.x), int(c.y))) ^ 0x7c1a
+		var dist := layout.district(c.x, c.y)
+		var worn := 1.0 if (dist == "docks" or layout.is_mainland) else (0.25 if dist == "cbd" else 0.6)
 		# Curved kerbs are sampled every few metres: merge them into runs.
 		var simple := CityRoads._simplify(CityLayout._closed(poly), 1.5)
 		simple.remove_at(simple.size() - 1)
@@ -925,11 +933,16 @@ func _place_furniture() -> Dictionary:
 					var roll := rng.randf()
 					if roll < 0.32:
 						put.call("bin", d, 0.55)
+						if rng2.randf() < 0.45 * worn:
+							put.call("litter", d + 0.9, 0.8, rng2.randf() * TAU)
 					elif roll < 0.44:
 						put.call("hydrant", d, 0.5, PI * 0.5)
 					elif roll < 0.58:
 						put.call("bollard", d, 0.45)
 						put.call("bollard", d + 1.4, 0.45)
+					elif rng2.randf() < 0.12:
+						# A street cabinet at the back of the kerb strip.
+						put.call("utility_box", d, 0.55, PI)
 				d += rng.randf_range(11.0, 22.0)
 			# Building line: one bus shelter per boulevard edge, benches/planters.
 			var shelter_at := length * rng.randf_range(0.35, 0.65) if avenue and length > 40.0 and rng.randf() < 0.7 else -100.0
@@ -943,7 +956,29 @@ func _place_furniture() -> Dictionary:
 						put.call("bench", d, 4.1)
 					elif roll < 0.6:
 						put.call("planter", d, 4.0)
+					elif rng2.randf() < 0.14 * worn:
+						# Deliveries left by a shopfront (more in the older quarters).
+						put.call("crates", d, 4.15, rng2.randf_range(-0.2, 0.2))
 				d += rng.randf_range(16.0, 34.0)
+	# District banners on every other street light: each quarter its own
+	# colours, so streets are recognisable without the map. (Not on the
+	# quiet residential streets.)
+	for pr in layout.props:
+		if pr[0] != "streetlight":
+			continue
+		var lxf: Transform3D = pr[1]
+		var lp := lxf.origin
+		if absi(hash(Vector2i(int(lp.x), int(lp.z)))) % 2 == 1:
+			continue
+		var dk := layout.district(lp.x, lp.z)
+		if layout.is_mainland:
+			dk = "shops" if dk != "suburb" else ""
+		if dk == "" or not StreetClutter.BANNERS.has(dk):
+			continue
+		var bkey := Vector2i(floori(lp.x / CHUNK), floori(lp.z / CHUNK))
+		if not out.has(bkey):
+			out[bkey] = []
+		out[bkey].append(["banner_" + dk, lxf])
 	for item in layout.public_furniture:
 		var p: Vector3 = item[1].origin
 		var key := Vector2i(floori(p.x / CHUNK), floori(p.z / CHUNK))
@@ -1118,6 +1153,8 @@ func _prop_boxes(kind: String) -> Array:
 			return [[Vector3(0.3, 14.3, 0.3), Vector3(0, 7.15, 0)]]
 		"roof_hut", "crane":
 			return []  # the layout's own boxes
+	if kind in StreetClutter.NO_COLLISION:
+		return []
 	var m: Mesh = prop_meshes.get(kind)
 	if m == null:
 		var src: Array = _furn_src.get(kind, [])
@@ -1618,7 +1655,18 @@ func chunk_props(key: Vector2i) -> Array:
 func chunk_furniture(key: Vector2i) -> Array:
 	var out: Array = []
 	var n := 0
+	# (Banners hang on street lights: only where that light is drawn.)
+	var lamps := {}
+	if prop_density < 1.0:
+		for pp in chunk_props(key):
+			if pp[0] == "streetlight":
+				lamps[Vector2i(int((pp[1] as Transform3D).origin.x * 10.0), int((pp[1] as Transform3D).origin.z * 10.0))] = true
 	for it in _furniture_by_chunk.get(key, []):
+		if String(it[0]).begins_with("banner_"):
+			var bo: Vector3 = (it[1] as Transform3D).origin
+			if prop_density >= 1.0 or lamps.has(Vector2i(int(bo.x * 10.0), int(bo.z * 10.0))):
+				out.append(it)
+			continue
 		n += 1
 		if prop_density < 1.0 and fmod(n * 0.618, 1.0) > prop_density:
 			continue

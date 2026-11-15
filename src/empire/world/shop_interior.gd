@@ -1237,6 +1237,54 @@ func _place_fixtures(st: _Batch, part_d: float) -> void:
 	for site in back_sites:
 		_wall_graphic(st, site, gi)
 		gi += 1
+	if _mid_used and type_id == "convenience":
+		_end_cap(st)
+
+
+## A promotional end cap on the front of the central gondola: a low unit
+## stacked with offer packs under a hanging OFFER card, facing the door –
+## what you see first in a real corner shop. Kept out of the way in.
+func _end_cap(st: _Batch) -> void:
+	var gx0 := 1.95
+	var gx1 := W - 3.7
+	if gx1 - gx0 < 1.15:
+		return
+	var gc := (gx0 + gx1) * 0.5
+	var x0 := gc - 0.6
+	var x1 := gc + 0.6
+	var d0 := 1.6
+	var d1 := 2.18
+	if d0 < ENTRY_CLEAR and x1 > door.x - 0.5 and x0 < door.y + 0.5:
+		return
+	var body := Color(0.2, 0.22, 0.25)
+	st.box(R(x0, d0, 0.0), R(x1, d1, 0.12), body)                       # plinth
+	for k in 3:
+		var y := 0.12 + k * 0.36
+		st.box(R(x0 + 0.03, d0 + 0.03, y), R(x1 - 0.03, d1, y + 0.03), Color(0.78, 0.78, 0.76))  # shelf
+		# Offer packs stacked on each step, in the shop's colours and a
+		# couple of bright promo ones.
+		var cols := [brand.lightened(0.2), Color(0.95, 0.8, 0.2), Color(0.85, 0.2, 0.15), brand.darkened(0.1)]
+		for j in 5:
+			var px := x0 + 0.08 + j * 0.21
+			st.box(R(px, d0 + 0.06, y + 0.03), R(px + 0.18, d0 + 0.4, y + 0.27), cols[(j + k) % cols.size()])
+			st.box(R(px + 0.03, d0 + 0.055, y + 0.1), R(px + 0.15, d0 + 0.06, y + 0.2), Color(0.96, 0.95, 0.92))
+	st.box(R(x0, d1 - 0.05, 0.0), R(x1, d1, 1.3), body)                  # back panel
+	# Hanging card on two rods.
+	st.box(R(x0 + 0.1, d0 + 0.2, 2.0), R(x1 - 0.1, d0 + 0.24, 2.45), Color(0.95, 0.8, 0.2))
+	for e: float in [x0 + 0.2, x1 - 0.2]:
+		st.box(R(e - 0.01, d0 + 0.21, 2.45), R(e + 0.01, d0 + 0.23, H), Color(0.3, 0.3, 0.32))
+	var lab := Label3D.new()
+	lab.text = "OFFERS"
+	lab.font = EmpireStyle.font("black")
+	lab.font_size = 64
+	lab.pixel_size = 0.0028
+	lab.shaded = false
+	lab.double_sided = false
+	lab.outline_size = 0
+	lab.modulate = Color(0.75, 0.1, 0.1)
+	lab.position = R(gc, d0 + 0.19, 2.22)
+	_static.add_child(lab)
+	_solid(R(x0, d0, 0.0), R(x1, d1, 1.3))
 
 
 const WALL_LINES := {"convenience": ["OPEN LATE\nEVERY DAY", "LOCAL &\nFRIENDLY", "FRESH\nEVERY MORNING"],

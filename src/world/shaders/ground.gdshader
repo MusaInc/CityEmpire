@@ -45,6 +45,20 @@ void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
+// Street age by quarter (mirrors building.gdshader's quarter()): newer,
+// well-kept streets in the financial core, the most worn in the docks and
+// on Westbank; broad patches vary it (a resurfaced stretch, a neglected
+// corner) so whole quarters aren't uniform.
+float street_age(vec2 p) {
+	float a = 0.35;
+	if (p.x < 30.0) a = 0.65;
+	else if (p.x < 250.0 && p.y > -330.0 && p.y < 260.0) a = 0.3;
+	else if (p.y >= 260.0 && p.x < 560.0) a = 0.85;
+	else if (p.x > 780.0 || p.y < -540.0 || p.y > 520.0) a = 0.55;
+	else if (distance(p, vec2(560.0, -170.0)) < 330.0) a = mix(0.1, 0.35, smoothstep(240.0, 330.0, distance(p, vec2(560.0, -170.0))));
+	return clamp(a + (vnoise(p / 70.0) - 0.5) * 0.5, 0.0, 1.0);
+}
+
 void fragment() {
 	vec3 c = COLOR.rgb;
 	vec2 p = UV;
@@ -102,6 +116,18 @@ void fragment() {
 			vec2 pc = floor(p / vec2(5.0, 3.0));
 			float patch = step(0.86, hash12(pc + 17.0));
 			albedo *= 1.0 + (hash12(pc) - 0.5) * 0.12 * patch * near;
+			float sa = street_age(p);
+			// Older streets: more patch repairs (darker, crisp edges), a crack
+			// network (wandering hairlines where the noise crosses its mid
+			// level, only in some stretches) and the odd oil stain.
+			vec2 pc2 = floor(p / vec2(3.7, 2.3) + 41.0);
+			float patch2 = step(1.0 - 0.18 * sa, hash12(pc2)) * near;
+			albedo *= 1.0 - 0.1 * patch2;
+			float cn = vnoise(p * 0.45 + vnoise(p * 0.11) * 2.5);
+			float crack = (1.0 - smoothstep(0.0, 0.012 + aa * 0.4, abs(cn - 0.5))) * smoothstep(0.45, 0.7, vnoise(p * 0.035 + 7.0));
+			albedo *= 1.0 - 0.38 * crack * sa * near;
+			float oil = smoothstep(0.72, 0.85, vnoise(p * 0.6 + 13.0)) * smoothstep(0.5, 0.8, vnoise(p * 0.08));
+			albedo *= 1.0 - 0.2 * oil * (0.4 + 0.6 * sa) * near;
 			if (on && other > 0.0) {
 				float across = rf.x;
 				float avenue = rf.y < 0.0 ? 1.0 : 0.0;
@@ -129,6 +155,8 @@ void fragment() {
 				vec3 white = vec3(0.9, 0.9, 0.86);
 				vec3 yellow = vec3(0.92, 0.76, 0.25);
 				float wear = 0.82 + 0.18 * vnoise(p * 1.7);
+				// Faded paint on older streets: it greys and breaks up.
+				wear *= mix(1.0, 0.55 + 0.45 * vnoise(p * 0.9 + 3.0), sa);
 				float centre = avenue > 0.5
 					? band(a - 0.22, 0.07, aa) * step(4.6, from_j)
 					: band(across, 0.07, aa) * step(5.0, from_j) * step(fract(along / 8.0), 0.375);
@@ -159,6 +187,10 @@ void fragment() {
 				// Kerb stones: lighter granite with joints.
 				float j = step(0.94, fract((p.x + p.y) / 0.9));
 				albedo = c * 1.12 * (1.0 - 0.15 * j * near);
+				// Worn kerbs: chipped, scuffed and darker on older streets.
+				float ka = street_age(p);
+				albedo *= 1.0 - 0.22 * ka * step(0.72, hash12(floor(p / 0.9) + 5.0)) * near;
+				albedo *= 1.0 - 0.1 * ka * vnoise(p * 2.3);
 			} else if (kerb < 3.3) {
 				// Pavement flagstones by the road, each a slightly different tone.
 				vec2 f = fract(p / 1.2);
@@ -167,6 +199,21 @@ void fragment() {
 				joint = max(joint, max(band(f.x - 1.0, 0.03, aa / 1.2), band(f.y - 1.0, 0.03, aa / 1.2)));
 				albedo = c * (0.93 + 0.1 * hash12(id)) * (1.0 - 0.14 * joint * near);
 				albedo *= 1.0 - 0.08 * step(0.97, hash12(id + 3.0)) * near;  // the odd stained slab
+				float pa = street_age(p);
+				// Chewing gum spots, drip stains and (older streets) weeds in
+				// the joints and a cracked slab here and there.
+				vec2 gq = floor(p / 0.3);
+				float gum = step(1.0 - 0.05 * (0.3 + pa), hash12(gq + 9.0)) * (1.0 - smoothstep(0.05, 0.11, length(fract(p / 0.3) - 0.5)));
+				albedo *= 1.0 - 0.3 * gum * near;
+				albedo *= 1.0 - 0.12 * smoothstep(0.7, 0.9, vnoise(p * 0.5 + 21.0)) * pa * near;
+				// (Clumps where joints meet, not lines along them.)
+				vec2 fc = abs(fract(p / 1.2 + 0.5) - 0.5) * 1.2;
+				float corner = 1.0 - smoothstep(0.06, 0.16, length(fc));
+				float weeds = corner * step(1.0 - 0.35 * smoothstep(0.45, 0.85, pa), hash12(floor(p / 1.2 + 0.5) + 31.0))
+					* step(0.35, hash12(floor(p * 14.0)));
+				albedo = mix(albedo, vec3(0.17, 0.25, 0.1) * (0.8 + 0.4 * hash12(floor(p * 9.0))), weeds * 0.85 * near);
+				float slab_crack = step(1.0 - 0.06 * pa, hash12(id + 17.0)) * (1.0 - smoothstep(0.0, 0.02 + aa, abs(f.x - f.y)));
+				albedo *= 1.0 - 0.3 * slab_crack * near;
 				// Tactile paving where a zebra meets the kerb: a buff strip of
 				// raised blisters (the crossings stopped dead at grey slabs).
 				float tact = step(a - hw, 1.15) * step(1.0, other) * step(other, 4.0);
