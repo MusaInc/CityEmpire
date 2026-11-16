@@ -385,6 +385,15 @@ func _after_start() -> void:
 			var from := o + Vector3(float(v[0]), float(v[1]), float(v[2]))
 			var to := o + Vector3(float(v[3]), float(v[4]), float(v[5]))
 			return [Transform3D(Basis.looking_at(to - from, Vector3.UP if absf((to - from).normalized().y) < 0.99 else Vector3.FORWARD), from), 62.0]
+	if args.has("cam"):
+		# Captures: a fixed camera in world metres, "x,y,z,lx,ly,lz" (unlike
+		# --view, independent of where the hero lands; y is above the ground).
+		var cv := String(args["cam"]).split(",")
+		var gy := func(x: float, z: float) -> float: return layout.ground_y(x, z)
+		var cfrom := Vector3(float(cv[0]), float(cv[1]) + float(gy.call(float(cv[0]), float(cv[2]))), float(cv[2]))
+		var cto := Vector3(float(cv[3]), float(cv[4]) + float(gy.call(float(cv[3]), float(cv[5]))), float(cv[5]))
+		camera.cine = func(_dt: float) -> Array:
+			return [Transform3D(Basis.looking_at(cto - cfrom, Vector3.UP), cfrom), 62.0]
 	if args.has("days"):
 		# Captures: run the economy forward (news, rivals, a net-worth history).
 		for i in int(args["days"]):

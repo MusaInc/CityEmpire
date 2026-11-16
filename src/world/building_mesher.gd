@@ -341,7 +341,10 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 		# along the foot of every building on a slope.)
 		var stone := Color(0.56, 0.53, 0.48) if _glassy(b) else trim.darkened(0.18)
 		# (UV.y from 0 at its foot, 0.3 m under the street: the shader's grime line.)
-		walls(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.position.y, bc.end.y, stone, KIND_STONE, 0, seed, 0.0)
+		# (Its "style" carries its height for building.gdshader – 10 + quarter
+		# metres – so graffiti sits under its top, clear of the street.)
+		walls(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.position.y, bc.end.y, stone, KIND_STONE,
+			10.0 + minf(floorf((bc.end.y - bc.position.y) * 4.0), 80.0), seed, 0.0)
 		top(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.end.y, stone.lightened(0.05), KIND_TRIM, 0, 0)
 	if shaped(b):
 		_add_shaped(b, detailed, style, seed, col, wall_kind, trim, roof, base, glassy)

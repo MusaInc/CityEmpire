@@ -20,6 +20,11 @@ uniform float lit_fraction = 0.025;
 uniform float lit_strength = 0.35;
 uniform float detail_fade_start = 250.0;
 uniform float detail_fade_end = 700.0;
+// Street graffiti (tools/graffiti/make_atlas.py): 8 x 4 cells of 256 px,
+// GRAFFITI_N pieces in reading order, each centred in its cell.
+uniform sampler2D graffiti_atlas : source_color, filter_linear_mipmap, repeat_disable;
+uniform bool has_graffiti = false;
+const float GRAFFITI_N = 27.0;
 
 const float KIND_WALL = 0.0;
 const float KIND_TRIM = 1.0;
@@ -358,6 +363,10 @@ void fragment() {
 	// _face_span); interpolation adds noise in the low bits, so snap it.
 	float seed = face_w > 0.0 ? floor(fract(UV2.y) * 256.0) / 256.0 : UV2.y;
 	vec2 uv = UV;
+	// (Taken here, in uniform control flow: the graffiti is sampled with
+	// explicit gradients from inside per-wall branches.)
+	vec2 uv_dx = dFdx(uv);
+	vec2 uv_dy = dFdy(uv);
 	float rough = 0.85;
 	float metal = 0.0;
 	vec3 albedo = base;
@@ -838,7 +847,8 @@ void fragment() {
 		// (How much by the building's age: kept-up towers stay clean.)
 		albedo *= 1.0 - detail * ((0.05 + 0.17 * age) * streak + (0.03 + 0.12 * age) * patches
 			+ (0.05 + 0.1 * age) * splash * float(v_kind != KIND_TRIM));
-		bool street_wall = (v_kind == KIND_WALL || v_kind == KIND_STONE) && !(uv.y < 4.6 && style != 3.0 && fract(seed * 5.37 + 0.21) < 0.5);
+		// (Base courses always: their shops are above them.)
+		bool street_wall = v_kind == KIND_STONE || (v_kind == KIND_WALL && !(uv.y < 4.6 && style != 3.0 && fract(seed * 5.37 + 0.21) < 0.5));
 		// Peeling render on old painted walls: patches showing the darker
 		// substrate, a pale lip at the edge.
 		if (street_wall && (style == 0.0 || style == 5.0 || style == 7.0 || style == 4.0) && age > 0.5) {
@@ -871,20 +881,81 @@ void fragment() {
 				pcol = mix(pcol, vec3(0.75, 0.73, 0.68), age * 0.5);                                // faded
 				albedo = mix(albedo, pcol, in_p * torn * detail);
 			}
-			float gc = floor(uv.x / 2.6) + 13.0;
+		}
+		// Graffiti: one piece per 3.6 m slot of older street walls, of all
+		// sizes – stickers and tags (0.45–0.9 m), pieces (1.1–1.8 m) and the
+		// odd big wall piece (2.2–3.0 m) – sprayed onto the wall: faded by
+		// sun and age, worn off in patches, the wall's grime showing through.
+		// Never across a window.
+		if (street_wall && has_graffiti && age > 0.3 && uv.y < 3.4) {
+			float gc = floor(uv.x / 3.6) + 13.0;
 			float gh = hash12(vec2(gc, seed * 23.0));
-			if (gh < (age - 0.35) * 0.9) {
-				float lx = fract(uv.x / 2.6) * 2.6;
-				float yl = 1.25 + 0.22 * sin(lx * 5.0 + gh * 40.0) + 0.1 * sin(lx * 13.0 + gh * 9.0);
-				float stroke = (1.0 - smoothstep(0.03, 0.06, abs(uv.y - yl))) * step(0.3, lx) * step(lx, 2.1);
-				float blob = smoothstep(0.6, 0.66, vnoise_b(vec2(lx * 2.4, uv.y * 2.4) + gh * 70.0))
-					* step(0.4, lx) * step(lx, 2.0) * step(abs(uv.y - 1.25), 0.45);
-				float gk = fract(gh * 37.0);
-				vec3 gcl = gk < 0.2 ? vec3(0.9, 0.25, 0.55) : (gk < 0.4 ? vec3(0.2, 0.7, 0.85)
-					: (gk < 0.6 ? vec3(0.55, 0.85, 0.25) : (gk < 0.8 ? vec3(0.95, 0.55, 0.15) : vec3(0.08))));
-				gcl = mix(gcl, albedo, 0.35);   // sprayed onto a rough wall: soft
-				albedo = mix(albedo, gcl * 0.7, blob * detail);
-				albedo = mix(albedo, gcl, stroke * detail);
+			// (The stone base course under the windows takes the most: no
+			// windows to avoid, but kept below its top.)
+			bool plinth = v_kind == KIND_STONE;
+			if (gh < (age - 0.3) * (plinth ? 1.5 : 1.0)) {
+				float lx = fract(uv.x / 3.6) * 3.6;
+				float sk = fract(gh * 19.31);
+				// (Base course: style = 10 + its height in quarter metres; its
+				// foot is buried, its top is a kerb over the lot.)
+				float ptop = (style - 10.0) * 0.25;
+				// The piece as sized; failing that (it would cross a window), a
+				// small tag under the ground-floor sills.
+				float sz = 0.0;
+				float x0 = 0.0;
+				float y0 = 0.0;
+				float clear = 0.0;
+				for (int cand = 0; cand < 2 && clear < 0.5; cand++) {
+					if (cand == 0) {
+						sz = sk < 0.38 ? mix(0.45, 0.9, fract(gh * 7.7))
+							: (sk < 0.84 ? mix(1.1, 1.8, fract(gh * 7.7)) : mix(2.2, 3.0, fract(gh * 7.7)));
+						// Small ones at eye/hand height; big ones from near the pavement.
+						y0 = sz < 1.0 ? mix(0.9, 1.6, fract(gh * 3.3)) : mix(0.3, 0.5, fract(gh * 3.3));
+						if (plinth) {
+							sz = min(mix(0.5, 1.3, fract(gh * 7.7)), ptop - 0.85);
+							y0 = ptop - 0.2 - sz;
+						}
+					} else {
+						sz = mix(0.5, 0.8, fract(gh * 7.7));
+						y0 = 0.3;
+					}
+					x0 = 0.2 + (3.2 - sz) * fract(gh * 53.1);
+					clear = 1.0;
+					for (int k = 0; k < (plinth ? 0 : 5); k++) {
+						vec2 o = k == 4 ? vec2(0.5) : vec2(float(k & 1), float(k >> 1));
+						vec2 wp = vec2((gc - 13.0) * 3.6 + x0 + o.x * sz, y0 + o.y * sz);
+						float gl; vec2 c1; float fr; vec2 c2; vec2 c3; vec2 c4;
+						window_layout(style, seed, wp, gl, c1, fr, c2, c3, c4);
+						clear *= 1.0 - step(0.5, max(gl, fr));
+					}
+					if (plinth) break;
+				}
+				vec2 q = vec2((lx - x0) / sz, 1.0 - (uv.y - y0) / sz);
+				if (q.x > 0.0 && q.x < 1.0 && q.y > 0.0 && q.y < 1.0 && sz > 0.4) {
+					if (clear > 0.5) {
+						float id = floor(fract(gh * 97.13) * GRAFFITI_N);
+						vec2 cell = vec2(mod(id, 8.0), floor(id / 8.0));
+						// (A slight lean, mirrored now and then: the same piece
+						// twice doesn't read as a stamp.)
+						float flip = step(0.8, fract(gh * 41.7));
+						vec2 qq = vec2(mix(q.x, 1.0 - q.x, flip), q.y);
+						vec2 auv = (cell + qq) / vec2(8.0, 4.0);
+						vec2 sc = vec2((flip > 0.5 ? -1.0 : 1.0) / (sz * 8.0), -1.0 / (sz * 4.0));
+						vec4 g = textureGrad(graffiti_atlas, auv, uv_dx * sc, uv_dy * sc);
+						// Worn: paint lost in patches and speckles where the
+						// wall is rough, more the older the building.
+						float wear = vnoise_b(uv * 3.1 + gh * 31.0) * 0.65 + vnoise_b(uv * 17.0 + gh * 5.0) * 0.35;
+						float keep = smoothstep(0.08 + 0.2 * age, 0.3 + 0.2 * age, wear);
+						float strength = mix(0.97, 0.8, age) * (0.85 + 0.15 * fract(gh * 13.7));
+						// Faded: sun-bleached towards grey, a little of the
+						// wall's colour through the thin coats.
+						vec3 paint = mix(g.rgb, vec3(dot(g.rgb, vec3(0.3, 0.59, 0.11))), 0.08 + 0.17 * age);
+						paint = mix(paint, base, 0.05 + 0.08 * age);
+						// The wall's own shading (grime, streaks, mortar) carries on under it.
+						float shade = clamp(dot(albedo, vec3(0.33)) / max(dot(base, vec3(0.33)), 0.04), 0.7, 1.1);
+						albedo = mix(albedo, paint * shade, g.a * (0.5 + 0.5 * keep) * strength * detail);
+					}
+				}
 			}
 		}
 		// Lit faces get a faint warm/cool drift by block of facade (repaints,
