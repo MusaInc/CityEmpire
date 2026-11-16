@@ -1392,10 +1392,15 @@ static func _road_side(pts: PackedVector3Array, i: int, hw: float) -> Vector3:
 
 
 ## A continuous strip: UV.x across, UV.y along; UV2 = half width, length.
-static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: float, kind: int, col: Color) -> void:
+## box0 / box1: metres at the start / end inside a junction – plain asphalt
+## there (no lines), and a stop line across the lanes arriving at it.
+static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: float, kind: int, col: Color,
+		box0 := 0.0, box1 := 0.0) -> void:
 	var total := 0.0
 	for i in range(1, pts.size()):
 		total += pts[i].distance_to(pts[i - 1])
+	if box0 > 0.0 or box1 > 0.0:
+		pts = _split_at(pts, [box0, total - box1])
 	var c := Color(col.r, col.g, col.b, (kind + 0.5) / 8.0)
 	var acc := 0.0
 	for i in pts.size() - 1:
@@ -1408,13 +1413,65 @@ static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: fl
 		var sb := _road_side(pts, i + 1, hw)
 		var q := [a - sa, a + sa, b + sb, b - sb]
 		var u := [Vector2(-hw, acc), Vector2(hw, acc), Vector2(hw, acc + L), Vector2(-hw, acc + L)]
+		var mid := acc + L * 0.5
+		var plain := (box0 > 0.0 and mid < box0) or (box1 > 0.0 and mid > total - box1)
 		for j in [0, 2, 1, 0, 3, 2]:
 			st.set_color(c)
 			st.set_normal(Vector3.UP)
-			st.set_uv(u[j])
-			st.set_uv2(Vector2(hw, total))
+			st.set_uv(Vector2(50.0, (u[j] as Vector2).y) if plain else u[j])
+			st.set_uv2(Vector2(100.0, total) if plain else Vector2(hw, total))
 			st.add_vertex((q[j] as Vector3) + Vector3.UP * lift)
 		acc += L
+	# Stop lines (traffic keeps right: arriving at the end, its lanes are on
+	# the +side; arriving at the start, on the −side).
+	for e in 2:
+		var bx := box1 if e == 1 else box0
+		if bx <= 0.0:
+			continue
+		var at := total - bx if e == 1 else bx
+		var p0 := _point_at(pts, at - (0.25 if e == 1 else -0.25))
+		var p1 := _point_at(pts, at - (0.75 if e == 1 else -0.75))
+		var d := p1 - p0
+		d.y = 0.0
+		var side := Vector3(-d.z, 0.0, d.x).normalized() * (1.0 if e == 1 else -1.0)
+		var o0 := 0.2
+		var o1 := hw - 0.5
+		var q2 := [p0 + side * o0, p0 + side * o1, p1 + side * o1, p1 + side * o0]
+		for j in [0, 1, 2, 0, 2, 3]:
+			st.set_color(c)
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(hw - 0.6, at))   # (on the edge-line band: solid white)
+			st.set_uv2(Vector2(hw, total))
+			st.add_vertex((q2[j] as Vector3) + Vector3.UP * (lift + 0.004))
+
+
+## The polyline with points inserted at these distances along it.
+static func _split_at(pts: PackedVector3Array, cuts: Array) -> PackedVector3Array:
+	var out := PackedVector3Array([pts[0]])
+	var acc := 0.0
+	for i in pts.size() - 1:
+		var L := pts[i].distance_to(pts[i + 1])
+		var ds: Array = []
+		for cu: float in cuts:
+			if cu > acc + 0.05 and cu < acc + L - 0.05:
+				ds.append(cu)
+		ds.sort()
+		for cu: float in ds:
+			out.append(pts[i].lerp(pts[i + 1], (cu - acc) / L))
+		out.append(pts[i + 1])
+		acc += L
+	return out
+
+
+## The point s metres along a polyline (clamped).
+static func _point_at(pts: PackedVector3Array, sd: float) -> Vector3:
+	var acc := 0.0
+	for i in pts.size() - 1:
+		var L := pts[i].distance_to(pts[i + 1])
+		if sd <= acc + L or i == pts.size() - 2:
+			return pts[i].lerp(pts[i + 1], clampf((sd - acc) / maxf(L, 0.001), 0.0, 1.0))
+		acc += L
+	return pts[-1]
 
 
 func _build_ground(street: StaticBody3D) -> void:
@@ -1441,10 +1498,39 @@ func _build_ground(street: StaticBody3D) -> void:
 		_poly_tris(st, a[1], LAND_Y + (0.011 if int(a[0]) == 1 else 0.014), int(a[0]), a[2])
 	for s in plan_data["strips"]:
 		_strip(st, PackedVector3Array([s[1], s[2]]), s[3], 0.025 if int(s[0]) == 3 else 0.02, int(s[0]), COL_RUNWAY if int(s[0]) == 3 else COL_APRON.darkened(0.15))
+	# Junctions (3+ road ends meet): each road's markings stop at the
+	# crossing road's kerb – the box between is plain asphalt – and its
+	# approach lanes get a stop line. (They used to run straight through
+	# each other.)
+	var ends := {}
+	var key := func(v: Vector3) -> Vector2i: return Vector2i(roundi(v.x), roundi(v.z))
+	for r in plan_data["roads"]:
+		if r[3]:
+			continue
+		var rp: PackedVector3Array = r[1]
+		for e: Vector3 in [rp[0], rp[-1]]:
+			var k: Vector2i = key.call(e)
+			if not ends.has(k):
+				ends[k] = []
+			(ends[k] as Array).append(float(r[2]) * 0.5)
+	var box := func(e: Vector3, hw: float) -> float:
+		var hs: Array = ends.get(key.call(e), [])
+		if hs.size() < 3:
+			return 0.0
+		var widest := 0.0
+		var mine := false
+		for h: float in hs:
+			if not mine and absf(h - hw) < 0.01:
+				mine = true   # (skip this road's own end once)
+				continue
+			widest = maxf(widest, h)
+		return widest + 1.0
 	for r in plan_data["roads"]:
 		if r[3]:
 			continue  # (the bridge deck draws its own road)
-		_strip(st, r[1], float(r[2]) * 0.5, 0.03, 2, COL_ROAD)
+		var rp2: PackedVector3Array = r[1]
+		var hw := float(r[2]) * 0.5
+		_strip(st, rp2, hw, 0.03, 2, COL_ROAD, box.call(rp2[0], hw), box.call(rp2[-1], hw))
 	for hp: Vector3 in plan_data["helipads"]:
 		if hp.y > LAND_Y + 1.0:
 			continue
