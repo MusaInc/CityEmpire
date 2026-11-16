@@ -80,6 +80,26 @@ static func forms(layout: CityLayout = null) -> Array:
 			[Vector2(640, 622), "rock"], [Vector2(652, 660), "rock"], [Vector2(684, 700), "rock"],
 			[Vector2(726, 712), "beach"], [Vector2(770, 690), "beach"], [Vector2(790, 652), "rock"],
 			[Vector2(786, 622), "attach"]], "coast"],
+		# Westbank's open coasts (joined along its own coast; it's hilly, so
+		# the high ones fall away to rocky points): a north-west cape, a sand
+		# spit on the north shore, a headland off the west hills and a point
+		# on the south-west lobe. (The south-east is the Westbank Bridge's.)
+		["Hollow Cape", -1, [
+			[Vector2(-1066, -386), "rock"], [Vector2(-1104, -404), "rock"], [Vector2(-1140, -446), "rock"],
+			[Vector2(-1132, -500), "rock"], [Vector2(-1086, -520), "rock"], [Vector2(-1040, -500), "rock"],
+			[Vector2(-1010, -466), "attach"]], "coast"],
+		["Northsand Spit", -1, [
+			[Vector2(-900, -520), "rock"], [Vector2(-904, -560), "beach"], [Vector2(-880, -604), "beach"],
+			[Vector2(-838, -620), "beach"], [Vector2(-800, -596), "beach"], [Vector2(-790, -556), "rock"],
+			[Vector2(-798, -504), "attach"]], "coast"],
+		["Westhill Head", -1, [
+			[Vector2(-1118, 52), "rock"], [Vector2(-1160, 44), "rock"], [Vector2(-1206, 12), "rock"],
+			[Vector2(-1214, -34), "rock"], [Vector2(-1176, -64), "beach"], [Vector2(-1124, -66), "beach"],
+			[Vector2(-1070, -26), "attach"]], "coast"],
+		["Lantern Point", -1, [
+			[Vector2(-936, 460), "rock"], [Vector2(-934, 504), "rock"], [Vector2(-904, 544), "rock"],
+			[Vector2(-860, 552), "beach"], [Vector2(-826, 524), "beach"], [Vector2(-830, 472), "rock"],
+			[Vector2(-862, 414), "attach"]], "coast"],
 		["Strand Park", -1, [
 			[Vector2(E - 0.3, 100), "attach"], [Vector2(E + 22, 96), "rock"], [Vector2(E + 70, 124), "beach"],
 			[Vector2(E + 100, 180), "beach"], [Vector2(E + 96, 248), "beach"], [Vector2(E + 62, 296), "rock"],
