@@ -13,8 +13,8 @@ extends Node3D
 ## without inheriting any business logic.
 ##
 ## Districts:
-##   high-rise coastal (north-west): a composed skyline round the Skyport
-##     Spire, towers in clusters with setbacks, a penthouse tower with a
+##   airport town (east, facing the open sea): low and mid-rise offices,
+##     an airline headquarters, a business hotel, a penthouse building with a
 ##     rooftop helipad, a waterfront promenade;
 ##   retail row (along Skyport Avenue): budget, luxury and commercial car
 ##     dealers, two clothing stores;
@@ -267,70 +267,79 @@ var viewer: Callable
 ## The coastline, drawn in WORLD coordinates (north up) as control points,
 ## each with the kind of shore on the stretch that starts there: "quay"
 ## (engineered, straight), "beach" (sand sloping into the sea), "rock" (a
-## boulder revetment). Only three stretches are straight – the bridge quay
-## both bridges land on, the marina quay and the container port – the rest
-## is land drawn round the airport and districts, not trimmed to them: a
-## lobe reaching up toward each city either side of the bridges, a bay on
-## the east between the towers and the port, rocky points and beaches along
-## the south, and a broad headland off the runway's west side.
+## boulder revetment). A long, narrow airport island in the Malé manner:
+## the runway along its west side, landside and a compact town and port
+## along the east, and the coast drawn close round them – rocky points,
+## small coves and peninsulas, no spare land. Only three stretches are
+## straight: the bridge quay (both bridges land on it), the marina quay and
+## the container quay.
 ## (Converted to local by l2(); outline() works in local like everything here.)
 const Q_Z := 942.0     # world z of the bridge quay (local x QUAY_X)
 const M_Z := 904.0     # world z of the marina quay (local x 1386)
-const P_X := 440.0     # world x of the container port quay (local z -676)
+const P_X := 98.0      # world x of the container quay (local z -334)
 static func coast_points() -> Array:
 	return [
-	[l2(Vector2(-860, 930)), "rock"],
-	[l2(Vector2(-832, 850)), "rock"],
-	[l2(Vector2(-770, 786)), "rock"],
-	[l2(Vector2(-700, 762)), "rock"],
-	[l2(Vector2(-628, 784)), "beach"],
-	[l2(Vector2(-540, 828)), "beach"],
-	[l2(Vector2(-440, 886)), "beach"],
-	[l2(Vector2(-360, 922)), "rock"],
+	[l2(Vector2(-800, 930)), "rock"],
+	[l2(Vector2(-760, 880)), "rock"],
+	[l2(Vector2(-690, 866)), "rock"],
+	[l2(Vector2(-616, 884)), "beach"],
+	[l2(Vector2(-560, 930)), "beach"],
+	[l2(Vector2(-498, 964)), "beach"],
+	[l2(Vector2(-440, 958)), "rock"],
+	[l2(Vector2(-398, 934)), "rock"],
+	[l2(Vector2(-366, 926)), "rock"],
 	[l2(Vector2(-342.0, Q_Z)), "quay"],
-	[l2(Vector2(-58.0, Q_Z)), "rock"],
-	[l2(Vector2(-62, 928)), "rock"],
-	[l2(Vector2(-30.0, M_Z)), "quay"],
-	[l2(Vector2(140.0, M_Z)), "rock"],
-	[l2(Vector2(180, 870)), "rock"],
-	[l2(Vector2(262, 812)), "rock"],
-	[l2(Vector2(350, 762)), "rock"],
-	[l2(Vector2(430, 758)), "beach"],
-	[l2(Vector2(500, 796)), "beach"],
-	[l2(Vector2(548, 876)), "rock"],
-	[l2(Vector2(572, 990)), "rock"],
-	[l2(Vector2(548, 1114)), "beach"],
-	[l2(Vector2(468, 1196)), "beach"],
-	[l2(Vector2(420, 1280)), "beach"],
-	[l2(Vector2(440, 1370)), "beach"],
-	[l2(Vector2(500, 1446)), "rock"],
-	[l2(Vector2(488, 1524)), "rock"],
-	[l2(Vector2(P_X, 1560)), "quay"],
-	[l2(Vector2(P_X, 1966)), "rock"],
-	[l2(Vector2(506, 2030)), "rock"],
-	[l2(Vector2(568, 2100)), "rock"],
-	[l2(Vector2(548, 2190)), "rock"],
-	[l2(Vector2(450, 2212)), "rock"],
-	[l2(Vector2(330, 2150)), "beach"],
-	[l2(Vector2(180, 2090)), "beach"],
-	[l2(Vector2(40, 2110)), "rock"],
-	[l2(Vector2(-60, 2186)), "rock"],
-	[l2(Vector2(-150, 2200)), "rock"],
-	[l2(Vector2(-240, 2136)), "beach"],
-	[l2(Vector2(-380, 2070)), "beach"],
-	[l2(Vector2(-520, 2080)), "rock"],
-	[l2(Vector2(-620, 2130)), "rock"],
-	[l2(Vector2(-730, 2140)), "rock"],
-	[l2(Vector2(-830, 2090)), "rock"],
-	[l2(Vector2(-890, 1990)), "rock"],
-	[l2(Vector2(-880, 1850)), "beach"],
-	[l2(Vector2(-900, 1710)), "beach"],
-	[l2(Vector2(-960, 1590)), "rock"],
-	[l2(Vector2(-1010, 1470)), "rock"],
-	[l2(Vector2(-990, 1360)), "rock"],
-	[l2(Vector2(-930, 1270)), "beach"],
-	[l2(Vector2(-890, 1160)), "beach"],
-	[l2(Vector2(-902, 1040)), "rock"],
+	[l2(Vector2(-84.0, Q_Z)), "rock"],
+	[l2(Vector2(-70, 926)), "rock"],
+	[l2(Vector2(-52.0, M_Z)), "quay"],
+	[l2(Vector2(96.0, M_Z)), "rock"],
+	[l2(Vector2(126, 918)), "rock"],
+	[l2(Vector2(140, 984)), "rock"],
+	[l2(Vector2(112, 1060)), "beach"],
+	[l2(Vector2(104, 1140)), "beach"],
+	[l2(Vector2(130, 1214)), "rock"],
+	[l2(Vector2(176, 1252)), "rock"],
+	[l2(Vector2(152, 1304)), "rock"],
+	[l2(Vector2(112, 1352)), "beach"],
+	[l2(Vector2(106, 1420)), "beach"],
+	[l2(Vector2(76, 1440)), "beach"],
+	[l2(Vector2(46, 1462)), "beach"],
+	[l2(Vector2(66, 1486)), "rock"],
+	[l2(Vector2(P_X, 1528)), "quay"],
+	[l2(Vector2(P_X, 1976)), "rock"],
+	[l2(Vector2(124, 2004)), "rock"],
+	[l2(Vector2(132, 2070)), "rock"],
+	[l2(Vector2(104, 2138)), "beach"],
+	[l2(Vector2(40, 2172)), "beach"],
+	[l2(Vector2(-40, 2170)), "rock"],
+	[l2(Vector2(-58, 2140)), "rock"],
+	[l2(Vector2(0, 2120)), "beach"],
+	[l2(Vector2(40, 2084)), "beach"],
+	[l2(Vector2(10, 2050)), "beach"],
+	[l2(Vector2(-80, 2032)), "beach"],
+	[l2(Vector2(-150, 2058)), "rock"],
+	[l2(Vector2(-196, 2100)), "rock"],
+	[l2(Vector2(-252, 2072)), "rock"],
+	[l2(Vector2(-320, 2030)), "beach"],
+	[l2(Vector2(-420, 2018)), "beach"],
+	[l2(Vector2(-520, 2032)), "rock"],
+	[l2(Vector2(-600, 2058)), "rock"],
+	[l2(Vector2(-684, 2046)), "rock"],
+	[l2(Vector2(-760, 2010)), "rock"],
+	[l2(Vector2(-792, 1940)), "rock"],
+	[l2(Vector2(-788, 1830)), "beach"],
+	[l2(Vector2(-802, 1724)), "rock"],
+	[l2(Vector2(-858, 1706)), "rock"],
+	[l2(Vector2(-918, 1712)), "rock"],
+	[l2(Vector2(-940, 1676)), "rock"],
+	[l2(Vector2(-884, 1632)), "rock"],
+	[l2(Vector2(-826, 1584)), "rock"],
+	[l2(Vector2(-792, 1500)), "beach"],
+	[l2(Vector2(-790, 1380)), "beach"],
+	[l2(Vector2(-808, 1260)), "rock"],
+	[l2(Vector2(-840, 1180)), "rock"],
+	[l2(Vector2(-802, 1100)), "rock"],
+	[l2(Vector2(-792, 1000)), "rock"],
 	]
 static var _shore_kind := PackedByteArray()   # per outline point: 0 quay, 1 beach, 2 rock (the edge starting there)
 
@@ -443,12 +452,10 @@ static func ground_y_local(x: float, z: float) -> float:
 ## sit only where nothing is built, clear of the shore bands.
 ## Knolls, WORLD coordinates: [centre, radius east-west, radius north-south, height].
 const KNOLLS_W := [
-	[Vector2(-740, 810), 48.0, 36.0, 8.0],     # the north-west lobe (toward Westbank)
-	[Vector2(390, 790), 54.0, 36.0, 9.0],      # the north-east lobe (toward the city)
-	[Vector2(-536, 946), 56.0, 66.0, 7.0],     # Skyport Park hill
-	[Vector2(-948, 1430), 40.0, 70.0, 8.0],    # the west headland
-	[Vector2(500, 2120), 40.0, 44.0, 6.5],     # the south-east point
-	[Vector2(-110, 2150), 44.0, 30.0, 6.0],    # the south point
+	[Vector2(-772, 902), 24.0, 18.0, 5.0],     # the north-west point (runway approach)
+	[Vector2(-880, 1672), 30.0, 20.0, 5.5],    # the west spit
+	[Vector2(-190, 2066), 26.0, 18.0, 4.5],    # the south point
+	[Vector2(146, 1258), 12.0, 18.0, 4.0],     # the east point
 ]
 static var _knolls: Array = []
 
@@ -490,7 +497,7 @@ static func plan(layout: CityLayout) -> Dictionary:
 	var H := Vector3(1890.0, LAND_Y, z0)
 	var C := Vector3(1960.0, LAND_Y, z0)
 	var D := Vector3(2330.0, LAND_Y, z0)
-	var T1 := Vector3(1610.0, LAND_Y, -300.0)
+	var T1 := Vector3(1610.0, LAND_Y, -176.0)
 	var I := Vector3(1890.0, LAND_Y, 110.0)
 	var y := func(x: float, zz: float) -> Vector3: return Vector3(x, LAND_Y, zz)
 	# Roads: [name, points, width, on a bridge]. Junctions are shared end
@@ -504,9 +511,9 @@ static func plan(layout: CityLayout) -> Dictionary:
 		["Skyport Avenue", PackedVector3Array([H, C]), 22.0, false],
 		["Skyport Avenue", PackedVector3Array([C, D]), 22.0, false],
 		["Tower Road", PackedVector3Array([B, T1]), 14.0, false],
-		["Tower Road", PackedVector3Array([T1, y.call(1610.0, -560.0), y.call(1890.0, -560.0), H]), 14.0, false],
-		["Marina Drive", PackedVector3Array([T1, y.call(1452.0, -300.0)]), 12.0, false],
-		["Industrial Way", PackedVector3Array([C, y.call(1960.0, -330.0), y.call(2330.0, -330.0), D]), 16.0, false],
+		["Tower Road", PackedVector3Array([T1, y.call(1890.0, -176.0), H]), 14.0, false],
+		["Marina Drive", PackedVector3Array([T1, y.call(1500.0, -176.0)]), 12.0, false],
+		["Industrial Way", PackedVector3Array([C, y.call(1960.0, -180.0), y.call(2330.0, -180.0), D]), 16.0, false],
 		["Terminal Road", PackedVector3Array([H, I]), 16.0, false],
 		# (Ends at the cargo terminal: the east inlet cuts in where it used to
 		# run back up to the avenue.)
@@ -521,13 +528,12 @@ static func plan(layout: CityLayout) -> Dictionary:
 	var grass := Geometry2D.intersect_polygons(_rect(1390, 410, 2470, 600), outline())
 	for g in grass:
 		areas.append([1, g, COL_GRASS])
-	areas.append([1, _rect(1640, -545, 1875, -380), COL_GRASS])           # tower park
+	areas.append([1, _rect(1470, -125, 1590, -58), COL_GRASS])            # pocket park by the bridges
 	areas.append([5, _rect(1560, 170, 1880, 385), COL_APRON])              # hangar apron
 	areas.append([5, _rect(1895, 242, 2330, 385), COL_APRON])              # terminal apron
 	areas.append([5, _rect(2335, 160, 2462, 385), COL_APRON])              # cargo apron
 	areas.append([5, _rect(1965, 58, 2255, 132), COL_APRON])               # terminal car park
-	areas.append([5, _rect(1985, -150, 2160, -40), COL_APRON])             # truck yard
-	areas.append([5, _rect(2140, -610, 2450, -345), COL_APRON])            # container yard
+	areas.append([5, _rect(2140, -300, 2450, -196), COL_APRON])            # container yard
 	for f in [[1630, 8, 1725, 96], [1745, 8, 1875, 96], [1975, 8, 2075, 96]]:
 		areas.append([0, _rect(f[0], f[1], f[2], f[3]), Color(0.62, 0.6, 0.57)])  # dealer forecourts (paved)
 	P["areas"] = areas
@@ -547,7 +553,7 @@ static func plan(layout: CityLayout) -> Dictionary:
 	var piers: Array = []
 	var berths: Array = []
 	for k in 4:
-		var pz := -345.0 + k * 34.0
+		var pz := -296.0 + k * 34.0
 		piers.append([Vector3(1300, 0.6, pz - 1.5), Vector3(1386, 0.6, pz + 1.5)])
 		for j in 3:
 			berths.append([Vector3(1318.0 + j * 24.0, SEA_Y, pz + 12.0), -PI * 0.5])
@@ -562,7 +568,7 @@ static func plan(layout: CityLayout) -> Dictionary:
 		"clothes_everyday": {"name": "Threadline", "door": Vector3(1685, LAND_Y, -38), "face": Vector3(0, 0, 1)},
 		"clothes_premium": {"name": "Maison Arden", "door": Vector3(1815, LAND_Y, -38), "face": Vector3(0, 0, 1)},
 		"aviation": {"name": "Skyport Aviation", "door": Vector3(1675, LAND_Y, 300), "face": Vector3(0, 0, 1)},
-		"marina": {"name": "Skyport Marina", "door": Vector3(1455, LAND_Y, -275), "face": Vector3(0, 0, -1)},
+		"marina": {"name": "Skyport Marina", "door": Vector3(1410, LAND_Y, -192), "face": Vector3(0, 0, 1)},
 		"cargo": {"name": "Skyport Cargo", "door": Vector3(2398, LAND_Y, 155), "face": Vector3(0, 0, -1)},
 		"terminal": {"name": "Skyport Airport", "door": Vector3(2110, LAND_Y, 160), "face": Vector3(0, 0, -1)},
 	}
@@ -738,29 +744,29 @@ static func _buildings(P: Dictionary) -> Array:
 	rng.seed = 90210
 	var S := CityLayout.Style
 	var glass_cols := [Color(0.62, 0.7, 0.76), Color(0.55, 0.6, 0.62), Color(0.7, 0.72, 0.7), Color(0.5, 0.56, 0.62)]
-	# High-rise coastal district: [x, z, w, d, h, form, style]. A composed
-	# skyline – the Spire on the waterfront corner, clusters stepping down
-	# inland and towards the airport, gaps between them for views (and
-	# swing lines).
+	# The airport town: [x, z, w, d, h, form, style]. Low and mid-rise only
+	# (no skyscrapers on an airport island: the runway's approach is over
+	# it, and the cities across the water carry the skyline) – offices,
+	# an airline headquarters, a parking garage, a business hotel.
 	var towers := [
-		[1660, -628, 40, 40, 272, "spire", S.GLASS],
-		[1505, -560, 30, 34, 168, "setback", S.DARK_GLASS],
-		[1440, -540, 34, 30, 128, "podium", S.MODERN],
-		[1520, -500, 36, 28, 104, "stepped", S.GLASS],
-		[1440, -480, 30, 40, 86, "slab", S.DECO],
-		[1730, -628, 30, 34, 142, "podium", S.DARK_GLASS],
-		[1790, -630, 40, 30, 176, "stepped", S.GLASS],
-		[1850, -628, 26, 30, 96, "slab", S.MODERN],
-		[1650, -360, 40, 30, 150, "setback", S.MODERN],
-		[1715, -350, 30, 40, 118, "podium", S.GLASS],
-		[1770, -360, 46, 34, 196, "spire", S.DARK_GLASS],
-		[1830, -350, 34, 30, 74, "stepped", S.DECO],
-		[1650, -280, 34, 36, 92, "slab", S.GLASS],
-		[1800, -280, 36, 34, 132, "setback", S.GLASS],
-		[1650, -205, 70, 30, 44, "slab", S.DECO],                # mid-rise offices
-		[1760, -205, 50, 30, 64, "stepped", S.MODERN],
-		[1835, -205, 36, 36, 38, "slab", S.STONE],
-		[1490, -420, 30, 30, 48, "slab", S.SANDSTONE],
+		# Waterfront row, facing the open sea.
+		[1490, -306, 34, 30, 22, "slab", S.MODERN],
+		[1540, -306, 60, 36, 16, "slab", S.STONE],               # parking garage
+		[1660, -310, 50, 40, 36, "podium", S.GLASS],             # airline headquarters
+		[1730, -306, 44, 34, 28, "stepped", S.DARK_GLASS],
+		[1790, -306, 40, 30, 24, "slab", S.GLASS],
+		[1850, -304, 26, 30, 18, "slab", S.MODERN],
+		# Middle row, north of Tower Road.
+		[1505, -250, 30, 34, 26, "setback", S.DARK_GLASS],
+		[1550, -246, 36, 28, 20, "slab", S.GLASS],
+		[1650, -240, 40, 30, 32, "setback", S.MODERN],
+		[1715, -240, 30, 40, 18, "slab", S.GLASS],
+		[1770, -240, 46, 34, 38, "podium", S.DARK_GLASS],
+		[1830, -240, 34, 30, 16, "slab", S.DECO],
+		# Inner row, between Tower Road and the avenue.
+		[1640, -160, 70, 30, 30, "slab", S.DECO],                # offices (eight floors)
+		[1800, -160, 36, 34, 24, "setback", S.GLASS],
+		[1490, -160, 30, 30, 14, "slab", S.SANDSTONE],
 	]
 	for t in towers:
 		var col: Color = glass_cols[rng.randi() % glass_cols.size()] if int(t[6]) in [S.GLASS, S.DARK_GLASS] else \
@@ -775,21 +781,21 @@ static func _buildings(P: Dictionary) -> Array:
 	#   a suite at the top of the Skyport Hotel, looking north over the park;
 	#   the Marina Quay show flat, looking west over the marina.
 	var homes: Array = []
-	var pt := _b([[1430, -630, 1474, -594, LAND_Y, LAND_Y + 130.0], [1436, -627.3, 1456.3, -600.7, LAND_Y + 130.0, LAND_Y + 145.0]],
+	var pt := _b([[1430, -310, 1474, -274, LAND_Y, LAND_Y + 34.0], [1436, -307.3, 1456.3, -280.7, LAND_Y + 34.0, LAND_Y + 49.0]],
 		S.DARK_GLASS, Color(0.5, 0.56, 0.62), 0.47)
 	out.append(pt)
-	homes.append(_home(pt, 1, 3, 4, "skyport_penthouse", "Skyport Penthouse", LAND_Y + 133.6))
-	homes[-1]["lift"] = Vector3(1426.5, LAND_Y, -614.0)   # (the window is on the narrower top: the lobby is below on the base)
-	var ht := _b([[1720, -270, 1770, -240, LAND_Y, LAND_Y + 17.0], [1730, -270, 1754.6, -251.7, LAND_Y + 17.0, LAND_Y + 61.0]],
+	homes.append(_home(pt, 1, 3, 4, "skyport_penthouse", "Skyport Penthouse", LAND_Y + 37.6))
+	homes[-1]["lift"] = Vector3(1426.5, LAND_Y, -294.0)   # (the window is on the narrower top: the lobby is below on the base)
+	var ht := _b([[1720, -160, 1770, -130, LAND_Y, LAND_Y + 17.0], [1730, -160, 1754.6, -141.7, LAND_Y + 17.0, LAND_Y + 45.0]],
 		S.MODERN, Color(0.82, 0.79, 0.72), 0.36)
 	out.append(ht)
-	homes.append(_home(ht, 1, 2, 3, "skyport_suite", "Skyport Hotel Suite", LAND_Y + 49.4))
-	var mq := _b([[1430, -420, 1464, -390, LAND_Y, LAND_Y + 40.0], [1430, -420, 1444.3, -403.4, LAND_Y + 40.0, LAND_Y + 52.0]],
+	homes.append(_home(ht, 1, 2, 3, "skyport_suite", "Skyport Hotel Suite", LAND_Y + 33.4))
+	var mq := _b([[1430, -250, 1464, -220, LAND_Y, LAND_Y + 40.0], [1430, -250, 1444.3, -233.4, LAND_Y + 40.0, LAND_Y + 52.0]],
 		S.MODERN, Color(0.74, 0.74, 0.72), 0.58)
 	out.append(mq)
 	homes.append(_home(mq, 1, 3, 1, "skyport_flat", "Marina Quay Show Flat", LAND_Y + 43.6))
 	P["homes"] = homes
-	P["penthouse"] = {"pad": Vector3(1446.15, LAND_Y + 145.0, -614.0)}
+	P["penthouse"] = {"pad": Vector3(1446.15, LAND_Y + 49.0, -294.0)}
 	(P["helipads"] as Array).append(P["penthouse"]["pad"])
 	# Retail row on Skyport Avenue: dealers (glazed showrooms behind their
 	# forecourts) and two clothing stores.
@@ -799,8 +805,8 @@ static func _buildings(P: Dictionary) -> Array:
 	out.append(_b([[1662, -66, 1708, -42, LAND_Y, LAND_Y + 9.0]], S.BRICK, Color(0.66, 0.4, 0.32), 0.44, "normal"))
 	out.append(_b([[1790, -70, 1840, -42, LAND_Y, LAND_Y + 11.0]], S.STONE, Color(0.84, 0.81, 0.74), 0.77, "normal"))
 	# Industrial & logistics.
-	var ind := [[1985, -305, 2160, -170, 16.0], [2180, -305, 2312, -200, 12.0], [2180, -180, 2312, -40, 12.0],
-		[1975, -600, 2055, -360, 14.0], [2065, -600, 2130, -360, 11.0], [2350, -300, 2448, -40, 13.0]]
+	var ind := [[1985, -160, 2160, -60, 16.0], [2180, -160, 2312, -60, 12.0], [2350, -160, 2448, -60, 13.0],
+		[1990, -296, 2130, -200, 14.0]]
 	for r in ind:
 		out.append(_b([[r[0], r[1], r[2], r[3], LAND_Y, LAND_Y + r[4]]], S.WAREHOUSE,
 			[Color(0.6, 0.62, 0.64), Color(0.42, 0.5, 0.58), Color(0.55, 0.52, 0.48)][rng.randi() % 3], rng.randf()))
@@ -808,9 +814,9 @@ static func _buildings(P: Dictionary) -> Array:
 	# hangars, cargo terminal.
 	# (The terminal is a glazed hall under a curved roof: _build_terminal.)
 	out.append(_b([[1962, 168, 2258, 236, LAND_Y, LAND_Y + TERMINAL_HALL]], S.GLASS, Color(0.6, 0.68, 0.74), 0.12))
-	# Skyport Grand: the airport hotel beside the terminal, a setback tower
-	# (a swing anchor between the runway and the high-rise district).
-	var hotel := _b(_tower(1900, 170, 44, 52, 62, "setback"), S.GLASS, Color(0.55, 0.62, 0.66), 0.83)
+	# Skyport Grand: the airport hotel beside the terminal, a low setback block
+	# between the runway and the town.
+	var hotel := _b(_tower(1900, 170, 44, 52, 30, "setback"), S.GLASS, Color(0.55, 0.62, 0.66), 0.83)
 	hotel["district"] = "airport"
 	out.append(hotel)
 	out.append(_b([[2284, 198, 2298, 212, LAND_Y, LAND_Y + 52.0], [2280, 194, 2302, 216, LAND_Y + 52.0, LAND_Y + 60.0]], S.DARK_GLASS,
@@ -820,7 +826,7 @@ static func _buildings(P: Dictionary) -> Array:
 		out.append(_b([[hx, 190, hx + 72, 288, LAND_Y, LAND_Y + 20.0]], S.WAREHOUSE, Color(0.78, 0.79, 0.8), 0.2 + k * 0.1))
 	out.append(_b([[2340, 170, 2455, 290, LAND_Y, LAND_Y + 15.0]], S.WAREHOUSE, Color(0.45, 0.52, 0.6), 0.9))
 	# Marina office and boat sales.
-	out.append(_b([[1400, -268, 1462, -238, LAND_Y, LAND_Y + 7.0]], S.MODERN, Color(0.9, 0.9, 0.88), 0.66))
+	out.append(_b([[1396, -246, 1424, -196, LAND_Y, LAND_Y + 7.0]], S.MODERN, Color(0.9, 0.9, 0.88), 0.66))
 	return out
 
 
@@ -1047,7 +1053,7 @@ func _build_ground(street: StaticBody3D) -> void:
 		var t: Array = b["tiers"][0]
 		var g := 6.0 if float(t[5]) - float(t[4]) > 40.0 else 4.0
 		_poly_tris(st, _rect(float(t[0]) - g, float(t[1]) - g, float(t[2]) + g, float(t[3]) + g), pave_y, 0, COL_PAVE)
-	for pr in [[1385, -480, 1475, -200], [1955, 135, 2265, 168]]:
+	for pr in [[1385, -312, 1475, -184], [1955, 135, 2265, 168]]:
 		var poly := Geometry2D.intersect_polygons(_rect(pr[0], pr[1], pr[2], pr[3]), outline())
 		for q in poly:
 			_poly_tris(st, q, pave_y, 0, COL_PAVE.lightened(0.04))
@@ -1606,8 +1612,8 @@ func _build_marina(street: StaticBody3D) -> void:
 			m.solid(x - 0.2, a.z - 0.4, x + 0.2, a.z, SEA_Y - 3.0, 1.4, Color(0.35, 0.3, 0.25))
 			x += 8.0
 	# A ramp from the quay down to the pier level.
-	m.solid(1386, -360, 1400, -230, 0.6, LAND_Y, Color(0.7, 0.7, 0.68))
-	CityWorld._add_box(street, AABB(Vector3(1386, 0.0, -360), Vector3(14, LAND_Y, 130)))
+	m.solid(1386, -300, 1400, -190, 0.6, LAND_Y, Color(0.7, 0.7, 0.68))
+	CityWorld._add_box(street, AABB(Vector3(1386, 0.0, -300), Vector3(14, LAND_Y, 110)))
 	_mesh(m, "Marina", 0.0, 1400.0)
 
 
@@ -1622,7 +1628,7 @@ func _build_trees() -> void:
 			for sg: float in [-1.0, 1.0]:
 				xfs.append(Transform3D(Basis(Vector3.UP, x * 0.37), Vector3(x, LAND_Y, e.z + sg * 15.0)))
 		x += 18.0
-	var zz := -540.0
+	var zz := -160.0
 	while zz < -40.0:
 		for xx: float in [1597.0, 1623.0, 1877.0, 1903.0]:
 			xfs.append(Transform3D(Basis(Vector3.UP, zz * 0.51), Vector3(xx, LAND_Y, zz)))
@@ -1630,7 +1636,7 @@ func _build_trees() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 77
 	for k in 70:
-		var p := Vector3(rng.randf_range(1650, 1870), LAND_Y, rng.randf_range(-540, -390))
+		var p := Vector3(rng.randf_range(1475, 1585), LAND_Y, rng.randf_range(-122, -62))
 		if rng.randf() < 0.5:
 			p = Vector3(rng.randf_range(1410, 1610), LAND_Y, rng.randf_range(15, 155))
 		xfs.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.2)), p))
@@ -1685,8 +1691,8 @@ func _build_industry() -> void:
 	rng.seed = 4411
 	var cols := [Color(0.7, 0.2, 0.15), Color(0.15, 0.35, 0.6), Color(0.85, 0.55, 0.1), Color(0.2, 0.5, 0.3),
 		Color(0.55, 0.55, 0.57), Color(0.5, 0.15, 0.4)]
-	var z := -595.0
-	while z < -360.0:
+	var z := -290.0
+	while z < -205.0:
 		var x := 2150.0
 		while x < 2440.0:
 			if rng.randf() < 0.82:
@@ -1700,13 +1706,13 @@ func _build_industry() -> void:
 	for cx: float in [2230.0, 2370.0]:
 		var yel := Color(0.85, 0.68, 0.12)
 		for lx: float in [-8.0, 8.0]:
-			for lz: float in [-618.0, -598.0]:
+			for lz: float in [-318.0, -298.0]:
 				m.beam(Vector3(cx + lx, LAND_Y, lz), Vector3(cx + lx, LAND_Y + 42.0, lz), 1.4, 1.4, yel)
 				_box_beam(body, Vector3(cx + lx, LAND_Y, lz), Vector3(cx + lx, LAND_Y + 42.0, lz), 1.4, 1.4)
-		m.beam(Vector3(cx - 9.0, LAND_Y + 42.0, -608.0), Vector3(cx + 9.0, LAND_Y + 42.0, -608.0), 2.0, 2.0, yel)
-		m.beam(Vector3(cx, LAND_Y + 44.0, -560.0), Vector3(cx, LAND_Y + 44.0, -690.0), 2.2, 3.0, yel)
-		_box_beam(body, Vector3(cx, LAND_Y + 44.0, -560.0), Vector3(cx, LAND_Y + 44.0, -690.0), 2.2, 3.0)
-		m.solid(cx - 3.0, -650.0, cx + 3.0, -644.0, LAND_Y + 38.0, LAND_Y + 42.5, Color(0.3, 0.3, 0.32))
+		m.beam(Vector3(cx - 9.0, LAND_Y + 42.0, -308.0), Vector3(cx + 9.0, LAND_Y + 42.0, -308.0), 2.0, 2.0, yel)
+		m.beam(Vector3(cx, LAND_Y + 44.0, -260.0), Vector3(cx, LAND_Y + 44.0, -390.0), 2.2, 3.0, yel)
+		_box_beam(body, Vector3(cx, LAND_Y + 44.0, -260.0), Vector3(cx, LAND_Y + 44.0, -390.0), 2.2, 3.0)
+		m.solid(cx - 3.0, -350.0, cx + 3.0, -344.0, LAND_Y + 38.0, LAND_Y + 42.5, Color(0.3, 0.3, 0.32))
 	_mesh(m, "Industry", 0.0, 2200.0)
 
 

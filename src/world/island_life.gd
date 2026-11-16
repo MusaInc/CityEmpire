@@ -77,7 +77,7 @@ func _process(dt: float) -> void:
 	for tr in _trolleys:
 		# Out along the boom over the water and back (a 40 s cycle).
 		var u := 0.5 - 0.5 * cos(_t * TAU / 40.0 + float(tr[1]) * 0.01)
-		(tr[0] as Node3D).position = Vector3(float(tr[1]), y + 41.0, lerpf(-575.0, -680.0, u))
+		(tr[0] as Node3D).position = Vector3(float(tr[1]), y + 41.0, lerpf(-275.0, -380.0, u))
 	# Tug: a loop along the stands and back along the terminal (90 s).
 	var a := fposmod(_t / 90.0, 1.0)
 	var pts := [Vector3(1990, y, 262), Vector3(2290, y, 262), Vector3(2290, y, 250), Vector3(1990, y, 250)]
@@ -94,4 +94,4 @@ func _process(dt: float) -> void:
 	# Truck: backs into a bay and pulls out again (60 s).
 	var tt := fposmod(_t, 60.0)
 	var k := smoothstep(0.0, 15.0, tt) * (1.0 - smoothstep(35.0, 50.0, tt))
-	_truck.transform = Transform3D(Basis(Vector3.UP, 0.0), Vector3(2060, y, lerpf(-128.0, -153.0, k)))
+	_truck.transform = Transform3D(Basis(Vector3.UP, 0.0), Vector3(2170, y, lerpf(-150.0, -72.0, k)))

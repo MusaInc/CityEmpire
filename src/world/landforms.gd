@@ -56,9 +56,9 @@ static func forms(layout: CityLayout = null) -> Array:
 		# (Joined along the Commercial Island's own south coast – not a
 		# straight quay – so it follows the sea wall exactly: "coast".)
 		["Harbour Strand", 1, [
-			[Vector2(262, 612), "rock"], [Vector2(270, 646), "rock"], [Vector2(300, 690), "beach"],
+			[Vector2(262, 624), "rock"], [Vector2(270, 646), "rock"], [Vector2(300, 690), "beach"],
 			[Vector2(352, 724), "beach"], [Vector2(412, 726), "beach"], [Vector2(462, 694), "rock"],
-			[Vector2(482, 652), "rock"], [Vector2(478, 612), "attach"]], "coast"],
+			[Vector2(482, 652), "rock"], [Vector2(478, 618), "attach"]], "coast"],
 		["Strand Park", -1, [
 			[Vector2(E - 0.3, 100), "attach"], [Vector2(E + 22, 96), "rock"], [Vector2(E + 70, 124), "beach"],
 			[Vector2(E + 100, 180), "beach"], [Vector2(E + 96, 248), "beach"], [Vector2(E + 62, 296), "rock"],

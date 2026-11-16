@@ -136,3 +136,42 @@ func test_unreachable_is_explained(t) -> void:
 	var r := g.plan(from, sea, "walk")
 	t.check(String(r["error"]) != "", "a destination out at sea gets a reason (%s)" % r["error"])
 	t.check((r["points"] as PackedVector3Array).is_empty(), "…and no line is drawn")
+
+
+## With Skyport Island built: from each city by car to the island, over
+## that city's own bridge (Harbour Bridge from the Commercial Island,
+## Westbank Bridge from Westbank), on roads all the way.
+func test_drive_to_skyport_over_each_bridge(t) -> void:
+	_setup()
+	var was := SkyportIsland.enabled
+	SkyportIsland.enabled = true
+	var g := Gps.new()
+	g.net = RoadNet.new().build(_layout)
+	var P := SkyportIsland.plan(_layout)
+	var W := SkyportIsland.world_plan(P)
+	var dealer: Vector3 = W["sites"]["dealer_budget"]["door"] + (W["sites"]["dealer_budget"]["face"] as Vector3) * 6.0
+	var terminal: Vector3 = W["sites"]["terminal"]["door"] + (W["sites"]["terminal"]["face"] as Vector3) * 6.0
+	var mids := {}
+	for B: Dictionary in P["bridges"]:
+		var S: Vector3 = B["S"]
+		mids[B["name"]] = S + (B["u"] as Vector3) * float(B["L"]) * 0.5
+	for c: Array in [["east", dealer, "Harbour Bridge"], ["west", terminal, "Westbank Bridge"]]:
+		var a := _unit("shop", c[0])
+		var from := Premises.door_point(a) + Premises.outward(a) * 6.0
+		var r := g.plan(from, c[1], "drive")
+		var pts: PackedVector3Array = r["points"]
+		t.check(String(r["error"]) == "" and pts.size() >= 3, "%s island → Skyport: a route (%s)" % [c[0], r["error"]])
+		var over := false
+		var wet := 0
+		for i in pts.size() - 1:
+			var steps := maxi(int(pts[i].distance_to(pts[i + 1]) / 4.0), 1)
+			for k in steps:
+				var p := pts[i].lerp(pts[i + 1], float(k) / steps)
+				if Vector2(p.x - (mids[c[2]] as Vector3).x, p.z - (mids[c[2]] as Vector3).z).length() < 20.0:
+					over = true
+				var on_bridge := not is_nan(SkyportIsland.bridge_road_y(_layout, p.x, p.z))
+				if _layout.is_water(p) and not on_bridge:
+					wet += 1
+		t.check(over, "%s island → Skyport goes over %s" % [c[0], c[2]])
+		t.check(wet == 0, "%s island → Skyport: never across open water (%d samples)" % [c[0], wet])
+	SkyportIsland.enabled = was

@@ -130,6 +130,18 @@ func _go() -> void:
 		for a in 64:
 			var t := TAU * a / 64.0
 			px.call(c + Vector2(cos(t) * float(kn[1]), sin(t) * float(kn[2])), Color(0.4, 1, 0.4), 1)
+	var area := 0.0
+	for i in o.size():
+		area += o[i].x * o[(i + 1) % o.size()].y - o[(i + 1) % o.size()].x * o[i].y
+	print("AREA m2 ", absf(area) * 0.5)
+	print("TRIANGULATE ", Geometry2D.triangulate_polygon(o).size(), " pts ", o.size())
+	for i in o.size():
+		for j in range(i + 2, o.size()):
+			if i == 0 and j == o.size() - 1:
+				continue
+			var hit = Geometry2D.segment_intersects_segment(o[i], o[(i + 1) % o.size()], o[j], o[(j + 1) % o.size()])
+			if hit != null:
+				print("SELF-CROSS ", i, " ", j, " at world ", SkyportIsland.w2(hit))
 	print("checked ", chk.size(), " bad ", nbad, " on knolls ", nk)
 	img.save_png(out)
 	print("saved ", out, " roads=", P["roads"].size(), " bldg=", P["buildings"].size())

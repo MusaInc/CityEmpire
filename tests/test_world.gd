@@ -206,3 +206,25 @@ func test_no_building_is_sunk_into_the_ground(t) -> void:
 				if g - base > 2.0:
 					sunk.append("(%.0f, %.0f) %.1f m" % [p.x, p.z, g - base])
 	t.check(sunk.is_empty(), "%d building faces checked, none sunk more than 2 m (%d: %s)" % [n, sunk.size(), str(sunk.slice(0, 4))])
+
+
+## Coastlines must be simple polygons: a self-crossing outline triangulates
+## to nothing, and the island silently loses its ground and collision.
+func test_coastlines_triangulate(t) -> void:
+	if _layout == null:
+		_layout = CityLayout.new().generate()
+	var was_s := SkyportIsland.enabled
+	var was_l := Landforms.enabled
+	SkyportIsland.enabled = true
+	Landforms.enabled = true
+	var o := SkyportIsland.outline()
+	t.check(Geometry2D.triangulate_polygon(o).size() > 0, "Skyport's outline triangulates (%d points)" % o.size())
+	for f: Dictionary in Landforms.forms(_layout):
+		t.check(Geometry2D.triangulate_polygon(f["poly"]).size() > 0, "landform %s triangulates" % f["name"])
+	# Every bridge lands on the island and starts on its city's coast road.
+	for B: Dictionary in SkyportIsland.plan(_layout)["bridges"]:
+		var F: Vector3 = B["F"]
+		t.check(SkyportIsland.contains(F.x + (B["u"] as Vector3).x * 3.0, F.z + (B["u"] as Vector3).z * 3.0), "%s lands on the island" % B["name"])
+		t.check(float(B["L"]) > 150.0 and float(B["L"]) < 700.0, "%s spans %.0f m" % [B["name"], float(B["L"])])
+	SkyportIsland.enabled = was_s
+	Landforms.enabled = was_l

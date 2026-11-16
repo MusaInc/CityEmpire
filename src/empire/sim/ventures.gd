@@ -38,17 +38,17 @@ const LOCAL_DELIVERY := 1.2
 ## "at": on Skyport Island's LOCAL plan – use estate_at() for the world.
 const ESTATES := [
 	{"id": "marina_quay", "name": "Marina Quay Apartments", "kind": "flats", "price": 420000.0, "units": 16, "rent": 30.0, "upkeep": 70.0,
-		"at": Vector3(1447, 3, -405), "desc": "Sixteen flats over the marina, with a show flat you can use"},
+		"at": Vector3(1447, 3, -235), "desc": "Sixteen flats over the marina, with a show flat you can use"},
 	{"id": "tower_offices", "name": "Tower Road Offices", "kind": "offices", "price": 780000.0, "units": 8, "rent": 110.0, "upkeep": 150.0,
-		"at": Vector3(1665, 3, -200), "desc": "Eight floors of offices on Tower Road"},
+		"at": Vector3(1675, 3, -145), "desc": "Eight floors of offices on Tower Road"},
 	{"id": "skyport_hotel", "name": "Skyport Hotel", "kind": "hotel", "price": 1600000.0, "units": 60, "rent": 26.0, "upkeep": 420.0,
-		"at": Vector3(1745, 3, -255), "desc": "Sixty rooms by the park, guests by the night; the top-floor suite is yours to use"},
+		"at": Vector3(1745, 3, -145), "desc": "Sixty rooms by the park, guests by the night; the top-floor suite is yours to use"},
 	{"id": "logistics", "name": "Skyport Logistics Warehouse", "kind": "warehouse", "price": 260000.0, "units": 1, "rent": 0.0, "upkeep": 45.0,
-		"at": Vector3(2400, 3, -170), "desc": "Free local delivery for every import"},
+		"at": Vector3(2400, 3, -110), "desc": "Free local delivery for every import"},
 	{"id": "hangar2", "name": "Hangar 2", "kind": "hangar", "price": 350000.0, "units": 1, "rent": 0.0, "upkeep": 60.0,
 		"at": Vector3(1756, 3, 240), "desc": "Your own hangar: no hangar fees for your aircraft"},
 	{"id": "berths", "name": "Marina Berths", "kind": "berths", "price": 180000.0, "units": 12, "rent": 16.0, "upkeep": 30.0,
-		"at": Vector3(1340, 0, -300), "desc": "Twelve berths: rent them out, moor free yourself"}
+		"at": Vector3(1340, 0, -250), "desc": "Twelve berths: rent them out, moor free yourself"}
 ]
 ## Homes that come with a building (the hotel's top-floor suite, the
 ## flats' show flat): owning the building gives you the home's keys.
