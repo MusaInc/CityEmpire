@@ -1,8 +1,8 @@
 // Sea, strait and dock water. Still no screen-space reads (cheap on mobile):
-//  * swell: four travelling sine wave trains in different directions with
-//    analytic slopes (crisp, coherent waves instead of blurry noise), plus
-//    two scrolling noise octaves of chop up close; all fade with distance so
-//    the far sea doesn't shimmer;
+//  * swell: ten wave trains spread round a veering wind, wavelengths with
+//    no common ratios and deep-water speeds (so they never settle into a
+//    grid), each rising and falling in drifting groups; gradient-noise chop
+//    up close; all fade with distance so the far sea doesn't shimmer;
 //  * colour: a deep blue-green body, lighter turquoise where the light comes
 //    through wave crests facing the sun, darker in the troughs;
 //  * reflection: the sky gradient (sky_top / sky_horizon) by Schlick fresnel,
@@ -48,6 +48,23 @@ float vnoise(vec2 p) {
 	return mix(mix(hash12(i), hash12(i + vec2(1, 0)), f.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), f.x), f.y);
 }
 
+// Gradient noise (smooth, no value-noise blockiness), in [-1, 1]-ish.
+vec2 grad2(vec2 i) {
+	// (No trig: two hashes, roughly unit length – cheap on mobile.)
+	return vec2(hash12(i), hash12(i + 19.19)) * 2.0 - 1.0;
+}
+
+float gnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+	float a = dot(grad2(i), f);
+	float b = dot(grad2(i + vec2(1, 0)), f - vec2(1, 0));
+	float c = dot(grad2(i + vec2(0, 1)), f - vec2(0, 1));
+	float d = dot(grad2(i + vec2(1, 1)), f - vec2(1, 1));
+	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y) * 1.6;
+}
+
 // One wave train: height and its slope (d/dx, d/dz).
 vec3 wave(vec2 p, vec2 dir, float len, float amp, float speed) {
 	float k = 6.28318 / len;
@@ -89,18 +106,45 @@ void fragment() {
 	// than the water is deep).
 	float calm = mix(0.2, 1.0, smoothstep(0.8, 9.0, depth));
 	float sw = (1.0 + 0.8 * blow) * patchy * calm;
-	// Each train fades out once a pixel covers a good part of its
-	// wavelength (seen from altitude or far off they'd alias into moiré).
+	// The swell: ten trains spread round a slowly veering wind (golden-angle
+	// spread, so no two line up), wavelengths 41 m → 2 m in steps of ×0.74
+	// (no common ratios: the trains never fall into a grid), each moving at
+	// its own deep-water speed (√(gL/2π) – slower in the shallows), and each
+	// rising and falling in slow-drifting groups. A train fades out once a
+	// pixel covers a good part of its wavelength (no moiré from altitude).
 	float fp = length(fwidth(p0)) + 0.001;
-	vec3 w = wave(p, normalize(vec2(1.0, 0.35)), 23.0, 0.55 * sw, 2.4) * (1.0 - smoothstep(1.2, 5.0, fp));
-	w += wave(p, normalize(vec2(0.6, -1.0)), 13.0, 0.32 * sw, 1.9) * (1.0 - smoothstep(0.7, 2.8, fp));
-	w += wave(p, normalize(vec2(-0.85, 0.5)), 7.3, 0.18 * sw, 1.5) * (1.0 - smoothstep(0.4, 1.6, fp));
-	w += wave(p, normalize(vec2(0.2, 1.0)), 3.9, 0.09 * sw, 1.1) * near * (1.0 - smoothstep(0.2, 0.8, fp));
-	// Chop up close (and rain pock-marks).
-	float e = 0.35;
-	vec2 q = p * 0.55 + vec2(TIME * 0.21, TIME * 0.13);
-	float c0 = vnoise(q);
-	vec2 chop = vec2(vnoise(q + vec2(e, 0.0)) - c0, vnoise(q + vec2(0.0, e)) - c0) / e * 0.22;
+	float wind = 0.62 + 0.25 * sin(TIME * 0.011) + 0.35 * (gnoise(p0 * 0.0007) );
+	vec3 w = vec3(0.0);
+	float amp_sum = 0.0;
+	float L = 41.0;
+	for (int i = 0; i < 10; i++) {
+		float fi = float(i);
+		float ang = wind + (fract(fi * 0.618034) - 0.5) * mix(1.6, 2.4, fi / 9.0);
+		vec2 dir = vec2(cos(ang), sin(ang));
+		float c = sqrt(9.81 * L / 6.28318);
+		c = min(c, sqrt(9.81 * max(depth, 0.4)));            // (shallow water slows it)
+		// (Groups are 150 m+ across: the cheap value noise is smooth enough.)
+		float group = 0.45 + 0.9 * vnoise(p0 * (0.004 + 0.0013 * fi) + dir * TIME * 0.02 + fi * 7.3);
+		float a = L * 0.021 * sw * group * (i < 3 ? 1.0 : 0.85);
+		float fade = 1.0 - smoothstep(L * 0.05, L * 0.2, fp);
+		if (i >= 7) {
+			fade *= near;
+		}
+		w += wave(p, dir, L, a, c) * fade;
+		amp_sum += a * fade;
+		L *= 0.74;
+	}
+	// Normalise the crest height for colour and foam (≈ the old 0–1.1 range).
+	w.x *= 1.1 / max(amp_sum, 0.01) * min(amp_sum, 1.2);
+	// Chop up close (smooth gradient noise, two octaves drifting with the
+	// wind) and rain pock-marks.
+	vec2 wd = vec2(cos(wind), sin(wind));
+	float e = 0.3;
+	vec2 q = p * 0.5 + wd * TIME * 0.35;
+	vec2 q3 = p * 1.3 + vec2(-wd.y, wd.x) * TIME * 0.22 + 31.0;
+	float c0 = gnoise(q) + 0.5 * gnoise(q3);
+	vec2 chop = vec2(gnoise(q + vec2(e, 0.0)) + 0.5 * gnoise(q3 + vec2(e, 0.0)) - c0,
+		gnoise(q + vec2(0.0, e)) + 0.5 * gnoise(q3 + vec2(0.0, e)) - c0) / e * 0.09 * (1.0 + 0.8 * blow);
 	vec2 q2 = p * 2.3 - vec2(TIME * 1.4, -TIME * 1.1);
 	float r0 = vnoise(q2);
 	vec2 pock = vec2(vnoise(q2 + vec2(0.3, 0.0)) - r0, vnoise(q2 + vec2(0.0, 0.3)) - r0) * 0.5 * blow;
@@ -110,6 +154,10 @@ void fragment() {
 	// (Over the shallows the surface is glassier still: no swell grid over
 	// a bright sandy floor.)
 	slope *= mix(0.35, 1.0, smoothstep(1.0, 10.0, depth));
+	// (At grazing angles a pixel spans metres along the view: the slopes
+	// alias into streaks along the horizon – soften them there.)
+	float graze = normalize(CAMERA_POSITION_WORLD - v_world).y;
+	slope *= mix(0.4, 1.0, smoothstep(0.04, 0.3, graze));
 	vec3 nw = normalize(vec3(-slope.x, 1.0, -slope.y));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 
@@ -131,7 +179,7 @@ void fragment() {
 	// Sun: a tight highlight and a wider glitter path on the facets.
 	float sd = max(dot(r, sun_dir), 0.0);
 	float day = clamp(sun_dir.y * 4.0, 0.0, 1.0) * (1.0 - night) * (1.0 - 0.85 * blow);
-	float glint = pow(sd, 900.0) * 30.0 + pow(sd, 90.0) * 1.6 * (0.4 + 0.6 * vnoise(p * 1.7 + TIME * 0.8)) * near;
+	float glint = pow(sd, 900.0) * 30.0 + pow(sd, 90.0) * 1.6 * (0.4 + 0.6 * clamp(gnoise(p * 1.7 + TIME * 0.8) * 0.5 + 0.5, 0.0, 1.0)) * near;
 	vec3 sun_col = mix(vec3(1.0, 0.72, 0.45), vec3(1.0, 0.96, 0.88), clamp(sun_dir.y * 2.5, 0.0, 1.0));
 
 	// Whitecaps on the steepest crests when it blows (and a few on a calm day).
