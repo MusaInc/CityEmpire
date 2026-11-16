@@ -11,14 +11,14 @@ extends Node3D
 ##
 ## height_at() is pure (no scene access) so tests/tools can sample it.
 
-const BAY_C := Vector2(-80.0, 0.0)   # bay ellipse centre (x, z)
-const BAY_R := Vector2(1950.0, 1450.0)
+const BAY_C := Vector2(-80.0, 420.0)   # bay ellipse centre (x, z): south far enough for Skyport Island
+const BAY_R := Vector2(2000.0, 1960.0)
 const EXTENT := Rect2(-5600.0, -4600.0, 9800.0, 9200.0)
 const CELL := 45.0
 ## Trees on the foothills facing the city (instanced cones), so the hills'
 ## outline and slopes read as land, not a smooth sheet.
 const TREES := 5200
-const TREE_REACH := 3300.0          # m from the bay centre
+const TREE_REACH := 4400.0          # m from the bay centre
 const SEA_Y := -1.6
 
 

@@ -37,10 +37,21 @@ const DETAIL_RANGE := 650.0
 const NEAR_LOAD := 1200.0
 const NEAR_FREE := 2000.0
 const FAR_RANGE := 5200.0
-const BRIDGE_ISLAND_X := 1560.0        # where the bridge road becomes Skyport Avenue (graph)
-const DECK_END := 1432.0               # the deck lands on the shore here (road on land beyond)
-const PYLONS := [1135.0, 1285.0]       # cable-stayed pylons (in the water)
-const PYLON_TOP := 128.0
+const BRIDGE_ISLAND_X := 1560.0        # Skyport Avenue's first junction east of Bridge Road (local)
+const QUAY_X := 1424.0                 # local: the north quay the bridges land on (world z ≈ 992)
+const BRIDGE_ROAD_X := 1446.0          # local: Bridge Road, along the quay
+## Local z of the two landings on the quay: [to the Commercial Island
+## (north-east), to Westbank (north-west)].
+const LANDINGS := [-106.0, 34.0]
+## Each bridge: [name, landing index, world point near where it should leave
+## the city, which city ("island" | "mainland")]. The city end is the nearest
+## point of that city's coast road to the hint, so it meets a real street.
+const BRIDGES := [
+	["Harbour Bridge", 0, Vector2(200.0, 585.0), "island"],
+	["Westbank Bridge", 1, Vector2(-560.0, 458.0), "mainland"],
+]
+const BRIDGE_CREST := 16.0             # deck height at mid-span (boats pass under)
+const BRIDGE_W := 22.0
 const RUNWAY := {"from": Vector3(1430.0, LAND_Y, 470.0), "to": Vector3(2430.0, LAND_Y, 470.0), "w": 45.0}
 const COL_PAVE := Color(0.56, 0.56, 0.55)
 const COL_GRASS := Color(0.33, 0.47, 0.26)
@@ -50,10 +61,191 @@ const COL_RUNWAY := Color(0.26, 0.26, 0.27)
 
 static var enabled := false
 static var _plan := {}
+
+# ------------------------------------------------------------ placement
+## The island is designed (and built) in its own LOCAL coordinates – every
+## number in this file – and placed in the world by one transform: a quarter
+## turn and a move south of the strait, so it sits under both city islands
+## (Westbank to its north-west, the Commercial Island to its north-east) with
+## its old west shore, the bridge landing, facing them. Local (x, z) → world
+## (ORIGIN.x − (z − PIVOT.y), ORIGIN.y + (x − PIVOT.x)). The node carries the
+## transform, so meshes and collision need nothing; anything that leaves this
+## file (plan data, lanes, sites, the map) goes through w() / l().
+const PIVOT := Vector2(1432.0, -36.0)     # local: the bridge landing
+const ORIGIN := Vector2(-200.0, 950.0)    # world: where the landing sits
+const YAW := -PI * 0.5                     # local +x → world +z
+
+
+## The local → world transform (for the node and for conversions).
+static func xform() -> Transform3D:
+	var b := Basis(Vector3.UP, YAW)
+	return Transform3D(b, Vector3(ORIGIN.x, 0.0, ORIGIN.y) - b * Vector3(PIVOT.x, 0.0, PIVOT.y))
+
+
+## Local point → world.
+static func w(v: Vector3) -> Vector3:
+	return Vector3(ORIGIN.x - (v.z - PIVOT.y), v.y, ORIGIN.y + (v.x - PIVOT.x))
+
+
+## World point → local.
+static func l(v: Vector3) -> Vector3:
+	return Vector3(PIVOT.x + (v.z - ORIGIN.y), v.y, PIVOT.y - (v.x - ORIGIN.x))
+
+
+static func w2(v: Vector2) -> Vector2:
+	return Vector2(ORIGIN.x - (v.y - PIVOT.y), ORIGIN.y + (v.x - PIVOT.x))
+
+
+static func l2(v: Vector2) -> Vector2:
+	return Vector2(PIVOT.x + (v.y - ORIGIN.y), PIVOT.y - (v.x - ORIGIN.x))
+
+
+## Local direction → world (no translation).
+static func wd(v: Vector3) -> Vector3:
+	return Vector3(-v.z, v.y, v.x)
+
+
+## Local yaw (rotation about +Y) → world yaw.
+static func wyaw(a: float) -> float:
+	return a + YAW
+
+
+## Local axis-aligned rect → world (still axis-aligned: a quarter turn).
+static func wrect(r: Rect2) -> Rect2:
+	var a := w2(r.position)
+	var b := w2(r.end)
+	return Rect2(Vector2(minf(a.x, b.x), minf(a.y, b.y)), (a - b).abs())
+
+
+static func wpoly(poly: PackedVector2Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for v in poly:
+		out.append(w2(v))
+	return out
+
+
+static func wpts(pts: PackedVector3Array) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for v in pts:
+		out.append(w(v))
+	return out
+
+
+## A building tier [x0, z0, x1, z1, y0, y1] → world (still a box).
+static func wtier(t: Array) -> Array:
+	var r := wrect(Rect2(float(t[0]), float(t[1]), float(t[2]) - float(t[0]), float(t[3]) - float(t[1])))
+	var out := [r.position.x, r.position.y, r.end.x, r.end.y, t[4], t[5]]
+	return out
+
+
+## A building record with its tiers in world coordinates.
+static func wbuilding(b: Dictionary) -> Dictionary:
+	var c := b.duplicate()
+	var ts: Array = []
+	for t: Array in b["tiers"]:
+		ts.append(wtier(t))
+	c["tiers"] = ts
+	return c
+
+
+## A home record (Apartments-style) in world coordinates: the building's
+## tiers turned, and its face index with them – BuildingMesher._face runs
+## round a box counter-clockwise from the +z side, and the quarter turn takes
+## local face k to world face k + 3 with the same start corner, so every
+## along-the-face measure stays as it is.
+static func whome(h: Dictionary) -> Dictionary:
+	var c := h.duplicate()
+	c["b"] = wbuilding(h["b"])
+	c["face"] = (int(h["face"]) + 3) % 4
+	c["wins"] = Apartments.facade_windows(c)
+	if h.has("lift"):
+		c["lift"] = w(h["lift"])
+	return c
+
+
+## The plan's places in WORLD coordinates, for games (sites, stands,
+## berths, helipads, piers, the penthouse pad, homes, buildings, runway,
+## roads). Yaws are world yaws; piers are [min corner, max corner].
+static func world_plan(P: Dictionary) -> Dictionary:
+	var W := {}
+	var sites := {}
+	for k in P["sites"]:
+		var d: Dictionary = (P["sites"][k] as Dictionary).duplicate()
+		d["door"] = w(d["door"])
+		if d.has("lot"):
+			d["lot"] = wrect(d["lot"])
+		if d.has("face"):
+			d["face"] = wd(d["face"])
+		sites[k] = d
+	W["sites"] = sites
+	var yawed := func(list: Array) -> Array:
+		var out: Array = []
+		for it: Array in list:
+			out.append([w(it[0]), wyaw(float(it[1]))])
+		return out
+	W["stands"] = yawed.call(P["stands"])
+	W["berths"] = yawed.call(P["berths"])
+	var pads: Array = []
+	for v: Vector3 in P["helipads"]:
+		pads.append(w(v))
+	W["helipads"] = pads
+	var piers: Array = []
+	for pr: Array in P["piers"]:
+		var a := w(pr[0])
+		var b := w(pr[1])
+		piers.append([Vector3(minf(a.x, b.x), minf(a.y, b.y), minf(a.z, b.z)), Vector3(maxf(a.x, b.x), maxf(a.y, b.y), maxf(a.z, b.z))])
+	W["piers"] = piers
+	W["penthouse"] = {"pad": w(P["penthouse"]["pad"])}
+	var bs: Array = []
+	for b: Dictionary in P["buildings"]:
+		bs.append(wbuilding(b))
+	W["buildings"] = bs
+	var hs: Array = []
+	for h: Dictionary in P.get("homes", []):
+		hs.append(whome(h))
+	W["homes"] = hs
+	var rw: Dictionary = P["runway"]
+	W["runway"] = {"from": w(rw["from"]), "to": w(rw["to"]), "w": rw["w"]}
+	var roads: Array = []
+	for r in P["roads"]:
+		roads.append([r[0], wpts(r[1]), r[2], r[3]])
+	for B: Dictionary in P["bridges"]:
+		roads.append([B["name"], B["pts"], BRIDGE_W, true])
+	W["roads"] = roads
+	var strips: Array = []
+	for st in P["strips"]:
+		strips.append([st[0], w(st[1]), w(st[2]), st[3]])
+	W["strips"] = strips
+	W["bridges"] = P["bridges"]
+	return W
+
+
+## Saves from before the island moved (save v5 and older): Skyport was
+## built in world space east of the Commercial Island, joined by a bridge
+## off its east cliffs. A position there – a parked car, a moored boat, an
+## aircraft on a stand, the player – maps to the same place on the island
+## now (old world = local), and one on the old bridge to the new bridge
+## quay. Elsewhere it's returned unchanged.
+static func was_old_site(p: Vector3) -> bool:
+	return p.x > 1040.0 and p.z > -820.0 and p.z < 820.0
+
+
+static func migrate_point(p: Vector3) -> Vector3:
+	if not was_old_site(p):
+		return p
+	if p.x < QUAY_X and absf(p.z - PIVOT.y) < 30.0:
+		return w(Vector3(BRIDGE_ROAD_X + 30.0, LAND_Y + 0.5, PIVOT.y + clampf(p.z - PIVOT.y, -8.0, 8.0)))
+	return w(p)
+
+
+## The coastline in world coordinates.
+static func world_outline() -> PackedVector2Array:
+	return wpoly(outline())
 static var _outline := PackedVector2Array()
 static var _bbox := Rect2()
 
-var plan_data := {}
+var plan_data := {}   # the plan, LOCAL coordinates (this file builds from it)
+var wplan := {}       # the same for games, WORLD coordinates (world_plan())
 var world_ref: Node   # CityWorld (materials)
 var body: StaticBody3D          # detail collision (near content)
 var street: StaticBody3D        # land, roads, bridge deck (always)
@@ -72,28 +264,74 @@ var viewer: Callable
 ## the high-rise district and port in the north, the airport in the south –
 ## pinched in the middle by a west cove (south of the bridge) and a sheltered
 ## east inlet, so the island reads as a landform, not a slab.
-const COAST := [
-	[Vector2(1372, -604), "rock"], [Vector2(1330, -676), "rock"], [Vector2(1352, -744), "rock"],
-	[Vector2(1428, -766), "rock"], [Vector2(1500, -730), "beach"], [Vector2(1560, -706), "rock"], [Vector2(1662, -722), "rock"], [Vector2(1770, -692), "beach"],
-	[Vector2(1872, -674), "beach"], [Vector2(1928, -640), "beach"], [Vector2(1970, -668), "rock"],
-	[Vector2(2050, -676), "quay"], [Vector2(2448, -676), "quay"], [Vector2(2498, -640), "rock"],
-	[Vector2(2520, -520), "rock"], [Vector2(2502, -400), "rock"], [Vector2(2530, -262), "rock"], [Vector2(2512, -120), "rock"],
-	[Vector2(2482, -36), "rock"], [Vector2(2410, -12), "beach"], [Vector2(2290, -8), "beach"],
-	[Vector2(2180, -2), "beach"], [Vector2(2116, 30), "beach"], [Vector2(2110, 82), "beach"], [Vector2(2164, 120), "beach"],
-	[Vector2(2290, 126), "beach"], [Vector2(2410, 126), "rock"], [Vector2(2486, 160), "rock"], [Vector2(2512, 290), "rock"],
-	[Vector2(2546, 430), "rock"], [Vector2(2546, 548), "rock"], [Vector2(2574, 626), "rock"],
-	[Vector2(2604, 700), "rock"], [Vector2(2560, 742), "rock"], [Vector2(2470, 712), "rock"],
-	[Vector2(2410, 668), "beach"], [Vector2(2346, 640), "beach"], [Vector2(2230, 598), "beach"], [Vector2(2090, 572), "beach"],
-	[Vector2(1950, 566), "beach"], [Vector2(1810, 580), "beach"], [Vector2(1700, 614), "rock"],
-	[Vector2(1606, 664), "rock"], [Vector2(1494, 676), "rock"], [Vector2(1400, 676), "rock"],
-	[Vector2(1312, 724), "rock"], [Vector2(1236, 716), "rock"], [Vector2(1204, 664), "rock"],
-	[Vector2(1236, 612), "beach"], [Vector2(1290, 586), "beach"], [Vector2(1330, 530), "rock"],
-	[Vector2(1346, 440), "rock"], [Vector2(1352, 330), "rock"], [Vector2(1384, 214), "beach"],
-	[Vector2(1452, 170), "beach"], [Vector2(1544, 152), "beach"], [Vector2(1612, 98), "beach"],
-	[Vector2(1574, 30), "beach"], [Vector2(1478, 4), "rock"], [Vector2(1424, -8), "quay"],
-	[Vector2(1424, -64), "rock"], [Vector2(1402, -120), "rock"], [Vector2(1386, -215), "quay"],
-	[Vector2(1386, -365), "rock"], [Vector2(1370, -440), "rock"], [Vector2(1346, -530), "rock"],
-]
+## The coastline, drawn in WORLD coordinates (north up) as control points,
+## each with the kind of shore on the stretch that starts there: "quay"
+## (engineered, straight), "beach" (sand sloping into the sea), "rock" (a
+## boulder revetment). Only three stretches are straight – the bridge quay
+## both bridges land on, the marina quay and the container port – the rest
+## is land drawn round the airport and districts, not trimmed to them: a
+## lobe reaching up toward each city either side of the bridges, a bay on
+## the east between the towers and the port, rocky points and beaches along
+## the south, and a broad headland off the runway's west side.
+## (Converted to local by l2(); outline() works in local like everything here.)
+const Q_Z := 942.0     # world z of the bridge quay (local x QUAY_X)
+const M_Z := 904.0     # world z of the marina quay (local x 1386)
+const P_X := 440.0     # world x of the container port quay (local z -676)
+static func coast_points() -> Array:
+	return [
+	[l2(Vector2(-860, 930)), "rock"],
+	[l2(Vector2(-832, 850)), "rock"],
+	[l2(Vector2(-770, 786)), "rock"],
+	[l2(Vector2(-700, 762)), "rock"],
+	[l2(Vector2(-628, 784)), "beach"],
+	[l2(Vector2(-540, 828)), "beach"],
+	[l2(Vector2(-440, 886)), "beach"],
+	[l2(Vector2(-360, 922)), "rock"],
+	[l2(Vector2(-342.0, Q_Z)), "quay"],
+	[l2(Vector2(-58.0, Q_Z)), "rock"],
+	[l2(Vector2(-62, 928)), "rock"],
+	[l2(Vector2(-30.0, M_Z)), "quay"],
+	[l2(Vector2(140.0, M_Z)), "rock"],
+	[l2(Vector2(180, 870)), "rock"],
+	[l2(Vector2(262, 812)), "rock"],
+	[l2(Vector2(350, 762)), "rock"],
+	[l2(Vector2(430, 758)), "beach"],
+	[l2(Vector2(500, 796)), "beach"],
+	[l2(Vector2(548, 876)), "rock"],
+	[l2(Vector2(572, 990)), "rock"],
+	[l2(Vector2(548, 1114)), "beach"],
+	[l2(Vector2(468, 1196)), "beach"],
+	[l2(Vector2(420, 1280)), "beach"],
+	[l2(Vector2(440, 1370)), "beach"],
+	[l2(Vector2(500, 1446)), "rock"],
+	[l2(Vector2(488, 1524)), "rock"],
+	[l2(Vector2(P_X, 1560)), "quay"],
+	[l2(Vector2(P_X, 1966)), "rock"],
+	[l2(Vector2(506, 2030)), "rock"],
+	[l2(Vector2(568, 2100)), "rock"],
+	[l2(Vector2(548, 2190)), "rock"],
+	[l2(Vector2(450, 2212)), "rock"],
+	[l2(Vector2(330, 2150)), "beach"],
+	[l2(Vector2(180, 2090)), "beach"],
+	[l2(Vector2(40, 2110)), "rock"],
+	[l2(Vector2(-60, 2186)), "rock"],
+	[l2(Vector2(-150, 2200)), "rock"],
+	[l2(Vector2(-240, 2136)), "beach"],
+	[l2(Vector2(-380, 2070)), "beach"],
+	[l2(Vector2(-520, 2080)), "rock"],
+	[l2(Vector2(-620, 2130)), "rock"],
+	[l2(Vector2(-730, 2140)), "rock"],
+	[l2(Vector2(-830, 2090)), "rock"],
+	[l2(Vector2(-890, 1990)), "rock"],
+	[l2(Vector2(-880, 1850)), "beach"],
+	[l2(Vector2(-900, 1710)), "beach"],
+	[l2(Vector2(-960, 1590)), "rock"],
+	[l2(Vector2(-1010, 1470)), "rock"],
+	[l2(Vector2(-990, 1360)), "rock"],
+	[l2(Vector2(-930, 1270)), "beach"],
+	[l2(Vector2(-890, 1160)), "beach"],
+	[l2(Vector2(-902, 1040)), "rock"],
+	]
 static var _shore_kind := PackedByteArray()   # per outline point: 0 quay, 1 beach, 2 rock (the edge starting there)
 
 
@@ -102,6 +340,7 @@ static func outline() -> PackedVector2Array:
 		# Natural stretches: a Catmull-Rom curve through the control points,
 		# every ~10 m, with a little irregularity (more on rock than sand);
 		# quays stay straight.
+		var COAST := coast_points()
 		var n := COAST.size()
 		var pts := PackedVector2Array()
 		var kinds := PackedByteArray()
@@ -161,9 +400,15 @@ static func _catmull(p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, t: floa
 	return 0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
 
 
+## Is world (x, z) on the island?
 static func contains(x: float, z: float) -> bool:
 	if not enabled:
 		return false
+	var q := l2(Vector2(x, z))
+	return contains_local(q.x, q.y)
+
+
+static func contains_local(x: float, z: float) -> bool:
 	outline()
 	if not _bbox.has_point(Vector2(x, z)):
 		return false
@@ -180,27 +425,46 @@ static func _shore_dist(q: Vector2) -> float:
 	return best
 
 
+## Ground height at world (x, z) (NAN off the island).
 static func ground_y(x: float, z: float) -> float:
-	return LAND_Y + knoll_h(x, z) if contains(x, z) else NAN
+	if not enabled:
+		return NAN
+	var q := l2(Vector2(x, z))
+	return ground_y_local(q.x, q.y)
+
+
+static func ground_y_local(x: float, z: float) -> float:
+	return LAND_Y + knoll_h(x, z) if contains_local(x, z) else NAN
 
 
 ## Grassy knolls on the open ground (headlands and the park west of the
 ## terminal): [centre, radius x, radius z, height]. The developed land –
 ## roads, aprons, the runway, every building's forecourt – stays level; these
 ## sit only where nothing is built, clear of the shore bands.
-const KNOLLS := [
-	[Vector2(1400, -700), 52.0, 40.0, 9.0],    # North Head
-	[Vector2(1262, 668), 46.0, 34.0, 7.5],     # Runway Point (the south-west hook)
-	[Vector2(2548, 690), 40.0, 30.0, 6.5],     # Signal Point (the south-east point)
-	[Vector2(1478, 300), 66.0, 56.0, 7.0],     # Skyport Park hill
-	[Vector2(2482, 370), 26.0, 50.0, 4.5],     # the east bluff
+## Knolls, WORLD coordinates: [centre, radius east-west, radius north-south, height].
+const KNOLLS_W := [
+	[Vector2(-740, 810), 48.0, 36.0, 8.0],     # the north-west lobe (toward Westbank)
+	[Vector2(390, 790), 54.0, 36.0, 9.0],      # the north-east lobe (toward the city)
+	[Vector2(-536, 946), 56.0, 66.0, 7.0],     # Skyport Park hill
+	[Vector2(-948, 1430), 40.0, 70.0, 8.0],    # the west headland
+	[Vector2(500, 2120), 40.0, 44.0, 6.5],     # the south-east point
+	[Vector2(-110, 2150), 44.0, 30.0, 6.0],    # the south point
 ]
+static var _knolls: Array = []
+
+
+## The knolls in local terms: [centre, radius along local x, along local z, height].
+static func knolls() -> Array:
+	if _knolls.is_empty():
+		for k: Array in KNOLLS_W:
+			_knolls.append([l2(k[0]), float(k[2]), float(k[1]), float(k[3])])
+	return _knolls
 
 
 ## Height of the knolls above LAND_Y at (x, z) (0 off them).
 static func knoll_h(x: float, z: float) -> float:
 	var h := 0.0
-	for k: Array in KNOLLS:
+	for k: Array in knolls():
 		var c: Vector2 = k[0]
 		var dx := (x - c.x) / float(k[1])
 		var dz := (z - c.y) / float(k[2])
@@ -218,11 +482,9 @@ static func knoll_h(x: float, z: float) -> float:
 static func plan(layout: CityLayout) -> Dictionary:
 	if not _plan.is_empty():
 		return _plan
-	var e := _city_end(layout)
-	var a_end := _avenue_end(layout, e)
-	e.y = maxf(e.y, _ramp_top(layout, a_end))   # (deck start = the ramp's top)
-	var z0 := e.z
+	var z0 := PIVOT.y
 	var P := {}
+	var J := Vector3(BRIDGE_ROAD_X, LAND_Y, z0)     # Bridge Road meets the avenue
 	var A := Vector3(BRIDGE_ISLAND_X, LAND_Y, z0)
 	var B := Vector3(1610.0, LAND_Y, z0)
 	var H := Vector3(1890.0, LAND_Y, z0)
@@ -231,14 +493,12 @@ static func plan(layout: CityLayout) -> Dictionary:
 	var T1 := Vector3(1610.0, LAND_Y, -300.0)
 	var I := Vector3(1890.0, LAND_Y, 110.0)
 	var y := func(x: float, zz: float) -> Vector3: return Vector3(x, LAND_Y, zz)
-	# Roads: [name, points, width]. Junctions are shared end points.
-	var bridge_pts := PackedVector3Array()
-	var n := 40
-	for i in n + 1:
-		var x := lerpf(e.x, A.x, float(i) / n)
-		bridge_pts.append(Vector3(x, bridge_y(e, x), z0))
+	# Roads: [name, points, width, on a bridge]. Junctions are shared end
+	# points. (The bridges themselves are world-space: P["bridges"].)
 	var roads: Array = [
-		["Skyport Bridge", bridge_pts, 22.0, true],
+		["Bridge Road", PackedVector3Array([y.call(BRIDGE_ROAD_X, LANDINGS[0]), J]), 18.0, false],
+		["Bridge Road", PackedVector3Array([J, y.call(BRIDGE_ROAD_X, LANDINGS[1])]), 18.0, false],
+		["Skyport Avenue", PackedVector3Array([J, A]), 22.0, false],
 		["Skyport Avenue", PackedVector3Array([A, B]), 22.0, false],
 		["Skyport Avenue", PackedVector3Array([B, H]), 22.0, false],
 		["Skyport Avenue", PackedVector3Array([H, C]), 22.0, false],
@@ -254,11 +514,8 @@ static func plan(layout: CityLayout) -> Dictionary:
 		["Hangar Lane", PackedVector3Array([I, y.call(1700.0, 112.0), y.call(1648.0, 150.0)]), 12.0, false],
 	]
 	P["roads"] = roads
-	P["city_end"] = e
-	P["avenue_end"] = a_end
-	# The railing opening over the esplanade's sea wall, the bridge's width.
-	P["rail_gap"] = Rect2(e.x - 30.0, e.z - 13.5, 60.0, 27.0)
-	P["bridge_foot"] = A
+	P["bridges"] = _plan_bridges(layout)
+	P["bridge_foot"] = J
 	# Surfaces (areas): [kind, polygon, colour]. Kinds as island_ground.gdshader.
 	var areas: Array = []
 	var grass := Geometry2D.intersect_polygons(_rect(1390, 410, 2470, 600), outline())
@@ -317,94 +574,135 @@ static func _rect(x0: float, z0: float, x1: float, z1: float) -> PackedVector2Ar
 	return PackedVector2Array([Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)])
 
 
-## Where the avenue's asphalt ends (the esplanade's inner edge) on the way
-## to the bridge: the ramp over the esplanade runs from here to city_end.
-static func _avenue_end(layout: CityLayout, e: Vector3) -> Vector3:
-	var x := e.x
-	while x > e.x - 60.0 and layout.block_at(x, e.z) >= 0:
-		x -= 0.5
-	return Vector3(x, layout.ground_y(x + 0.6, e.z), e.z)
-
-
-## The ramp that carries the avenue up its kerb onto the esplanade and on
-## to the deck: [start on the asphalt, top of the kerb, deck start].
-## The ramp's run up to the esplanade: the avenue is cambered, so the deck
-## (at its highest point across the width) sits up to ~0.9 m above the low
-## lanes; over 7 m that was a 17% kick that threw cars at speed. 28 m ≈ 3%.
+## The ramp's run from the coast road up its kerb onto the esplanade and on
+## to the deck: the road is cambered, so the deck (at its highest point
+## across the width) sits up to ~0.9 m above the low lanes; over 28 m that's
+## about 3% (7 m was a 17% kick that threw cars at speed).
 const RAMP_RUN := 28.0
 
 
-static func ramp_points(P: Dictionary, layout: CityLayout) -> PackedVector3Array:
-	var a0: Vector3 = P["avenue_end"]
-	var e: Vector3 = P["city_end"]
-	# Across its 22 m the avenue isn't level: start just under the lowest
-	# point of the asphalt (it emerges from the road, never a lip), meet the
-	# esplanade at its highest point (the pavement never pokes through).
-	var lo := INF
-	for dz: float in [-11.0, -5.5, 0.0, 5.5, 11.0]:
-		lo = minf(lo, layout.terrain.road_y(a0.x - RAMP_RUN, a0.z + dz))
-	var s0 := Vector3(a0.x - RAMP_RUN, lo - 0.03, a0.z)
-	var top := _ramp_top(layout, a0)
-	return PackedVector3Array([s0, Vector3(a0.x, top, a0.z), Vector3(e.x, e.y, e.z)])
+## The bridges, world space. Each: {name, city ("island" | "mainland"),
+## s0 (ramp start on the coast road's asphalt), a0 (the asphalt's edge),
+## S (deck start at the sea wall), F (landing on the north quay), Jw (Bridge
+## Road), u (unit direction S → F, horizontal), L (S → F, horizontal), y0
+## (deck height at S), pts (driving centreline s0 … Jw), rail_gap}.
+static func _plan_bridges(layout: CityLayout) -> Array:
+	var out: Array = []
+	if layout == null:
+		return out
+	for bd: Array in BRIDGES:
+		var lz: float = LANDINGS[int(bd[1])]
+		var F := w(Vector3(QUAY_X, LAND_Y, lz))
+		var Jw := w(Vector3(BRIDGE_ROAD_X, LAND_Y, lz))
+		var city: CityLayout = layout if String(bd[3]) == "island" else layout.mainland
+		var R := _coast_road_point(city, bd[2])
+		var u2 := (Vector2(F.x, F.z) - R).normalized()
+		# Out from the road to the sea wall; the deck starts 4 m short of it.
+		var q := R
+		while not layout.is_water(Vector3(q.x, 0.0, q.y)) and q.distance_to(R) < 240.0:
+			q += u2 * 0.5
+		var S2 := q - u2 * 4.0
+		# Back from there over the esplanade to the asphalt's edge.
+		var a2 := S2
+		while city.block_at(a2.x, a2.y) >= 0 and a2.distance_to(S2) < 70.0:
+			a2 -= u2 * 0.5
+		var n2 := Vector2(-u2.y, u2.x)
+		# The ramp: from just under the asphalt's lowest point across the
+		# road's width to the esplanade's highest point (no lip either end).
+		var s02 := a2 - u2 * RAMP_RUN
+		var lo := INF
+		var hi := -INF
+		for k: float in [-11.0, -5.5, 0.0, 5.5, 11.0]:
+			var c := s02 + n2 * k
+			lo = minf(lo, city.terrain.road_y(c.x, c.y))
+			var e2 := a2 + u2 * 0.6 + n2 * k
+			hi = maxf(hi, city.ground_y(e2.x, e2.y))
+		var y_es := maxf(hi + 0.01, city.ground_y(S2.x, S2.y))
+		var S := Vector3(S2.x, y_es, S2.y)
+		var L := Vector2(F.x - S.x, F.z - S.z).length()
+		var B := {"name": bd[0], "city": bd[3], "s0": Vector3(s02.x, lo - 0.03, s02.y),
+			"a0": Vector3(a2.x, hi + 0.01, a2.y), "S": S, "F": F, "Jw": Jw,
+			"u": Vector3(u2.x, 0.0, u2.y), "L": L, "y0": y_es}
+		var pts := PackedVector3Array([B["s0"], B["a0"]])
+		var n := maxi(24, int(L / 12.0))
+		for i in n + 1:
+			var sd := L * i / n
+			pts.append(S + Vector3(u2.x, 0.0, u2.y) * sd + Vector3.UP * (deck_y(B, sd) - S.y))
+		pts.append(Jw)
+		B["pts"] = pts
+		# The sea-wall railing opens where the ramp crosses it.
+		var gc := (a2 + S2) * 0.5
+		B["rail_gap"] = Rect2(gc - Vector2(30.0, 30.0), Vector2(60.0, 60.0))
+		out.append(B)
+	return out
 
 
-## The ramp's height over the esplanade: its highest point across the
-## road's width (the deck starts at this height too).
-static func _ramp_top(layout: CityLayout, a0: Vector3) -> float:
-	var hi := a0.y
-	for dz: float in [-11.0, -5.5, 0.0, 5.5, 11.0]:
-		hi = maxf(hi, layout.ground_y(a0.x + 0.6, a0.z + dz))
-	return hi + 0.01
+## The coast road's point nearest a hint (the ring, else any road).
+static func _coast_road_point(city: CityLayout, hint: Vector2) -> Vector2:
+	var best := hint
+	var bd := INF
+	for r: Dictionary in city.roads.roads:
+		var pts: PackedVector2Array = r["pts"]
+		var pen := 0.0 if String(r.get("name", "")) == "ring" else 60.0
+		for i in pts.size() - 1:
+			var c := Geometry2D.get_closest_point_to_segment(hint, pts[i], pts[i + 1])
+			var d := c.distance_to(hint) + pen
+			if d < bd:
+				bd = d
+				best = c
+	return best
 
 
-## The driving surface's height along the Skyport road (city avenue → ramp
-## over the esplanade → bridge deck → island). For audits and the bridge.
-static func road_y(layout: CityLayout, x: float, z: float) -> float:
-	var P := plan(layout)
-	var e: Vector3 = P["city_end"]
-	var rp := ramp_points(P, layout)
-	if x <= rp[0].x:
-		return layout.terrain.road_y(x, z)
-	if x <= rp[1].x:
-		# (The ramp emerges from the asphalt: the surface is whichever is higher.)
-		return maxf(layout.terrain.road_y(x, z), lerpf(rp[0].y, rp[1].y, (x - rp[0].x) / maxf(rp[1].x - rp[0].x, 0.01)))
-	if x <= e.x:
-		return lerpf(rp[1].y, rp[2].y, (x - rp[1].x) / maxf(rp[2].x - rp[1].x, 0.01))
-	return bridge_y(e, x)
+## Deck height s metres along a bridge from its sea-wall end: one steady
+## grade up to the crest at mid-span and down to the quay, each with eased
+## vertical curves over its first and last 12% (≤ ~7%: the old bridge's
+## hump threw cars at motorway speed).
+static func deck_y(B: Dictionary, sd: float) -> float:
+	var L: float = B["L"]
+	var y0: float = B["y0"]
+	var crest := maxf(BRIDGE_CREST, y0 + 4.0)
+	var mid := L * 0.5
+	if sd <= mid:
+		return lerpf(y0, crest, _ease_grade(clampf(sd / mid, 0.0, 1.0)))
+	return lerpf(crest, LAND_Y, _ease_grade(clampf((sd - mid) / (L - mid), 0.0, 1.0)))
 
 
-## Where the bridge meets the city: the last point of the "heights" avenue
-## that's still on the cliff top.
-static func _city_end(layout: CityLayout) -> Vector3:
-	var pts: PackedVector2Array = layout.roads.by_name["heights"]["pts"] if layout and layout.roads.by_name.has("heights") else PackedVector2Array()
-	var e := Vector2(1000.0, -18.0)
-	for p in pts:
-		if not layout.is_water(Vector3(p.x, 0.0, p.y)) and p.x > e.x - 40.0:
-			e = p
-	# Step back a few metres from the cliff edge; the deck starts at the
-	# esplanade's own surface there (it used to start at road level, a
-	# 0.24 m step up off the pavement).
-	var yv := layout.ground_y(e.x - 4.0, e.y) if layout else 30.0
-	return Vector3(e.x - 4.0, yv, e.y)
-
-
-## Deck height along the bridge: high over the strait (ships pass under the
-## main span), easing down onto the island.
-## The deck falls ~29 m over ~420 m. One steady grade (~7%) with eased
-## vertical curves over the first and last 12% (peak ~8%): the old hump +
-## smoothstep crested at x≈1160 and then fell at up to 16%, which threw
-## cars at motorway speed.
-static func bridge_y(e: Vector3, x: float) -> float:
-	var t := clampf((x - e.x) / (DECK_END - e.x), 0.0, 1.0)
+## 0 → 1 with a steady middle and eased (parabolic) ends: flat at both ends.
+static func _ease_grade(t: float) -> float:
 	const F := 0.12
-	var s: float
 	if t < F:
-		s = t * t / (2.0 * F * (1.0 - F))
-	elif t > 1.0 - F:
-		s = 1.0 - (1.0 - t) * (1.0 - t) / (2.0 * F * (1.0 - F))
-	else:
-		s = (t - F * 0.5) / (1.0 - F)
-	return lerpf(e.y, LAND_Y, s)
+		return t * t / (2.0 * F * (1.0 - F))
+	if t > 1.0 - F:
+		return 1.0 - (1.0 - t) * (1.0 - t) / (2.0 * F * (1.0 - F))
+	return (t - F * 0.5) / (1.0 - F)
+
+
+## The driving surface's height on a bridge's road at world (x, z) – the
+## ramp, the deck – or NAN if (x, z) isn't on one. For audits and cars.
+static func bridge_road_y(layout: CityLayout, x: float, z: float) -> float:
+	if not enabled:
+		return NAN
+	for B: Dictionary in plan(layout)["bridges"]:
+		var u: Vector3 = B["u"]
+		var s0: Vector3 = B["s0"]
+		var S: Vector3 = B["S"]
+		var rel := Vector2(x - S.x, z - S.z)
+		var along := rel.dot(Vector2(u.x, u.z))
+		var across := absf(rel.dot(Vector2(-u.z, u.x)))
+		if across > BRIDGE_W * 0.5 + 1.0:
+			continue
+		var a0: Vector3 = B["a0"]
+		var d_s0 := -Vector2(S.x - s0.x, S.z - s0.z).length()
+		var d_a0 := -Vector2(S.x - a0.x, S.z - a0.z).length()
+		if along < d_s0 or along > float(B["L"]) + 1.0:
+			continue
+		if along < d_a0:
+			var city: CityLayout = layout if String(B["city"]) == "island" else layout.mainland
+			return maxf(city.terrain.road_y(x, z), lerpf(s0.y, a0.y, (along - d_s0) / maxf(d_a0 - d_s0, 0.01)))
+		if along < 0.0:
+			return lerpf(a0.y, S.y, (along - d_a0) / maxf(-d_a0, 0.01))
+		return deck_y(B, along)
+	return NAN
 
 
 # ----------------------------------------------------------- buildings
@@ -557,6 +855,8 @@ func build(layout: CityLayout, world: Node) -> void:
 	world_ref = world
 	_layout = layout
 	plan_data = plan(layout)
+	wplan = world_plan(plan_data)
+	transform = xform()   # (local → world: see "placement")
 	street = StaticBody3D.new()
 	street.name = "Ground"
 	street.collision_layer = 1 << 3
@@ -609,8 +909,15 @@ func _start_near() -> void:
 			near_root.add_child(tr)
 			tr.setup(_layout, world_ref),
 		func():
-			for h: Dictionary in plan_data.get("homes", []):
-				near_root.add_child(HomeInteriors.build(h, _bmat())),
+			# (Interiors from the world-space records, in a top-level node: their
+			# interaction spots are world positions, like the city's homes.)
+			var hn := Node3D.new()
+			hn.name = "Homes"
+			near_root.add_child(hn)
+			hn.top_level = true
+			hn.global_transform = Transform3D.IDENTITY
+			for h: Dictionary in wplan.get("homes", []):
+				hn.add_child(HomeInteriors.build(h, _bmat())),
 		func():
 			var lf := IslandLife.new()
 			lf.name = "Life"
@@ -636,9 +943,10 @@ func _free_near() -> void:
 
 
 ## Distance from p to the island (0 on it).
+## Distance from world point p to the island's bounding box.
 static func distance_to(p: Vector3) -> float:
 	outline()
-	var q := Vector2(p.x, p.z)
+	var q := l2(Vector2(p.x, p.z))
 	if _bbox.has_point(q):
 		return 0.0
 	return Vector2(clampf(q.x, _bbox.position.x, _bbox.end.x), clampf(q.y, _bbox.position.y, _bbox.end.y)).distance_to(q)
@@ -757,7 +1065,7 @@ func _build_ground(street: StaticBody3D) -> void:
 		_pad(st, hp, LAND_Y + 0.035)
 	# Knolls: radial grass domes over the flat land (1.5 cm proud at their rim).
 	var knoll_faces := PackedVector3Array()
-	for k: Array in KNOLLS:
+	for k: Array in knolls():
 		knoll_faces.append_array(_knoll(st, k))
 	# The shore all round: quay walls where it's engineered, sand beaches
 	# sloping into the sea, boulder revetments elsewhere (shore_band()).
@@ -1006,101 +1314,129 @@ func _build_detail(key: String) -> void:
 
 ## The landmark: a cable-stayed bridge on two white A-frame pylons, the
 ## deck high over the strait, easing down onto the island.
-func _build_bridge(street: StaticBody3D) -> void:
-	# (The bridge's railings, piers and pylons: always resident, like the deck.)
-	var bridge_body := StaticBody3D.new()
-	bridge_body.name = "BridgeCollision"
-	bridge_body.collision_layer = 1 | (1 << 1)
-	add_child(bridge_body)
-	var e: Vector3 = plan_data["city_end"]
-	var road: Array = plan_data["roads"][0]
-	var pts: PackedVector3Array = road[1]
+## The bridges to the two city islands, built in world space (a top-level
+## node: the island's own transform doesn't apply). Each is built in its own
+## frame – the deck along +x from the sea wall (x 0) to the quay (x L) – and
+## that frame is placed between its city end and its landing.
+func _build_bridge(_street: StaticBody3D) -> void:
+	var root := Node3D.new()
+	root.name = "Bridges"
+	root.top_level = true
+	add_child(root)
+	root.global_transform = Transform3D.IDENTITY
+	for B: Dictionary in plan_data["bridges"]:
+		_build_one_bridge(B, root)
+
+
+func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
+	var u: Vector3 = B["u"]
+	var S: Vector3 = B["S"]
+	var L: float = B["L"]
+	var fr := Node3D.new()
+	fr.name = String(B["name"]).replace(" ", "")
+	fr.transform = Transform3D(Basis(u, Vector3.UP, u.cross(Vector3.UP)), Vector3(S.x, 0.0, S.z))
+	root.add_child(fr)
+	var inv := fr.transform.affine_inverse()
+	var road_body := StaticBody3D.new()   # (the driving surface: ground layer)
+	road_body.name = "Road"
+	road_body.collision_layer = 1 << 3
+	fr.add_child(road_body)
+	var body := StaticBody3D.new()        # railings, piers, pylon
+	body.name = "Structure"
+	body.collision_layer = 1 | (1 << 1)
+	fr.add_child(body)
+	var at := func(sd: float) -> Vector3: return Vector3(sd, deck_y(B, sd), 0.0)
 	var m := BuildingMesher.new()
 	var white := Color(0.88, 0.88, 0.86)
 	var deck_c := Color(0.42, 0.43, 0.45)
-	var z0 := e.z
-	for i in pts.size() - 1:
-		var a := pts[i]
-		var b := pts[i + 1]
-		if a.x >= DECK_END - 0.5:
-			continue   # (on the island the road is on the land itself)
-		if b.x > DECK_END:
-			b = Vector3(DECK_END, bridge_y(e, DECK_END), b.z)
-		var d := (b - a).normalized()
+	# Deck, railings and edge girders, segment by segment.
+	var n := maxi(24, int(L / 12.0))
+	for i in n:
+		var a: Vector3 = at.call(L * i / n)
+		var c: Vector3 = at.call(L * (i + 1) / n)
+		var d := (c - a).normalized()
 		var ext := d * 0.3
 		var a0 := a - ext + Vector3.DOWN * 0.8
-		var b0 := b + ext + Vector3.DOWN * 0.8
-		m.beam(a0, b0, 26.0, 1.6, deck_c)
-		_box_beam(street, a0, b0, 26.0, 1.6)
+		var c0 := c + ext + Vector3.DOWN * 0.8
+		m.beam(a0, c0, 26.0, 1.6, deck_c)
+		_box_beam(road_body, a0, c0, 26.0, 1.6)
 		for sg: float in [-1.0, 1.0]:
 			var o := Vector3(0, 0, sg * 12.6)
-			m.beam(a + o + Vector3.UP * 0.55, b + o + Vector3.UP * 0.55, 0.5, 1.1, white)
-			_box_beam(bridge_body, a + o + Vector3.UP * 0.55, b + o + Vector3.UP * 0.55, 0.5, 1.1)
-			m.beam(a + Vector3(0, -1.9, sg * 11.0) - ext, b + Vector3(0, -1.9, sg * 11.0) + ext, 1.2, 1.6, white)  # edge girders
-	# Approach piers on land (island side) every 30 m.
-	var x := DECK_END - 30.0
-	while x > 1300.0:
-		var yy := bridge_y(e, x)
-		if yy - LAND_Y > 3.5:
-			for sg: float in [-1.0, 1.0]:
-				m.beam(Vector3(x, LAND_Y - 0.5, z0 + sg * 7.0), Vector3(x, yy - 1.6, z0 + sg * 7.0), 1.6, 1.6, white)
-				_box_beam(bridge_body, Vector3(x, LAND_Y - 0.5, z0 + sg * 7.0), Vector3(x, yy - 1.6, z0 + sg * 7.0), 1.6, 1.6)
-		x -= 30.0
-	# Pylons: A-frames from the water, legs meeting above the deck, three
-	# crossbeams (one under the deck carries it), cables fanning to the deck.
-	for px: float in PYLONS:
-		var dy := bridge_y(e, px)
-		for sg: float in [-1.0, 1.0]:
-			var foot := Vector3(px, -6.0, z0 + sg * 16.0)
-			var head := Vector3(px, PYLON_TOP, z0 + sg * 2.2)
-			m.beam(foot, head, 4.2, 4.2, white)
-			_box_beam(bridge_body, foot, head, 4.2, 4.2)
-		for cy: float in [dy - 2.2, dy + 34.0, PYLON_TOP - 26.0]:
-			var t := (cy + 6.0) / (PYLON_TOP + 6.0)
-			var half := lerpf(16.0, 2.2, t)
-			m.beam(Vector3(px, cy, z0 - half), Vector3(px, cy, z0 + half), 3.0, 3.0, white)
-			_box_beam(bridge_body, Vector3(px, cy, z0 - half), Vector3(px, cy, z0 + half), 3.0, 3.0)
-		m.solid(px - 9.0, z0 - 22.0, px + 9.0, z0 + 22.0, -8.0, 0.6, Color(0.6, 0.6, 0.58))   # pier cap at the water
-		_box_beam(bridge_body, Vector3(px, -8.0, z0), Vector3(px, 0.6, z0), 18.0, 44.0)
-		for sg: float in [-1.0, 1.0]:
-			for k in 11:
-				var off := 18.0 + k * 13.0
-				for dir: float in [-1.0, 1.0]:
-					var dx := px + dir * off
-					if dx < e.x + 6.0 or dx > DECK_END - 4.0:
-						continue
-					var anchor := Vector3(dx, bridge_y(e, dx) + 0.4, z0 + sg * 11.6)
-					var top := Vector3(px, PYLON_TOP - 6.0 - k * 4.2, z0 + sg * 2.6)
-					m.beam(anchor, top, 0.28, 0.28, Color(0.95, 0.95, 0.93))
+			m.beam(a + o + Vector3.UP * 0.55, c + o + Vector3.UP * 0.55, 0.5, 1.1, white)
+			_box_beam(body, a + o + Vector3.UP * 0.55, c + o + Vector3.UP * 0.55, 0.5, 1.1)
+			m.beam(a + Vector3(0, -1.9, sg * 11.0) - ext, c + Vector3(0, -1.9, sg * 11.0) + ext, 1.2, 1.6, white)
+	# Piers every 32 m from the sea bed (not at the pylon).
+	var mid := L * 0.5
+	var sd := 30.0
+	while sd < L - 12.0:
+		if absf(sd - mid) > 24.0:
+			var dy := deck_y(B, sd)
+			if dy > 3.0:
+				for sg: float in [-1.0, 1.0]:
+					m.beam(Vector3(sd, -6.0, sg * 7.0), Vector3(sd, dy - 1.6, sg * 7.0), 1.8, 1.8, white)
+					_box_beam(body, Vector3(sd, -6.0, sg * 7.0), Vector3(sd, dy - 1.6, sg * 7.0), 1.8, 1.8)
+				m.beam(Vector3(sd, dy - 2.4, -8.5), Vector3(sd, dy - 2.4, 8.5), 1.6, 1.6, white)
+		sd += 32.0
+	# The pylon at mid-span: an A-frame from the water, legs meeting above
+	# the deck, crossbeams, and cables fanning out to the deck both ways.
+	var cy0 := deck_y(B, mid)
+	var top := cy0 + 74.0
+	for sg: float in [-1.0, 1.0]:
+		var foot := Vector3(mid, -6.0, sg * 16.0)
+		var head := Vector3(mid, top, sg * 2.2)
+		m.beam(foot, head, 4.0, 4.0, white)
+		_box_beam(body, foot, head, 4.0, 4.0)
+	for cy: float in [cy0 - 2.2, cy0 + 30.0, top - 20.0]:
+		var t := (cy + 6.0) / (top + 6.0)
+		var half := lerpf(16.0, 2.2, t)
+		m.beam(Vector3(mid, cy, -half), Vector3(mid, cy, half), 3.0, 3.0, white)
+		_box_beam(body, Vector3(mid, cy, -half), Vector3(mid, cy, half), 3.0, 3.0)
+	m.solid(mid - 9.0, -22.0, mid + 9.0, 22.0, -8.0, 0.6, Color(0.6, 0.6, 0.58))   # pier cap at the water
+	_box_beam(body, Vector3(mid, -8.0, 0.0), Vector3(mid, 0.6, 0.0), 18.0, 44.0)
+	for sg: float in [-1.0, 1.0]:
+		for k in 10:
+			var off := 18.0 + k * minf(13.0, (mid - 30.0) / 10.0)
+			for dir: float in [-1.0, 1.0]:
+				var dx := mid + dir * off
+				if dx < 6.0 or dx > L - 6.0:
+					continue
+				var anchor := Vector3(dx, deck_y(B, dx) + 0.4, sg * 11.6)
+				var tp := Vector3(mid, top - 4.0 - k * 3.6, sg * 2.6)
+				m.beam(anchor, tp, 0.28, 0.28, Color(0.95, 0.95, 0.93))
 	# Deck lamps every 36 m.
-	var lx := e.x + 18.0
-	while lx < BRIDGE_ISLAND_X:
-		var ly := bridge_y(e, lx)
+	var lx := 18.0
+	while lx < L:
+		var ly := deck_y(B, lx)
 		for sg: float in [-1.0, 1.0]:
-			m.beam(Vector3(lx, ly, z0 + sg * 12.2), Vector3(lx, ly + 7.5, z0 + sg * 12.2), 0.22, 0.22, Color(0.25, 0.26, 0.28))
-			m.beam(Vector3(lx, ly + 7.4, z0 + sg * 12.2), Vector3(lx, ly + 7.4, z0 + sg * 10.6), 0.2, 0.2, Color(0.25, 0.26, 0.28))
+			m.beam(Vector3(lx, ly, sg * 12.2), Vector3(lx, ly + 7.5, sg * 12.2), 0.22, 0.22, Color(0.25, 0.26, 0.28))
+			m.beam(Vector3(lx, ly + 7.4, sg * 12.2), Vector3(lx, ly + 7.4, sg * 10.6), 0.2, 0.2, Color(0.25, 0.26, 0.28))
 		lx += 36.0
+	var prev := _target
+	_target = fr
 	_mesh(m, "Bridge", 0.0, FAR_RANGE)
-	# Road surface on the deck.
-	# The ramp from the avenue over the esplanade to the deck (collision
-	# slabs whose tops are the road line, and its road surface).
-	var rp := ramp_points(plan_data, _layout)
+	_target = prev
+	# The ramp from the coast road over the esplanade to the deck (collision
+	# slabs whose tops are the road line), and the road surface: ramp, deck,
+	# and on across the quay to Bridge Road.
+	var rp := PackedVector3Array([inv * (B["s0"] as Vector3), inv * (B["a0"] as Vector3), Vector3(0.0, S.y, 0.0)])
 	for i in rp.size() - 1:
-		var u := rp[i]
-		var v := rp[i + 1]
 		var dn := Vector3.DOWN * 0.4
-		_box_beam(street, u + dn, v + dn + (v - u).normalized() * 0.2, 22.0, 0.8)
+		_box_beam(road_body, rp[i] + dn, rp[i + 1] + dn + (rp[i + 1] - rp[i]).normalized() * 0.2, 22.0, 0.8)
+	var deck := PackedVector3Array()
+	for i in n + 1:
+		deck.append(at.call(L * i / n))
+	var tail := PackedVector3Array([Vector3(L, LAND_Y, 0.0), inv * (B["Jw"] as Vector3)])
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_strip(st, pts, 11.0, 0.03, 7, COL_ROAD)
-	if rp.size() >= 2:
-		_strip(st, rp, 11.0, 0.03, 2, COL_ROAD)
+	_strip(st, rp, 11.0, 0.03, 2, COL_ROAD)
+	_strip(st, deck, 11.0, 0.03, 7, COL_ROAD)
+	_strip(st, tail, 11.0, 0.03, 2, COL_ROAD)
 	var mi := MeshInstance3D.new()
 	mi.name = "BridgeRoad"
 	mi.mesh = st.commit()
 	mi.material_override = _ground_mat()
 	mi.visibility_range_end = 2600.0
-	add_child(mi)
+	fr.add_child(mi)
 
 
 static func _box_beam(b: StaticBody3D, a: Vector3, c: Vector3, w: float, h: float) -> void:
@@ -1279,7 +1615,7 @@ func _build_marina(street: StaticBody3D) -> void:
 ## parks (the city's own tree mesh, one MultiMesh).
 func _build_trees() -> void:
 	var xfs: Array = []
-	var e: Vector3 = plan_data["city_end"]
+	var e := Vector3(0.0, LAND_Y, PIVOT.y)   # (Skyport Avenue's line)
 	var x := BRIDGE_ISLAND_X + 20.0
 	while x < 2320.0:
 		if absf(x - 1610.0) > 14.0 and absf(x - 1890.0) > 14.0 and absf(x - 1960.0) > 14.0:
@@ -1299,7 +1635,7 @@ func _build_trees() -> void:
 			p = Vector3(rng.randf_range(1410, 1610), LAND_Y, rng.randf_range(15, 155))
 		xfs.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.2)), p))
 	# Copses on the knolls (their crowns and flanks, not the bare summits).
-	for kn: Array in KNOLLS:
+	for kn: Array in knolls():
 		var c: Vector2 = kn[0]
 		for k in int(float(kn[1]) * float(kn[2]) / 180.0):
 			var a := rng.randf() * TAU
@@ -1382,13 +1718,25 @@ func _build_industry() -> void:
 ## Returns [{pts, speed, next: [local lane ids], city_start, city_end}].
 static func lanes(layout: CityLayout, step: float) -> Array:
 	var P := plan(layout)
-	var e: Vector3 = P["city_end"]
 	var out: Array = []
 	var ends := {}   # Vector2i(node) -> {"in": [lane], "out": [lane]}
 	var key := func(v: Vector3) -> Vector2i: return Vector2i(roundi(v.x), roundi(v.z))
+	# World space: the island's roads through w(), the bridges as planned.
+	var all: Array = []
+	var city_pts: Array = []
 	for r in P["roads"]:
+		all.append([r[0], wpts(r[1])])
+	for B: Dictionary in P["bridges"]:
+		all.append([B["name"], B["pts"]])
+		city_pts.append(B["s0"])
+	var at_city := func(v: Vector3) -> bool:
+		for c: Vector3 in city_pts:
+			if v.distance_to(c) < 2.0:
+				return true
+		return false
+	for r in all:
 		var pts: PackedVector3Array = r[1]
-		var speed := 22.0 if r[0] == "Skyport Bridge" or r[0] == "Skyport Avenue" else 13.0
+		var speed := 22.0 if String(r[0]).ends_with("Bridge") or r[0] == "Skyport Avenue" else 13.0
 		for dir in [1, -1]:
 			var src := pts.duplicate()
 			if dir < 0:
@@ -1411,9 +1759,9 @@ static func lanes(layout: CityLayout, step: float) -> Array:
 					ends[kk] = {"in": [], "out": []}
 			(ends[k0]["out"] as Array).append(id)
 			(ends[k1]["in"] as Array).append(id)
-			if src[0].distance_to(e) < 2.0:
+			if at_city.call(src[0]):
 				out[id]["city_start"] = true
-			if src[src.size() - 1].distance_to(e) < 2.0:
+			if at_city.call(src[src.size() - 1]):
 				out[id]["city_end"] = true
 		out[out.size() - 2]["u"] = out.size() - 1
 		out[out.size() - 1]["u"] = out.size() - 2

@@ -23,6 +23,10 @@ var world: Node
 
 func setup(layout: CityLayout, p_world: Node) -> void:
 	world = p_world
+	# (The lanes are world space – the island's roads and both bridges – so
+	# this node ignores the island's own transform.)
+	top_level = true
+	global_transform = Transform3D.IDENTITY
 	_rng.seed = 2207
 	for l: Dictionary in SkyportIsland.lanes(layout, 3.0):
 		var pts: PackedVector3Array = l["pts"]
@@ -48,7 +52,7 @@ func setup(layout: CityLayout, p_world: Node) -> void:
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mmi.custom_aabb = AABB(Vector3(900, -20, -800), Vector3(1700, 260, 1500))
+		mmi.custom_aabb = AABB(Vector3(-1100, -20, 380), Vector3(1800, 260, 1900))
 		add_child(mmi)
 		_mm.append(mm)
 	# Spread the cars over the lanes, a gap apart.

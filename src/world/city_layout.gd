@@ -545,7 +545,7 @@ func block_at(x: float, z: float) -> int:
 ## Height of what you'd stand on at (x, z): a block's pavement or the road.
 ## (Basins are water: their quay ring is the block level.)
 func ground_y(x: float, z: float) -> float:
-	if x > BOUNDS.end.x + 200.0 and SkyportIsland.contains(x, z):
+	if z > MAX_Z + 120.0 and SkyportIsland.contains(x, z):
 		return SkyportIsland.ground_y(x, z)
 	if Landforms.enabled:
 		var lh := Landforms.ground_y(x, z)

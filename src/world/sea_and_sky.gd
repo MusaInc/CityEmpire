@@ -251,8 +251,11 @@ func _add_ship(path: PackedVector3Array, length: float, mode: String, start_s :=
 ## turned, out to sea, and back in again later).
 func _port_ships() -> void:
 	var berth := Vector3(CityLayout.RIVER_EDGE - 19.0, 0, 440.0)
-	var path := PackedVector3Array([Vector3(-250, 0, 2600), Vector3(-250, 0, 1000), Vector3(-210, 0, 700),
-		Vector3(-90, 0, 520), Vector3(berth.x - 8.0, 0, 470.0), berth])
+	# (In from the open sea to the east, round the north of the city and down
+	# the strait – under the suspension bridge's main span and the railway's
+	# 22 m deck; Skyport Island closes the strait's southern mouth.)
+	var path := PackedVector3Array([Vector3(2600, 0, -1050), Vector3(400, 0, -1000), Vector3(-200, 0, -820),
+		Vector3(-215, 0, -300), Vector3(-205, 0, 250), Vector3(-90, 0, 400), Vector3(berth.x - 8.0, 0, 430.0), berth])
 	if _route_ok(path.slice(0, path.size() - 1), 18.0):
 		_add_ship(path, 150.0, "port", 1550.0)  # (already coming in when you arrive)
 	else:
@@ -266,7 +269,7 @@ func _lane_ships() -> void:
 		[PackedVector3Array([Vector3(1450, 0, -3200), Vector3(1450, 0, 3200)]), 0.0],
 		[PackedVector3Array([Vector3(1720, 0, 3200), Vector3(1720, 0, -3200)]), 2600.0],
 		[PackedVector3Array([Vector3(3000, 0, -1250), Vector3(-200, 0, -1250)]), 1200.0],
-		[PackedVector3Array([Vector3(-150, 0, 1500), Vector3(3000, 0, 1500)]), 600.0],
+		[PackedVector3Array([Vector3(900, 0, 1500), Vector3(3000, 0, 1500)]), 600.0],
 	]
 	for ln in lanes:
 		var pth: PackedVector3Array = ln[0]

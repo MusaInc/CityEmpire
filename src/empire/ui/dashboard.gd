@@ -228,14 +228,14 @@ static func home(ui: EmpireUI, v: VBoxContainer) -> void:
 		(" · best " + top.name) if top else " · rent your first"], Thumbs.place(_door(g, top)), func(): ui.open_phone("businesses")))
 	var es: Dictionary = e.flags.get("estates", {})
 	grid.add_child(card("Property", ("%d building%s you own" % [es.size(), "" if es.size() == 1 else "s"]) if not es.is_empty() else "Flats, offices, a hotel – invest",
-		Thumbs.place(Vector3(1700, 3, -420), 260.0), func(): ui.open_phone("property")))
+		Thumbs.place(SkyportIsland.w(Vector3(1700, 3, -420)), 260.0), func(): ui.open_phone("property")))
 	var air := g.skyport_play.site("aviation") if g.skyport_play else {}
-	grid.add_child(card("Skyport Airport", "Aircraft, imports, the marina", Thumbs.place(Vector3(1940, 3, 330), 420.0),
+	grid.add_child(card("Skyport Airport", "Aircraft, imports, the marina", Thumbs.place(SkyportIsland.w(Vector3(1940, 3, 330)), 420.0),
 		func():
 			if not air.is_empty():
 				g.set_gps(air["door"], "Skyport Aviation", {"kind": "place", "id": "aviation"})
 			ui.open_phone("map"), S.BLUE))
-	grid.add_child(card("Explore", "Showrooms, fashion, the marina, the Spire", Thumbs.place(Vector3(1720, 3, -40), 300.0),
+	grid.add_child(card("Explore", "Showrooms, fashion, the marina, the Spire", Thumbs.place(SkyportIsland.w(Vector3(1720, 3, -40)), 300.0),
 		func(): _explore(ui)))
 	var spark := EmpireWidgets.Spark.new(e.day_reports.map(func(r): return float(r.get("profit", 0.0))).slice(maxi(e.day_reports.size() - 14, 0)), Vector2(270, 150))
 	grid.add_child(card("Your empire", "Net worth %s" % EmpireData.money(e.net_worth()), spark, func(): ui.open_phone("bank"), S.GREEN))

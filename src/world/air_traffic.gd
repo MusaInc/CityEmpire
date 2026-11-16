@@ -83,7 +83,7 @@ func _process(dt: float) -> void:
 				var yaw := lerp_angle(float(s[4]), float(s[5]), smoothstep(0.0, 1.0, u))
 				var d := (s[3] as Vector3) - (s[2] as Vector3)
 				var pitch := clampf(atan2(d.y, Vector2(d.x, d.z).length() + 0.01) * 0.8, -0.12, 0.25)
-				node.global_transform = Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch), p)
+				node.transform = Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch), p)
 				break
 		if node.global_position.distance_to(cam.global_position) > ACTIVE:
 			node.visible = false

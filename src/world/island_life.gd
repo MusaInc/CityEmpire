@@ -27,7 +27,7 @@ func setup(P: Dictionary) -> void:
 		var n := CraftModels.build("boat", String(m[0]), spec)
 		add_child(n)
 		var base: Vector3 = (b[0] as Vector3) + Vector3(0, 0.05, 0)
-		n.global_transform = Transform3D(Basis(Vector3.UP, float(b[1])), base)
+		n.transform = Transform3D(Basis(Vector3.UP, float(b[1])), base)
 		_boats.append([n, base, float(i) * 1.7])
 	for cx: float in [2230.0, 2370.0]:
 		var tr := _box_node(Vector3(4.0, 1.4, 4.0), Color(0.3, 0.3, 0.32))
@@ -90,8 +90,8 @@ func _process(dt: float) -> void:
 	var p0: Vector3 = pts[i]
 	var p1: Vector3 = pts[(i + 1) % 4]
 	var dir := (p1 - p0).normalized()
-	_tug.global_transform = Transform3D(Basis.looking_at(dir, Vector3.UP), p0 + dir * dist)
+	_tug.transform = Transform3D(Basis.looking_at(dir, Vector3.UP), p0 + dir * dist)
 	# Truck: backs into a bay and pulls out again (60 s).
 	var tt := fposmod(_t, 60.0)
 	var k := smoothstep(0.0, 15.0, tt) * (1.0 - smoothstep(35.0, 50.0, tt))
-	_truck.global_transform = Transform3D(Basis(Vector3.UP, 0.0), Vector3(2060, y, lerpf(-128.0, -153.0, k)))
+	_truck.transform = Transform3D(Basis(Vector3.UP, 0.0), Vector3(2060, y, lerpf(-128.0, -153.0, k)))

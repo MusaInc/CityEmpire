@@ -58,7 +58,7 @@ func setup(p_game: EmpireGame) -> void:
 	# Skyport Island: a pavement each side of every road (walked along one
 	# side and back along the other, so nobody reaches an end and vanishes).
 	if SkyportIsland.enabled and game.skyport:
-		for rd in game.skyport.plan_data.get("roads", []):
+		for rd in game.skyport.wplan.get("roads", []):
 			if rd[3]:
 				continue  # (not on the bridge deck)
 			var rp: PackedVector3Array = (rd[1] as PackedVector3Array).duplicate()

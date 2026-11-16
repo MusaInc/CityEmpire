@@ -53,6 +53,12 @@ static func forms(layout: CityLayout = null) -> Array:
 			[Vector2(E - 0.3, 400), "attach"], [Vector2(E + 24, 402), "rock"], [Vector2(E + 70, 428), "beach"],
 			[Vector2(E + 92, 480), "beach"], [Vector2(E + 74, 540), "rock"], [Vector2(E + 30, 566), "rock"],
 			[Vector2(E - 0.3, 480), "rock"]]],
+		# (Joined along the Commercial Island's own south coast – not a
+		# straight quay – so it follows the sea wall exactly: "coast".)
+		["Harbour Strand", 1, [
+			[Vector2(262, 612), "rock"], [Vector2(270, 646), "rock"], [Vector2(300, 690), "beach"],
+			[Vector2(352, 724), "beach"], [Vector2(412, 726), "beach"], [Vector2(462, 694), "rock"],
+			[Vector2(482, 652), "rock"], [Vector2(478, 612), "attach"]], "coast"],
 		["Strand Park", -1, [
 			[Vector2(E - 0.3, 100), "attach"], [Vector2(E + 22, 96), "rock"], [Vector2(E + 70, 124), "beach"],
 			[Vector2(E + 100, 180), "beach"], [Vector2(E + 96, 248), "beach"], [Vector2(E + 62, 296), "rock"],
@@ -81,10 +87,21 @@ static func forms(layout: CityLayout = null) -> Array:
 					q += Vector2(d.y, -d.x) * w * (1.0 if kind == "beach" else 2.4)
 				pts.append(q)
 				kinds.append(kb)
-		pts.append(cps[n - 1][0])
-		kinds.append(3)   # (closing edge, back along the quay: attached)
 		var side: int = sp[1]
 		var L: CityLayout = layout if side > 0 else layout.mainland
+		var join := PackedVector2Array()
+		if sp.size() > 3 and String(sp[3]) == "coast" and L != null:
+			# Snap both ends onto the coast and close along it (the shorter way).
+			join = _coast_between(L.coast, cps[n - 1][0], cps[0][0])
+			pts[0] = join[join.size() - 1]
+			for v in join:
+				pts.append(v)
+				kinds.append(3)
+			pts.remove_at(pts.size() - 1)
+			kinds.remove_at(kinds.size() - 1)
+		else:
+			pts.append(cps[n - 1][0])
+			kinds.append(3)   # (closing edge, back along the quay: attached)
 		var ax := W + 4.0 if side > 0 else E - 4.0
 		var bb := Rect2(pts[0], Vector2.ZERO)
 		for v in pts:
@@ -96,8 +113,22 @@ static func forms(layout: CityLayout = null) -> Array:
 			var hz := L.ground_y(ax, z) if L != null else 1.0
 			h0[int(floorf(z / 4.0))] = hz if not is_nan(hz) else 1.0
 			z += 4.0
-		_forms.append({"name": sp[0], "poly": pts, "kinds": kinds, "bbox": bb, "attach_x": ax, "side": side, "h0": h0,
-			"paved": String(sp[0]).ends_with("Mole")})
+		var f := {"name": sp[0], "poly": pts, "kinds": kinds, "bbox": bb, "attach_x": ax, "side": side, "h0": h0,
+			"paved": String(sp[0]).ends_with("Mole")}
+		if not join.is_empty():
+			# Heights along the join, sampled 5 m inside the city's sea wall.
+			var cen := Vector2.ZERO
+			for v in pts:
+				cen += v
+			cen /= pts.size()
+			var jh := PackedFloat32Array()
+			for v in join:
+				var inl := v + (v - cen).normalized() * 5.0
+				var hz := L.ground_y(inl.x, inl.y)
+				jh.append(hz if not is_nan(hz) else 1.0)
+			f["join"] = join
+			f["jh"] = jh
+		_forms.append(f)
 	return _forms
 
 
@@ -129,6 +160,63 @@ static func _mole(c: Array, w: float) -> Array:
 		out.append([right[i], "quay"])
 	out.append([Vector2((c[0] as Vector2).x, (right[0] as Vector2).y), "attach"])
 	return out
+
+
+## The coast from a to b (each snapped to its nearest coast vertex), the
+## shorter way round.
+static func _coast_between(coast: PackedVector2Array, a: Vector2, b: Vector2) -> PackedVector2Array:
+	var ia := 0
+	var ib := 0
+	for i in coast.size():
+		if coast[i].distance_squared_to(a) < coast[ia].distance_squared_to(a):
+			ia = i
+		if coast[i].distance_squared_to(b) < coast[ib].distance_squared_to(b):
+			ib = i
+	var n := coast.size()
+	var fwd := PackedVector2Array()
+	var i := ia
+	while true:
+		fwd.append(coast[i])
+		if i == ib:
+			break
+		i = (i + 1) % n
+	var back := PackedVector2Array()
+	i = ia
+	while true:
+		back.append(coast[i])
+		if i == ib:
+			break
+		i = (i - 1 + n) % n
+	return fwd if fwd.size() <= back.size() else back
+
+
+## Distance from q to where the landform joins its island.
+static func _join_dist(f: Dictionary, q: Vector2) -> float:
+	if not f.has("join"):
+		return absf(q.x - float(f["attach_x"]))
+	var j: PackedVector2Array = f["join"]
+	var best := INF
+	for i in j.size() - 1:
+		best = minf(best, Geometry2D.get_closest_point_to_segment(q, j[i], j[i + 1]).distance_to(q))
+	return best
+
+
+## The island's height where the landform joins it, nearest q.
+static func _base_h(f: Dictionary, q: Vector2) -> float:
+	if not f.has("join"):
+		return _quay_h(f, q.y)
+	var j: PackedVector2Array = f["join"]
+	var jh: PackedFloat32Array = f["jh"]
+	var best := INF
+	var h := jh[0]
+	for i in j.size() - 1:
+		var cp := Geometry2D.get_closest_point_to_segment(q, j[i], j[i + 1])
+		var d := cp.distance_to(q)
+		if d < best:
+			best = d
+			var L := j[i].distance_to(j[i + 1])
+			h = lerpf(jh[i], jh[i + 1], cp.distance_to(j[i]) / maxf(L, 0.01))
+	return h
 
 
 static func _quay_h(f: Dictionary, z: float) -> float:
@@ -164,8 +252,8 @@ static func ground_y(x: float, z: float) -> float:
 
 
 static func _height(f: Dictionary, x: float, z: float) -> float:
-	var base := _quay_h(f, z)
-	var from_join := absf(x - float(f["attach_x"]))
+	var base := _base_h(f, Vector2(x, z))
+	var from_join := _join_dist(f, Vector2(x, z))
 	var edge := _edge_dist(f, Vector2(x, z))
 	var k := smoothstep(14.0, 50.0, from_join) * smoothstep(4.0, 30.0, edge) * (0.0 if f.get("paved", false) else 1.0)
 	var hill := (sin(x * 0.031 + z * 0.017) * 0.5 + 0.5) * (sin(x * 0.012 - z * 0.027 + 1.3) * 0.5 + 0.5)
@@ -189,7 +277,13 @@ static func rail_gaps() -> Array:
 	var out: Array = []
 	for f: Dictionary in _forms:
 		var bb: Rect2 = f["bbox"]
-		out.append(Rect2(float(f["attach_x"]) - 12.0, bb.position.y + 6.0, 24.0, bb.size.y - 12.0))
+		if f.has("join"):
+			var jr := Rect2((f["join"] as PackedVector2Array)[0], Vector2.ZERO)
+			for v in (f["join"] as PackedVector2Array):
+				jr = jr.expand(v)
+			out.append(jr.grow(-6.0).grow_individual(0.0, 12.0, 0.0, 12.0) if jr.size.x > jr.size.y else jr.grow(-6.0).grow_individual(12.0, 0.0, 12.0, 0.0))
+		else:
+			out.append(Rect2(float(f["attach_x"]) - 12.0, bb.position.y + 6.0, 24.0, bb.size.y - 12.0))
 	return out
 
 
@@ -257,7 +351,7 @@ func _build_form(f: Dictionary, body: StaticBody3D) -> void:
 			elif e < 9.0:
 				col = sand
 				marker = -1.0
-			elif absf(_edge_dist(f, Vector2(v.x, v.z)) - 16.0) < 2.2 and absf(v.x - float(f["attach_x"])) > 10.0:
+			elif absf(_edge_dist(f, Vector2(v.x, v.z)) - 16.0) < 2.2 and _join_dist(f, Vector2(v.x, v.z)) > 10.0:
 				col = path
 			st.set_color(col)
 			st.set_normal(nrm)

@@ -1946,7 +1946,7 @@ func homes() -> Array:
 	# Skyport Island's: the penthouse (a home you buy), the hotel suite and
 	# the show flat (yours with the building: Ventures.ESTATE_HOMES).
 	if skyport:
-		for h: Dictionary in skyport.plan_data.get("homes", []):
+		for h: Dictionary in skyport.wplan.get("homes", []):
 			var est := String(Ventures.HOME_ESTATE.get(String(h["id"]), ""))
 			out.append({"id": "home_" + String(h["id"]), "kind": "home", "name": String(h["name"]),
 				"price": SKYPORT_PENTHOUSE if est == "" else float(Ventures.estate_def(est).get("price", 0.0)),
@@ -2137,6 +2137,10 @@ func load_game() -> bool:
 	_obj_sig = ""
 	gps.restore()
 	var pp: Array = d.get("player", [])
+	if pp.size() >= 4 and int((d.get("empire", {}) as Dictionary).get("version", 1)) < 6:
+		# (Saved on Skyport Island before it moved: Empire.migrate v6.)
+		var q := SkyportIsland.migrate_point(Vector3(float(pp[0]), float(pp[1]), float(pp[2])))
+		pp = [q.x, q.y, q.z, float(pp[3])]
 	if pp.size() >= 4:
 		_teleport(Vector3(pp[0], pp[1], pp[2]) + Vector3.UP * 0.2, float(pp[3]))
 	else:

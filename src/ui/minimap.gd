@@ -18,7 +18,7 @@ extends Control
 ## with kind "token", "ring", "next" (the next ring/goal), "job" / "crime"
 ## (contract offers) or "poi".
 
-const BOUNDS := Rect2(-1180.0, -800.0, 3840.0, 1600.0)  # world x/z covered by the texture (to Skyport Island's headlands)
+const BOUNDS := Rect2(-1240.0, -760.0, 2300.0, 2980.0)  # world x/z covered by the texture (Westbank, the city, Skyport to the south)
 const M_PER_PX := 1.5
 const R_SLOW := 95.0     # m shown from the centre to the rim, standing
 const R_FAST := 175.0    # ... at full swinging speed
@@ -210,18 +210,22 @@ class MapPainter:
 	## Skyport Island: land, aprons, runway, roads, buildings.
 	func _skyport() -> void:
 		var P: Dictionary = SkyportIsland._plan
+		var W := func(v: Vector3) -> Vector2:
+			var q := SkyportIsland.w(v)
+			return Vector2(q.x, q.z)
+		var outline := SkyportIsland.world_outline()
 		# The shore (beaches / rocks) as a sand rim, the land green: the
 		# island is mostly open ground, not one big block.
-		var rim := Geometry2D.offset_polygon(SkyportIsland.outline(), 12.0)
+		var rim := Geometry2D.offset_polygon(outline, 12.0)
 		if not rim.is_empty():
 			_poly(rim[0], SHORE)
-		_poly(SkyportIsland.outline(), LAND)
+		_poly(outline, LAND)
 		for a in P["areas"]:
-			_poly(a[1], PARK if int(a[0]) == 1 else PLAZA)
+			_poly(SkyportIsland.wpoly(a[1]), PARK if int(a[0]) == 1 else PLAZA)
 		# Airside: taxiways and aprons a pale tarmac, the runway dark with a
 		# dashed centreline (it reads as an airport, not more streets).
 		for st in P["strips"]:
-			var ab := PackedVector2Array([Vector2(st[1].x, st[1].z), Vector2(st[2].x, st[2].z)])
+			var ab := PackedVector2Array([W.call(st[1]), W.call(st[2])])
 			_line(ab, float(st[3]) * 2.0, RUNWAY if int(st[0]) == 3 else AIRSIDE)
 			if int(st[0]) == 3:
 				var L := ab[0].distance_to(ab[1])
@@ -232,12 +236,17 @@ class MapPainter:
 		for r in P["roads"]:
 			var p2 := PackedVector2Array()
 			for v: Vector3 in (r[1] as PackedVector3Array):
-				p2.append(Vector2(v.x, v.z))
+				p2.append(W.call(v))
 			_line(p2, float(r[2]), ROAD)
+		for B: Dictionary in P["bridges"]:
+			var p3 := PackedVector2Array()
+			for v: Vector3 in (B["pts"] as PackedVector3Array):
+				p3.append(Vector2(v.x, v.z))
+			_line(p3, SkyportIsland.BRIDGE_W, BRIDGE)
 		for b: Dictionary in P["buildings"]:
 			var t: Array = b["tiers"][0]
 			var top := float(b["tiers"][-1][5]) - float(t[4])
-			_poly(PackedVector2Array([Vector2(t[0], t[1]), Vector2(t[2], t[1]), Vector2(t[2], t[3]), Vector2(t[0], t[3])]),
+			_poly(SkyportIsland.wpoly(PackedVector2Array([Vector2(t[0], t[1]), Vector2(t[2], t[1]), Vector2(t[2], t[3]), Vector2(t[0], t[3])])),
 				Color(0.6, 0.6, 0.62).lerp(Color(0.9, 0.88, 0.84), clampf(top / 220.0, 0.0, 1.0)))
 	var layouts: Array = []
 	var layout: CityLayout

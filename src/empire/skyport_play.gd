@@ -55,7 +55,7 @@ static func craft_spec(model: String) -> Dictionary:
 
 
 func site(id: String) -> Dictionary:
-	return (game.skyport.plan_data.get("sites", {}) as Dictionary).get(id, {}) if game.skyport else {}
+	return (game.skyport.wplan.get("sites", {}) as Dictionary).get(id, {}) if game.skyport else {}
 
 
 # ---------------------------------------------------------------- crafts
@@ -75,7 +75,7 @@ func _spawn(v: Dictionary) -> Craft:
 	c.name = "Craft_" + String(v["id"])
 	c.setup(vclass(model), model, craft_spec(model))
 	c.water_check = game.layout.is_water
-	c.berths = game.skyport.plan_data.get("berths", []) if game.skyport else []
+	c.berths = game.skyport.wplan.get("berths", []) if game.skyport else []
 	game.add_child(c)
 	var p := Vector3(float(v["pos"][0]), float(v["pos"][1]), float(v["pos"][2]))
 	c.place(Transform3D(Basis(Vector3.UP, float(v.get("yaw", 0.0))), p))
@@ -85,13 +85,13 @@ func _spawn(v: Dictionary) -> Craft:
 
 ## A free place for a new craft of this class: a helipad, a stand, a berth.
 func free_slot(kind: String) -> Array:
-	var P: Dictionary = game.skyport.plan_data
+	var P: Dictionary = game.skyport.wplan
 	var opts: Array = []
 	match kind:
 		"heli":
 			for hp: Vector3 in P["helipads"]:
 				if hp.y < SkyportIsland.LAND_Y + 1.0:
-					opts.append([hp, PI])
+					opts.append([hp, SkyportIsland.wyaw(PI)])
 		"plane":
 			opts = P["stands"]
 		_:
@@ -104,7 +104,7 @@ func free_slot(kind: String) -> Array:
 		if not taken:
 			return o
 	var last: Array = opts[opts.size() - 1]
-	return [(last[0] as Vector3) + Vector3(0, 0, 30.0 * crafts.size()), last[1]]
+	return [(last[0] as Vector3) + SkyportIsland.wd(Vector3(0, 0, 30.0 * crafts.size())), last[1]]
 
 
 func buy(model: String) -> String:
@@ -123,7 +123,7 @@ func buy(model: String) -> String:
 ## A car bought at a showroom: waiting on the dealer's forecourt edge.
 func buy_car(model: String, at_site := "") -> String:
 	var s := site(at_site if at_site != "" else _nearest_dealer())
-	var p: Vector3 = s.get("door", game.player.global_position) as Vector3 + Vector3(-6.0, 0.0, -6.0)
+	var p: Vector3 = s.get("door", game.player.global_position) as Vector3 + SkyportIsland.wd(Vector3(-6.0, 0.0, -6.0))
 	var v := game.empire.buy_vehicle(model, p + Vector3.UP * 0.3, 0.0)
 	if v.is_empty():
 		return "Not enough money"
@@ -196,7 +196,7 @@ func _step_off(c: Craft) -> Vector3:
 		return Vector3(side.x, (g if not is_nan(g) else c.global_position.y), side.z)
 	var best := Vector3.INF
 	var bd := INF
-	for pr: Array in game.skyport.plan_data["piers"]:
+	for pr: Array in game.skyport.wplan["piers"]:
 		var a: Vector3 = pr[0]
 		var b: Vector3 = pr[1]
 		var q := Vector3(clampf(c.global_position.x, a.x, b.x), 0.7, clampf(c.global_position.z, a.z, b.z))
@@ -277,8 +277,8 @@ func start_test(model: String, at_site: String) -> void:
 	var pos: Vector3
 	var yaw := 0.0
 	if kind == "car":
-		pos = (s["door"] as Vector3) + Vector3(-8.0, 0.3, -9.0)
-		yaw = -PI * 0.5
+		pos = (s["door"] as Vector3) + SkyportIsland.wd(Vector3(-8.0, 0.0, -9.0)) + Vector3.UP * 0.3
+		yaw = SkyportIsland.wyaw(-PI * 0.5)
 	else:
 		var slot := free_slot(kind)
 		pos = slot[0]
@@ -308,7 +308,7 @@ func end_test(vid: String) -> void:
 		game.cars[vid].queue_free()
 		game.cars.erase(vid)
 	if _test_return != Vector3.INF:
-		game._teleport(_test_return + Vector3(0, 1.0, 3.0), game.camera.view_yaw())
+		game._teleport(_test_return + Vector3.UP + SkyportIsland.wd(Vector3(0, 0, 3.0)), game.camera.view_yaw())
 	game.ui.toast("Test over – it's back with the dealer", "info")
 
 
@@ -337,8 +337,8 @@ func _process(dt: float) -> void:
 
 ## A display car on a forecourt (frozen: it's for looking at).
 func _display_car(sid: String, model: String, i: int) -> Car:
-	var s := site(sid)
-	var lot: Rect2 = s["lot"]
+	# (Laid out on the island's own plan – rows along the avenue – then placed.)
+	var lot: Rect2 = game.skyport.plan_data["sites"][sid]["lot"]
 	var c := Car.new()
 	c.name = "Display_" + model
 	c.setup(game._car_spec(model), "display")
@@ -348,8 +348,8 @@ func _display_car(sid: String, model: String, i: int) -> Car:
 	vis.setup(c)
 	c.visual = vis
 	var x := lot.position.x + 10.0 + i * minf(17.0, (lot.size.x - 20.0) / maxf(float((STOCK[sid] as Array).size() - 1), 1.0))
-	var pos := Vector3(x, SkyportIsland.LAND_Y + 0.35, lot.position.y + 30.0)
-	c.place(Transform3D(Basis(Vector3.UP, PI * 0.15), pos))
+	var pos := SkyportIsland.w(Vector3(x, SkyportIsland.LAND_Y + 0.35, lot.position.y + 30.0))
+	c.place(Transform3D(Basis(Vector3.UP, SkyportIsland.wyaw(PI * 0.15)), pos))
 	c.freeze = true
 	c.set_meta("site", sid)
 	c.set_meta("model", model)
@@ -384,15 +384,15 @@ func update_markers() -> void:
 	for id in owned:
 		var at: Vector3
 		if id == "penthouse":
-			at = (game.skyport.plan_data["penthouse"]["pad"] as Vector3) + Vector3(-8.0, 0.0, -11.0)
+			at = (game.skyport.wplan["penthouse"]["pad"] as Vector3) + SkyportIsland.wd(Vector3(-8.0, 0.0, -11.0))
 		else:
 			var d := Ventures.estate_def(String(id))
 			if d.is_empty():
 				continue
-			at = d["at"]
+			at = Ventures.estate_at(d)
 			var top := -INF
 			var corner := Vector3(at.x, 0.0, at.z)
-			for b: Dictionary in game.skyport.plan_data["buildings"]:
+			for b: Dictionary in game.skyport.wplan["buildings"]:
 				var t0: Array = b["tiers"][0]
 				if at.x >= float(t0[0]) and at.x <= float(t0[2]) and at.z >= float(t0[1]) and at.z <= float(t0[3]):
 					var tt: Array = b["tiers"][-1]
@@ -439,8 +439,8 @@ func roof_spots() -> Array:
 		return []
 	var h: Dictionary = hm["h"]
 	var up := Apartments.face_point(h, float(h["a0"]) + 1.6, -float(h["depth"]) + 1.6, float(h["y0"]))
-	var pad: Vector3 = game.skyport.plan_data["penthouse"]["pad"]
-	return [up, pad + Vector3(6.0, 0.0, 0.0)]
+	var pad: Vector3 = game.skyport.wplan["penthouse"]["pad"]
+	return [up, pad + SkyportIsland.wd(Vector3(6.0, 0.0, 0.0))]
 
 
 ## The nearest showroom thing / craft / site within reach of p:
@@ -472,7 +472,7 @@ func spot_near(p: Vector3) -> Dictionary:
 				bd = dq
 				best = {"kind": "sky_roof", "up": k == 0, "world": q, "d": dq}
 	if game.skyport:
-		var sites: Dictionary = game.skyport.plan_data.get("sites", {})
+		var sites: Dictionary = game.skyport.wplan.get("sites", {})
 		for sid in sites:
 			var door: Vector3 = sites[sid]["door"]
 			var d3 := Vector2(door.x - p.x, door.z - p.z).length() - 3.0
@@ -511,7 +511,7 @@ func act(s: Dictionary) -> void:
 		"sky_roof":
 			var rs := roof_spots()
 			var to: Vector3 = rs[1] if s["up"] else rs[0]
-			game._teleport(to + Vector3(0.0, 1.0, 0.0) + (Vector3(-1.5, 0, 0) if s["up"] else Vector3(1.5, 0, 0)), game.camera.view_yaw())
+			game._teleport(to + Vector3(0.0, 1.0, 0.0) + SkyportIsland.wd(Vector3(-1.5, 0, 0) if s["up"] else Vector3(1.5, 0, 0)), game.camera.view_yaw())
 			Sfx.play("bell", -8.0)
 		"sky_site":
 			var sid := String(s["site"])

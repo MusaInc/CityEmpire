@@ -23,7 +23,7 @@ signal goal_done(goal: Dictionary)
 signal changed
 signal won
 
-const VERSION := 5
+const VERSION := 6
 
 var seed := 1
 var day := 1
@@ -1390,5 +1390,22 @@ static func migrate(d: Dictionary) -> Dictionary:
 		if not d.has("offices"):
 			d["offices"] = []
 		v = 5
+	if v < 6:
+		# v6: Skyport Island moved south of the strait (a quarter turn): its
+		# vehicles, aircraft and boats move with it; the GPS target too.
+		for vv in d.get("vehicles", []):
+			var pos: Array = vv.get("pos", [])
+			if pos.size() >= 3:
+				var p := Vector3(float(pos[0]), float(pos[1]), float(pos[2]))
+				if SkyportIsland.was_old_site(p):
+					var q := SkyportIsland.migrate_point(p)
+					vv["pos"] = [q.x, q.y, q.z]
+					vv["yaw"] = SkyportIsland.wyaw(float(vv.get("yaw", 0.0)))
+		var fl: Dictionary = d.get("flags", {})
+		var g = fl.get("gps", null)
+		if g is Array and (g as Array).size() == 3:
+			var q2 := SkyportIsland.migrate_point(Vector3(float(g[0]), float(g[1]), float(g[2])))
+			fl["gps"] = [q2.x, q2.y, q2.z]
+		v = 6
 	d["version"] = v
 	return d

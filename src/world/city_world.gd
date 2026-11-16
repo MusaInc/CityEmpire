@@ -126,7 +126,9 @@ func _ready() -> void:
 	if SkyportIsland.enabled:
 		# (Before the ground is built: the sea-wall railing opens for its bridge.)
 		var sp := SkyportIsland.plan(layout)
-		BuildingMesher.rail_gaps = [sp["rail_gap"]]
+		BuildingMesher.rail_gaps = []
+		for bb: Dictionary in sp["bridges"]:
+			BuildingMesher.rail_gaps.append(bb["rail_gap"])
 	if Landforms.enabled:
 		# (Also before the ground: the quay railing opens where land joins.)
 		Landforms.forms(layout)

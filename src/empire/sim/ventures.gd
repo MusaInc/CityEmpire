@@ -35,6 +35,7 @@ const LOCAL_DELIVERY := 1.2
 
 ## Buildings you can invest in. kind: flats / offices / hotel / warehouse /
 ## hangar / berths / home. units × rent a unit a day at full occupancy.
+## "at": on Skyport Island's LOCAL plan – use estate_at() for the world.
 const ESTATES := [
 	{"id": "marina_quay", "name": "Marina Quay Apartments", "kind": "flats", "price": 420000.0, "units": 16, "rent": 30.0, "upkeep": 70.0,
 		"at": Vector3(1447, 3, -405), "desc": "Sixteen flats over the marina, with a show flat you can use"},
@@ -134,6 +135,11 @@ static func imports_due(e: Empire) -> Array:
 
 
 # ------------------------------------------------------------- property
+## An estate's position in the world ("at" is on Skyport Island's own plan).
+static func estate_at(d: Dictionary) -> Vector3:
+	return SkyportIsland.w(d["at"])
+
+
 static func estate_def(id: String) -> Dictionary:
 	for d in ESTATES:
 		if d["id"] == id:

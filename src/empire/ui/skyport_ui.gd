@@ -256,13 +256,13 @@ static func estates(ui: EmpireUI, v: VBoxContainer) -> void:
 				ui.toast(err if err != "" else "Renovated: like new, and worth more rent", "bad" if err != "" else "good")
 				ui.open_phone("property"), false, 220))
 			acts.add_child(S.button("GPS", func():
-				ui.game.set_gps(d["at"], String(d["name"]), {"kind": "place", "id": id})
+				ui.game.set_gps(Ventures.estate_at(d), String(d["name"]), {"kind": "place", "id": id})
 				ui.close_panel(true), false, 80))
 		else:
 			c.add_child(S.label("%s" % ("Up to %s a day in rent" % EmpireData.money(float(d["rent"]) * float(d["units"])) if int(d["units"]) > 0 else "Upkeep %s a day" % EmpireData.money(float(d["upkeep"]))), 15, S.PAPER))
 			acts.add_child(S.spacer())
 			acts.add_child(S.button("GPS", func():
-				ui.game.set_gps(d["at"], String(d["name"]), {"kind": "place", "id": id})
+				ui.game.set_gps(Ventures.estate_at(d), String(d["name"]), {"kind": "place", "id": id})
 				ui.close_panel(true), false, 80))
 			acts.add_child(S.button("Buy · %s" % EmpireData.money(float(d["price"])), func():
 				var err := Ventures.buy_estate(e, id)

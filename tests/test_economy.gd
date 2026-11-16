@@ -399,6 +399,27 @@ func test_old_save_migrates(t) -> void:
 	t.check(int(e.to_dict()["version"]) == Empire.VERSION, "saved at the current version")
 
 
+func test_v5_save_moves_skyport_things(t) -> void:
+	# (v6: Skyport Island moved south of the strait; old world = its local.)
+	var old := {"version": 5, "vehicles": [
+		{"id": "a", "model": "heli", "pos": [1585.0, 3.0, 205.0], "yaw": PI},
+		{"id": "b", "model": "hatch", "pos": [500.0, 2.0, 100.0], "yaw": 0.3},
+		{"id": "c", "model": "hatch", "pos": [1200.0, 20.0, -30.0], "yaw": 0.0}],
+		"flags": {"gps": [1678.0, 3.0, 4.0]}}
+	var d := Empire.migrate(old)
+	var a: Array = d["vehicles"][0]["pos"]
+	var want := SkyportIsland.w(Vector3(1585, 3, 205))
+	t.check(Vector3(a[0], a[1], a[2]).distance_to(want) < 0.01, "a helicopter on its pad moves with the island")
+	t.check(is_equal_approx(float(d["vehicles"][0]["yaw"]), SkyportIsland.wyaw(PI)), "and turns with it")
+	t.check(d["vehicles"][1]["pos"] == [500.0, 2.0, 100.0], "a car in the city stays put")
+	var c: Array = d["vehicles"][2]["pos"]
+	var cq := Vector3(c[0], c[1], c[2])
+	t.check(SkyportIsland.l(cq).x > SkyportIsland.QUAY_X, "a car on the old bridge lands on the island (%s)" % cq)
+	var g: Array = d["flags"]["gps"]
+	t.check(Vector3(g[0], g[1], g[2]).distance_to(SkyportIsland.w(Vector3(1678, 3, 4))) < 0.01, "the GPS target moves too")
+	t.check(int(d["version"]) == 6, "now v6")
+
+
 func test_offscreen_fast_forward_is_cheap(t) -> void:
 	var e := _game()
 	var b := _running_shop(e)

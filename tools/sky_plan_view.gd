@@ -13,20 +13,21 @@ func _go() -> void:
 	SkyportIsland.enabled = true
 	var layout := CityLayout.new().generate()
 	var P := SkyportIsland.plan(layout)
-	var x0 := 1150.0
-	var z0 := -860.0
+	var x0 := -1100.0
+	var z0 := 650.0
 	var mpp := 2.0
-	var W := int(1550 / mpp)
-	var H := int(1680 / mpp)
+	var W := int(1800 / mpp)
+	var H := int(1750 / mpp)
 	var img := Image.create(W, H, false, Image.FORMAT_RGB8)
 	img.fill(Color(0.12, 0.2, 0.32))
 	var o := SkyportIsland.outline()
 	for i in W:
 		for j in H:
-			var q := Vector2(x0 + i * mpp, z0 + j * mpp)
+			var q := SkyportIsland.l2(Vector2(x0 + i * mpp, z0 + j * mpp))
 			if Geometry2D.is_point_in_polygon(q, o):
 				img.set_pixel(i, j, Color(0.25, 0.35, 0.22))
-	var px := func(q: Vector2, c: Color, r: int = 0) -> void:
+	var px := func(ql: Vector2, c: Color, r: int = 0) -> void:
+		var q := SkyportIsland.w2(ql)
 		var i := int((q.x - x0) / mpp)
 		var j := int((q.y - z0) / mpp)
 		for a in range(-r, r + 1):
@@ -73,13 +74,10 @@ func _go() -> void:
 		while k <= L:
 			px.call(a.lerp(c, k / maxf(L, 0.01)), col, 1)
 			k += 1.0
-	# 100 m grid ticks
-	for gx in range(1300, 2700, 100):
-		for gz in range(-800, 820, 10):
-			px.call(Vector2(gx, gz), Color(0.4, 0.4, 0.5))
-	for gz in range(-800, 820, 100):
-		for gx in range(1260, 2700, 10):
-			px.call(Vector2(gx, gz), Color(0.4, 0.4, 0.5))
+	# Both bridges (world).
+	for B: Dictionary in P["bridges"]:
+		for v: Vector3 in (B["pts"] as PackedVector3Array):
+			px.call(SkyportIsland.l2(Vector2(v.x, v.z)), Color(0.9, 0.5, 0.2), 2)
 	# The XO rule: content on land, 8 m+ from the shore.
 	var near := func(q: Vector2) -> float:
 		var best := INF
@@ -102,8 +100,7 @@ func _go() -> void:
 			var k := 0.0
 			while k <= L:
 				var q := a.lerp(c, k / maxf(L, 0.01))
-				if q.x > SkyportIsland.DECK_END + 20.0:
-					chk.append([String(r[0]), q])
+				chk.append([String(r[0]), q])
 				k += 10.0
 	for st in P["strips"]:
 		chk.append(["strip", Vector2((st[1] as Vector3).x, (st[1] as Vector3).z)])
@@ -121,14 +118,14 @@ func _go() -> void:
 	var nk := 0
 	for it in chk:
 		var q: Vector2 = it[1]
-		for kn: Array in SkyportIsland.KNOLLS:
+		for kn: Array in SkyportIsland.knolls():
 			var c: Vector2 = kn[0]
 			var dx := (q.x - c.x) / (float(kn[1]) + 6.0)
 			var dz := (q.y - c.y) / (float(kn[2]) + 6.0)
 			if dx * dx + dz * dz < 1.0:
 				nk += 1
 				print("ON-KNOLL ", it[0], " ", q)
-	for kn: Array in SkyportIsland.KNOLLS:
+	for kn: Array in SkyportIsland.knolls():
 		var c: Vector2 = kn[0]
 		for a in 64:
 			var t := TAU * a / 64.0
