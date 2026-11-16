@@ -59,6 +59,27 @@ static func forms(layout: CityLayout = null) -> Array:
 			[Vector2(262, 624), "rock"], [Vector2(270, 646), "rock"], [Vector2(300, 690), "beach"],
 			[Vector2(352, 724), "beach"], [Vector2(412, 726), "beach"], [Vector2(462, 694), "rock"],
 			[Vector2(482, 652), "rock"], [Vector2(478, 618), "attach"]], "coast"],
+		# The Commercial Island's open-sea coasts (joined along the coast
+		# itself): a high promontory off the north cliffs, a headland on the
+		# east cliffs, a sand spit on the low south-east shore and a rocky
+		# point on the straight south edge – the bays between them read as
+		# bays.
+		["North Cliff Head", 1, [
+			[Vector2(612, -612), "rock"], [Vector2(626, -660), "rock"], [Vector2(652, -706), "rock"],
+			[Vector2(690, -728), "rock"], [Vector2(728, -712), "rock"], [Vector2(744, -676), "rock"],
+			[Vector2(742, -640), "attach"]], "coast"],
+		["Cliff Point", 1, [
+			[Vector2(1068, -372), "rock"], [Vector2(1110, -380), "rock"], [Vector2(1158, -352), "rock"],
+			[Vector2(1186, -304), "rock"], [Vector2(1170, -258), "rock"], [Vector2(1122, -238), "rock"],
+			[Vector2(1088, -246), "rock"], [Vector2(1064, -244), "attach"]], "coast"],
+		["Eastmouth Spit", 1, [
+			[Vector2(986, 262), "rock"], [Vector2(1020, 278), "beach"], [Vector2(1072, 316), "beach"],
+			[Vector2(1110, 372), "beach"], [Vector2(1118, 430), "beach"], [Vector2(1092, 468), "rock"],
+			[Vector2(1050, 470), "rock"], [Vector2(1024, 452), "attach"]], "coast"],
+		["Southgate Point", 1, [
+			[Vector2(640, 622), "rock"], [Vector2(652, 660), "rock"], [Vector2(684, 700), "rock"],
+			[Vector2(726, 712), "beach"], [Vector2(770, 690), "beach"], [Vector2(790, 652), "rock"],
+			[Vector2(786, 622), "attach"]], "coast"],
 		["Strand Park", -1, [
 			[Vector2(E - 0.3, 100), "attach"], [Vector2(E + 22, 96), "rock"], [Vector2(E + 70, 124), "beach"],
 			[Vector2(E + 100, 180), "beach"], [Vector2(E + 96, 248), "beach"], [Vector2(E + 62, 296), "rock"],
@@ -254,6 +275,10 @@ static func ground_y(x: float, z: float) -> float:
 static func _height(f: Dictionary, x: float, z: float) -> float:
 	var base := _base_h(f, Vector2(x, z))
 	var from_join := _join_dist(f, Vector2(x, z))
+	if f.has("join") and base > 6.0:
+		# Joined to a cliff top: the headland falls away towards its point
+		# (a flat-topped drum at cliff height looked built, not grown).
+		base = lerpf(base, maxf(4.0, base * 0.3), smoothstep(8.0, 95.0, from_join))
 	var edge := _edge_dist(f, Vector2(x, z))
 	var k := smoothstep(14.0, 50.0, from_join) * smoothstep(4.0, 30.0, edge) * (0.0 if f.get("paved", false) else 1.0)
 	var hill := (sin(x * 0.031 + z * 0.017) * 0.5 + 0.5) * (sin(x * 0.012 - z * 0.027 + 1.3) * 0.5 + 0.5)
@@ -428,7 +453,9 @@ func _row(f: Dictionary, o: PackedVector2Array, i: int, k: int) -> PackedVector3
 		1:
 			prof = [[0.0, top], [4.0, lerpf(top, 0.15, 0.4)], [12.0, 0.15], [22.0, -1.05], [32.0, -4.0]]
 		_:
-			prof = [[0.0, top], [3.0, top - 0.5], [7.0, 0.1], [12.0, -2.3], [16.0, -6.5]]
+			# (A high top gets wider, sloping rocky flanks, not a wall.)
+			var sc := clampf(top / 5.0, 1.0, 4.0)
+			prof = [[0.0, top], [3.0 * sc, top - 0.5 - top * 0.25], [7.0 * sc, 0.1], [12.0 * sc, -2.3], [16.0 * sc, -6.5]]
 	var row := PackedVector3Array()
 	for r in prof.size():
 		var d: float = prof[r][0]

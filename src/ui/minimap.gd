@@ -18,7 +18,7 @@ extends Control
 ## with kind "token", "ring", "next" (the next ring/goal), "job" / "crime"
 ## (contract offers) or "poi".
 
-const BOUNDS := Rect2(-1240.0, -760.0, 2300.0, 2980.0)  # world x/z covered by the texture (Westbank, the city, Skyport to the south)
+const BOUNDS := Rect2(-1240.0, -800.0, 2480.0, 3020.0)  # world x/z covered by the texture (Westbank, the city, Skyport to the south)
 const M_PER_PX := 1.5
 const R_SLOW := 95.0     # m shown from the centre to the rim, standing
 const R_FAST := 175.0    # ... at full swinging speed
