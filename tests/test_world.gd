@@ -208,6 +208,42 @@ func test_no_building_is_sunk_into_the_ground(t) -> void:
 	t.check(sunk.is_empty(), "%d building faces checked, none sunk more than 2 m (%d: %s)" % [n, sunk.size(), str(sunk.slice(0, 4))])
 
 
+## The far city (FarCity): every land chunk of both cities has a coarse
+## ground and its buildings' massing, small enough to keep resident, and the
+## dock basins stay water.
+func test_far_city_covers_the_islands(t) -> void:
+	if _layout == null:
+		_layout = CityLayout.new().generate()
+	var C := CityWorld.CHUNK
+	var worst := 0
+	var empty := 0
+	var land_chunks := 0
+	for L: CityLayout in [_layout, _layout.mainland]:
+		if L == null:
+			continue
+		var bb := L.island
+		var x := floorf(bb.position.x / C) * C
+		while x < bb.end.x:
+			var z := floorf(bb.position.y / C) * C
+			while z < bb.end.y:
+				var r := Rect2(x, z, C, C)
+				var c := r.get_center()
+				if Geometry2D.is_point_in_polygon(c, L.coast) and not L.is_water(Vector3(c.x, 0.0, c.y)):
+					land_chunks += 1
+					var m := BuildingMesher.new()
+					m.add_far_ground(L, r)
+					if m.is_empty():
+						empty += 1
+					else:
+						var a := m.arrays()
+						var idx = a[Mesh.ARRAY_INDEX]
+						worst = maxi(worst, (idx.size() if idx != null else (a[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()) / 3)
+				z += C
+			x += C
+	t.check(land_chunks > 20 and empty == 0, "%d land chunks all have far ground (%d empty)" % [land_chunks, empty])
+	t.check(worst < 6000, "far ground stays light: worst chunk %d triangles" % worst)
+
+
 ## Coastlines must be simple polygons: a self-crossing outline triangulates
 ## to nothing, and the island silently loses its ground and collision.
 func test_coastlines_triangulate(t) -> void:

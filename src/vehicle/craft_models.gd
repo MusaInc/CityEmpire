@@ -48,6 +48,20 @@ static func build(kind: String, model: String, spec: Dictionary) -> Node3D:
 			var r: float = spec.get("rotor_r", 4.6)
 			rotor.box(Vector3(-r, 0.0, -0.18), Vector3(r, 0.06, 0.18), trim)
 			rotor.box(Vector3(-0.18, 0.0, -r), Vector3(0.18, 0.06, r), trim)
+		"plane" when model == "liner":
+			_liner(b, spec, paint, trim, glass)
+			var lg := _M.new()
+			var LL: float = (spec.get("size", Vector3(34, 9, 36)) as Vector3).z
+			for g in [[0.0, -LL * 0.38], [-2.9, LL * 0.03], [2.9, LL * 0.03]]:
+				lg.box(Vector3(g[0] - 0.15, 0.5, g[1] - 0.15), Vector3(g[0] + 0.15, 2.0, g[1] + 0.15), Color(0.7, 0.7, 0.72))
+				lg.box(Vector3(g[0] - 0.55, 0.0, g[1] - 0.6), Vector3(g[0] + 0.55, 1.0, g[1] + 0.6), Color(0.08, 0.08, 0.08))
+			var lgn := Node3D.new()
+			lgn.name = "Gear"
+			var lgm := MeshInstance3D.new()
+			lgm.mesh = lg.commit()
+			lgm.material_override = material()
+			lgn.add_child(lgm)
+			root.add_child(lgn)
 		"plane":
 			var sz: Vector3 = spec.get("size", Vector3(11, 3, 9))
 			var span := sz.x
@@ -125,6 +139,59 @@ static func build(kind: String, model: String, spec: Dictionary) -> Node3D:
 		if kind == "plane":
 			rn.name = "Props"  # (props are drawn as fixed blurred bars)
 	return root
+
+
+## A narrow-body airliner (Skyport's scheduled traffic and the planes at
+## the gates): a 4 m fuselage with a tapered nose and tail cone, swept wings
+## in three steps with winglets, two engines under them, a tall fin in the
+## airline's colour, cockpit and cabin window lines, a cheatline. Nose at
+## −z, wheels at y 0. spec: size (span, –, length), paint, trim.
+static func _liner(b: _M, spec: Dictionary, paint: Color, trim: Color, glass: Color) -> void:
+	var sz: Vector3 = spec.get("size", Vector3(34, 9, 36))
+	var L := sz.z
+	var hs := sz.x * 0.5
+	var grey := Color(0.62, 0.64, 0.67)
+	var dark := Color(0.1, 0.12, 0.15)
+	var n0 := -L * 0.5
+	# Fuselage: an octagon-ish section from two boxes.
+	b.box(Vector3(-2.0, 2.3, n0 + 4.0), Vector3(2.0, 5.3, L * 0.3), paint)
+	b.box(Vector3(-1.55, 1.8, n0 + 4.0), Vector3(1.55, 5.8, L * 0.3), paint)
+	b.box(Vector3(-2.25, 1.5, -L * 0.1), Vector3(2.25, 2.4, L * 0.14), grey)          # wing-root fairing
+	# Nose: tapering steps, the cockpit glazing on the last.
+	b.box(Vector3(-1.75, 2.1, n0 + 2.0), Vector3(1.75, 5.4, n0 + 4.0), paint)
+	b.box(Vector3(-1.35, 2.5, n0 + 0.8), Vector3(1.35, 4.9, n0 + 2.0), paint)
+	b.box(Vector3(-0.85, 2.9, n0), Vector3(0.85, 4.3, n0 + 0.8), paint)
+	b.box(Vector3(-1.38, 4.1, n0 + 1.0), Vector3(1.38, 4.7, n0 + 2.3), dark)          # cockpit windows
+	# Tail cone up to the fin.
+	b.box(Vector3(-1.5, 2.9, L * 0.3), Vector3(1.5, 5.6, L * 0.4), paint)
+	b.box(Vector3(-0.9, 3.8, L * 0.4), Vector3(0.9, 5.4, L * 0.5), paint)
+	# Cabin windows and the cheatline, both sides.
+	for s: float in [-1.0, 1.0]:
+		var x0 := s * 2.0
+		b.box(Vector3(x0 - 0.03 * s, 4.15, n0 + 4.5), Vector3(x0 + 0.03 * s, 4.45, L * 0.27), dark)
+		b.box(Vector3(x0 - 0.03 * s, 3.3, n0 + 2.5), Vector3(x0 + 0.03 * s, 3.65, L * 0.3), trim)
+		b.box(Vector3(x0 - 0.03 * s, 2.9, n0 + 5.0), Vector3(x0 + 0.03 * s, 4.6, n0 + 6.0), Color(0.82, 0.83, 0.85))  # door
+	# Wings: three swept steps out to the winglets (low wing).
+	var steps := [[1.8, hs * 0.38, 0.0], [hs * 0.38, hs * 0.72, 1.8], [hs * 0.72, hs, 3.6]]
+	for s: float in [-1.0, 1.0]:
+		for st: Array in steps:
+			var xa := float(st[0])
+			var xb := float(st[1])
+			var dz := float(st[2])
+			var chord := lerpf(L * 0.2, L * 0.07, xb / hs)
+			b.box(Vector3(s * xa, 2.0 + xa * 0.04, -L * 0.1 + dz), Vector3(s * xb, 2.35 + xa * 0.04, -L * 0.1 + dz + chord), paint)
+		b.box(Vector3(s * (hs - 0.15), 2.35 + hs * 0.04, -L * 0.1 + 4.6), Vector3(s * hs, 4.6, -L * 0.1 + 6.4), trim)  # winglet
+		# Engine under the wing on a pylon.
+		var ex := s * hs * 0.36
+		b.box(Vector3(ex - 1.15, 0.85, -L * 0.2), Vector3(ex + 1.15, 2.9, -L * 0.06), trim)
+		b.box(Vector3(ex - 1.0, 1.0, -L * 0.2 - 0.05), Vector3(ex + 1.0, 2.75, -L * 0.2), dark)   # intake
+		b.box(Vector3(ex - 0.25, 2.8, -L * 0.14), Vector3(ex + 0.25, 2.1 + hs * 0.04 + 0.2, -L * 0.03), grey)
+		# Tailplane.
+		b.box(Vector3(s * 0.8, 4.6, L * 0.37), Vector3(s * hs * 0.36, 4.85, L * 0.46), paint)
+	# Fin (the airline's colour), stepped back as it rises.
+	b.box(Vector3(-0.22, 5.4, L * 0.33), Vector3(0.22, 8.6, L * 0.5), trim)
+	b.box(Vector3(-0.2, 8.6, L * 0.38), Vector3(0.2, 11.4, L * 0.5), trim)
+	b.box(Vector3(-0.18, 11.4, L * 0.43), Vector3(0.18, 12.6, L * 0.5), trim)
 
 
 class _M:

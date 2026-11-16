@@ -268,7 +268,10 @@ func scenario_xa() -> void:
 				var k := 0.0
 				while k < Ln:
 					var q2 := a.lerp(b, k / Ln)
-					if not game.layout.is_water(Vector3(q2.x, 0, q2.y)) and not L.is_water(Vector3(q2.x, 0, q2.y)) and not carried.call(q2):
+					# (Only where the street is drawn: the road graph runs a few
+					# metres past the coast, where a headland may now stand.)
+					if not game.layout.is_water(Vector3(q2.x, 0, q2.y)) and not L.is_water(Vector3(q2.x, 0, q2.y)) and not carried.call(q2) \
+							and Geometry2D.is_point_in_polygon(q2, L.coast):
 						pts.append(Vector3(q2.x, 0.0, q2.y))
 					k += 2.0
 			n += pts.size()

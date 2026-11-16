@@ -103,6 +103,8 @@ var _by_chunk := {}
 var _props_by_chunk := {}
 var _all_keys: Array[Vector2i] = []
 var _loaded := {}      # key -> Node3D
+## Far versions of every chunk (FarCity), shown while a chunk isn't loaded.
+var far_city: FarCity
 var _pending := {}     # key -> WorkerThreadPool task id
 var _results := {}     # key -> Dictionary of mesh arrays
 var _mutex := Mutex.new()
@@ -163,6 +165,11 @@ func _ready() -> void:
 	_build_prop_collision()
 	if not secondary:
 		_build_water()
+		# The real sea floor under the shallows (the water shows it there).
+		if water_mat.get_shader_parameter("has_seabed"):
+			var sb := SeabedMesh.build((load(SEABED) as Texture2D).get_image(), Rect2(-2400.0, -1800.0, 4800.0, 4800.0), 32.0)
+			if sb:
+				add_child(sb)
 	_build_landmarks()
 	_build_structures()
 	_build_homes()
@@ -187,6 +194,10 @@ func _ready() -> void:
 	add_child(sea_sky)
 	sea_sky.setup(layout)
 	_bake_street_maps()
+	# The whole map from far off (shown where chunks aren't streamed in).
+	far_city = FarCity.new()
+	add_child(far_city)
+	far_city.setup(self)
 	if secondary:
 		print("Mainland: %d buildings, %d chunks, %d ms" % [layout.buildings.size(), _all_keys.size(),
 			Time.get_ticks_msec() - t0])
@@ -625,6 +636,9 @@ func _materials() -> void:
 	if SkyportIsland.enabled and Landforms.enabled and ResourceLoader.exists(SEABED):
 		water_mat.set_shader_parameter("seabed", load(SEABED))
 		water_mat.set_shader_parameter("has_seabed", true)
+	# (The water is see-through in the shallows: drawn first among the
+	# transparent surfaces, so foam strips and wakes land on top of it.)
+	water_mat.render_priority = -1
 
 
 ## (Sky colours and the sun now reach every shader as global uniforms, set by

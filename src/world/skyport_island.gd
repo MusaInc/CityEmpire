@@ -47,9 +47,10 @@ const LANDINGS := [-106.0, 34.0]
 ## the city, which city ("island" | "mainland")]. The city end is the nearest
 ## point of that city's coast road to the hint, so it meets a real street.
 const BRIDGES := [
-	["Harbour Bridge", 0, Vector2(200.0, 585.0), "island"],
-	["Westbank Bridge", 1, Vector2(-560.0, 458.0), "mainland"],
+	["Harbour Bridge", 0, Vector2(200.0, 585.0), "island", "fan"],      # white A-frame cable-stay
+	["Westbank Bridge", 1, Vector2(-560.0, 458.0), "mainland", "truss"], # steel through-truss
 ]
+const TRUSS_HALF := 112.0  # m: the Westbank Bridge's truss span, each side of mid-span
 const BRIDGE_CREST := 16.0             # deck height at mid-span (boats pass under)
 const BRIDGE_W := 22.0
 const RUNWAY := {"from": Vector3(1430.0, LAND_Y, 470.0), "to": Vector3(2430.0, LAND_Y, 470.0), "w": 45.0}
@@ -327,15 +328,15 @@ static func coast_points() -> Array:
 	[l2(Vector2(-684, 2046)), "rock"],
 	[l2(Vector2(-760, 2010)), "rock"],
 	[l2(Vector2(-792, 1940)), "rock"],
-	[l2(Vector2(-788, 1830)), "beach"],
+	[l2(Vector2(-788, 1830)), "rock"],   # (rock armour along the runway)
 	[l2(Vector2(-802, 1724)), "rock"],
 	[l2(Vector2(-858, 1706)), "rock"],
 	[l2(Vector2(-918, 1712)), "rock"],
 	[l2(Vector2(-940, 1676)), "rock"],
 	[l2(Vector2(-884, 1632)), "rock"],
 	[l2(Vector2(-826, 1584)), "rock"],
-	[l2(Vector2(-792, 1500)), "beach"],
-	[l2(Vector2(-790, 1380)), "beach"],
+	[l2(Vector2(-792, 1500)), "rock"],   # (rock armour along the runway)
+	[l2(Vector2(-790, 1380)), "rock"],   # (rock armour along the runway)
 	[l2(Vector2(-808, 1260)), "rock"],
 	[l2(Vector2(-840, 1180)), "rock"],
 	[l2(Vector2(-802, 1100)), "rock"],
@@ -390,11 +391,22 @@ static func shore_kind(i: int) -> int:
 static func waterline_edges() -> Array:
 	var o := outline()
 	var out: Array = []
-	var dist := [0.0, 19.5, 9.0]
+	# (Where each shore row crosses the sea surface: beaches and rock blend
+	# and vary in width, so the waterline is read off the row itself.)
+	var wl := PackedVector2Array()
 	for i in o.size():
-		var k := shore_kind(i)
-		var a := o[i] + _out_n(o, i) * float(dist[k])
-		var b := o[(i + 1) % o.size()] + _out_n(o, (i + 1) % o.size()) * float(dist[k])
+		var row := _blend_row(o, i)
+		var q := o[i]
+		for j in row.size() - 1:
+			if row[j].y >= 0.0 and row[j + 1].y < 0.0:
+				var t := row[j].y / maxf(row[j].y - row[j + 1].y, 0.001)
+				var v := row[j].lerp(row[j + 1], t)
+				q = Vector2(v.x, v.z)
+				break
+		wl.append(q)
+	for i in o.size():
+		var a := wl[i]
+		var b := wl[(i + 1) % o.size()]
 		var dd := (b - a).normalized()
 		var on := Vector2(dd.y, -dd.x)
 		if on.dot(_out_n(o, i)) < 0.0:
@@ -519,6 +531,8 @@ static func plan(layout: CityLayout) -> Dictionary:
 		# run back up to the avenue.)
 		["Terminal Road", PackedVector3Array([I, y.call(1960.0, 150.0), y.call(2260.0, 150.0), y.call(2392.0, 150.0)]), 16.0, false],
 		["Hangar Lane", PackedVector3Array([I, y.call(1700.0, 112.0), y.call(1648.0, 150.0)]), 12.0, false],
+		# On past the industrial estate to the fuel farm.
+		["Fuel Farm Road", PackedVector3Array([D, y.call(2466.0, z0)]), 12.0, false],
 	]
 	P["roads"] = roads
 	P["bridges"] = _plan_bridges(layout)
@@ -542,8 +556,22 @@ static func plan(layout: CityLayout) -> Dictionary:
 		[3, RUNWAY["from"], RUNWAY["to"], RUNWAY["w"] * 0.5],
 		[4, Vector3(1470, LAND_Y, 395), Vector3(2410, LAND_Y, 395), 11.5],
 	]
-	for cx: float in [1480.0, 1940.0, 2400.0]:
+	for cx: float in [1480.0, 1700.0, 1940.0, 2160.0, 2400.0]:
 		strips.append([4, Vector3(cx, LAND_Y, 384), Vector3(cx, LAND_Y, 470), 11.5])
+	# Rapid exits: arrivals land westbound and turn off at a shallow angle.
+	for rx: float in [2290.0, 1860.0]:
+		strips.append([4, Vector3(rx, LAND_Y, 466), Vector3(rx - 120.0, LAND_Y, 398), 11.5])
+	# Fire station apron out to the taxiway.
+	strips.append([4, Vector3(1520, LAND_Y, 334), Vector3(1520, LAND_Y, 384), 9.0])
+	# Apron markings (narrow taxiway strips read as painted lines): a lead-in
+	# line from the taxiway to every stand, its stop bar, and the equipment
+	# restraint line along the gates.
+	for sx: float in [1990.0, 2080.0, 2170.0, 2260.0]:
+		strips.append([4, Vector3(sx, LAND_Y, 383), Vector3(sx, LAND_Y, 288), 0.3])
+		strips.append([4, Vector3(sx - 4.0, LAND_Y, 289), Vector3(sx + 4.0, LAND_Y, 289), 0.3])
+	strips.append([4, Vector3(1958, LAND_Y, 262), Vector3(2292, LAND_Y, 262), 0.25])
+	for sx: float in [1700.0, 1800.0]:
+		strips.append([4, Vector3(sx, LAND_Y, 383), Vector3(sx, LAND_Y, 326), 0.3])
 	P["strips"] = strips
 	P["helipads"] = [Vector3(1585, LAND_Y, 205), Vector3(1585, LAND_Y, 255), Vector3(1585, LAND_Y, 305)]
 	P["stands"] = [[Vector3(1990, LAND_Y, 300), PI], [Vector3(2080, LAND_Y, 300), PI], [Vector3(2170, LAND_Y, 300), PI],
@@ -650,7 +678,7 @@ static func _plan_bridges(layout: CityLayout) -> Array:
 			y_es = maxf(y_es, maxf(0.9, H - 0.5) + 0.08)
 		var S := Vector3(S2.x, y_es, S2.y)
 		var L := Vector2(F.x - S.x, F.z - S.z).length()
-		var B := {"name": bd[0], "city": bd[3], "s0": Vector3(s02.x, lo - 0.03, s02.y),
+		var B := {"name": bd[0], "city": bd[3], "style": bd[4], "s0": Vector3(s02.x, lo - 0.03, s02.y),
 			"a0": Vector3(a2.x, hi + 0.01, a2.y), "S": S, "F": F, "Jw": Jw,
 			"u": Vector3(u2.x, 0.0, u2.y), "L": L, "y0": y_es}
 		var pts := PackedVector3Array([B["s0"], B["a0"]])
@@ -682,6 +710,22 @@ static func under_bridge(x: float, z: float) -> bool:
 		var across := absf(r.dot(Vector2(-u.z, u.x)))
 		var back := Vector2(S.x - s0.x, S.z - s0.z).length()
 		if across < BRIDGE_W * 0.5 + 3.0 and along > -back - 3.0 and along < 30.0:
+			return true
+	return false
+
+
+## Is world (x, z) on the shore under a bridge's low end (the deck clears a
+## sand apron there, not rock armour)?
+static func over_bridge_shore(x: float, z: float) -> bool:
+	if not enabled or _plan.is_empty():
+		return false
+	for B: Dictionary in _plan["bridges"]:
+		var u: Vector3 = B["u"]
+		var S: Vector3 = B["S"]
+		var r := Vector2(x - S.x, z - S.z)
+		var along := r.dot(Vector2(u.x, u.z))
+		var across := absf(r.dot(Vector2(-u.z, u.x)))
+		if across < BRIDGE_W * 0.5 + 8.0 and along > -20.0 and along < 90.0:
 			return true
 	return false
 
@@ -856,18 +900,38 @@ static func _buildings(P: Dictionary) -> Array:
 	# Airport: terminal (long glass hall on a stone base), control tower,
 	# hangars, cargo terminal.
 	# (The terminal is a glazed hall under a curved roof: _build_terminal.)
-	out.append(_b([[1962, 168, 2258, 236, LAND_Y, LAND_Y + TERMINAL_HALL]], S.GLASS, Color(0.6, 0.68, 0.74), 0.12))
+	var term := _b([[1962, 168, 2258, 236, LAND_Y, LAND_Y + TERMINAL_HALL]], S.GLASS, Color(0.6, 0.68, 0.74), 0.12)
+	term["mesh"] = false   # (a glazed hall: SkyportAirport.build_terminal; the record keeps collision and the map)
+	out.append(term)
 	# Skyport Grand: the airport hotel beside the terminal, a low setback block
 	# between the runway and the town.
 	var hotel := _b(_tower(1900, 170, 44, 52, 30, "setback"), S.GLASS, Color(0.55, 0.62, 0.66), 0.83)
 	hotel["district"] = "airport"
 	out.append(hotel)
-	out.append(_b([[2284, 198, 2298, 212, LAND_Y, LAND_Y + 52.0], [2280, 194, 2302, 216, LAND_Y + 52.0, LAND_Y + 60.0]], S.DARK_GLASS,
-		Color(0.25, 0.3, 0.34), 0.58))
+	# Control tower (drawn by SkyportAirport.build_tower; these boxes are its
+	# collision and map footprint): base block, shaft, cab.
+	var twr := _b([[2274, 190, 2308, 220, LAND_Y, LAND_Y + 8.1], [2287, 201, 2295, 209, LAND_Y + 8.1, LAND_Y + 54.4],
+		[2282.5, 196.5, 2299.5, 213.5, LAND_Y + 54.4, LAND_Y + 61.6]], S.DARK_GLASS, Color(0.25, 0.3, 0.34), 0.58)
+	twr["mesh"] = false
+	out.append(twr)
+	# Airport fire station (ARFF) between the hangars and the runway's west
+	# end: four engine bays facing the taxiway, a training tower.
+	out.append(_b([[1492, 300, 1548, 334, LAND_Y, LAND_Y + 9.0], [1530, 300, 1548, 312, LAND_Y + 9.0, LAND_Y + 18.0]], S.BRICK,
+		Color(0.62, 0.3, 0.24), 0.71))
 	for k in 3:
 		var hx := 1640.0 + k * 80.0
 		out.append(_b([[hx, 190, hx + 72, 288, LAND_Y, LAND_Y + 20.0]], S.WAREHOUSE, Color(0.78, 0.79, 0.8), 0.2 + k * 0.1))
 	out.append(_b([[2340, 170, 2455, 290, LAND_Y, LAND_Y + 15.0]], S.WAREHOUSE, Color(0.45, 0.52, 0.6), 0.9))
+	# Landside aviation businesses on the open ground south of Hangar Lane:
+	# flight catering (a loading dock towards the apron) and an aviation
+	# academy with a simulator hall.
+	var fc := _b([[1702, 128, 1772, 176, LAND_Y, LAND_Y + 10.0]], S.WAREHOUSE, Color(0.86, 0.87, 0.86), 0.27)
+	fc["district"] = "airport"
+	out.append(fc)
+	var ac := _b([[1792, 124, 1872, 156, LAND_Y, LAND_Y + 15.0], [1820, 156, 1872, 176, LAND_Y, LAND_Y + 9.0]], S.GLASS,
+		Color(0.55, 0.62, 0.66), 0.39)
+	ac["district"] = "airport"
+	out.append(ac)
 	# Marina office and boat sales.
 	out.append(_b([[1396, -246, 1424, -196, LAND_Y, LAND_Y + 7.0]], S.MODERN, Color(0.9, 0.9, 0.88), 0.66))
 	return out
@@ -946,6 +1010,13 @@ func _start_near() -> void:
 		func(): _near(_build_detail.bind("en")), func(): _near(_build_detail.bind("es")),
 		func(): _near(_build_airport_dressing), func(): _near(_build_marina.bind(near_street)),
 		func(): _near(_build_terminal.bind(near_street)),
+		func(): SkyportAirport.build_terminal(self, near_root, body),
+		func(): SkyportAirport.build_tower(near_root, self),
+		func(): SkyportAirport.build_parked(plan_data, near_root, self),
+		func(): SkyportAirport.build_masts(near_root, body, self),
+		func(): SkyportAirport.build_link(plan_data, near_root, body, self),
+		func(): SkyportAirport.build_fuel_farm(near_root, body, self),
+		func(): SkyportAirport.build_car_park(near_root, body, self),
 		func(): _near(_build_industry), func(): _near(_build_trees),
 		func():
 			var at := AirTraffic.new()
@@ -1204,8 +1275,8 @@ func _knoll(st: SurfaceTool, k: Array) -> PackedVector3Array:
 ## Shore profiles: [metres out from the land's edge, height] per kind.
 const SHORE_PROFILES := [
 	[[0.0, LAND_Y], [0.0, -9.0]],                                                     # quay: a wall
-	[[0.0, LAND_Y], [4.0, LAND_Y - 0.9], [14.0, 0.15], [24.0, -1.05], [36.0, -4.0]],  # beach
-	[[0.0, LAND_Y], [3.0, LAND_Y - 0.5], [8.0, 0.1], [13.0, -2.3], [17.0, -6.5]],     # rock
+	[[0.0, LAND_Y], [7.0, LAND_Y - 0.55], [18.0, 1.1], [29.0, 0.05], [40.0, -1.0], [54.0, -4.0]],   # beach
+	[[0.0, LAND_Y], [3.5, LAND_Y - 0.5], [9.0, 0.6], [14.0, -0.9], [19.0, -3.0], [25.0, -6.5]],    # rock
 ]
 
 
@@ -1222,14 +1293,15 @@ static func _out_n(o: PackedVector2Array, i: int) -> Vector2:
 	return nn
 
 
-## A row of the profile for kind k at outline point i (rock jitters).
-static func _shore_row(o: PackedVector2Array, i: int, k: int) -> PackedVector3Array:
+## A row of the profile for kind k at outline point i (rock jitters), its
+## width scaled by w.
+static func _shore_row(o: PackedVector2Array, i: int, k: int, w := 1.0) -> PackedVector3Array:
 	var p := o[i]
 	var nn := _out_n(o, i)
 	var row := PackedVector3Array()
 	var prof: Array = SHORE_PROFILES[k]
 	for j in prof.size():
-		var d: float = prof[j][0]
+		var d: float = prof[j][0] * (w if k != 0 else 1.0)
 		var y: float = prof[j][1]
 		if k == 2 and j > 0:
 			var h := sin(p.x * 1.37 + p.y * 0.91 + j * 2.1) * 0.5 + sin(p.x * 0.43 - p.y * 1.7 + j) * 0.5
@@ -1239,20 +1311,71 @@ static func _shore_row(o: PackedVector2Array, i: int, k: int) -> PackedVector3Ar
 	return row
 
 
+## Shore width factor along the coast (0.7–1.45): beaches swell and pinch.
+static func _shore_w(p: Vector2) -> float:
+	return 0.7 + 0.75 * clampf(0.5 + 0.5 * (sin(p.x * 0.021 + p.y * 0.013) * 0.6 + sin(p.y * 0.034 - p.x * 0.017 + 2.0) * 0.4), 0.0, 1.0)
+
+
+## How sandy the shore is at outline point i (0 rock … 1 beach), averaged
+## over its natural neighbours so beaches fade into rock over ~60 m
+## instead of stepping (quays: −1, never blended).
+static func _sandiness(o: PackedVector2Array, i: int) -> float:
+	if shore_kind(i) == 0:
+		return -1.0
+	var n := o.size()
+	var acc := 0.0
+	var cnt := 0.0
+	for j in range(-3, 4):
+		var k := shore_kind((i + j + n) % n)
+		if k == 0:
+			continue
+		var wgt := 1.0 - absf(j) / 4.0
+		acc += (1.0 if k == 1 else 0.0) * wgt
+		cnt += wgt
+	return acc / maxf(cnt, 0.001)
+
+
+## The blended row at outline point i: beach and rock profiles mixed by
+## sandiness, with the width factor; quays as they are.
+static func _blend_row(o: PackedVector2Array, i: int) -> PackedVector3Array:
+	return _row_as(o, i, _sandiness(o, i))
+
+
+## Point i's row with sandiness sd (−1: a quay wall).
+static func _row_as(o: PackedVector2Array, i: int, sd: float) -> PackedVector3Array:
+	if sd < 0.0:
+		return _shore_row(o, i, 0)
+	var w := _shore_w(o[i])
+	var bch := _shore_row(o, i, 1, w)
+	var rck := _shore_row(o, i, 2, w)
+	var row := PackedVector3Array()
+	var t := smoothstep(0.0, 1.0, sd)
+	for j in bch.size():
+		row.append(rck[j].lerp(bch[j], t))
+	return row
+
+
 ## Shore geometry into st (sand / rock / concrete, UV2.y = -1 marks shore for
 ## island_ground.gdshader); returns the collision faces.
 func _shore_bands(st: SurfaceTool) -> PackedVector3Array:
 	var o := outline()
 	var faces := PackedVector3Array()
-	var cols := [Color(0.55, 0.53, 0.5), Color(0.8, 0.72, 0.55), Color(0.42, 0.4, 0.37)]
-	var put := func(q: Array, col: Color) -> void:
+	var quay_c := Color(0.55, 0.53, 0.5)
+	var sand_c := Color(0.8, 0.72, 0.55)
+	var rock_c := Color(0.42, 0.4, 0.37)
+	var colour := func(sd: float) -> Color:
+		if sd < 0.0:
+			return quay_c
+		return rock_c.lerp(sand_c, smoothstep(0.35, 0.65, sd))
+	var put := func(q: Array, cs: Array) -> void:
 		var nrm := ((q[2] as Vector3) - (q[0] as Vector3)).cross((q[1] as Vector3) - (q[0] as Vector3)).normalized()
-		if nrm.y < -0.01 or (absf(nrm.y) < 0.01 and false):
+		if nrm.y < -0.01:
 			nrm = -nrm
-		for v: Vector3 in q:
-			var c := col
-			if v.y < 0.4 and col.r > 0.7:
-				c = col.darkened(0.28)   # wet sand
+		for vi in 3:
+			var v: Vector3 = q[vi]
+			var c: Color = cs[vi]
+			if v.y < 0.4 and c.r > 0.7:
+				c = c.darkened(0.28)   # wet sand
 			c.a = 0.5 / 8.0
 			st.set_color(c)
 			st.set_normal(nrm)
@@ -1260,30 +1383,40 @@ func _shore_bands(st: SurfaceTool) -> PackedVector3Array:
 			st.set_uv2(Vector2(0.0, -1.0))
 			st.add_vertex(v)
 			faces.append(v)
-	for i in o.size():
-		var k := shore_kind(i)
-		var A := _shore_row(o, i, k)
-		var B := _shore_row(o, (i + 1) % o.size(), k)
-		for j in A.size() - 1:
+	var n := o.size()
+	var sds: Array = []
+	for i in n:
+		sds.append(_sandiness(o, i))
+	for i in n:
+		var i2 := (i + 1) % n
+		var s1: float = sds[i]
+		var s2: float = sds[i2]
+		var ca: Color = colour.call(s1)
+		var cb: Color = colour.call(s2)
+		var A := _row_as(o, i, s1)
+		var B := _row_as(o, i2, s2)
+		if (s1 < 0.0) != (s2 < 0.0):
+			# Quay meets natural shore: run this stretch with point i's own
+			# profile, then close the step to point i2's with rock.
+			B = _row_as(o, i2, s1)
+			var own := _row_as(o, i2, s2)
+			for j in mini(B.size(), own.size()) - 1:
+				put.call([B[j], own[j + 1], B[j + 1]], [rock_c, rock_c, rock_c])
+				put.call([B[j], B[j + 1], own[j + 1]], [rock_c, rock_c, rock_c])
+			cb = ca
+		var is_quay := s1 < 0.0
+		for j in mini(A.size(), B.size()) - 1:
 			var a := A[j]
 			var b := B[j]
 			var c := B[j + 1]
 			var d := A[j + 1]
-			# (Wind each quad so its face points up / outwards.)
 			var up := (c - a).cross(b - d)
-			if up.y < 0.0 or (k == 0 and up.dot(Vector3(d.x - a.x, 0, d.z - a.z)) < 0.0):
-				put.call([a, d, c], cols[k])
-				put.call([a, c, b], cols[k])
+			if up.y < 0.0 or (is_quay and up.dot(Vector3(d.x - a.x, 0, d.z - a.z)) < 0.0):
+				put.call([a, d, c], [ca, ca, cb])
+				put.call([a, c, b], [ca, cb, cb])
 			else:
-				put.call([a, b, c], cols[k])
-				put.call([a, c, d], cols[k])
-		# Where the kind changes, close the step between the two profiles.
-		var k2 := shore_kind((i + 1) % o.size())
-		if k2 != k:
-			var P2 := _shore_row(o, (i + 1) % o.size(), k2)
-			for j in mini(B.size(), P2.size()) - 1:
-				put.call([B[j], P2[j + 1], B[j + 1]], cols[2])
-				put.call([B[j], B[j + 1], P2[j + 1]], cols[2])
+				put.call([a, b, c], [ca, cb, cb])
+				put.call([a, c, d], [ca, cb, ca])
 	return faces
 
 
@@ -1317,6 +1450,14 @@ func _mesh(m: BuildingMesher, nm: String, range_begin: float, range_end: float) 
 	_target.add_child(mi)
 
 
+## Like _mesh, into any node (SkyportAirport's pieces).
+func _mesh_into(m: BuildingMesher, nm: String, target: Node, range_begin: float, range_end: float) -> void:
+	var prev := _target
+	_target = target
+	_mesh(m, nm, range_begin, range_end)
+	_target = prev
+
+
 func _groups() -> Dictionary:
 	var groups := {}
 	for b: Dictionary in plan_data["buildings"]:
@@ -1335,7 +1476,8 @@ func _build_skyline() -> void:
 	for key in groups:
 		var far := BuildingMesher.new()
 		for b: Dictionary in groups[key]:
-			far.add_building(b, false)
+			if b.get("mesh", true):
+				far.add_building(b, false)
 		_mesh(far, "Skyline_" + key, DETAIL_RANGE - 20.0, FAR_RANGE)
 
 
@@ -1343,8 +1485,9 @@ func _build_skyline() -> void:
 func _build_detail(key: String) -> void:
 	var near := BuildingMesher.new()
 	for b: Dictionary in _groups().get(key, []):
-		near.add_building(b, true)
-		near.add_features(b)
+		if b.get("mesh", true):   # (the terminal and the tower are drawn by SkyportAirport)
+			near.add_building(b, true)
+			near.add_features(b)
 		for bx in BuildingMesher.collision_boxes(b):
 			CityWorld._add_box(body, bx)
 	_mesh(near, "Detail_" + key, 0.0, DETAIL_RANGE)
@@ -1423,7 +1566,8 @@ func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
 	var mid := L * 0.5
 	var sd := 30.0
 	while sd < L - 12.0:
-		if absf(sd - mid) > 24.0:
+		var clear := 24.0 if String(B.get("style", "fan")) == "fan" else TRUSS_HALF - 6.0
+		if absf(sd - mid) > clear:
 			var dy := deck_y(B, sd)
 			if dy > 3.0:
 				for sg: float in [-1.0, 1.0]:
@@ -1431,32 +1575,10 @@ func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
 					_box_beam(body, Vector3(sd, -6.0, sg * 7.0), Vector3(sd, dy - 1.6, sg * 7.0), 1.8, 1.8)
 				m.beam(Vector3(sd, dy - 2.4, -8.5), Vector3(sd, dy - 2.4, 8.5), 1.6, 1.6, white)
 		sd += 32.0
-	# The pylon at mid-span: an A-frame from the water, legs meeting above
-	# the deck, crossbeams, and cables fanning out to the deck both ways.
-	var cy0 := deck_y(B, mid)
-	var top := cy0 + 74.0
-	for sg: float in [-1.0, 1.0]:
-		var foot := Vector3(mid, -6.0, sg * 16.0)
-		var head := Vector3(mid, top, sg * 2.2)
-		m.beam(foot, head, 4.0, 4.0, white)
-		_box_beam(body, foot, head, 4.0, 4.0)
-	for cy: float in [cy0 - 2.2, cy0 + 30.0, top - 20.0]:
-		var t := (cy + 6.0) / (top + 6.0)
-		var half := lerpf(16.0, 2.2, t)
-		m.beam(Vector3(mid, cy, -half), Vector3(mid, cy, half), 3.0, 3.0, white)
-		_box_beam(body, Vector3(mid, cy, -half), Vector3(mid, cy, half), 3.0, 3.0)
-	m.solid(mid - 9.0, -22.0, mid + 9.0, 22.0, -8.0, 0.6, Color(0.6, 0.6, 0.58))   # pier cap at the water
-	_box_beam(body, Vector3(mid, -8.0, 0.0), Vector3(mid, 0.6, 0.0), 18.0, 44.0)
-	for sg: float in [-1.0, 1.0]:
-		for k in 10:
-			var off := 18.0 + k * minf(13.0, (mid - 30.0) / 10.0)
-			for dir: float in [-1.0, 1.0]:
-				var dx := mid + dir * off
-				if dx < 6.0 or dx > L - 6.0:
-					continue
-				var anchor := Vector3(dx, deck_y(B, dx) + 0.4, sg * 11.6)
-				var tp := Vector3(mid, top - 4.0 - k * 3.6, sg * 2.6)
-				m.beam(anchor, tp, 0.28, 0.28, Color(0.95, 0.95, 0.93))
+	if String(B.get("style", "fan")) == "truss":
+		_build_truss(B, m, body, mid)
+	else:
+		_build_fan(B, m, body, mid, L)
 	# Deck lamps every 36 m.
 	var lx := 18.0
 	while lx < L:
@@ -1491,6 +1613,93 @@ func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
 	mi.material_override = _ground_mat()
 	mi.visibility_range_end = 2600.0
 	fr.add_child(mi)
+
+
+
+## The Harbour Bridge's landmark: an A-frame pylon at mid-span with cables
+## fanning to the deck both ways.
+func _build_fan(B: Dictionary, m: BuildingMesher, body: StaticBody3D, mid: float, L: float) -> void:
+	var white := Color(0.88, 0.88, 0.86)
+	var cy0 := deck_y(B, mid)
+	var top := cy0 + 74.0
+	for sg: float in [-1.0, 1.0]:
+		var foot := Vector3(mid, -6.0, sg * 16.0)
+		var head := Vector3(mid, top, sg * 2.2)
+		m.beam(foot, head, 4.0, 4.0, white)
+		_box_beam(body, foot, head, 4.0, 4.0)
+	for cy: float in [cy0 - 2.2, cy0 + 30.0, top - 20.0]:
+		var t := (cy + 6.0) / (top + 6.0)
+		var half := lerpf(16.0, 2.2, t)
+		m.beam(Vector3(mid, cy, -half), Vector3(mid, cy, half), 3.0, 3.0, white)
+		_box_beam(body, Vector3(mid, cy, -half), Vector3(mid, cy, half), 3.0, 3.0)
+	m.solid(mid - 9.0, -22.0, mid + 9.0, 22.0, -8.0, 0.6, Color(0.6, 0.6, 0.58))   # pier cap at the water
+	_box_beam(body, Vector3(mid, -8.0, 0.0), Vector3(mid, 0.6, 0.0), 18.0, 44.0)
+	for sg: float in [-1.0, 1.0]:
+		for k in 10:
+			var off := 18.0 + k * minf(13.0, (mid - 30.0) / 10.0)
+			for dir: float in [-1.0, 1.0]:
+				var dx := mid + dir * off
+				if dx < 6.0 or dx > L - 6.0:
+					continue
+				var anchor := Vector3(dx, deck_y(B, dx) + 0.4, sg * 11.6)
+				var tp := Vector3(mid, top - 4.0 - k * 3.6, sg * 2.6)
+				m.beam(anchor, tp, 0.28, 0.28, Color(0.95, 0.95, 0.93))
+
+
+## The Westbank Bridge: a steel through-truss over the main span – a
+## camelback top chord (deepest mid-span), verticals and Warren diagonals
+## each side, portal and top bracing well clear of the traffic, on heavy
+## river piers. Weathered green-grey steel: Westbank's older, industrial
+## character, unlike the Harbour Bridge's white A-frame, the strait's red
+## suspension bridge and the white rail arch.
+func _build_truss(B: Dictionary, m: BuildingMesher, body: StaticBody3D, mid: float) -> void:
+	var steel := Color(0.3, 0.38, 0.34)
+	var pier := Color(0.68, 0.67, 0.64)
+	var n := 16
+	var low := func(sg: float, k: int) -> Vector3:
+		var sd := mid - TRUSS_HALF + 2.0 * TRUSS_HALF * k / n
+		return Vector3(sd, deck_y(B, sd) + 0.2, sg * 14.2)
+	var high := func(sg: float, k: int) -> Vector3:
+		var u := -1.0 + 2.0 * k / n
+		var p: Vector3 = low.call(sg, k)
+		return p + Vector3(0.0, 14.0 + 9.0 * (1.0 - u * u), 0.0)
+	for sg: float in [-1.0, 1.0]:
+		for k in n:
+			var a: Vector3 = low.call(sg, k)
+			var c: Vector3 = low.call(sg, k + 1)
+			m.beam(a, c, 1.2, 2.2, steel)                              # bottom chord
+			if k > 0 and k < n - 1:
+				var ta: Vector3 = high.call(sg, k)
+				var tc: Vector3 = high.call(sg, k + 1)
+				m.beam(ta, tc, 1.4, 1.6, steel)                        # top chord
+				_box_beam(body, ta, tc, 1.4, 1.6)
+		for k in range(1, n):
+			var b0: Vector3 = low.call(sg, k)
+			var t0: Vector3 = high.call(sg, k)
+			m.beam(b0, t0, 0.9, 0.9, steel)                            # vertical
+			_box_beam(body, b0, t0, 0.9, 0.9)
+			# Warren diagonals, alternating; the end posts slope down to the bearings.
+			var nb: Vector3 = low.call(sg, k + 1 if k % 2 == 1 else k - 1)
+			if k == 1:
+				m.beam(t0, low.call(sg, 0), 1.2, 1.2, steel)
+			elif k == n - 1:
+				m.beam(t0, low.call(sg, n), 1.2, 1.2, steel)
+			else:
+				m.beam(t0, nb, 0.7, 0.7, steel)
+	# Top bracing: struts across at every node, X-bracing every other bay.
+	for k in range(1, n):
+		var a: Vector3 = high.call(-1.0, k)
+		var c: Vector3 = high.call(1.0, k)
+		m.beam(a, c, 0.8, 0.9, steel)
+		if k < n - 1 and k % 2 == 1:
+			m.beam(a, high.call(1.0, k + 1), 0.45, 0.45, steel)
+			m.beam(c, high.call(-1.0, k + 1), 0.45, 0.45, steel)
+	# River piers under the bearings.
+	for sd: float in [mid - TRUSS_HALF, mid + TRUSS_HALF]:
+		var dy := deck_y(B, sd)
+		m.solid(sd - 6.0, -18.0, sd + 6.0, 18.0, -8.0, dy - 1.6, pier)
+		m.solid(sd - 7.5, -19.5, sd + 7.5, 19.5, -8.0, 0.4, pier.darkened(0.25))
+		_box_beam(body, Vector3(sd, -8.0, 0.0), Vector3(sd, dy - 1.6, 0.0), 36.0, 12.0)
 
 
 static func _box_beam(b: StaticBody3D, a: Vector3, c: Vector3, w: float, h: float) -> void:
@@ -1543,10 +1752,6 @@ func _build_airport_dressing() -> void:
 			m.beam(Vector3(tx + 1.5, LAND_Y, zs[1]), top, 0.45, 0.45, Color(0.86, 0.87, 0.88))
 			m.beam(Vector3(tx - 1.5, LAND_Y, zs[1]), top, 0.45, 0.45, Color(0.86, 0.87, 0.88))
 		tx += 32.0
-	# Control tower cab glass ring and a radar on top.
-	m.solid(2281, 195, 2301, 215, LAND_Y + 60.0, LAND_Y + 61.0, Color(0.85, 0.85, 0.85))
-	m.beam(Vector3(2291, LAND_Y + 61.0, 205), Vector3(2291, LAND_Y + 64.0, 205), 0.4, 0.4, Color(0.8, 0.8, 0.8))
-	m.beam(Vector3(2288, LAND_Y + 64.0, 205), Vector3(2294, LAND_Y + 64.0, 205), 0.4, 1.2, Color(0.9, 0.9, 0.9))
 	# Hangar doors (dark, ribbed by the warehouse style) facing the apron.
 	for k in 3:
 		var hx := 1640.0 + k * 80.0
@@ -1614,37 +1819,7 @@ func _build_terminal(street: StaticBody3D) -> void:
 	var cs := CollisionShape3D.new()
 	cs.shape = sh
 	street.add_child(cs)
-	# Clerestory glazing from the hall's top up to the roof, all round it.
-	var g := SurfaceTool.new()
-	g.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var hall := Rect2(1962, 168, 296, 68)
-	var y0 := LAND_Y + TERMINAL_HALL
-	var ring := [Vector2(hall.position.x, hall.position.y), Vector2(hall.end.x, hall.position.y),
-		Vector2(hall.end.x, hall.end.y), Vector2(hall.position.x, hall.end.y)]
-	for k in 4:
-		var p0: Vector2 = ring[k]
-		var p1: Vector2 = ring[(k + 1) % 4]
-		var steps := maxi(1, ceili(p0.distance_to(p1) / 8.0))
-		for s2 in steps:
-			var a2 := p0.lerp(p1, float(s2) / steps)
-			var b2 := p0.lerp(p1, float(s2 + 1) / steps)
-			var A0 := Vector3(a2.x, y0, a2.y)
-			var B0 := Vector3(b2.x, y0, b2.y)
-			var A1 := Vector3(a2.x, terminal_roof_y(a2.x, a2.y) - 0.3, a2.y)
-			var B1 := Vector3(b2.x, terminal_roof_y(b2.x, b2.y) - 0.3, b2.y)
-			for v: Vector3 in [A0, A1, B1, A0, B1, B0, A0, B1, A1, A0, B0, B1]:
-				g.add_vertex(v)
-	g.generate_normals()
-	var gl := MeshInstance3D.new()
-	gl.name = "TerminalGlazing"
-	gl.mesh = g.commit()
-	var gm := StandardMaterial3D.new()
-	gm.albedo_color = Color(0.32, 0.45, 0.52)
-	gm.metallic = 0.8
-	gm.roughness = 0.08
-	gl.material_override = gm
-	gl.visibility_range_end = 2000.0
-	_target.add_child(gl)
+	# (The hall's glazing, full height: SkyportAirport.build_terminal.)
 
 
 func _build_marina(street: StaticBody3D) -> void:

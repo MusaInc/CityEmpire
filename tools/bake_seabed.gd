@@ -168,10 +168,17 @@ func _go() -> void:
 
 ## Depth below the surface d metres out from a shore of rockiness r.
 static func depth_at(d: float, r: float, x: float, z: float) -> float:
+	# Every shore has a shallow shelf (turquoise water follows the coasts),
+	# its width varying slowly along the coast – ×0.55 to ×1.6 – so the
+	# shallows swell into bays and pinch off points rather than drawing an
+	# even band. Rock and sea walls get a narrower, steeper one.
+	var wv := 0.55 + 1.05 * clampf(0.5 + 0.5 * (sin(x * 0.0061 + z * 0.0037) * 0.6 + sin(z * 0.0097 - x * 0.0043 + 1.3) * 0.4), 0.0, 1.0)
+	var ds := d / wv
 	# Sand: a long shallow shelf, then down to the floor.
-	var sand := 0.4 + 1.8 * smoothstep(0.0, 25.0, d) + 3.8 * smoothstep(15.0, 75.0, d) + 6.0 * smoothstep(50.0, 160.0, d) + 10.0 * smoothstep(140.0, 420.0, d)
-	# Rock / sea wall: steep from the foot.
-	var rock := 3.0 + 6.0 * smoothstep(0.0, 25.0, d) + 7.0 * smoothstep(15.0, 90.0, d) + 8.0 * smoothstep(80.0, 420.0, d)
+	var sand := 0.4 + 1.8 * smoothstep(0.0, 25.0, ds) + 3.8 * smoothstep(15.0, 75.0, ds) + 6.0 * smoothstep(50.0, 160.0, ds) + 10.0 * smoothstep(140.0, 420.0, ds)
+	# Rock / sea wall: a boulder toe ~1.5 m down, a shelf to ~4 m over the
+	# first 30–40 m, then a steeper drop.
+	var rock := 1.4 + 2.4 * smoothstep(0.0, 34.0, ds) + 7.0 * smoothstep(28.0, 110.0, ds) + 11.0 * smoothstep(90.0, 420.0, ds)
 	var depth := lerpf(sand, rock, r)
 	# Sand ridges and hollows on the shelf (fade out in deep water), and a
 	# broad unevenness on the channel floor.

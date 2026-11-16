@@ -17,7 +17,7 @@
 //    calms in the shallows and a line of surf runs in to the shore; a storm
 //    stirs the water up (less clear).
 shader_type spatial;
-render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
+render_mode cull_disabled, diffuse_burley, specular_schlick_ggx, depth_draw_always;
 
 uniform vec3 deep : source_color = vec3(0.03, 0.12, 0.17);
 uniform vec3 shallow : source_color = vec3(0.07, 0.34, 0.38);
@@ -27,6 +27,9 @@ uniform sampler2D seabed : filter_linear, repeat_disable;
 uniform vec4 seabed_rect = vec4(-2400.0, -1800.0, 4800.0, 4800.0);
 uniform float seabed_max = 32.0;
 uniform bool has_seabed = false;
+uniform float shallow_visibility = 0.78;
+uniform float clear_depth_start = 0.5;
+uniform float clear_depth_end = 10.0;
 global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
@@ -158,6 +161,12 @@ void fragment() {
 	// alias into streaks along the horizon – soften them there.)
 	float graze = normalize(CAMERA_POSITION_WORLD - v_world).y;
 	slope *= mix(0.4, 1.0, smoothstep(0.04, 0.3, graze));
+	// (Far off only the longest trains survive their fade and cross into a
+	// diamond lattice: calm them there and let broad wind patches – cat's
+	// paws and slicks – shape the reflection instead.)
+	float farw = smoothstep(180.0, 800.0, dist);
+	slope *= mix(1.0, 0.5, farw);
+	slope += vec2(gnoise(p0 * 0.011 + wd * TIME * 0.05), gnoise(p0 * 0.011 + 17.3 - wd * TIME * 0.04)) * 0.07 * farw * (1.0 + blow);
 	vec3 nw = normalize(vec3(-slope.x, 1.0, -slope.y));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 
@@ -213,10 +222,29 @@ void fragment() {
 	// Far off the bottom's detail aliases: fade it to its mean.
 	float fdet = 1.0 - smoothstep(0.3, 2.5, fp);
 	floor_c = mix(mix(vec3(0.78, 0.72, 0.56), vec3(0.24, 0.24, 0.2), smoothstep(0.25, 0.75, rocky)) * mix(1.0, 0.12, night), floor_c, fdet);
+	vec3 water_c = body;
 	body = floor_c * tr + body * (vec3(1.0) - tr);
+
+	// See-through shallows: where the baked seabed says it's shallow there
+	// is real floor geometry under the surface (SeabedMesh, the beaches and
+	// rock armour), so the water thins out and shows it – opaque again by
+	// ~6 m, wherever the surface reflects (grazing views, fresnel), on foam
+	// and glints, in a storm, at night and far off (where the painted floor
+	// takes over). Its colour there is the turquoise tint the light picks
+	// up through a metre or two of water, not the painted floor.
+	float see = has_seabed
+                ? 1.0 - smoothstep(clear_depth_start, clear_depth_end, depth)
+                : 0.0;
+	see *= (1.0 - fres) * (1.0 - foam) * (1.0 - clamp(glint * day, 0.0, 1.0));
+	see *= (1.0 - 0.75 * blow) * (1.0 - 0.6 * night) * (1.0 - smoothstep(900.0, 1800.0, dist));
+	vec3 tint = mix(shallow * vec3(1.0, 1.8, 1.62), water_c, smoothstep(1.5, 7.0, depth));
+	body = mix(body, tint, see);
+	ALPHA = 1.0 - see * shallow_visibility;
 
 	ALBEDO = mix(body * (1.0 - fres), vec3(0.9), foam);
 	EMISSION = (sky * fres * (1.0 - foam) * mix(1.0, 0.6, night) + sun_col * glint * day) * (1.0 - foam * 0.7);
+	// (Caustics dance on the real floor too: a faint dapple in the surface.)
+	EMISSION += vec3(0.9, 1.0, 0.95) * caus * day * see * exp(-depth * 0.45) * 0.06 * (1.0 - blow);
 	ROUGHNESS = mix(0.06, 0.6, foam) + 0.08 * blow;
 	SPECULAR = 0.25;
 }

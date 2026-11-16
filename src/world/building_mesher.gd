@@ -1658,14 +1658,67 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 			solid(x, z0, x + 0.6, z1, 0.0, 1.1, Color(0.3, 0.32, 0.33))
 
 
+## The far ground (FarCity): the same surfaces as add_ground – asphalt over
+## the land, each block's paving or lawn a kerb above it – on a coarse grid,
+## with no kerbs, walls or quay faces, plus the shore apron (beaches and rocks
+## read from the air). Drawn only while the chunk itself isn't streamed in.
+func add_far_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
+	const FG := 32.0
+	const FE := 14.0
+	var T := layout.terrain
+	var crect := CityLayout._rect_poly(chunk_rect)
+	var outers: Array = []
+	for q in Geometry2D.intersect_polygons(crect, layout.coast):
+		if not Geometry2D.is_polygon_clockwise(q):
+			outers.append(q)
+	if outers.is_empty():
+		return
+	var holes: Array = []
+	for bs in layout.basins:
+		if (bs as Rect2).intersects(chunk_rect):
+			holes.append(CityLayout._rect_poly(bs))
+	_slab(T, outers, holes, func(x: float, z: float) -> float: return T.road_y(x, z), Color(0.2, 0.21, 0.23), FG, FE)
+	for blk in layout.blocks:
+		var poly: PackedVector2Array = blk["poly"]
+		if not CityLayout._bbox(poly).intersects(chunk_rect):
+			continue
+		var kind: String = blk["kind"]
+		if kind == "basin":
+			continue
+		var level: float = blk["level"]
+		var flat := not is_nan(level)
+		var col: Color = Color(0.32, 0.45, 0.24) if kind == "park" else {"cbd": Color(0.55, 0.57, 0.59),
+			"docks": Color(0.53, 0.52, 0.50), "georgian": Color(0.62, 0.55, 0.51),
+			"waterfront": Color(0.56, 0.57, 0.54)}.get(blk["district"], Color(0.58, 0.57, 0.55))
+		var b_outers: Array = []
+		for q in Geometry2D.intersect_polygons(crect, poly):
+			if not Geometry2D.is_polygon_clockwise(q):
+				b_outers.append(q)
+		if b_outers.is_empty():
+			continue
+		var b_holes: Array = blk["holes"].duplicate()
+		var basin: Rect2 = blk["basin"]
+		if basin.has_area():
+			b_holes.append(CityLayout._rect_poly(basin))
+		var hf := (func(x: float, z: float) -> float: return level) if flat \
+			else (func(x: float, z: float) -> float: return T.road_y(x, z) + CityTerrain.KERB)
+		_slab(T, b_outers, b_holes, hf, col, FG, FE)
+		if flat:
+			for g in layout.greens:
+				var gr: Rect2 = (g as Rect2).intersection(chunk_rect)
+				if gr.has_area() and Geometry2D.is_point_in_polygon((g as Rect2).get_center(), poly):
+					top(gr.position.x, gr.position.y, gr.end.x, gr.end.y, level + 0.02, Color(0.32, 0.45, 0.24), KIND_ROOF, 0, 0)
+	_shore(layout, chunk_rect)
+
+
 ## A ground surface over polygons (minus holes), following height(x, z):
 ## Delaunay over the landform's grid points inside plus the boundary sampled
 ## every SLAB_EDGE m, keeping the triangles whose centre is inside.
-func _slab(T: CityTerrain, outers: Array, holes: Array, height: Callable, col: Color) -> void:
+func _slab(T: CityTerrain, outers: Array, holes: Array, height: Callable, col: Color, g := CityTerrain.GRID, edge := SLAB_EDGE) -> void:
 	for o in outers:
 		var poly: PackedVector2Array = o
 		var pts := PackedVector2Array()
-		_densify(poly, SLAB_EDGE, pts)
+		_densify(poly, edge, pts)
 		var my_holes: Array = []
 		for h in holes:
 			var hp: PackedVector2Array = h
@@ -1673,9 +1726,8 @@ func _slab(T: CityTerrain, outers: Array, holes: Array, height: Callable, col: C
 				my_holes.append(hp)
 				var cut: Array = Geometry2D.intersect_polygons(hp, poly)
 				for c in cut:
-					_densify(c, SLAB_EDGE, pts)
+					_densify(c, edge, pts)
 		var bb := CityLayout._bbox(poly)
-		var g := CityTerrain.GRID
 		var x := ceilf(bb.position.x / g) * g
 		while x < bb.end.x:
 			var z := ceilf(bb.position.y / g) * g
@@ -1957,12 +2009,23 @@ static func shore_profile(layout: CityLayout, smp: Array) -> Array:
 	var n2 := _snoise(s / 23.0 + 40.0)
 	var amt := x_taper * (1.0 - dock)
 	var r := smoothstep(4.0, 9.0, H)
+	# Low engineered coasts are rock armour (a constant-width sand apron
+	# along a straight sea wall read as a beige strip), with sand only in
+	# the odd cove where the shore noise peaks – and on the North Beach.
+	var cove := smoothstep(0.66, 0.84, n1)
+	# (Not under a bridge's low end: its deck is built to clear a sand
+	# apron, and armour boulders there stopped cars.)
+	if not SkyportIsland.over_bridge_shore(p.x, p.y):
+		r = maxf(r, 1.0 - cove)
 	var w := lerpf(16.0 + 30.0 * n1 + 6.0 * n2, 14.0 + H * 0.9 + 46.0 * pow(n1, 1.6) + 9.0 * n2, r) * amt
-	# North Beach (CoastLife): a long, wide, shallow sand beach.
+	# North Beach (CoastLife): a long, wide, shallow sand beach – a crescent,
+	# widest mid-bay, narrowing towards rocky ends.
 	var bk := 0.0 if layout.is_mainland else CoastLife.beach_k(p)
 	if bk > 0.0:
 		r *= 1.0 - bk
-		w = lerpf(w, CoastLife.BEACH_W + 6.0 * n2, bk)
+		var bt := clampf((p.x - CoastLife.BEACH_X.x) / (CoastLife.BEACH_X.y - CoastLife.BEACH_X.x), 0.0, 1.0)
+		var crescent := 0.6 + 0.62 * sin(PI * pow(bt, 0.85)) + 0.1 * (n1 - 0.5)
+		w = lerpf(w, CoastLife.BEACH_W * crescent + 6.0 * n2, bk)
 	var j := func(k: int) -> float: return (_snoise(s / 32.0 + k * 17.3) - 0.5) * r
 	var rock := [[0.0, H - 0.5], [w * 0.07 + 2.0 * j.call(1), H * 0.66 + H * 0.14 * j.call(2)],
 		[w * 0.3 + 6.0 * j.call(3), H * 0.32 + H * 0.2 * j.call(4)],
