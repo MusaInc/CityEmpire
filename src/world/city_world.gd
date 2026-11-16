@@ -68,6 +68,7 @@ var max_builds_per_frame := 2
 var building_mat: ShaderMaterial
 var ground_mat: ShaderMaterial
 var water_mat: ShaderMaterial
+const SEABED := "res://assets/world/seabed.png"
 var prop_meshes := {}
 var car_meshes: Array[Mesh] = []  # CAR_KINDS order; null where the model is missing
 var car_far_meshes: Array[Mesh] = []  # two-box stand-ins (24 tris) for chunks past CAR_NEAR
@@ -129,6 +130,10 @@ func _ready() -> void:
 		BuildingMesher.rail_gaps = []
 		for bb: Dictionary in sp["bridges"]:
 			BuildingMesher.rail_gaps.append(bb["rail_gap"])
+		# (No benches, bins or bollards under the bridges' ramps and decks.)
+		for L: CityLayout in [layout, layout.mainland]:
+			if L != null:
+				L.props = L.props.filter(func(pr): return not SkyportIsland.under_bridge((pr[1] as Transform3D).origin.x, (pr[1] as Transform3D).origin.z))
 	if Landforms.enabled:
 		# (Also before the ground: the quay railing opens where land joins.)
 		Landforms.forms(layout)
@@ -615,6 +620,11 @@ func _materials() -> void:
 	ground_mat.shader = load("res://src/world/shaders/ground.gdshader")
 	water_mat = ShaderMaterial.new()
 	water_mat.shader = load("res://src/world/shaders/water.gdshader")
+	# The baked seabed (tools/bake_seabed.gd) is City Empire's three-island
+	# bay; games without that geography keep the plain deep sea.
+	if SkyportIsland.enabled and Landforms.enabled and ResourceLoader.exists(SEABED):
+		water_mat.set_shader_parameter("seabed", load(SEABED))
+		water_mat.set_shader_parameter("has_seabed", true)
 
 
 ## (Sky colours and the sun now reach every shader as global uniforms, set by

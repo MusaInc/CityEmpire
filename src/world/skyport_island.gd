@@ -34,8 +34,8 @@ extends Node3D
 const LAND_Y := 3.0
 const SEA_Y := -1.6
 const DETAIL_RANGE := 650.0
-const NEAR_LOAD := 1200.0
-const NEAR_FREE := 2000.0
+const NEAR_LOAD := 600.0     # (the island sits right by both cities now: detail only as you near it)
+const NEAR_FREE := 900.0
 const FAR_RANGE := 5200.0
 const BRIDGE_ISLAND_X := 1560.0        # Skyport Avenue's first junction east of Bridge Road (local)
 const QUAY_X := 1424.0                 # local: the north quay the bridges land on (world z ≈ 992)
@@ -580,6 +580,12 @@ static func _rect(x0: float, z0: float, x1: float, z1: float) -> PackedVector2Ar
 	return PackedVector2Array([Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)])
 
 
+## The deck runs on this far over the quay at ground level: the bridges
+## meet the quay at an angle, and a deck cut square to its own axis left a
+## triangle of open water beside one kerb.
+const LAND_RUN := 14.0
+
+
 ## The ramp's run from the coast road up its kerb onto the esplanade and on
 ## to the deck: the road is cambered, so the deck (at its highest point
 ## across the width) sits up to ~0.9 m above the low lanes; over 28 m that's
@@ -624,6 +630,24 @@ static func _plan_bridges(layout: CityLayout) -> Array:
 			var e2 := a2 + u2 * 0.6 + n2 * k
 			hi = maxf(hi, city.ground_y(e2.x, e2.y))
 		var y_es := maxf(hi + 0.01, city.ground_y(S2.x, S2.y))
+		# Clear the sea wall's top (road height + kerb) across the deck's whole
+		# width – the coast crosses under it at an angle.
+		for k: float in [-13.0, -9.0, -5.0, 0.0, 5.0, 9.0, 13.0]:
+			var c2 := S2 + n2 * k
+			var guard := 0
+			while not layout.is_water(Vector3(c2.x, 0.0, c2.y)) and guard < 120:
+				c2 += u2 * 0.5
+				guard += 1
+			while layout.is_water(Vector3(c2.x, 0.0, c2.y)) and guard < 240:
+				c2 -= u2 * 0.5
+				guard += 1
+			var H := city.terrain.road_y(c2.x, c2.y)
+			y_es = maxf(y_es, H + CityTerrain.KERB + 0.04)
+			# ...and the shore apron outside it (BuildingMesher.shore_profile:
+			# a sand beach starting 0.9 m up at the wall's foot, or rocks from
+			# H − 0.5): the deck was buried in the beach and cars heading for
+			# the city drove into its edge.
+			y_es = maxf(y_es, maxf(0.9, H - 0.5) + 0.08)
 		var S := Vector3(S2.x, y_es, S2.y)
 		var L := Vector2(F.x - S.x, F.z - S.z).length()
 		var B := {"name": bd[0], "city": bd[3], "s0": Vector3(s02.x, lo - 0.03, s02.y),
@@ -641,6 +665,25 @@ static func _plan_bridges(layout: CityLayout) -> Array:
 		B["rail_gap"] = Rect2(gc - Vector2(30.0, 30.0), Vector2(60.0, 60.0))
 		out.append(B)
 	return out
+
+
+## Is world (x, z) under a bridge's ramp or deck where it leaves its city
+## (street furniture there – a bench on the esplanade's edge – stood up
+## through the deck: CityWorld drops props here)?
+static func under_bridge(x: float, z: float) -> bool:
+	if not enabled or _plan.is_empty():
+		return false
+	for B: Dictionary in _plan["bridges"]:
+		var u: Vector3 = B["u"]
+		var S: Vector3 = B["S"]
+		var s0: Vector3 = B["s0"]
+		var r := Vector2(x - S.x, z - S.z)
+		var along := r.dot(Vector2(u.x, u.z))
+		var across := absf(r.dot(Vector2(-u.z, u.x)))
+		var back := Vector2(S.x - s0.x, S.z - s0.z).length()
+		if across < BRIDGE_W * 0.5 + 3.0 and along > -back - 3.0 and along < 30.0:
+			return true
+	return false
 
 
 ## The coast road's point nearest a hint (the ring, else any road).
@@ -700,7 +743,7 @@ static func bridge_road_y(layout: CityLayout, x: float, z: float) -> float:
 		var a0: Vector3 = B["a0"]
 		var d_s0 := -Vector2(S.x - s0.x, S.z - s0.z).length()
 		var d_a0 := -Vector2(S.x - a0.x, S.z - a0.z).length()
-		if along < d_s0 or along > float(B["L"]) + 1.0:
+		if along < d_s0 or along > float(B["L"]) + LAND_RUN:
 			continue
 		if along < d_a0:
 			var city: CityLayout = layout if String(B["city"]) == "island" else layout.mainland
@@ -1371,6 +1414,11 @@ func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
 			m.beam(a + o + Vector3.UP * 0.55, c + o + Vector3.UP * 0.55, 0.5, 1.1, white)
 			_box_beam(body, a + o + Vector3.UP * 0.55, c + o + Vector3.UP * 0.55, 0.5, 1.1)
 			m.beam(a + Vector3(0, -1.9, sg * 11.0) - ext, c + Vector3(0, -1.9, sg * 11.0) + ext, 1.2, 1.6, white)
+	# On over the quay at ground level (see LAND_RUN).
+	var e0 := Vector3(L - 0.3, LAND_Y - 0.8, 0.0)
+	var e1 := Vector3(L + LAND_RUN, LAND_Y - 0.8, 0.0)
+	m.beam(e0, e1, 26.0, 1.6, deck_c)
+	_box_beam(road_body, e0, e1, 26.0, 1.6)
 	# Piers every 32 m from the sea bed (not at the pylon).
 	var mid := L * 0.5
 	var sd := 30.0
@@ -1431,7 +1479,7 @@ func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
 	var deck := PackedVector3Array()
 	for i in n + 1:
 		deck.append(at.call(L * i / n))
-	var tail := PackedVector3Array([Vector3(L, LAND_Y, 0.0), inv * (B["Jw"] as Vector3)])
+	var tail := PackedVector3Array([Vector3(L, LAND_Y, 0.0), Vector3(L + LAND_RUN, LAND_Y, 0.0), inv * (B["Jw"] as Vector3)])
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	_strip(st, rp, 11.0, 0.03, 2, COL_ROAD)

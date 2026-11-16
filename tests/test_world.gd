@@ -228,3 +228,58 @@ func test_coastlines_triangulate(t) -> void:
 		t.check(float(B["L"]) > 150.0 and float(B["L"]) < 700.0, "%s spans %.0f m" % [B["name"], float(B["L"])])
 	SkyportIsland.enabled = was_s
 	Landforms.enabled = was_l
+
+
+## The baked seabed (tools/bake_seabed.gd) matches today's coastlines –
+## land where there's land, water where there's water – so a coast edit
+## without a re-bake shows up here; and it has shallows by the beaches and
+## deep water between the islands.
+func test_seabed_matches_the_coasts(t) -> void:
+	if _layout == null:
+		_layout = CityLayout.new().generate()
+	var was_s := SkyportIsland.enabled
+	var was_l := Landforms.enabled
+	SkyportIsland.enabled = true
+	Landforms.enabled = true
+	SkyportIsland.plan(_layout)
+	Landforms.forms(_layout)
+	var tex: Texture2D = load(CityWorld.SEABED)
+	t.check(tex != null, "the seabed is baked (%s)" % CityWorld.SEABED)
+	if tex == null:
+		return
+	var img := tex.get_image()
+	if img.is_compressed():
+		img.decompress()
+	var R := Rect2(-2400.0, -1800.0, 4800.0, 4800.0)
+	var depth := func(x: float, z: float) -> float:
+		var px := clampi(int((x - R.position.x) / R.size.x * img.get_width()), 0, img.get_width() - 1)
+		var pz := clampi(int((z - R.position.y) / R.size.y * img.get_height()), 0, img.get_height() - 1)
+		return img.get_pixel(px, pz).r * 32.0
+	var bad := 0
+	var n := 0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+	for k in 3000:
+		var x := rng.randf_range(-1300.0, 1100.0)
+		var z := rng.randf_range(-800.0, 2300.0)
+		if Hinterland.height_at(x, z) > Hinterland.SEA_Y + 0.2:
+			continue
+		var wet := _layout.is_water(Vector3(x, 0.0, z))
+		var d: float = depth.call(x, z)
+		# (Within a texel of a shore either answer is fine.)
+		if wet == (d < 0.05):
+			var near_shore := false
+			for o: Vector2 in [Vector2(8, 0), Vector2(-8, 0), Vector2(0, 8), Vector2(0, -8)]:
+				if _layout.is_water(Vector3(x + o.x, 0.0, z + o.y)) != wet:
+					near_shore = true
+			if not near_shore:
+				bad += 1
+		n += 1
+	t.check(bad <= n / 200, "the seabed matches the coasts (%d of %d samples disagree: re-run tools/bake_seabed.gd)" % [bad, n])
+	# A beach's shallows, and the channel between the islands.
+	var beach := Vector3(-498.0, 0.0, 948.0)   # (16 m off the north cove's beach)
+	var mid_ch := Vector3(-200.0, 0.0, 780.0)
+	t.check(float(depth.call(beach.x, beach.z)) < 3.0, "shallow off Skyport's north cove beach (%.1f m)" % float(depth.call(beach.x, beach.z)))
+	t.check(float(depth.call(mid_ch.x, mid_ch.z)) > 6.0, "deep in the channel off the strait (%.1f m)" % float(depth.call(mid_ch.x, mid_ch.z)))
+	SkyportIsland.enabled = was_s
+	Landforms.enabled = was_l

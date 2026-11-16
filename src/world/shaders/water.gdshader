@@ -10,12 +10,23 @@
 //    wider glitter path that sparkles on the wave facets;
 //  * whitecaps on the steepest crests when it blows (rain/storm), and a pock
 //    of fine ripples in the rain;
-//  * night: the body goes inky and the reflection follows the dark sky.
+//  * night: the body goes inky and the reflection follows the dark sky;
+//  * depth (a baked seabed): light is absorbed by depth, red first, so sand
+//    shelves read turquoise, rock darker, channels deep blue; the bottom –
+//    sand ripples or rock – shows through with a little parallax; the swell
+//    calms in the shallows and a line of surf runs in to the shore; a storm
+//    stirs the water up (less clear).
 shader_type spatial;
 render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 
 uniform vec3 deep : source_color = vec3(0.03, 0.12, 0.17);
 uniform vec3 shallow : source_color = vec3(0.07, 0.34, 0.38);
+// The seabed (tools/bake_seabed.gd): L = depth / seabed_max, A = how rocky
+// the nearest shore is. Outside seabed_rect the sea is deep.
+uniform sampler2D seabed : filter_linear, repeat_disable;
+uniform vec4 seabed_rect = vec4(-2400.0, -1800.0, 4800.0, 4800.0);
+uniform float seabed_max = 32.0;
+uniform bool has_seabed = false;
 global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
@@ -64,7 +75,20 @@ void fragment() {
 	float near = 1.0 - smoothstep(60.0, 420.0, dist);
 	float mid = 1.0 - smoothstep(250.0, 1600.0, dist);
 	float blow = clamp(rain, 0.0, 1.0);
-	float sw = (1.0 + 0.8 * blow) * patchy;
+	float depth = seabed_max;
+	float rocky = 1.0;
+	if (has_seabed) {
+		vec2 suv = (p0 - seabed_rect.xy) / seabed_rect.zw;
+		if (suv.x > 0.0 && suv.y > 0.0 && suv.x < 1.0 && suv.y < 1.0) {
+			vec4 sb = texture(seabed, suv);
+			depth = max(sb.r * seabed_max, 0.25);
+			rocky = sb.a;
+		}
+	}
+	// Shallow water: the swell shortens and calms (and it can't be taller
+	// than the water is deep).
+	float calm = mix(0.2, 1.0, smoothstep(0.8, 9.0, depth));
+	float sw = (1.0 + 0.8 * blow) * patchy * calm;
 	// Each train fades out once a pixel covers a good part of its
 	// wavelength (seen from altitude or far off they'd alias into moiré).
 	float fp = length(fwidth(p0)) + 0.001;
@@ -83,6 +107,9 @@ void fragment() {
 	// (Far off the swell's slopes fade more: seen from height the trains
 	// interfere into a regular ripple grid.)
 	vec2 slope = w.yz * mix(0.12, 1.0, mid * mid) + (chop + pock) * near * (1.0 - smoothstep(0.15, 0.6, fp));
+	// (Over the shallows the surface is glassier still: no swell grid over
+	// a bright sandy floor.)
+	slope *= mix(0.35, 1.0, smoothstep(1.0, 10.0, depth));
 	vec3 nw = normalize(vec3(-slope.x, 1.0, -slope.y));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 
@@ -110,6 +137,35 @@ void fragment() {
 	// Whitecaps on the steepest crests when it blows (and a few on a calm day).
 	float foam = smoothstep(0.8, 0.96, crest) * smoothstep(0.55, 0.85, vnoise(p * 0.9 + TIME * 0.3)) * smoothstep(0.4, 0.8, vnoise(p0 * 0.02))
 		* (0.04 + 0.96 * blow) * mid * near;
+	// Surf: lines along the depth contours running in to the shore over the
+	// sand shelves (rocks get a ragged wash), broken up along their length;
+	// higher seas, bigger surf.
+	float surf_zone = smoothstep(2.2, 0.5, depth);
+	float lines = sin(depth * 7.5 + TIME * 2.2 + vnoise(p0 * 0.08) * 3.0) * 0.5 + 0.5;
+	float surf = surf_zone * smoothstep(0.62, 0.92, lines) * smoothstep(0.3, 0.7, vnoise(p0 * 0.12 + vec2(TIME * 0.15, 0.0)))
+		* mix(0.75, 1.0, rocky) * (0.65 + 0.6 * blow) * mid;
+	foam = max(foam, surf);
+
+	// The seabed seen through the water. Absorption per metre (red first),
+	// over a path that lengthens at grazing angles; a storm stirs it up.
+	vec3 kd = vec3(0.34, 0.088, 0.064) * (1.0 + 1.6 * blow);
+	float path = depth * (1.0 + 1.0 / max(ndv, 0.25));
+	vec3 tr = exp(-kd * path);
+	// (Parallax: the bottom sits below the surface, offset along the view.)
+	vec2 bp = p0 - view_w.xz / max(view_w.y, 0.25) * depth * 0.55;
+	float ripple = sin(dot(bp, vec2(0.83, 0.55)) * 2.6 + vnoise(bp * 0.35) * 4.0) * 0.5 + 0.5;
+	vec3 sand_c = vec3(0.86, 0.79, 0.62) * (0.86 + 0.14 * ripple) * (0.9 + 0.2 * vnoise(bp * 0.05));
+	float stones = vnoise(bp * 0.45) * 0.6 + vnoise(bp * 1.7) * 0.4;
+	vec3 rock_c = mix(vec3(0.16, 0.17, 0.14), vec3(0.34, 0.33, 0.27), stones) * (0.8 + 0.4 * vnoise(bp * 0.06 + 3.0));
+	vec3 floor_c = mix(sand_c, rock_c, smoothstep(0.25, 0.75, rocky));
+	// Caustics flicker on a shallow sunlit floor.
+	float caus = pow(vnoise(bp * 0.9 + vec2(TIME * 0.4, TIME * 0.25)) * vnoise(bp * 1.3 - vec2(TIME * 0.3, 0.0)), 2.0) * 2.4;
+	floor_c *= 1.0 + caus * day * exp(-depth * 0.35) * (1.0 - blow);
+	floor_c *= mix(1.0, 0.12, night) * mix(1.0, 0.7, blow);
+	// Far off the bottom's detail aliases: fade it to its mean.
+	float fdet = 1.0 - smoothstep(0.3, 2.5, fp);
+	floor_c = mix(mix(vec3(0.78, 0.72, 0.56), vec3(0.24, 0.24, 0.2), smoothstep(0.25, 0.75, rocky)) * mix(1.0, 0.12, night), floor_c, fdet);
+	body = floor_c * tr + body * (vec3(1.0) - tr);
 
 	ALBEDO = mix(body * (1.0 - fres), vec3(0.9), foam);
 	EMISSION = (sky * fres * (1.0 - foam) * mix(1.0, 0.6, night) + sun_col * glint * day) * (1.0 - foam * 0.7);

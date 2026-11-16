@@ -73,10 +73,33 @@ Shared, still opt-in through `SkyportIsland.enabled` unless noted:
   unit ids are untouched, so saves need no migration). Hooks: one early-out
   each in `CityLayout.is_water` / `ground_y`, `Landforms.rail_gaps()` into
   `BuildingMesher.rail_gaps`, map painting in `Minimap.MapPainter`.
-- `SkyportIsland.COAST`: the outline is a curve through typed control points
-  (quay / beach / rock); `_shore_bands` builds beaches, revetments and quay
-  walls with collision; `waterline_edges()` puts the foam where the water
-  is. `_build_terminal` (curved roof + glazing), Skyport Grand hotel.
+- **Three-island layout (save v6).** Skyport Island is designed in its own
+  LOCAL coordinates (every number in skyport_island.gd) and placed by one
+  transform – a quarter turn and a move south of the strait, between
+  Westbank and the Commercial Island: `SkyportIsland.xform()`, `w()` / `l()`
+  / `w2()` / `l2()` / `wd()` / `wyaw()` / `wrect()`, `whome()` (face k → k+3).
+  `plan_data` is local (the island builds from it); `wplan` (=
+  `world_plan()`) is world, for games. `contains` / `ground_y` /
+  `distance_to` / `lanes()` take and give world coordinates. Children that
+  work in world space (IslandTraffic, home interiors, the bridges) are
+  `top_level`.
+- Bridges: `BRIDGES` + `LANDINGS` → `_plan_bridges()` finds each city end on
+  that city's coast road, the ramp over the esplanade, and a deck
+  (`deck_y`, 16 m crest, eased grades ≤ ~7%) built in its own frame
+  (`_build_one_bridge`); `bridge_road_y()` gives the surface for audits.
+- Coast: `coast_points()` – control points drawn in WORLD coordinates
+  (north up) with shore kinds (quay / beach / rock), converted by `l2()`;
+  Malé-style narrow airport island, 1.05 km². **Outlines must be simple
+  polygons** (test_world.test_coastlines_triangulate): a self-crossing one
+  triangulates to nothing and the island loses its ground and collision.
+  `tools/sky_plan_view.gd` draws the layout (world orientation), checks
+  content-on-land, self-crossings and area.
+- Landforms can join along a city's real coast (`"coast"`, e.g. Harbour
+  Strand), not only a straight quay.
+- Hinterland bay enlarged south (BAY_C/BAY_R); port ship comes down the
+  strait from the north. Skyport detail streams at 600 / 900 m.
+- `_build_terminal` (curved roof + glazing), low-rise airport town (no
+  skyscrapers: max ~38 m), Skyport Grand hotel.
 - `TreeKit` (src/world/tree_kit.gd + shaders/tree.gdshader) replaces the
   glTF street tree everywhere; `grass.gdshaderinc` is shared by ground.gdshader
   and island_ground.gdshader (**visible in every game that uses them**).
