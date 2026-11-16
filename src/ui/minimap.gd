@@ -18,7 +18,7 @@ extends Control
 ## with kind "token", "ring", "next" (the next ring/goal), "job" / "crime"
 ## (contract offers) or "poi".
 
-const BOUNDS := Rect2(-1180.0, -720.0, 3700.0, 1420.0)  # world x/z covered by the texture (to Skyport Island)
+const BOUNDS := Rect2(-1180.0, -800.0, 3840.0, 1600.0)  # world x/z covered by the texture (to Skyport Island's headlands)
 const M_PER_PX := 1.5
 const R_SLOW := 95.0     # m shown from the centre to the rim, standing
 const R_FAST := 175.0    # ... at full swinging speed
@@ -210,11 +210,25 @@ class MapPainter:
 	## Skyport Island: land, aprons, runway, roads, buildings.
 	func _skyport() -> void:
 		var P: Dictionary = SkyportIsland._plan
-		_poly(SkyportIsland.outline(), BLOCK)
+		# The shore (beaches / rocks) as a sand rim, the land green: the
+		# island is mostly open ground, not one big block.
+		var rim := Geometry2D.offset_polygon(SkyportIsland.outline(), 12.0)
+		if not rim.is_empty():
+			_poly(rim[0], SHORE)
+		_poly(SkyportIsland.outline(), LAND)
 		for a in P["areas"]:
 			_poly(a[1], PARK if int(a[0]) == 1 else PLAZA)
+		# Airside: taxiways and aprons a pale tarmac, the runway dark with a
+		# dashed centreline (it reads as an airport, not more streets).
 		for st in P["strips"]:
-			_line(PackedVector2Array([Vector2(st[1].x, st[1].z), Vector2(st[2].x, st[2].z)]), float(st[3]) * 2.0, ROAD)
+			var ab := PackedVector2Array([Vector2(st[1].x, st[1].z), Vector2(st[2].x, st[2].z)])
+			_line(ab, float(st[3]) * 2.0, RUNWAY if int(st[0]) == 3 else AIRSIDE)
+			if int(st[0]) == 3:
+				var L := ab[0].distance_to(ab[1])
+				var k := 30.0
+				while k < L - 30.0:
+					_line(PackedVector2Array([ab[0].lerp(ab[1], k / L), ab[0].lerp(ab[1], (k + 18.0) / L)]), 2.0, Color(0.85, 0.85, 0.8))
+					k += 40.0
 		for r in P["roads"]:
 			var p2 := PackedVector2Array()
 			for v: Vector3 in (r[1] as PackedVector3Array):
@@ -234,9 +248,12 @@ class MapPainter:
 	const BLOCK := Color(0.42, 0.43, 0.45)
 	const PLAZA := Color(0.56, 0.55, 0.52)
 	const PARK := Color(0.27, 0.43, 0.27)
+	const LAND := Color(0.3, 0.38, 0.3)    # open ground (Skyport, landforms)
 	const PIECE := Color(0.45, 0.42, 0.38)
 	const BRIDGE := Color(0.33, 0.34, 0.37)   # (City Empire: a road like any other – the GPS route is the colour)
 	const RAIL := Color(0.15, 0.15, 0.17)
+	const RUNWAY := Color(0.17, 0.17, 0.19)
+	const AIRSIDE := Color(0.38, 0.39, 0.42)
 
 	func _px(v: Vector2) -> Vector2:
 		return (v - Minimap.BOUNDS.position) / Minimap.M_PER_PX
@@ -265,6 +282,12 @@ class MapPainter:
 
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, Minimap.BOUNDS.size / Minimap.M_PER_PX), WATER)
+		if Landforms.enabled:
+			for f: Dictionary in Landforms.forms():
+				var rim := Geometry2D.offset_polygon(f["poly"], 8.0)
+				if not rim.is_empty():
+					_poly(rim[0], SHORE)
+				_poly(f["poly"], PLAZA if f.get("paved", false) else PARK)
 		for L: CityLayout in layouts:
 			if L.coast.size() >= 3:
 				_poly(L.coast, SHORE)  # esplanade / quay edge

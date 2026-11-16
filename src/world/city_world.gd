@@ -127,6 +127,10 @@ func _ready() -> void:
 		# (Before the ground is built: the sea-wall railing opens for its bridge.)
 		var sp := SkyportIsland.plan(layout)
 		BuildingMesher.rail_gaps = [sp["rail_gap"]]
+	if Landforms.enabled:
+		# (Also before the ground: the quay railing opens where land joins.)
+		Landforms.forms(layout)
+		BuildingMesher.rail_gaps.append_array(Landforms.rail_gaps())
 	_by_chunk = layout.buildings_by_chunk()
 	_props_by_chunk = layout.props_by_chunk()
 	var settings := get_node_or_null("/root/Settings")

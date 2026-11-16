@@ -83,6 +83,7 @@ func _ready() -> void:
 	var t0 := Time.get_ticks_msec()
 	CityWorld.walker_crowd_radius = Crowd.NEAR
 	SkyportIsland.enabled = true   # (before the world: the city opens its sea wall for the bridge)
+	Landforms.enabled = true       # (headlands, beaches and a harbour along the strait)
 	world = CityWorld.new()
 	world.name = "World"
 	add_child(world)
@@ -94,6 +95,10 @@ func _ready() -> void:
 	skyport.name = "Skyport"
 	add_child(skyport)
 	skyport.build(layout, world)
+	var lfn := Landforms.new()
+	lfn.name = "Landforms"
+	add_child(lfn)
+	lfn.build(layout)
 	skyport.viewer = func() -> Vector3: return vehicle_node().global_position if vehicle_node() else player.global_position
 	print("Skyport Island: %d ms" % (Time.get_ticks_msec() - t1))
 	EmpireMinimap.bake.call_deferred(self, layout)  # (the minimap's and phone map's city image)
@@ -390,6 +395,10 @@ func _after_start() -> void:
 			var gu: Dictionary = wholesaler(gid.get_slice(":", 1)) if gid.begins_with("wholesale") else unit_by_id.get(gid, {})
 			if not gu.is_empty():
 				set_gps(Premises.door_point(gu), String(gu.get("name", gid)), {"kind": "unit", "id": String(gu["id"])})
+	if args.has("mapview"):
+		# Captures: the full map's centre and zoom, "x,z,zoom".
+		var mv := String(args["mapview"]).split(",")
+		EmpireMap._view = {"c": Vector2(float(mv[0]), float(mv[1])), "z": float(mv[2])}
 	if args.has("panel"):
 		var pn := String(args["panel"])
 		if pn == "victory":

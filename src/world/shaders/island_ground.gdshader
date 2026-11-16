@@ -119,6 +119,32 @@ void fragment() {
 		albedo = mix(albedo, white, max(ring, max(hbar, hleg)) * 0.95);
 		albedo = mix(albedo, yellow, band(r - 8.6, 0.25, aa));
 	}
+	if (UV2.y < -0.5) {
+		// Shore (SkyportIsland._shore_bands): sand, rock or quay concrete by
+		// colour. Sand: fine grain, ripples and a tide line; rock: boulders
+		// (cells), dark gaps, weed and wet below the waterline.
+		float y = v_world.y;
+		float wet = 1.0 - smoothstep(-0.2, 0.9, y);
+		if (c.r > c.b + 0.1) {
+			float rip = sin(p.x * 1.7 + p.y * 1.1 + vnoise(p * 0.3) * 4.0) * 0.5 + 0.5;
+			albedo = c * (0.9 + 0.12 * vnoise(p * 2.3) * near + 0.05 * rip * near);
+			albedo *= 1.0 - 0.12 * smoothstep(0.02, 0.0, abs(y - 0.45));   // tide line
+			albedo = mix(albedo, albedo * 0.62, wet);
+			rough = mix(0.95, 0.4, wet);
+		} else if (c.r < 0.2) {
+			vec2 cell = floor(p / 1.6 + vec2(0.0, floor(y * 0.6)));
+			float hb = hash12(cell);
+			vec2 fc = fract(p / 1.6) - 0.5;
+			float gap = smoothstep(0.32, 0.5, max(abs(fc.x), abs(fc.y)));
+			albedo = c * (0.75 + 0.5 * hb) * (1.0 - 0.45 * gap * near);
+			albedo = mix(albedo, vec3(0.12, 0.16, 0.1), wet * 0.6 * step(0.4, vnoise(p * 0.8)));
+			albedo = mix(albedo, albedo * 0.6, wet);
+			rough = mix(0.9, 0.5, wet);
+		} else {
+			albedo = c * tone * (1.0 - 0.3 * wet);
+			albedo = mix(albedo, vec3(0.14, 0.17, 0.12), wet * 0.7);
+		}
+	}
 	ALBEDO = albedo * (1.0 - 0.22 * wetness);
 	ROUGHNESS = mix(rough, 0.35, wetness * 0.7);
 }

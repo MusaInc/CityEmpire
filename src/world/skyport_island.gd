@@ -66,16 +66,99 @@ var viewer: Callable
 
 
 # ------------------------------------------------------------ geometry
+## The coastline as control points, each with the kind of shore on the
+## stretch that starts there: "quay" (engineered: straight wall), "beach"
+## (sand sloping into the sea), "rock" (a boulder revetment). Two wide lobes –
+## the high-rise district and port in the north, the airport in the south –
+## pinched in the middle by a west cove (south of the bridge) and a sheltered
+## east inlet, so the island reads as a landform, not a slab.
+const COAST := [
+	[Vector2(1372, -604), "rock"], [Vector2(1330, -676), "rock"], [Vector2(1352, -744), "rock"],
+	[Vector2(1428, -766), "rock"], [Vector2(1500, -730), "beach"], [Vector2(1560, -706), "rock"], [Vector2(1662, -722), "rock"], [Vector2(1770, -692), "beach"],
+	[Vector2(1872, -674), "beach"], [Vector2(1928, -640), "beach"], [Vector2(1970, -668), "rock"],
+	[Vector2(2050, -676), "quay"], [Vector2(2448, -676), "quay"], [Vector2(2498, -640), "rock"],
+	[Vector2(2520, -520), "rock"], [Vector2(2502, -400), "rock"], [Vector2(2530, -262), "rock"], [Vector2(2512, -120), "rock"],
+	[Vector2(2482, -36), "rock"], [Vector2(2410, -12), "beach"], [Vector2(2290, -8), "beach"],
+	[Vector2(2180, -2), "beach"], [Vector2(2116, 30), "beach"], [Vector2(2110, 82), "beach"], [Vector2(2164, 120), "beach"],
+	[Vector2(2290, 126), "beach"], [Vector2(2410, 126), "rock"], [Vector2(2486, 160), "rock"], [Vector2(2512, 290), "rock"],
+	[Vector2(2546, 430), "rock"], [Vector2(2546, 548), "rock"], [Vector2(2574, 626), "rock"],
+	[Vector2(2604, 700), "rock"], [Vector2(2560, 742), "rock"], [Vector2(2470, 712), "rock"],
+	[Vector2(2410, 668), "beach"], [Vector2(2346, 640), "beach"], [Vector2(2230, 598), "beach"], [Vector2(2090, 572), "beach"],
+	[Vector2(1950, 566), "beach"], [Vector2(1810, 580), "beach"], [Vector2(1700, 614), "rock"],
+	[Vector2(1606, 664), "rock"], [Vector2(1494, 676), "rock"], [Vector2(1400, 676), "rock"],
+	[Vector2(1312, 724), "rock"], [Vector2(1236, 716), "rock"], [Vector2(1204, 664), "rock"],
+	[Vector2(1236, 612), "beach"], [Vector2(1290, 586), "beach"], [Vector2(1330, 530), "rock"],
+	[Vector2(1346, 440), "rock"], [Vector2(1352, 330), "rock"], [Vector2(1384, 214), "beach"],
+	[Vector2(1452, 170), "beach"], [Vector2(1544, 152), "beach"], [Vector2(1612, 98), "beach"],
+	[Vector2(1574, 30), "beach"], [Vector2(1478, 4), "rock"], [Vector2(1424, -8), "quay"],
+	[Vector2(1424, -64), "rock"], [Vector2(1402, -120), "rock"], [Vector2(1386, -215), "quay"],
+	[Vector2(1386, -365), "rock"], [Vector2(1370, -440), "rock"], [Vector2(1346, -530), "rock"],
+]
+static var _shore_kind := PackedByteArray()   # per outline point: 0 quay, 1 beach, 2 rock (the edge starting there)
+
+
 static func outline() -> PackedVector2Array:
 	if _outline.is_empty():
-		_outline = PackedVector2Array([Vector2(1400, -640), Vector2(1700, -662), Vector2(2100, -655), Vector2(2400, -625),
-			Vector2(2468, -540), Vector2(2482, -120), Vector2(2474, 300), Vector2(2448, 540), Vector2(2320, 592),
-			Vector2(1900, 600), Vector2(1500, 592), Vector2(1408, 545), Vector2(1378, 320), Vector2(1384, 40),
-			Vector2(1376, -180), Vector2(1372, -420), Vector2(1384, -580)])
+		# Natural stretches: a Catmull-Rom curve through the control points,
+		# every ~10 m, with a little irregularity (more on rock than sand);
+		# quays stay straight.
+		var n := COAST.size()
+		var pts := PackedVector2Array()
+		var kinds := PackedByteArray()
+		for i in n:
+			var kind := String(COAST[i][1])
+			var p1: Vector2 = COAST[i][0]
+			var p2: Vector2 = COAST[(i + 1) % n][0]
+			var p0: Vector2 = COAST[(i - 1 + n) % n][0]
+			var p3: Vector2 = COAST[(i + 2) % n][0]
+			var k := maxi(1, ceili(p1.distance_to(p2) / 10.0))
+			var kb := 0 if kind == "quay" else (1 if kind == "beach" else 2)
+			for j in k:
+				var t := float(j) / k
+				var q := p1.lerp(p2, t) if kind == "quay" else _catmull(p0, p1, p2, p3, t)
+				if kind != "quay" and j > 0:
+					var d := (p2 - p1).normalized()
+					var amp := 1.2 if kind == "beach" else 3.0
+					var w := sin(q.x * 0.071 + q.y * 0.053) * 0.6 + sin(q.x * 0.19 - q.y * 0.17) * 0.4
+					q += Vector2(d.y, -d.x) * w * amp
+				pts.append(q)
+				kinds.append(kb)
+		_outline = pts
+		_shore_kind = kinds
 		_bbox = Rect2(_outline[0], Vector2.ZERO)
 		for v in _outline:
 			_bbox = _bbox.expand(v)
 	return _outline
+
+
+## Shore kind of the edge from outline point i: 0 quay, 1 beach, 2 rock.
+static func shore_kind(i: int) -> int:
+	outline()
+	return _shore_kind[i % _shore_kind.size()]
+
+
+## Where each stretch of shore meets the sea (for the foam): the wall for a
+## quay, out down the beach / rocks otherwise.
+static func waterline_edges() -> Array:
+	var o := outline()
+	var out: Array = []
+	var dist := [0.0, 19.5, 9.0]
+	for i in o.size():
+		var k := shore_kind(i)
+		var a := o[i] + _out_n(o, i) * float(dist[k])
+		var b := o[(i + 1) % o.size()] + _out_n(o, (i + 1) % o.size()) * float(dist[k])
+		var dd := (b - a).normalized()
+		var on := Vector2(dd.y, -dd.x)
+		if on.dot(_out_n(o, i)) < 0.0:
+			on = -on
+		out.append([a, b, on])
+	return out
+
+
+static func _catmull(p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, t: float) -> Vector2:
+	var t2 := t * t
+	var t3 := t2 * t
+	return 0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
 
 
 static func contains(x: float, z: float) -> bool:
@@ -88,8 +171,45 @@ static func contains(x: float, z: float) -> bool:
 
 
 ## Ground height on the island (NAN off it). The bridge is not ground.
+## Distance from (q) to the coastline.
+static func _shore_dist(q: Vector2) -> float:
+	var o := outline()
+	var best := INF
+	for i in o.size():
+		best = minf(best, Geometry2D.get_closest_point_to_segment(q, o[i], o[(i + 1) % o.size()]).distance_to(q))
+	return best
+
+
 static func ground_y(x: float, z: float) -> float:
-	return LAND_Y if contains(x, z) else NAN
+	return LAND_Y + knoll_h(x, z) if contains(x, z) else NAN
+
+
+## Grassy knolls on the open ground (headlands and the park west of the
+## terminal): [centre, radius x, radius z, height]. The developed land –
+## roads, aprons, the runway, every building's forecourt – stays level; these
+## sit only where nothing is built, clear of the shore bands.
+const KNOLLS := [
+	[Vector2(1400, -700), 52.0, 40.0, 9.0],    # North Head
+	[Vector2(1262, 668), 46.0, 34.0, 7.5],     # Runway Point (the south-west hook)
+	[Vector2(2548, 690), 40.0, 30.0, 6.5],     # Signal Point (the south-east point)
+	[Vector2(1478, 300), 66.0, 56.0, 7.0],     # Skyport Park hill
+	[Vector2(2482, 370), 26.0, 50.0, 4.5],     # the east bluff
+]
+
+
+## Height of the knolls above LAND_Y at (x, z) (0 off them).
+static func knoll_h(x: float, z: float) -> float:
+	var h := 0.0
+	for k: Array in KNOLLS:
+		var c: Vector2 = k[0]
+		var dx := (x - c.x) / float(k[1])
+		var dz := (z - c.y) / float(k[2])
+		var r2 := dx * dx + dz * dz
+		if r2 < 1.0:
+			# A smooth dome with a little irregularity on its flanks.
+			var w := 1.0 + 0.12 * sin(x * 0.09 + z * 0.05) * r2
+			h = maxf(h, float(k[3]) * pow(1.0 - r2, 2.0) * w)
+	return h
 
 
 # ---------------------------------------------------------------- plan
@@ -128,8 +248,10 @@ static func plan(layout: CityLayout) -> Dictionary:
 		["Marina Drive", PackedVector3Array([T1, y.call(1452.0, -300.0)]), 12.0, false],
 		["Industrial Way", PackedVector3Array([C, y.call(1960.0, -330.0), y.call(2330.0, -330.0), D]), 16.0, false],
 		["Terminal Road", PackedVector3Array([H, I]), 16.0, false],
-		["Terminal Road", PackedVector3Array([I, y.call(1960.0, 150.0), y.call(2260.0, 150.0), y.call(2330.0, 80.0), D]), 16.0, false],
-		["Hangar Lane", PackedVector3Array([I, y.call(1700.0, 110.0), y.call(1600.0, 140.0)]), 12.0, false],
+		# (Ends at the cargo terminal: the east inlet cuts in where it used to
+		# run back up to the avenue.)
+		["Terminal Road", PackedVector3Array([I, y.call(1960.0, 150.0), y.call(2260.0, 150.0), y.call(2392.0, 150.0)]), 16.0, false],
+		["Hangar Lane", PackedVector3Array([I, y.call(1700.0, 112.0), y.call(1648.0, 150.0)]), 12.0, false],
 	]
 	P["roads"] = roads
 	P["city_end"] = e
@@ -386,8 +508,13 @@ static func _buildings(P: Dictionary) -> Array:
 			[Color(0.6, 0.62, 0.64), Color(0.42, 0.5, 0.58), Color(0.55, 0.52, 0.48)][rng.randi() % 3], rng.randf()))
 	# Airport: terminal (long glass hall on a stone base), control tower,
 	# hangars, cargo terminal.
-	out.append(_b([[1962, 168, 2258, 236, LAND_Y, LAND_Y + 9.0], [1975, 172, 2245, 232, LAND_Y + 9.0, LAND_Y + 18.0]], S.GLASS,
-		Color(0.6, 0.68, 0.74), 0.12))
+	# (The terminal is a glazed hall under a curved roof: _build_terminal.)
+	out.append(_b([[1962, 168, 2258, 236, LAND_Y, LAND_Y + TERMINAL_HALL]], S.GLASS, Color(0.6, 0.68, 0.74), 0.12))
+	# Skyport Grand: the airport hotel beside the terminal, a setback tower
+	# (a swing anchor between the runway and the high-rise district).
+	var hotel := _b(_tower(1900, 170, 44, 52, 62, "setback"), S.GLASS, Color(0.55, 0.62, 0.66), 0.83)
+	hotel["district"] = "airport"
+	out.append(hotel)
 	out.append(_b([[2284, 198, 2298, 212, LAND_Y, LAND_Y + 52.0], [2280, 194, 2302, 216, LAND_Y + 52.0, LAND_Y + 60.0]], S.DARK_GLASS,
 		Color(0.25, 0.3, 0.34), 0.58))
 	for k in 3:
@@ -435,7 +562,7 @@ func build(layout: CityLayout, world: Node) -> void:
 	street.collision_layer = 1 << 3
 	add_child(street)
 	_build_ground(street)
-	add_child(Shoreline.build(Shoreline.polygon_edges(outline())))
+	add_child(Shoreline.build(waterline_edges()))
 	_build_skyline()
 	_build_bridge(street)
 
@@ -469,6 +596,7 @@ func _start_near() -> void:
 		func(): _near(_build_detail.bind("wn")), func(): _near(_build_detail.bind("ws")),
 		func(): _near(_build_detail.bind("en")), func(): _near(_build_detail.bind("es")),
 		func(): _near(_build_airport_dressing), func(): _near(_build_marina.bind(near_street)),
+		func(): _near(_build_terminal.bind(near_street)),
 		func(): _near(_build_industry), func(): _near(_build_trees),
 		func():
 			var at := AirTraffic.new()
@@ -627,20 +755,13 @@ func _build_ground(street: StaticBody3D) -> void:
 		if hp.y > LAND_Y + 1.0:
 			continue
 		_pad(st, hp, LAND_Y + 0.035)
-	# Cliff / quay skirt round the edge down to the sea bed.
-	var o := outline()
-	var c := Color(0.55, 0.53, 0.5, 0.5 / 8.0)
-	for i in o.size():
-		var a := o[i]
-		var b := o[(i + 1) % o.size()]
-		var n := Vector3(b.y - a.y, 0.0, -(b.x - a.x)).normalized()
-		var q := [Vector3(a.x, LAND_Y, a.y), Vector3(b.x, LAND_Y, b.y), Vector3(b.x, -9.0, b.y), Vector3(a.x, -9.0, a.y)]
-		for j in [0, 1, 2, 0, 2, 3]:
-			st.set_color(c)
-			st.set_normal(n)
-			st.set_uv(Vector2((q[j] as Vector3).x + (q[j] as Vector3).z, (q[j] as Vector3).y))
-			st.set_uv2(Vector2.ZERO)
-			st.add_vertex(q[j])
+	# Knolls: radial grass domes over the flat land (1.5 cm proud at their rim).
+	var knoll_faces := PackedVector3Array()
+	for k: Array in KNOLLS:
+		knoll_faces.append_array(_knoll(st, k))
+	# The shore all round: quay walls where it's engineered, sand beaches
+	# sloping into the sea, boulder revetments elsewhere (shore_band()).
+	var shore_faces := _shore_bands(st)
 	var mi := MeshInstance3D.new()
 	mi.name = "GroundMesh"
 	mi.mesh = st.commit()
@@ -663,6 +784,150 @@ func _build_ground(street: StaticBody3D) -> void:
 		var cs := CollisionShape3D.new()
 		cs.shape = cp
 		street.add_child(cs)
+	var ksh := ConcavePolygonShape3D.new()
+	ksh.set_faces(knoll_faces)
+	var kcs := CollisionShape3D.new()
+	kcs.shape = ksh
+	street.add_child(kcs)
+	# The beaches and revetments are solid too (walk down to the water).
+	var sh := ConcavePolygonShape3D.new()
+	sh.set_faces(shore_faces)
+	var scs := CollisionShape3D.new()
+	scs.shape = sh
+	street.add_child(scs)
+
+
+## One knoll: rings × segments of grass following knoll_h(); returns its
+## collision faces.
+func _knoll(st: SurfaceTool, k: Array) -> PackedVector3Array:
+	var c: Vector2 = k[0]
+	var RINGS := 10
+	var SEG := 28
+	var grid: Array = []
+	for i in RINGS + 1:
+		var row: Array = []
+		var r := 1.0 - float(i) / RINGS
+		for j in SEG:
+			var a := TAU * j / SEG
+			var x := c.x + cos(a) * float(k[1]) * r
+			var z := c.y + sin(a) * float(k[2]) * r
+			row.append(Vector3(x, LAND_Y + knoll_h(x, z) + 0.015, z))
+			if i == RINGS:
+				break   # (the summit: one point)
+		grid.append(row)
+	var faces := PackedVector3Array()
+	var col := Color(COL_GRASS.r, COL_GRASS.g, COL_GRASS.b, 1.5 / 8.0)
+	var put := func(a: Vector3, b: Vector3, d: Vector3) -> void:
+		var n := (d - a).cross(b - a).normalized()
+		if n.y < 0.0:
+			var t := b
+			b = d
+			d = t
+			n = -n
+		for v: Vector3 in [a, d, b]:
+			st.set_color(col)
+			st.set_normal(n)
+			st.set_uv(Vector2(v.x, v.z))
+			st.set_uv2(Vector2(0, 0))
+			st.add_vertex(v)
+		faces.append_array(PackedVector3Array([a, d, b]))
+	for i in RINGS:
+		var A: Array = grid[i]
+		var B: Array = grid[i + 1]
+		for j in SEG:
+			var j2 := (j + 1) % SEG
+			if B.size() == 1:
+				put.call(A[j], A[j2], B[0])
+			else:
+				put.call(A[j], A[j2], B[j2])
+				put.call(A[j], B[j2], B[j])
+	return faces
+
+
+## Shore profiles: [metres out from the land's edge, height] per kind.
+const SHORE_PROFILES := [
+	[[0.0, LAND_Y], [0.0, -9.0]],                                                     # quay: a wall
+	[[0.0, LAND_Y], [4.0, LAND_Y - 0.9], [14.0, 0.15], [24.0, -1.05], [36.0, -4.0]],  # beach
+	[[0.0, LAND_Y], [3.0, LAND_Y - 0.5], [8.0, 0.1], [13.0, -2.3], [17.0, -6.5]],     # rock
+]
+
+
+## Outward normal at outline point i (averaged over its two edges).
+static func _out_n(o: PackedVector2Array, i: int) -> Vector2:
+	var n := o.size()
+	var a := o[(i - 1 + n) % n]
+	var b := o[i]
+	var c := o[(i + 1) % n]
+	var d := ((b - a).normalized() + (c - b).normalized()).normalized()
+	var nn := Vector2(d.y, -d.x)
+	if Geometry2D.is_point_in_polygon(b + nn * 0.5, o):
+		nn = -nn
+	return nn
+
+
+## A row of the profile for kind k at outline point i (rock jitters).
+static func _shore_row(o: PackedVector2Array, i: int, k: int) -> PackedVector3Array:
+	var p := o[i]
+	var nn := _out_n(o, i)
+	var row := PackedVector3Array()
+	var prof: Array = SHORE_PROFILES[k]
+	for j in prof.size():
+		var d: float = prof[j][0]
+		var y: float = prof[j][1]
+		if k == 2 and j > 0:
+			var h := sin(p.x * 1.37 + p.y * 0.91 + j * 2.1) * 0.5 + sin(p.x * 0.43 - p.y * 1.7 + j) * 0.5
+			d += h * 1.6
+			y += h * 0.45
+		row.append(Vector3(p.x + nn.x * d, y, p.y + nn.y * d))
+	return row
+
+
+## Shore geometry into st (sand / rock / concrete, UV2.y = -1 marks shore for
+## island_ground.gdshader); returns the collision faces.
+func _shore_bands(st: SurfaceTool) -> PackedVector3Array:
+	var o := outline()
+	var faces := PackedVector3Array()
+	var cols := [Color(0.55, 0.53, 0.5), Color(0.8, 0.72, 0.55), Color(0.42, 0.4, 0.37)]
+	var put := func(q: Array, col: Color) -> void:
+		var nrm := ((q[2] as Vector3) - (q[0] as Vector3)).cross((q[1] as Vector3) - (q[0] as Vector3)).normalized()
+		if nrm.y < -0.01 or (absf(nrm.y) < 0.01 and false):
+			nrm = -nrm
+		for v: Vector3 in q:
+			var c := col
+			if v.y < 0.4 and col.r > 0.7:
+				c = col.darkened(0.28)   # wet sand
+			c.a = 0.5 / 8.0
+			st.set_color(c)
+			st.set_normal(nrm)
+			st.set_uv(Vector2(v.x, v.z))
+			st.set_uv2(Vector2(0.0, -1.0))
+			st.add_vertex(v)
+			faces.append(v)
+	for i in o.size():
+		var k := shore_kind(i)
+		var A := _shore_row(o, i, k)
+		var B := _shore_row(o, (i + 1) % o.size(), k)
+		for j in A.size() - 1:
+			var a := A[j]
+			var b := B[j]
+			var c := B[j + 1]
+			var d := A[j + 1]
+			# (Wind each quad so its face points up / outwards.)
+			var up := (c - a).cross(b - d)
+			if up.y < 0.0 or (k == 0 and up.dot(Vector3(d.x - a.x, 0, d.z - a.z)) < 0.0):
+				put.call([a, d, c], cols[k])
+				put.call([a, c, b], cols[k])
+			else:
+				put.call([a, b, c], cols[k])
+				put.call([a, c, d], cols[k])
+		# Where the kind changes, close the step between the two profiles.
+		var k2 := shore_kind((i + 1) % o.size())
+		if k2 != k:
+			var P2 := _shore_row(o, (i + 1) % o.size(), k2)
+			for j in mini(B.size(), P2.size()) - 1:
+				put.call([B[j], P2[j + 1], B[j + 1]], cols[2])
+				put.call([B[j], B[j + 1], P2[j + 1]], cols[2])
+	return faces
 
 
 static func _pad(st: SurfaceTool, c: Vector3, yv: float) -> void:
@@ -877,10 +1142,17 @@ func _build_airport_dressing() -> void:
 	# Windsock mast.
 	m.beam(Vector3(1500, LAND_Y, 430), Vector3(1500, LAND_Y + 8.0, 430), 0.2, 0.2, Color(0.9, 0.9, 0.9))
 	m.beam(Vector3(1500, LAND_Y + 7.6, 430), Vector3(1503.5, LAND_Y + 7.3, 430), 0.7, 0.7, Color(0.95, 0.45, 0.1))
-	# Terminal canopy over the drop-off.
-	m.solid(1980, 150, 2240, 168, LAND_Y + 5.2, LAND_Y + 5.6, Color(0.85, 0.86, 0.88))
-	for k in 9:
-		m.beam(Vector3(1990 + k * 30.0, LAND_Y, 152), Vector3(1990 + k * 30.0, LAND_Y + 5.2, 152), 0.35, 0.35, Color(0.5, 0.52, 0.55))
+	# The terminal roof's raking columns, landside and airside.
+	var tx := TERMINAL_ROOF.position.x + 12.0
+	while tx < TERMINAL_ROOF.end.x - 6.0:
+		# [roof z, foot z]: landside on the drop-off pavement (Terminal Road
+		# runs under the overhang), airside by the gates.
+		for zs: Array in [[160.0, 163.5], [246.0, 243.0]]:
+			var zz: float = zs[0]
+			var top := Vector3(tx, terminal_roof_y(tx, zz) - 0.4, zz)
+			m.beam(Vector3(tx + 1.5, LAND_Y, zs[1]), top, 0.45, 0.45, Color(0.86, 0.87, 0.88))
+			m.beam(Vector3(tx - 1.5, LAND_Y, zs[1]), top, 0.45, 0.45, Color(0.86, 0.87, 0.88))
+		tx += 32.0
 	# Control tower cab glass ring and a radar on top.
 	m.solid(2281, 195, 2301, 215, LAND_Y + 60.0, LAND_Y + 61.0, Color(0.85, 0.85, 0.85))
 	m.beam(Vector3(2291, LAND_Y + 61.0, 205), Vector3(2291, LAND_Y + 64.0, 205), 0.4, 0.4, Color(0.8, 0.8, 0.8))
@@ -890,6 +1162,99 @@ func _build_airport_dressing() -> void:
 		var hx := 1640.0 + k * 80.0
 		m.solid(hx + 6.0, 287.6, hx + 66.0, 288.4, LAND_Y, LAND_Y + 15.0, Color(0.3, 0.33, 0.36))
 	_mesh(m, "AirportDressing", 0.0, 1400.0)
+
+
+## The terminal roof: one long curved shell (a shallow wave along it) that
+## oversails the hall on both sides – over the drop-off canopy landside and
+## the gates airside – on raking columns, glazed down to the hall between.
+const TERMINAL_HALL := 14.0
+const TERMINAL_ROOF := Rect2(1946, 146, 328, 104)
+
+
+static func terminal_roof_y(x: float, z: float) -> float:
+	var u := clampf((z - TERMINAL_ROOF.position.y) / TERMINAL_ROOF.size.y, 0.0, 1.0)
+	var arch := sin(PI * u)
+	return LAND_Y + TERMINAL_HALL + 1.0 + 8.5 * arch + 1.6 * sin((x - TERMINAL_ROOF.position.x) * 0.038) * arch
+
+
+func _build_terminal(street: StaticBody3D) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var faces := PackedVector3Array()
+	var R := TERMINAL_ROOF
+	var nx := 41
+	var nz := 14
+	var grid: Array = []
+	for i in nx + 1:
+		var row: Array = []
+		for j in nz + 1:
+			var xx := R.position.x + R.size.x * i / nx
+			var zz := R.position.y + R.size.y * j / nz
+			row.append(Vector3(xx, terminal_roof_y(xx, zz), zz))
+		grid.append(row)
+	var put := func(a: Vector3, b: Vector3, c: Vector3) -> void:
+		for v: Vector3 in [a, b, c]:
+			st.add_vertex(v)
+			faces.append(v)
+	for i in nx:
+		for j in nz:
+			var a: Vector3 = grid[i][j]
+			var b: Vector3 = grid[i + 1][j]
+			var c: Vector3 = grid[i + 1][j + 1]
+			var d: Vector3 = grid[i][j + 1]
+			# Top (clockwise seen from above) and the soffit underneath.
+			put.call(a, b, c)
+			put.call(a, c, d)
+			var dn := Vector3(0, -0.6, 0)   # (the soffit: a shell's thickness below)
+			put.call(a + dn, c + dn, b + dn)
+			put.call(a + dn, d + dn, c + dn)
+	st.generate_normals()
+	var roof := MeshInstance3D.new()
+	roof.name = "TerminalRoof"
+	roof.mesh = st.commit()
+	var rm := StandardMaterial3D.new()
+	rm.albedo_color = Color(0.9, 0.91, 0.92)
+	rm.metallic = 0.12
+	rm.roughness = 0.42
+	roof.material_override = rm
+	roof.visibility_range_end = 2600.0
+	_target.add_child(roof)
+	var sh := ConcavePolygonShape3D.new()
+	sh.set_faces(faces)
+	var cs := CollisionShape3D.new()
+	cs.shape = sh
+	street.add_child(cs)
+	# Clerestory glazing from the hall's top up to the roof, all round it.
+	var g := SurfaceTool.new()
+	g.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var hall := Rect2(1962, 168, 296, 68)
+	var y0 := LAND_Y + TERMINAL_HALL
+	var ring := [Vector2(hall.position.x, hall.position.y), Vector2(hall.end.x, hall.position.y),
+		Vector2(hall.end.x, hall.end.y), Vector2(hall.position.x, hall.end.y)]
+	for k in 4:
+		var p0: Vector2 = ring[k]
+		var p1: Vector2 = ring[(k + 1) % 4]
+		var steps := maxi(1, ceili(p0.distance_to(p1) / 8.0))
+		for s2 in steps:
+			var a2 := p0.lerp(p1, float(s2) / steps)
+			var b2 := p0.lerp(p1, float(s2 + 1) / steps)
+			var A0 := Vector3(a2.x, y0, a2.y)
+			var B0 := Vector3(b2.x, y0, b2.y)
+			var A1 := Vector3(a2.x, terminal_roof_y(a2.x, a2.y) - 0.3, a2.y)
+			var B1 := Vector3(b2.x, terminal_roof_y(b2.x, b2.y) - 0.3, b2.y)
+			for v: Vector3 in [A0, A1, B1, A0, B1, B0, A0, B1, A1, A0, B0, B1]:
+				g.add_vertex(v)
+	g.generate_normals()
+	var gl := MeshInstance3D.new()
+	gl.name = "TerminalGlazing"
+	gl.mesh = g.commit()
+	var gm := StandardMaterial3D.new()
+	gm.albedo_color = Color(0.32, 0.45, 0.52)
+	gm.metallic = 0.8
+	gm.roughness = 0.08
+	gl.material_override = gm
+	gl.visibility_range_end = 2000.0
+	_target.add_child(gl)
 
 
 func _build_marina(street: StaticBody3D) -> void:
@@ -933,6 +1298,24 @@ func _build_trees() -> void:
 		if rng.randf() < 0.5:
 			p = Vector3(rng.randf_range(1410, 1610), LAND_Y, rng.randf_range(15, 155))
 		xfs.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.2)), p))
+	# Copses on the knolls (their crowns and flanks, not the bare summits).
+	for kn: Array in KNOLLS:
+		var c: Vector2 = kn[0]
+		for k in int(float(kn[1]) * float(kn[2]) / 180.0):
+			var a := rng.randf() * TAU
+			var r := sqrt(rng.randf_range(0.08, 0.8))
+			xfs.append(Transform3D(Basis(Vector3.UP, a).scaled(Vector3.ONE * rng.randf_range(0.85, 1.3)),
+				Vector3(c.x + cos(a) * float(kn[1]) * r, LAND_Y, c.y + sin(a) * float(kn[2]) * r)))
+	# On land only (12 m+ from the shore), standing on the ground (knolls).
+	var o := outline()
+	var kept: Array = []
+	for xf: Transform3D in xfs:
+		var q := Vector2(xf.origin.x, xf.origin.z)
+		if not Geometry2D.is_point_in_polygon(q, o) or _shore_dist(q) < 12.0:
+			continue
+		xf.origin.y = LAND_Y + knoll_h(q.x, q.y)
+		kept.append(xf)
+	xfs = kept
 	# TreeKit species (avenues mostly one kind, parks mixed), one MultiMesh
 	# per species.
 	var by_sp := {}

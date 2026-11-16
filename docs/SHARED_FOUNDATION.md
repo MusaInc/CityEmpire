@@ -64,3 +64,20 @@ Shared, still opt-in through `SkyportIsland.enabled` unless noted:
   `src/audio/craft_audio.gd` (synthesised engine audio for Craft).
 - City Empire-only: island pavement loops in `empire/npc/crowd.gd`, home
   records/ownership markers (`skyport_play.gd`, `ventures.gd` HOME_ESTATE).
+
+## Geography pass (2026-11-16)
+
+- `src/world/landforms.gd` (Landforms, opt-in static `enabled`, default
+  false): headland parks, beaches and breakwaters added OUTSIDE the two
+  city islands' generated coasts along the strait (the coasts, blocks and
+  unit ids are untouched, so saves need no migration). Hooks: one early-out
+  each in `CityLayout.is_water` / `ground_y`, `Landforms.rail_gaps()` into
+  `BuildingMesher.rail_gaps`, map painting in `Minimap.MapPainter`.
+- `SkyportIsland.COAST`: the outline is a curve through typed control points
+  (quay / beach / rock); `_shore_bands` builds beaches, revetments and quay
+  walls with collision; `waterline_edges()` puts the foam where the water
+  is. `_build_terminal` (curved roof + glazing), Skyport Grand hotel.
+- `TreeKit` (src/world/tree_kit.gd + shaders/tree.gdshader) replaces the
+  glTF street tree everywhere; `grass.gdshaderinc` is shared by ground.gdshader
+  and island_ground.gdshader (**visible in every game that uses them**).
+- `Car.park_lock` (default false) — a game's own parked cars lock in place.

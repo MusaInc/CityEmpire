@@ -252,6 +252,65 @@ func scenario_xa() -> void:
 	check(bad_roads == 0, "city streets: %d of the roads have a step or hole (worst %.2f m at %s; %d samples)" % [bad_roads, worst, wpos, n])
 
 
+## XO: the Skyport coastline vs its content: every building corner, road
+## point, airport strip end, stand, helipad and site door is on land and at
+## least 8 m from the shore (no building in the sea, no road off the edge).
+func scenario_xo() -> void:
+	print("--- XO: Skyport coast vs content")
+	var P: Dictionary = game.skyport.plan_data
+	var o := SkyportIsland.outline()
+	var near := func(q: Vector2) -> float:
+		var best := INF
+		for i in o.size():
+			var cp := Geometry2D.get_closest_point_to_segment(q, o[i], o[(i + 1) % o.size()])
+			best = minf(best, cp.distance_to(q))
+		return best
+	var bad: Array = []
+	var pts: Array = []
+	for b: Dictionary in P["buildings"]:
+		var t: Array = b["tiers"][0]
+		for c in [Vector2(t[0], t[1]), Vector2(t[2], t[1]), Vector2(t[2], t[3]), Vector2(t[0], t[3])]:
+			pts.append(["building", c])
+	for r in P["roads"]:
+		if r[3]:
+			continue
+		var rp: PackedVector3Array = r[1]
+		for i in rp.size() - 1:
+			var L := Vector2(rp[i].x, rp[i].z).distance_to(Vector2(rp[i + 1].x, rp[i + 1].z))
+			var k := 0.0
+			while k <= L:
+				var q := Vector2(rp[i].x, rp[i].z).lerp(Vector2(rp[i + 1].x, rp[i + 1].z), k / maxf(L, 0.01))
+				# (The avenue meets the bridge at the quay: allowed at the edge.)
+				if q.x > SkyportIsland.DECK_END + 20.0:
+					pts.append([String(r[0]), q])
+				k += 10.0
+	for st in P["strips"]:
+		pts.append(["strip", Vector2((st[1] as Vector3).x, (st[1] as Vector3).z)])
+		pts.append(["strip", Vector2((st[2] as Vector3).x, (st[2] as Vector3).z)])
+	for sd in P["stands"]:
+		pts.append(["stand", Vector2((sd[0] as Vector3).x, (sd[0] as Vector3).z)])
+	for hp: Vector3 in P["helipads"]:
+		if hp.y < SkyportIsland.LAND_Y + 1.0:
+			pts.append(["helipad", Vector2(hp.x, hp.z)])
+	for k in P["sites"]:
+		var d: Vector3 = P["sites"][k]["door"]
+		pts.append([k, Vector2(d.x, d.z)])
+	for it in pts:
+		var q: Vector2 = it[1]
+		if not Geometry2D.is_point_in_polygon(q, o) or float(near.call(q)) < 8.0:
+			bad.append("%s at %s (%.0f m)" % [it[0], q, near.call(q)])
+	check(bad.is_empty(), "all %d content points on land, 8 m+ from the shore (%s)" % [pts.size(), str(bad.slice(0, 6))])
+	# The shore isn't a rectangle: the outline's area vs its bounding box.
+	var bb := Rect2(o[0], Vector2.ZERO)
+	for v in o:
+		bb = bb.expand(v)
+	var area := 0.0
+	for i in o.size():
+		area += o[i].x * o[(i + 1) % o.size()].y - o[(i + 1) % o.size()].x * o[i].y
+	var fill := absf(area) * 0.5 / bb.get_area()
+	check(fill < 0.86, "the island fills %.0f%% of its bounding box (bays, a waist, headlands)" % (fill * 100.0))
+
+
 ## XV: the Skyport bridge at 8, 20 and 34 m/s, city → island and back,
 ## starting on the avenue (over the ramp and the esplanade): no stall, no
 ## drop below the road, no jolt, never off the deck.
@@ -376,6 +435,12 @@ func scenario_xd() -> void:
 		if q.x > 1150.0 and q.x < 1500.0:
 			crosses = true
 	check(game.gps.points.size() >= 2 and crosses, "GPS from the city to the airport crosses the bridge (%d points, %s)" % [game.gps.points.size(), game.gps.message])
+	# Set back from any road (the penthouse's lift across its plaza): still
+	# a route, ending on foot – it used to say "No road goes there".
+	var lift: Vector3 = P["homes"][0]["lift"]
+	var r2: Dictionary = game.gps.plan(game.player.global_position, lift, "walk")
+	check(String(r2["error"]) == "" and (r2["points"] as PackedVector3Array).size() >= 2,
+		"a route to the penthouse lift (%d points, '%s')" % [(r2["points"] as PackedVector3Array).size(), r2["error"]])
 	var vid := String(game.empire.vehicles[0]["id"])
 	game.enter_vehicle(vid)
 	var car: Car = game.cars[vid]
@@ -701,7 +766,7 @@ func _run() -> void:
 		await scenario_p()
 	if _which.split(",").has("B"):
 		await scenario_b()
-	for k in ["XA", "XV", "XN", "XD", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS"]:
+	for k in ["XO", "XA", "XV", "XN", "XD", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())
 	if _which.split(",").has("W"):

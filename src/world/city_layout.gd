@@ -546,7 +546,11 @@ func block_at(x: float, z: float) -> int:
 ## (Basins are water: their quay ring is the block level.)
 func ground_y(x: float, z: float) -> float:
 	if x > BOUNDS.end.x + 200.0 and SkyportIsland.contains(x, z):
-		return SkyportIsland.LAND_Y
+		return SkyportIsland.ground_y(x, z)
+	if Landforms.enabled:
+		var lh := Landforms.ground_y(x, z)
+		if not is_nan(lh):
+			return lh
 	if mainland != null and x < FAR_SHORE:
 		return mainland.ground_y(x, z)
 	var i := block_at(x, z)
@@ -1073,6 +1077,8 @@ func is_water(p: Vector3) -> bool:
 	var q := Vector2(p.x, p.z)
 	if SkyportIsland.contains(p.x, p.z):
 		return false  # (the third island, when a game builds it)
+	if Landforms.contains(p.x, p.z):
+		return false  # (headlands / harbour moles along the strait)
 	for w in basins:
 		if (w as Rect2).has_point(q):
 			return true

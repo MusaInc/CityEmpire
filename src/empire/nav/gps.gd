@@ -314,6 +314,12 @@ func plan(from: Vector3, to: Vector3, p_mode: String, heading := Vector3.ZERO) -
 	if s0.is_empty():
 		s0 = net.nearest(from, Vector3.ZERO, 120.0)
 	var t0 := net.nearest(to, Vector3.ZERO, 120.0)
+	if t0.is_empty():
+		# Places set back from the street (a tower's lift across a plaza, a
+		# park, a pier): the nearest road within 450 m, then on foot (the
+		# route ends with a straight line to the door). Before this, those
+		# said "No road goes there" though you could plainly get there.
+		t0 = net.nearest(to, Vector3.ZERO, 450.0)
 	if s0.is_empty():
 		out["error"] = "You're too far from any road"
 		return out
