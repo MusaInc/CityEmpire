@@ -900,8 +900,15 @@ func scenario_e() -> void:
 				same = false
 		check(same, "…point for point")
 	game.ui.close_panel(true)
-	# Follow the route part way: progress and distance go down.
+	# Follow the route part way: progress and distance go down. (A point on
+	# a street, not out on a bridge: with the three islands joined up the
+	# route may cross Skyport.)
 	var mid := gps.points[gps.points.size() / 3]
+	for frac: float in [0.33, 0.25, 0.45, 0.2, 0.55, 0.65]:
+		var c := gps.points[int(gps.points.size() * frac)]
+		if not game.layout.is_water(c) and is_nan(SkyportIsland.bridge_road_y(game.layout, c.x, c.z)) and not SkyportIsland.contains(c.x, c.z):
+			mid = c
+			break
 	await stand(mid)
 	await wait(0.8)
 	check(gps.remaining < len0 * 0.85 and gps.progress_i > 0, "following it: %.0f m left (was %.0f)" % [gps.remaining, len0])
@@ -913,8 +920,13 @@ func scenario_e() -> void:
 	var side := Vector3(-(b - a).z, 0, (b - a).x).normalized()
 	var off := Vector3.INF
 	# A street well away from every part of the route (a real wrong turn).
+	var probes: Array = []
 	for dist: float in [70.0, -70.0, 110.0, -110.0, 160.0, -160.0]:
-		var p := mid + side * dist
+		probes.append(mid + side * dist)
+	for dist2: float in [90.0, 140.0, 200.0]:
+		for k in 16:
+			probes.append(mid + Vector3(cos(k * TAU / 16.0), 0.0, sin(k * TAU / 16.0)) * dist2)
+	for p: Vector3 in probes:
 		var near := gps.net.nearest(p, Vector3.ZERO, 12.0)
 		if near.is_empty() or game.layout.is_water(p):
 			continue

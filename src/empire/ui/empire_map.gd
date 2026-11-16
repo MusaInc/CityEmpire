@@ -9,7 +9,7 @@ extends Control
 ## a vehicle…). Tap an empty street for a waypoint. Filter chips hide the
 ## kinds of place you don't care about. No typing anywhere.
 
-const MIN_ZOOM := 0.26   # px per metre (all three islands fit)
+const MIN_ZOOM := 0.17   # px per metre (all three islands fit, Skyport to the south)
 const MAX_ZOOM := 3.2
 const S = preload("res://src/empire/ui/empire_style.gd")
 const FILTERS := [["all", "All"], ["yours", "Mine"], ["to_let", "To let"], ["sale", "For sale"],
