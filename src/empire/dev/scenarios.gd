@@ -264,7 +264,8 @@ func scenario_xv() -> void:
 	game.enter_vehicle(vid)
 	var car: Car = game.cars[vid]
 	game.drive_input.enabled = false
-	for v0: float in [8.0, 20.0, 34.0]:
+	var speeds: Array = [8.0, 20.0, 34.0] if not OS.has_environment("XV_SPEED") else [float(OS.get_environment("XV_SPEED"))]
+	for v0: float in speeds:
 		for dir: int in [1, -1]:
 			var lane := e.z + 3.8 * dir
 			var x0 := rp[0].x - 25.0 if dir > 0 else 1560.0
@@ -276,11 +277,18 @@ func scenario_xv() -> void:
 			# (Lambdas capture locals by value: keep the measurements in a dictionary.)
 			var m := {"low": 0.0, "vy": 0.0, "off": 0.0, "x": x0, "vyx": 0.0, "offx": 0.0}
 			var ok := await until(func():
-				car.steer = -clampf((car.global_position.z - lane) * 0.1, -0.3, 0.3) * dir
+				# Lane keeping with damping (sideways speed) and less gain at
+				# speed: proportional-only weaved ±10° and grew at 20+ m/s.
+				var kg := clampf(10.0 / maxf(car.speed, 1.0), 0.2, 1.0)
+				car.steer = -clampf(((car.global_position.z - lane) * 0.1 + car.linear_velocity.z * 0.12) * kg, -0.3, 0.3) * dir
 				car.throttle = 1.0 if car.forward_speed < v0 else 0.0
 				car.brake = 0.0
 				var px := car.global_position.x
 				m["low"] = minf(m["low"], car.global_position.y - SkyportIsland.road_y(game.layout, px, lane))
+				if OS.has_environment("XV_TRACE") and (absf(car.linear_velocity.y) > 2.5 or absf(car.global_position.z - lane) > 2.0) and px > 1020.0 and px < 1430.0:
+					var cs := car.get_colliding_bodies() if car.has_method("get_colliding_bodies") else []
+					print("XVT x %.1f z %.2f y %.2f road %.2f vy %.2f yaw %.1f hits %s" % [px, car.global_position.z, car.global_position.y,
+						SkyportIsland.road_y(game.layout, px, car.global_position.z), car.linear_velocity.y, rad_to_deg(car.rotation.y), cs.map(func(b): return String(b.name) + "@" + str(b.global_position.round()))])
 				if absf(car.linear_velocity.y) > float(m["vy"]):
 					m["vy"] = absf(car.linear_velocity.y)
 					m["vyx"] = px

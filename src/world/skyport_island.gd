@@ -206,6 +206,12 @@ static func _avenue_end(layout: CityLayout, e: Vector3) -> Vector3:
 
 ## The ramp that carries the avenue up its kerb onto the esplanade and on
 ## to the deck: [start on the asphalt, top of the kerb, deck start].
+## The ramp's run up to the esplanade: the avenue is cambered, so the deck
+## (at its highest point across the width) sits up to ~0.9 m above the low
+## lanes; over 7 m that was a 17% kick that threw cars at speed. 28 m ≈ 3%.
+const RAMP_RUN := 28.0
+
+
 static func ramp_points(P: Dictionary, layout: CityLayout) -> PackedVector3Array:
 	var a0: Vector3 = P["avenue_end"]
 	var e: Vector3 = P["city_end"]
@@ -214,8 +220,8 @@ static func ramp_points(P: Dictionary, layout: CityLayout) -> PackedVector3Array
 	# esplanade at its highest point (the pavement never pokes through).
 	var lo := INF
 	for dz: float in [-11.0, -5.5, 0.0, 5.5, 11.0]:
-		lo = minf(lo, layout.terrain.road_y(a0.x - 7.0, a0.z + dz))
-	var s0 := Vector3(a0.x - 7.0, lo - 0.03, a0.z)
+		lo = minf(lo, layout.terrain.road_y(a0.x - RAMP_RUN, a0.z + dz))
+	var s0 := Vector3(a0.x - RAMP_RUN, lo - 0.03, a0.z)
 	var top := _ramp_top(layout, a0)
 	return PackedVector3Array([s0, Vector3(a0.x, top, a0.z), Vector3(e.x, e.y, e.z)])
 
@@ -262,11 +268,21 @@ static func _city_end(layout: CityLayout) -> Vector3:
 
 ## Deck height along the bridge: high over the strait (ships pass under the
 ## main span), easing down onto the island.
+## The deck falls ~29 m over ~420 m. One steady grade (~7%) with eased
+## vertical curves over the first and last 12% (peak ~8%): the old hump +
+## smoothstep crested at x≈1160 and then fell at up to 16%, which threw
+## cars at motorway speed.
 static func bridge_y(e: Vector3, x: float) -> float:
 	var t := clampf((x - e.x) / (DECK_END - e.x), 0.0, 1.0)
-	var k := smoothstep(0.35, 1.0, t)
-	var mid := e.y + 4.0 * sin(t * PI) * (1.0 - k)
-	return lerpf(mid, LAND_Y, k)
+	const F := 0.12
+	var s: float
+	if t < F:
+		s = t * t / (2.0 * F * (1.0 - F))
+	elif t > 1.0 - F:
+		s = 1.0 - (1.0 - t) * (1.0 - t) / (2.0 * F * (1.0 - F))
+	else:
+		s = (t - F * 0.5) / (1.0 - F)
+	return lerpf(e.y, LAND_Y, s)
 
 
 # ----------------------------------------------------------- buildings
