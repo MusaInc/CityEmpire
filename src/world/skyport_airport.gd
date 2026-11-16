@@ -23,6 +23,7 @@ const MULLION := Color(0.84, 0.85, 0.86)
 const STANDS_AT := [1990.0, 2080.0, 2170.0, 2260.0]   # gate stands (x), facing the hall
 const LINK_Y := 9.0                                   # guideway deck top above the ground
 const LINK_W := 6.0
+const CAR_PARK := Rect2(2100, 62, 84, 64)
 
 
 static func glass_material() -> StandardMaterial3D:
@@ -495,7 +496,7 @@ static func build_fuel_farm(target: Node3D, body: StaticBody3D, isl: SkyportIsla
 ## each deck walkable.
 static func build_car_park(target: Node3D, body: StaticBody3D, isl: SkyportIsland) -> void:
 	var Y := SkyportIsland.LAND_Y
-	var r := Rect2(1968, 62, 84, 64)
+	var r := CAR_PARK
 	var m := BuildingMesher.new()
 	var conc := Color(0.74, 0.73, 0.7)
 	var deck := Color(0.46, 0.47, 0.48)
@@ -519,20 +520,40 @@ static func build_car_park(target: Node3D, body: StaticBody3D, isl: SkyportIslan
 		m.solid(r.end.x, r.position.y, r.end.x + 0.2, r.end.y, y, y + 1.1, Color(0.85, 0.84, 0.8))
 		# Parked cars in two rows (not on the top deck's ends).
 		for row: float in [r.position.y + 6.0, r.end.y - 6.0]:
-			var x := r.position.x + 4.0
+			var x := r.position.x + 14.0
 			while x < r.end.x - 4.0:
 				if rng.randf() < 0.72:
 					var cc: Color = car_cols[rng.randi() % car_cols.size()]
 					m.solid(x - 1.0, row - 2.2, x + 1.0, row + 2.2, y, y + 0.9, cc)
 					m.solid(x - 0.85, row - 1.2, x + 0.85, row + 1.0, y + 0.9, y + 1.45, cc.darkened(0.35))
 				x += 2.8
+	# Level landings at both ends of each 6.7% ramp let cars turn onto the
+	# deck without a lip. Reserve the west aisle above for these turns.
+	for lvl in 4:
+		var x := r.position.x - 4.0
+		var y := Y + lvl * 3.2
+		var pts := PackedVector3Array([Vector3(x, y, r.end.y), Vector3(x, y, r.end.y - 8),
+			Vector3(x, y + 3.2, r.position.y + 8), Vector3(x, y + 3.2, r.position.y)])
+		for i in pts.size() - 1:
+			var a := pts[i]
+			var b := pts[i + 1]
+			# Overlap slab ends: rotated box end faces otherwise leave a lip.
+			var ext := (b - a).normalized() * 0.1
+			m.beam(a - ext + Vector3.DOWN * 0.18, b + ext + Vector3.DOWN * 0.18, 8.0, 0.36, deck)
+			_col(body, a - ext + Vector3.DOWN * 0.18, b + ext + Vector3.DOWN * 0.18, 8.0, 0.36)
+			var rail := Vector3(-3.9, 0.55, 0)
+			m.beam(a + rail, b + rail, 0.2, 1.1, conc)
+			_col(body, a + rail, b + rail, 0.2, 1.1)
+		for z: float in [r.position.y, r.end.y]:
+			_col(body, Vector3(r.position.x, y + 3.75, z), Vector3(r.end.x, y + 3.75, z), 0.2, 1.1)
+		_col(body, Vector3(r.end.x, y + 3.75, r.position.y), Vector3(r.end.x, y + 3.75, r.end.y), 0.2, 1.1)
 	# Columns on a 12 m grid; the lift core; the up-ramp on the west side.
-	var cx := r.position.x + 1.0
+	var cx := r.position.x + 13.0
 	while cx < r.end.x:
 		for cz: float in [r.position.y + 1.0, r.get_center().y, r.end.y - 1.0]:
 			m.solid(cx - 0.4, cz - 0.4, cx + 0.4, cz + 0.4, Y, Y + 12.8, conc)
 			CityWorld._add_box(body, AABB(Vector3(cx - 0.4, Y, cz - 0.4), Vector3(0.8, 12.8, 0.8)))
 		cx += 12.0
-	m.solid(r.position.x - 6.0, r.position.y + 20, r.position.x, r.position.y + 28, Y, Y + 15.5, Color(0.3, 0.38, 0.45))
-	CityWorld._add_box(body, AABB(Vector3(r.position.x - 6.0, Y, r.position.y + 20), Vector3(6.0, 15.5, 8.0)))
+	m.solid(r.end.x, r.position.y + 20, r.end.x + 6.0, r.position.y + 28, Y, Y + 15.5, Color(0.3, 0.38, 0.45))
+	CityWorld._add_box(body, AABB(Vector3(r.end.x, Y, r.position.y + 20), Vector3(6.0, 15.5, 8.0)))
 	isl._mesh_into(m, "CarPark", target, 0.0, 1800.0)

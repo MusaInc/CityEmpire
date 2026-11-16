@@ -2013,10 +2013,13 @@ static func shore_profile(layout: CityLayout, smp: Array) -> Array:
 	# along a straight sea wall read as a beige strip), with sand only in
 	# the odd cove where the shore noise peaks – and on the North Beach.
 	var cove := smoothstep(0.66, 0.84, n1)
-	# (Not under a bridge's low end: its deck is built to clear a sand
-	# apron, and armour boulders there stopped cars.)
-	if not SkyportIsland.over_bridge_shore(p.x, p.y):
-		r = maxf(r, 1.0 - cove)
+	# (Not under a bridge's end: armour boulders there stopped cars.)
+	if SkyportIsland.over_bridge_shore(p.x, p.y):
+		# Under a bridge's end: a plain quay wall, straight down into the
+		# water (the abutment stands on it; an apron squeezed to nothing
+		# left a 0.9 m lip of sand at the wall's foot).
+		return [[0.0, -1.2], [0.3, -1.8], [0.6, -2.4], [0.9, -3.0], [1.2, -3.8], [1.5, -4.5], 0.0]
+	r = maxf(r, 1.0 - cove)
 	var w := lerpf(16.0 + 30.0 * n1 + 6.0 * n2, 14.0 + H * 0.9 + 46.0 * pow(n1, 1.6) + 9.0 * n2, r) * amt
 	# North Beach (CoastLife): a long, wide, shallow sand beach – a crescent,
 	# widest mid-bay, narrowing towards rocky ends.

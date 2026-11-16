@@ -124,6 +124,7 @@ func generate(p_seed := 1207) -> CityLayout:
 	keep_out.append(_rect_poly(Rect2(CBD_CENTER.x - 40 - 22, CBD_CENTER.y + 60 - 22, 44, 44)))  # beacon plaza
 	keep_out.append(_rect_poly(Rect2(SetPieces.SHIP_AT - Vector2(50, 32), Vector2(100, 64))))  # the ship's basin
 	roads = CityRoads.new().generate(seed, district, BOUNDS, keep_out)
+	_bridge_spurs("island")
 	roads.bake_field(2.0)
 	coast = roads.coast
 	island = _bbox(coast)
@@ -240,6 +241,7 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 				if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 30.0:
 					kept.append({"poly": q, "district": b["district"], "kind": "plaza"})
 		roads.blocks = kept
+	_bridge_spurs("mainland")
 	roads.bake_field(2.0)
 	coast = roads.coast
 	island = _bbox(coast)
@@ -359,11 +361,60 @@ func _to_world(snap: Array, rot: float, pivot: Vector2) -> void:
 
 
 # ---------------------------------------------------------------- blocks
+## Bridge approaches (Skyport's road bridges): a street from the coast
+## road's centre line straight out to the sea wall, towards the bridge's
+## island landing – a real T-junction (the road field draws its junction
+## box, traffic turns onto it); the bridge starts at its end.
+## [{name, pts: [on the ring, past the sea wall], u}]
+var bridge_spurs: Array = []
+const SPUR_HALF := 13.5        # m: the corridor (22 m road + verges under the parapets)
+const SPUR_WALL_GAP := 0.3     # m of esplanade kept along the sea wall (its coping)
+
+
+func _bridge_spurs(which: String) -> void:
+	bridge_spurs.clear()
+	if not SkyportIsland.enabled:
+		return
+	for i in SkyportIsland.BRIDGES.size():
+		var bd: Array = SkyportIsland.BRIDGES[i]
+		if String(bd[3]) != which:
+			continue
+		var lz: float = SkyportIsland.LANDINGS[int(bd[1])]
+		var F := SkyportIsland.w(Vector3(SkyportIsland.QUAY_X, SkyportIsland.LAND_Y, lz))
+		var R := SkyportIsland._coast_road_point(self, bd[2])
+		var u := (Vector2(F.x, F.z) - R).normalized()
+		var e := R
+		var guard := 0
+		while Geometry2D.is_point_in_polygon(e, roads.coast) and guard < 600:
+			e += u * 0.5
+			guard += 1
+		e += u * 2.0
+		var r := {"pts": PackedVector2Array([R, e]), "w": 22.0, "kind": "major", "name": String(bd[0]) + " Approach",
+			"id": roads.roads.size()}
+		roads.roads.append(r)
+		roads.by_name[r["name"]] = r
+		bridge_spurs.append({"name": bd[0], "pts": r["pts"], "u": u})
+
+
 func _blocks() -> void:
 	# The esplanade round the coast: one raised pavement (a hole = the land
 	# inside the ring road's outer kerb).
 	var rc := roads._ring_coast()
 	var hole: PackedVector2Array = Geometry2D.offset_polygon(rc, -CityRoads.ESPLANADE)[0]
+	# Bridge approaches cross it as streets: their corridors join the hole
+	# (to just short of the sea wall), so its kerb turns the corners of the
+	# junction and runs along both sides of the approach.
+	var inner := Geometry2D.offset_polygon(coast, -SPUR_WALL_GAP)
+	for sp: Dictionary in bridge_spurs:
+		var corridor := CityRoads._buffer(sp["pts"], SPUR_HALF)
+		for cut in Geometry2D.intersect_polygons(corridor, inner[0] if not inner.is_empty() else coast):
+			if Geometry2D.is_polygon_clockwise(cut):
+				continue
+			var merged := Geometry2D.merge_polygons(hole, cut)
+			for mp in merged:
+				if not Geometry2D.is_polygon_clockwise(mp):
+					hole = mp
+					break
 	blocks.append({"poly": coast, "holes": [hole], "district": "waterfront", "kind": "esplanade", "rot": 0.0,
 		"pivot": Vector2.ZERO, "level": NAN, "basin": Rect2()})
 	var beacon := Vector2(CBD_CENTER.x - 40, CBD_CENTER.y + 60)

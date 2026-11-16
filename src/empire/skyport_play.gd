@@ -474,11 +474,17 @@ func spot_near(p: Vector3) -> Dictionary:
 	if game.skyport:
 		var sites: Dictionary = game.skyport.wplan.get("sites", {})
 		for sid in sites:
+			if String(sid).begins_with("clothes") and game.venues and game.venues.has_venue(sid):
+				continue   # (a walk-in shop: its points are inside)
 			var door: Vector3 = sites[sid]["door"]
 			var d3 := Vector2(door.x - p.x, door.z - p.z).length() - 3.0
 			if d3 < REACH and absf(door.y - p.y) < 3.0 and d3 < bd:
 				bd = d3
 				best = {"kind": "sky_site", "site": sid, "world": door, "d": maxf(d3, 0.0)}
+	if game.venues:
+		var vs := game.venues.spot_near(p)
+		if not vs.is_empty() and float(vs["d"]) < bd:
+			best = vs
 	return best
 
 
@@ -496,6 +502,8 @@ func prompt(s: Dictionary) -> Array:
 			return ["UP TO THE HELIPAD" if s["up"] else "DOWN TO THE PENTHOUSE", true]
 		"sky_site":
 			var st := site(String(s["site"]))
+			if s.has("venue_spot"):
+				return ["%s · %s" % [Venues.spot_label(String(s["venue_spot"])), String(st.get("name", "")).to_upper()], true]
 			var what := {"aviation": "AIRCRAFT SALES", "marina": "BOAT SALES", "cargo": "IMPORTS & CARGO",
 				"clothes_everyday": "SHOP CLOTHES", "clothes_premium": "SHOP FASHION", "terminal": "AIRPORT"}.get(String(s["site"]), "SHOWROOM") as String
 			return ["%s · %s" % [String(st.get("name", "")).to_upper(), what], true]

@@ -35,6 +35,7 @@ var chase: ChaseCamera
 var drive_input: DriveInput
 var skyport: SkyportIsland
 var skyport_play: SkyportPlay
+var venues: Venues   # walk-in showrooms + clothes shops on Skyport
 var vfx: VehicleFx
 var audio: AudioDirector
 var sfx: Sfx
@@ -90,6 +91,7 @@ func _ready() -> void:
 	layout = world.layout
 	# Skyport Island (the third island: airport, logistics, high-rise, marina).
 	SkyportIsland.enabled = true
+	Venues.register()   # (the island carves their rooms out of its buildings)
 	var t1 := Time.get_ticks_msec()
 	skyport = SkyportIsland.new()
 	skyport.name = "Skyport"
@@ -168,6 +170,10 @@ func _ready() -> void:
 	skyport_play.name = "SkyportPlay"
 	add_child(skyport_play)
 	skyport_play.setup(self)
+	venues = Venues.new()
+	venues.name = "Venues"
+	add_child(venues)
+	venues.setup(self)
 	# The one GPS route (both maps draw it); its road graph builds on a thread.
 	gps = Gps.new()
 	gps.name = "Gps"
@@ -677,6 +683,8 @@ func _play() -> void:
 func _teleport(p: Vector3, yaw: float) -> void:
 	if skyport and SkyportIsland.distance_to(p) < SkyportIsland.NEAR_LOAD and not skyport.near_loaded():
 		skyport.load_near_now()   # (arriving at once: its buildings must be solid now)
+	if venues:
+		venues.load_near_now(p)
 	player.respawn(p)
 	player.last_safe_position = p
 	_dry_pos = p
@@ -938,6 +946,8 @@ func _update_indoors() -> void:
 			if si.global_transform.origin.distance_squared_to(p) < 2500.0 and si.contains(p):
 				ceiling = si.global_transform.origin.y + si.H
 				break
+		if ceiling == INF and venues:
+			ceiling = venues.ceiling_at(p)
 	player.indoors = ceiling < INF
 	camera.indoor_ceiling = ceiling
 	if atmosphere.rain_fx:

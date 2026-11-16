@@ -149,6 +149,7 @@ func _physics_process(dt: float) -> void:
 	forward_speed = hv.dot(Vector2(forward().x, forward().z))
 	if _rotor_node:
 		_rotor_node.rotate_y(dt * 40.0 * rotor)
+	CraftModels.animate(_visual, dt, rotor)
 	if _gear:
 		# Up once well clear of the runway; down for the approach (low and
 		# coming down) and always on the ground. Folds up into the body.

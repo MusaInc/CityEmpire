@@ -226,7 +226,37 @@ func scenario_xa() -> void:
 				blocked += 1
 				bwhere = p
 		check(blocked == 0, "nothing stands up in %s's lanes (%d samples blocked, last at %s)" % [B["name"], blocked, bwhere])
+		# Traffic on the coast road through the bridge's junction: five lane
+		# lines along the ring road, 45 m either side of the junction.
+		var cross_bad := 0
+		var city: CityLayout = game.layout if B["city"] == "island" else game.layout.mainland
+		var s0v: Vector3 = B["s0"]
+		var ring: Dictionary = city.roads.by_name.get("ring", {})
+		var rp2: PackedVector2Array = ring.get("pts", PackedVector2Array())
+		for lane_off: float in [-8.0, -4.0, 0.0, 4.0, 8.0]:
+			var previous := NAN
+			for i in rp2.size() - 1:
+				var a2 := rp2[i]
+				var b2 := rp2[i + 1]
+				var L2 := a2.distance_to(b2)
+				var nrm := (b2 - a2).normalized().orthogonal()
+				var t := 0.0
+				while t < L2:
+					var q := a2.lerp(b2, t / L2)
+					t += 0.5
+					if q.distance_to(Vector2(s0v.x, s0v.z)) > 45.0:
+						previous = NAN
+						continue
+					q += nrm * lane_off
+					var y := _surface(q.x, q.y, city.terrain.road_y(q.x, q.y) + 1.5)
+					if is_nan(y) or (not is_nan(previous) and absf(y - previous) > 0.18):
+						cross_bad += 1
+					previous = y
+		check(cross_bad == 0, "%s coast-road cross traffic: %d steps or holes" % [B["name"], cross_bad])
 	var island_pts: Array = []
+	var road_obstacles: Array = []
+	var clearance := BoxShape3D.new()
+	clearance.size = Vector3(2.0, 1.4, 3.0)
 	for rd in game.skyport.wplan["roads"]:
 		if rd[3]:
 			continue
@@ -235,10 +265,32 @@ func scenario_xa() -> void:
 			var L := rp[i].distance_to(rp[i + 1])
 			var k := 0.0
 			while k < L:
-				island_pts.append(rp[i].lerp(rp[i + 1], k / L))
+				var centre := rp[i].lerp(rp[i + 1], k / L)
+				island_pts.append(centre)
+				var direction := (rp[i + 1] - rp[i]).normalized()
+				for offset: float in [-3.4, 3.4]:
+					var query := PhysicsShapeQueryParameters3D.new()
+					query.shape = clearance
+					query.collision_mask = 1
+					query.transform = Transform3D(Basis(Vector3.UP, atan2(-direction.x, -direction.z)), centre + Vector3(-direction.z, 0, direction.x) * offset + Vector3.UP * 1.1)
+					if not game.get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty():
+						road_obstacles.append("%s at %s" % [rd[0], centre])
 				k += 2.0
 	var r2 := _audit_line(island_pts, func(p): return SkyportIsland.LAND_Y + 0.3)   # (all flat)
 	check(int(r2[0]) == 0 and int(r2[1]) == 0, "island roads: %d steps, %d holes over %d samples" % [r2[0], r2[1], island_pts.size()])
+	check(road_obstacles.is_empty(), "island vehicle clearance: %d obstructions %s" % [road_obstacles.size(), str(road_obstacles.slice(0, 6))])
+	var ramp_errors := 0
+	var park := SkyportAirport.CAR_PARK
+	for level in 4:
+		for k in 65:
+			var z := park.end.y - k
+			var y := SkyportIsland.LAND_Y + level * 3.2 + clampf((float(k) - 8.0) / 48.0, 0.0, 1.0) * 3.2
+			var wp := SkyportIsland.w(Vector3(park.position.x - 4, y, z))
+			var actual := _surface(wp.x, wp.z, y + 0.4)
+			if is_nan(actual) or absf(actual - y) > 0.04:
+				ramp_errors += 1
+				print("Ramp level %d sample %d expected %.3f got %.3f" % [level, k, y, actual])
+	check(ramp_errors == 0, "all four parking ramps have continuous collision (%d bad samples)" % ramp_errors)
 	# City streets (both landmasses), centrelines; a jump between samples on
 	# separate roads is not a step, so audit each road on its own. Where a
 	# bridge ramp carries the road (the old bridge's island ramp, the Skyport
@@ -250,7 +302,9 @@ func scenario_xa() -> void:
 				return true
 		for B2: Dictionary in P["bridges"]:
 			var f := _bf(B2, Vector3(q.x, 0.0, q.y))
-			if f.x > _ramp_start(B2) - 2.0 and f.x < 2.0 and absf(f.y) < 12.0:
+			# The tapered shoulders are audited by the cross-traffic scan above.
+			var half_width := 21.0 if f.x <= _bf(B2, B2["a0"]).x else 12.0
+			if f.x > _ramp_start(B2) - 2.0 and f.x < 2.0 and absf(f.y) < half_width:
 				return true
 		return false
 	var bad_roads := 0
@@ -588,6 +642,100 @@ func scenario_xc() -> void:
 	check(HeroLook.current(game.empire.flags)["shoes"] != "shoes_gold", "walked out unpaid: the gold trainers stay in the shop")
 
 
+## XW: the walk-in venues (car showrooms, clothes shops). For each room:
+## start on the pavement, walk through the sliding doors (they open) to the
+## middle of the floor (solid, indoors under its ceiling), visit every
+## walk-up point (each offers its prompt), check the display cars stand
+## inside, then walk back out. `--sc-film=<dir>`: a screenshot per room.
+func scenario_xw() -> void:
+	print("--- XW: walk-in venues")
+	var v: Venues = game.venues
+	var vplan: Dictionary = game.skyport.plan_data.get("venues", {})
+	check(vplan.size() == Venues.DEFS.size(), "every venue was carved into its building (%s)" % str(vplan.keys()))
+	var p := game.player
+	var w := _Walk.new()
+	for id: String in vplan:
+		var xf := v.venue_xf(id)
+		var d: Dictionary = Venues.DEFS[id]
+		var street := xf * Vector3(0, 0, 4.0)
+		if not game.skyport.near_loaded():
+			game.skyport.load_near_now()
+		v.load_near_now(street)
+		await stand(street)
+		await until(func(): return v.rooms.has(id), 10.0)
+		check(v.rooms.has(id), "%s: the room streams in" % id)
+		if not v.rooms.has(id):
+			continue
+		var R: Dictionary = v.rooms[id]
+		await until(func(): return p.is_on_floor(), 5.0)
+		await frames(10)
+		p.bot = w
+		var opened := [0.0]
+		var ax := float(d["aisle"])
+		var dx := ((R["doors"][0][1] as Vector3).x + (R["doors"][-1][1] as Vector3).x) * 0.5   # (the entrance)
+		var inside := xf * Vector3(ax, 0, -float(d["d"]) * 0.45)
+		var watch := func() -> void:
+			opened[0] = maxf(opened[0], float(R["door_t"]))
+		get_tree().process_frame.connect(watch)
+		# Through the doors, along the aisle to mid-floor.
+		var a: Dictionary = {}
+		for wp: Vector3 in [Vector3(dx, 0, 2.0), Vector3(dx, 0, -0.9), Vector3(ax, 0, -1.1), Vector3(ax, 0, -float(d["d"]) * 0.45)]:
+			a = await _walk_to(w, xf * wp, 20.0)
+			if not a["ok"]:
+				break
+		get_tree().process_frame.disconnect(watch)
+		check(a["ok"], "%s: walked in through the front (%s)" % [id, a.get("at", "%.1fs" % a["t"])])
+		check(opened[0] > 0.8, "%s: the doors slid open (%.2f)" % [id, opened[0]])
+		var fy := p.global_position.y - 0.9 - xf.origin.y
+		check(absf(fy) < 0.25 and p.is_on_floor(), "%s: standing on the floor (%.2f m)" % [id, fy])
+		check(v.ceiling_at(p.global_position) < INF and p.indoors, "%s: indoors under the ceiling" % id)
+		if game.args.has("sc-film"):
+			# From just inside the doors, eye height, looking in (and back out).
+			for view: Array in [["in", Vector3(0, 1.7, -1.5), Vector3(0, 1.2, -float(d["d"]))],
+					["back", Vector3(float(d["w"]) * 0.3, 2.2, -float(d["d"]) + 1.5), Vector3(-float(d["w"]) * 0.1, 1.2, 0.0)]]:
+				var from: Vector3 = xf * (view[1] as Vector3)
+				var to: Vector3 = xf * (view[2] as Vector3)
+				game.camera.cine = func(_dt: float) -> Array:
+					return [Transform3D(Basis.looking_at(to - from, Vector3.UP), from), 70.0]
+				await wait(1.0)
+				await RenderingServer.frame_post_draw
+				get_viewport().get_texture().get_image().save_png("%s/%s_%s.png" % [String(game.args["sc-film"]), id, view[0]])
+			game.camera.cine = Callable()
+		p.bot = null
+		var bad: Array = []
+		for sp: Array in R["spots"]:
+			var q: Vector3 = sp[1]
+			await stand(Vector3(q.x, xf.origin.y, q.z) + (xf.basis * Vector3(0, 0, 0.6)))
+			game._update_spot()
+			if String(game.spot.get("venue_spot", "")) != String(sp[0]):
+				bad.append("%s→%s (hero %s, spot %s)" % [sp[0], game.spot.get("venue_spot", game.spot.get("kind", "none")), p.global_position.snapped(Vector3.ONE * 0.01), q.snapped(Vector3.ONE * 0.01)])
+		check(bad.is_empty(), "%s: every walk-up point offers its prompt (%d points; %s)" % [id, (R["spots"] as Array).size(), str(bad)])
+		var cars_in := 0
+		for key: String in R["cars"]:
+			var c: Car = game.skyport_play.displays.get(key)
+			if c and v.ceiling_at(c.global_position + Vector3.UP) < INF:
+				cars_in += 1
+		check(cars_in == (R["cars"] as Array).size(), "%s: %d display cars, all inside" % [id, cars_in])
+		await stand(inside)
+		await until(func(): return p.is_on_floor(), 5.0)
+		p.bot = w
+		var b: Dictionary = {}
+		for wp: Vector3 in [Vector3(ax, 0, -1.1), Vector3(dx, 0, -0.9), Vector3(dx, 0, 5.0)]:
+			b = await _walk_to(w, xf * wp, 20.0)
+			if not b["ok"]:
+				break
+		check(b["ok"], "%s: walked back out (%s)" % [id, b.get("at", "%.1fs" % b["t"])])
+		p.bot = null
+
+
+## `--sc-film=<dir>`: saves what the player sees now as <dir>/<tag>.png.
+func _film(tag: String) -> void:
+	if not game.args.has("sc-film"):
+		return
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("%s/%s.png" % [String(game.args["sc-film"]), tag])
+
+
 ## Drives a craft with scripted controls until cond (or timeout).
 func _fly(c: Craft, inp: Dictionary, cond: Callable, secs: float) -> bool:
 	game.skyport_play.script_input = inp
@@ -611,6 +759,7 @@ func scenario_xk() -> void:
 	check(await _fly(c, {"active": true, "gas": 0.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.state == "flying" and c.altitude > 25.0, 90.0),
 		"took off and climbed (%.0f m)" % c.altitude)
 	check((c.get_node("Audio") as AudioStreamPlayer3D).playing, "the rotors are heard while you fly")
+	await _film("craft_wren")
 	var y0 := c._yaw
 	check(await _fly(c, {"active": true, "gas": 1.0, "kick": false, "brake": 0.0, "steer": 0.6}, func(): return Vector2(c.global_position.x - p0.x, c.global_position.z - p0.z).length() > 120.0, 120.0),
 		"flew forward and turned (%.0f m)" % Vector2(c.global_position.x - p0.x, c.global_position.z - p0.z).length())
@@ -651,8 +800,12 @@ func scenario_xp() -> void:
 		"takeoff roll and lift-off (%.0f m along)" % (SkyportIsland.l(c.global_position).x - (rw["from"] as Vector3).x))
 	check(await _fly(c, {"active": true, "gas": 1.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.altitude > 25.0, 60.0),
 		"climbing (%.0f m)" % c.altitude)
-	check(await _fly(c, {"active": true, "gas": 1.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.gear_down < 0.05, 40.0),
-		"the gear folds away in the climb (%.2f)" % c.gear_down)
+	await _film("craft_skylark")
+	if c._gear:   # (the Skylark's gear is fixed, in spats)
+		check(await _fly(c, {"active": true, "gas": 1.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.gear_down < 0.05, 40.0),
+			"the gear folds away in the climb (%.2f)" % c.gear_down)
+	else:
+		await _fly(c, {"active": true, "gas": 1.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.altitude > 40.0, 40.0)
 	check(await _fly(c, {"active": true, "gas": 0.0, "kick": false, "brake": 1.0, "steer": 0.0}, func(): return c.state in ["landing_roll", "taxi", "parked"], 120.0),
 		"descended and touched down (%s at %.0f m along)" % [c.state, SkyportIsland.l(c.global_position).x - (rw["from"] as Vector3).x])
 	check(SkyportIsland.contains(c.global_position.x, c.global_position.z), "on the island, not in the sea")
@@ -677,6 +830,7 @@ func scenario_xg() -> void:
 	check(await _fly(c, {"active": true, "gas": 1.0, "kick": false, "brake": 0.0, "steer": 0.3}, func(): return c.global_position.distance_to(p0) > 60.0, 120.0),
 		"under way (%.0f m)" % c.global_position.distance_to(p0))
 	check(absf(c.global_position.y - Craft.SEA_Y) < 0.6, "floating at sea level (%.2f)" % c.global_position.y)
+	await _film("craft_dart")
 	check(await _fly(c, {"active": true, "gas": 0.0, "kick": false, "brake": 1.0, "steer": 0.0}, func(): return absf(c.forward_speed) < 0.6, 60.0),
 		"slowed to a stop")
 	# Docking: drift in slowly near a free berth, hands off: it lines up.
@@ -806,7 +960,7 @@ func _run() -> void:
 		await scenario_p()
 	if _which.split(",").has("B"):
 		await scenario_b()
-	for k in ["XO", "XA", "XV", "XN", "XD", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS"]:
+	for k in ["XO", "XA", "XV", "XN", "XD", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS", "XW"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())
 	if _which.split(",").has("W"):

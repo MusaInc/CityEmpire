@@ -20,6 +20,81 @@ static func material() -> StandardMaterial3D:
 
 
 static func build(kind: String, model: String, spec: Dictionary) -> Node3D:
+	var ps := _glb(model)
+	if ps != null:
+		return _from_glb(ps, model, spec)
+	return _build_boxes(kind, model, spec)
+
+
+## Section-lofted models from tools/blender/build_craft.py (assets/craft/<id>.glb).
+## Nodes: Body, Rotor, RotorBlur, TailRotor, Prop, Prop_L/R, PropBlur*, Gear,
+## Outboard – each with its origin on its pivot. "paint" takes spec.paint,
+## "paint2" spec.trim.
+static var _scenes := {}
+static var _paints := {}
+
+
+static func _glb(model: String) -> PackedScene:
+	if not _scenes.has(model):
+		var p := "res://assets/craft/%s.glb" % model
+		_scenes[model] = load(p) if ResourceLoader.exists(p) else null
+	return _scenes[model]
+
+
+static func _from_glb(ps: PackedScene, model: String, spec: Dictionary) -> Node3D:
+	var root: Node3D = ps.instantiate()
+	root.name = "Visual"
+	var paint: Color = spec.get("paint", Color(0.9, 0.9, 0.9))
+	var trim: Color = spec.get("trim", Color(0.15, 0.17, 0.2))
+	_recolour(root, paint, trim)
+	for n in root.get_children():
+		if String(n.name).contains("Blur"):
+			(n as Node3D).visible = false
+	# The Skylark's gear is fixed (wheel spats): Craft must not fold it away.
+	if model == "skylark" and root.has_node("Gear"):
+		root.get_node("Gear").name = "FixedGear"
+	return root
+
+
+static func _recolour(n: Node, paint: Color, trim: Color) -> void:
+	if n is MeshInstance3D:
+		var mi := n as MeshInstance3D
+		for i in mi.mesh.get_surface_count():
+			var m := mi.mesh.surface_get_material(i)
+			if m == null:
+				continue
+			var nm := String(m.resource_name)
+			if nm == "paint" or nm == "paint2":
+				var c := paint if nm == "paint" else trim
+				var key := "%s/%s" % [nm, c.to_html()]
+				if not _paints.has(key):
+					var d := (m as BaseMaterial3D).duplicate() as BaseMaterial3D
+					d.albedo_color = c
+					_paints[key] = d
+				mi.set_surface_override_material(i, _paints[key])
+	for c in n.get_children():
+		_recolour(c, paint, trim)
+
+
+## Spin the moving parts of a GLB craft (rotor 0..1 = spin-up).
+static func animate(visual: Node3D, dt: float, rotor: float) -> void:
+	if visual == null:
+		return
+	var fast := rotor > 0.55
+	for n in visual.get_children():
+		var nm := String(n.name)
+		if nm == "TailRotor":
+			(n as Node3D).rotate_x(dt * 90.0 * rotor)
+		elif nm.begins_with("Prop") and not nm.contains("Blur"):
+			(n as Node3D).rotate_z(dt * 70.0 * rotor)
+			(n as Node3D).visible = not fast
+		elif nm.contains("Blur"):
+			(n as Node3D).visible = fast if nm.begins_with("Prop") else rotor > 0.3
+		elif nm == "Rotor":
+			pass  # (Craft spins it)
+
+
+static func _build_boxes(kind: String, model: String, spec: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Visual"
 	var paint: Color = spec.get("paint", Color(0.9, 0.9, 0.9))
