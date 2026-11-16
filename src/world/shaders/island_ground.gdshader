@@ -7,6 +7,7 @@
 //   6 helipad (H in a circle)    7 bridge deck road (as 2, no kerb wear)
 shader_type spatial;
 render_mode diffuse_burley;
+#include "res://src/world/shaders/grass.gdshaderinc"
 
 global uniform float wetness;
 global uniform float night;
@@ -63,7 +64,7 @@ void fragment() {
 		albedo *= 1.0 - 0.1 * smoothstep(0.6, 0.85, vnoise(p * 0.12 + 5.0));
 		albedo *= 1.0 - 0.08 * smoothstep(0.7, 0.9, vnoise(p * 0.7 + 11.0)) * near;
 	} else if (v_kind == 1.0) {
-		albedo = c * (0.82 + 0.3 * vnoise(p / 9.0)) * (0.92 + 0.12 * vnoise(p * 1.3) * near);
+		albedo = grass_shade(c, p, near, (fwidth(p.x) + fwidth(p.y)) * 0.5);
 		rough = 0.97;
 	} else if (v_kind == 2.0 || v_kind == 7.0) {
 		albedo = c * tone;

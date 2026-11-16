@@ -170,10 +170,18 @@ vec3 room(vec2 o, vec3 d, vec3 rsize, float rnd, float lit, vec3 lamp, float day
 	return c * light;
 }
 
+// What kind of business a painted shopfront bay is (independent of its sign
+// colour): 0 café, 1 convenience, 2 boutique, 3 restaurant, 4 estate agent /
+// office, 5 salon, 6 empty unit (whitewashed glass).
+int shop_kind(float sid) {
+	float k = fract(sid * 13.7 + 0.37);
+	return k < 0.18 ? 0 : (k < 0.34 ? 1 : (k < 0.48 ? 2 : (k < 0.62 ? 3 : (k < 0.75 ? 4 : (k < 0.86 ? 5 : 6)))));
+}
+
 // Interior of a shop seen through its window (interior mapping, like room()):
-// bright floor, rows of ceiling lights, and shelving stocked with goods on the
-// back and side walls – or, for cafés, a counter and a dark menu board. Shops
-// are lit all day, so they read as open businesses rather than boarded bays.
+// a box room plus one furniture plane (tables / desks / counters at their real
+// height), dressed by kind so a street of shops reads as different businesses
+// rather than rows of shelving. Shops are lit all day; empty units are not.
 vec3 shop_room(vec2 o, vec3 d, vec3 rsize, float sid, vec3 lamp, float daylight) {
 	vec3 lo = vec3(-rsize.x * 0.5, -rsize.y * 0.5, 0.0);
 	vec3 hi = vec3(rsize.x * 0.5, rsize.y * 0.5, rsize.z);
@@ -183,43 +191,67 @@ vec3 shop_room(vec2 o, vec3 d, vec3 rsize, float sid, vec3 lamp, float daylight)
 	float t = min(tf.x, min(tf.y, tf.z));
 	vec3 h = p0 + d * t;
 	float fy = h.y - lo.y;  // height above the shop floor
-	bool cafe = fract(sid * 9.13) < 0.3;
-	vec3 wallc = cafe ? vec3(0.55, 0.42, 0.32) : (fract(sid * 4.7) < 0.5 ? vec3(0.86, 0.85, 0.82) : vec3(0.7, 0.74, 0.76));
+	int kind = shop_kind(sid);
+	float v = fract(sid * 4.7);
+	vec3 wallc = kind == 0 ? vec3(0.55, 0.42, 0.32) : (kind == 3 ? vec3(0.34, 0.2, 0.15) : (kind == 6 ? vec3(0.62, 0.6, 0.56)
+		: (v < 0.5 ? vec3(0.86, 0.85, 0.82) : vec3(0.7, 0.74, 0.76))));
 	vec3 c;
 	if (t == tf.y) {
 		if (d.y > 0.0) {
 			c = vec3(0.86, 0.85, 0.83);
-			vec2 g = fract(h.xz / vec2(1.6, 1.8)) - 0.5;
-			c += lamp * step(abs(g.x), 0.16) * step(abs(g.y), 0.16) * 4.0;
+			if (kind == 3) {
+				// Restaurant: dark ceiling, a warm pendant over each table.
+				c = vec3(0.2, 0.15, 0.12);
+				vec2 g = fract(h.xz / 1.8) - 0.5;
+				c += lamp * (1.0 - smoothstep(0.05, 0.14, length(g))) * 5.0;
+			} else if (kind != 6) {
+				vec2 g = fract(h.xz / vec2(1.6, 1.8)) - 0.5;
+				c += lamp * step(abs(g.x), 0.16) * step(abs(g.y), 0.16) * 4.0;
+			}
 		} else {
 			vec2 tl = floor(h.xz / 0.6);
-			c = cafe ? vec3(0.36, 0.25, 0.17) : mix(vec3(0.62, 0.6, 0.57), vec3(0.74, 0.72, 0.69), mod(tl.x + tl.y, 2.0));
+			c = (kind == 0 || kind == 3) ? vec3(0.36, 0.25, 0.17) * (0.9 + 0.1 * mod(floor(h.x / 0.18), 2.0))
+				: (kind == 6 ? vec3(0.45, 0.44, 0.42) * (0.85 + 0.2 * hash12(floor(h.xz * 1.3) + sid))
+				: mix(vec3(0.62, 0.6, 0.57), vec3(0.74, 0.72, 0.69), mod(tl.x + tl.y, 2.0)));
 		}
 	} else {
-		// Back (z) or side (x) wall: shelving with goods, or a café counter.
 		float along = t == tf.z ? h.x : h.z;
+		bool back = t == tf.z;
 		c = wallc;
-		if (cafe) {
-			float counter = step(fy, 1.05) * step(0.3, t == tf.z ? 1.0 : 0.0);
+		if (kind == 0) {
+			// Café: counter, dark menu board with chalk lines.
+			float counter = step(fy, 1.05) * (back ? 1.0 : 0.0);
 			c = mix(c, vec3(0.22, 0.14, 0.09), counter);
-			float board = step(abs(fy - 2.35), 0.45) * step(abs(along), rsize.x * 0.3) * (t == tf.z ? 1.0 : 0.0);
+			float board = step(abs(fy - 2.35), 0.45) * step(abs(along), rsize.x * 0.3) * (back ? 1.0 : 0.0);
 			float chalk = step(0.62, hash12(floor(vec2(along / 0.12, fy / 0.11)) + sid * 31.0)) * step(abs(fy - 2.35), 0.36);
 			c = mix(c, mix(vec3(0.08, 0.09, 0.08), vec3(0.85), chalk * 0.7), board);
-		} else if (fract(sid * 5.71) < 0.5) {
-			float row = floor((fy - 0.25) / 0.55);
-			float in_rows = step(0.25, fy) * step(fy, 2.5);
-			float shelf = step(fract((fy - 0.25) / 0.55), 0.1);
-			float item = floor(along / 0.22);
-			float hi_r = hash12(vec2(item, row) + sid * 57.0);
-			vec3 goods = vec3(fract(hi_r * 7.1), fract(hi_r * 3.3), fract(hi_r * 5.9));
-			goods = mix(vec3(0.5), goods, 0.6) * (0.55 + 0.5 * fract(hi_r * 11.0));
-			float gap = step(0.2, fract(along / 0.22)) * step(0.15, hi_r);
-			float stocked = step(fract((fy - 0.25) / 0.55), 0.78) * gap;
-			c = mix(c, mix(vec3(0.35, 0.33, 0.31), goods, stocked), in_rows);
-			c = mix(c, vec3(0.92, 0.92, 0.9), shelf * in_rows);
-		} else {
-			// Boutique: a rail of hanging garments at shoulder height, framed
-			// prints above, lots of bare wall.
+		} else if (kind == 1) {
+			// Convenience: one side a wall of lit fridges; elsewhere low
+			// shelving bays (1.2 m uprights) of chunky, muted packs, plain
+			// wall above with a category band.
+			if (!back && h.x > 0.0) {
+				float door = abs(fract(along / 0.8) - 0.5);
+				float in_f = step(0.15, fy) * step(fy, 2.0);
+				vec3 fr = mix(vec3(0.8, 0.88, 0.92), vec3(0.95), step(fract(fy / 0.45), 0.08));
+				fr = mix(fr, vec3(0.25), step(0.46, door));
+				c = mix(c, fr * 1.3, in_f);
+			} else {
+				float in_rows = step(0.1, fy) * step(fy, 1.75);
+				float row = floor((fy - 0.1) / 0.4);
+				float shelf = step(fract((fy - 0.1) / 0.4), 0.08);
+				float pk = floor(along / 0.32);
+				float hr = hash12(vec2(pk, row) + sid * 57.0);
+				vec3 goods = mix(vec3(0.55, 0.5, 0.45), vec3(fract(hr * 7.1), fract(hr * 3.3), fract(hr * 5.9)), 0.45);
+				float tall = 0.4 * mix(0.55, 0.85, fract(hr * 11.0));
+				float stocked = step(0.08, fract((fy - 0.1) / 0.4)) * step(fract((fy - 0.1) / 0.4) * 0.4, tall) * step(0.06, fract(along / 0.32)) * step(0.12, hr);
+				c = mix(c, mix(vec3(0.42, 0.42, 0.44), goods, stocked), in_rows);
+				c = mix(c, vec3(0.88), shelf * in_rows);
+				c = mix(c, vec3(0.3), step(abs(fract(along / 1.2) - 0.5), 0.015) * in_rows);
+				float band = step(abs(fy - 2.25), 0.16);
+				c = mix(c, vec3(0.75, 0.2, 0.15) * (0.7 + 0.5 * fract(sid * 19.0)), band);
+			}
+		} else if (kind == 2) {
+			// Boutique: a rail of hanging garments, framed prints above.
 			float g = floor(along / 0.16);
 			float hg = hash12(vec2(g, 3.0) + sid * 23.0);
 			float hang = step(0.9, fy) * step(fy, 1.75 - 0.35 * fract(hg * 7.0)) * step(0.35, hg)
@@ -229,11 +261,70 @@ vec3 shop_room(vec2 o, vec3 d, vec3 rsize, float sid, vec3 lamp, float daylight)
 			c = mix(c, vec3(0.3, 0.3, 0.32), step(abs(fy - 1.82), 0.025) * step(abs(fract(along / 2.4) - 0.5), 0.35));
 			float print_ = step(abs(fract(along / 2.4) - 0.5), 0.18) * step(abs(fy - 2.6), 0.28);
 			c = mix(c, vec3(0.2, 0.25, 0.3) + vec3(fract(sid * 7.7), 0.2, fract(sid * 2.3)) * 0.4, print_);
+		} else if (kind == 3) {
+			// Restaurant: panelled dado, framed art, a bar along the back.
+			c = mix(c, c * 0.6, step(fy, 1.0));
+			c = mix(c, vec3(0.75, 0.62, 0.4), step(abs(fy - 1.0), 0.03));
+			float art = step(abs(fract(along / 2.0) - 0.5), 0.2) * step(abs(fy - 1.85), 0.35);
+			c = mix(c, mix(vec3(0.6, 0.45, 0.25), vec3(0.15, 0.2, 0.25) + 0.3 * fract(sid * vec3(3.1, 5.3, 7.9)), step(abs(fract(along / 2.0) - 0.5), 0.17) * step(abs(fy - 1.85), 0.31)), art);
+			if (back) {
+				c = mix(c, vec3(0.12, 0.08, 0.06), step(fy, 1.1));
+				float bottles = step(1.5, fy) * step(fy, 2.3) * step(fract(along / 0.13), 0.5) * step(fract((fy - 1.5) / 0.4), 0.7);
+				c = mix(c, vec3(0.3, 0.45, 0.3) * (0.6 + 0.8 * hash12(vec2(floor(along / 0.13), floor(fy / 0.4)))), bottles);
+			}
+		} else if (kind == 4) {
+			// Estate agent / office: white walls, listing boards on the back
+			// wall (card grid: picture over text), a dark skirting.
+			if (back) {
+				vec2 cg = vec2(fract(along / 0.7), fract((fy - 0.9) / 0.6));
+				float card = step(0.9, fy) * step(fy, 2.7) * step(0.1, cg.x) * step(cg.x, 0.9) * step(0.08, cg.y) * step(cg.y, 0.92);
+				float pic = step(0.45, cg.y);
+				vec3 cc = mix(vec3(0.95), vec3(0.4, 0.55, 0.7) * (0.7 + 0.5 * hash12(floor(vec2(along / 0.7, fy / 0.6)))), pic);
+				c = mix(c, cc, card);
+			}
+			c = mix(c, vec3(0.2), step(fy, 0.1));
+		} else if (kind == 5) {
+			// Salon: mirrors along the walls over a ledge, black chairs.
+			float bay = abs(fract(along / 1.4) - 0.5);
+			float mirror = step(bay, 0.32) * step(0.95, fy) * step(fy, 2.0);
+			c = mix(c, mix(sky_horizon * 0.55, vec3(0.75, 0.78, 0.8), 0.4) * (0.85 + 0.3 * fract(fy * 0.7)), mirror);
+			c = mix(c, vec3(0.15), step(abs(fy - 0.92), 0.04) * step(bay, 0.4));
+			c = mix(c, vec3(0.06), step(bay, 0.14) * step(0.2, fy) * step(fy, 0.95));
+		} else {
+			// Empty unit: patchy plaster, a cable dangling, nothing on show.
+			c *= 0.8 + 0.25 * vnoise_b(vec2(along, fy) * 1.3 + sid * 9.0);
 		}
-		if (t != tf.z) c *= 0.85;
+		if (!back) c *= 0.85;
 	}
-	float depth_k = mix(1.0, 0.7, h.z / rsize.z);
-	return c * (vec3(daylight) * depth_k * 0.5 + lamp * 0.5);
+	// One furniture plane at table / desk height in front of the walls.
+	if (kind == 0 || kind == 3 || kind == 4) {
+		float ty = lo.y + (kind == 4 ? 0.74 : 0.76);
+		if (d.y < -1e-4) {
+			float tp = (ty - p0.y) / d.y;
+			if (tp > 0.0 && tp < t) {
+				vec3 q = p0 + d * tp;
+				if (q.z > 0.9) {
+					if (kind == 4) {
+						vec2 g = vec2(fract(q.x / 2.4) - 0.5, fract((q.z - 0.9) / 2.2) - 0.5);
+						if (abs(g.x) < 0.38 && abs(g.y) < 0.22) {
+							c = vec3(0.42, 0.3, 0.2);
+							t = tp;
+						}
+					} else {
+						vec2 g = fract(vec2(q.x, q.z - 0.9) / 1.8) - 0.5;
+						if (length(g) < (kind == 3 ? 0.42 : 0.3)) {
+							c = kind == 3 ? vec3(0.92, 0.9, 0.86) : vec3(0.78, 0.76, 0.72);
+							t = tp;
+						}
+					}
+				}
+			}
+		}
+	}
+	vec3 hpos = p0 + d * t;
+	float depth_k = mix(1.0, 0.7, hpos.z / rsize.z);
+	float lit = kind == 6 ? 0.25 : (kind == 3 ? 0.75 : 1.0);
+	return c * (vec3(daylight) * depth_k * 0.5 + lamp * 0.5 * lit);
 }
 
 // Reflection of the world in glass: sky above, a hazy band of city skyline
@@ -672,6 +763,11 @@ void fragment() {
 			}
 			// Dark plate glass: the shop shows through, the street reflects.
 			vec3 shop_glass = mix(shop_in, refl * 0.85, 0.1 + 0.55 * fres);
+			if (shop_kind(sid) == 6) {
+				// Empty unit: whitewashed glass in swirls, a little see-through.
+				float ww = smoothstep(0.3, 0.7, vnoise_b(vec2(uv.x * 1.6, uv.y * 2.2) + sid * 13.0));
+				shop_glass = mix(shop_glass, vec3(0.86, 0.85, 0.8), (0.55 + 0.35 * ww) * detail);
+			}
 			albedo = mix(albedo, shop_glass, glass * (1.0 - riser));
 			albedo = mix(albedo, base * 0.5, max(riser, max(mull, transom) * glass) * detail);
 			// Glazed door with a dark frame and push bar.

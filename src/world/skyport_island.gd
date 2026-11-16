@@ -913,10 +913,6 @@ func _build_marina(street: StaticBody3D) -> void:
 ## Street trees along Skyport Avenue and Tower Road, and clumps in the
 ## parks (the city's own tree mesh, one MultiMesh).
 func _build_trees() -> void:
-	var pm: Dictionary = world_ref.get("prop_meshes") if world_ref else {}
-	var mesh: Mesh = pm.get("tree")
-	if mesh == null:
-		return
 	var xfs: Array = []
 	var e: Vector3 = plan_data["city_end"]
 	var x := BRIDGE_ISLAND_X + 20.0
@@ -937,17 +933,30 @@ func _build_trees() -> void:
 		if rng.randf() < 0.5:
 			p = Vector3(rng.randf_range(1410, 1610), LAND_Y, rng.randf_range(15, 155))
 		xfs.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.2)), p))
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = mesh
-	mm.instance_count = xfs.size()
-	for i in xfs.size():
-		mm.set_instance_transform(i, xfs[i])
-	var mi := MultiMeshInstance3D.new()
-	mi.name = "Trees"
-	mi.multimesh = mm
-	mi.visibility_range_end = 900.0
-	_target.add_child(mi)
+	# TreeKit species (avenues mostly one kind, parks mixed), one MultiMesh
+	# per species.
+	var by_sp := {}
+	for xf: Transform3D in xfs:
+		var park := absf(xf.origin.z - e.z) > 20.0
+		var sp := TreeKit.pick(xf.origin, park)
+		if not by_sp.has(sp):
+			by_sp[sp] = []
+		by_sp[sp].append(Transform3D(TreeKit.shape(xf.origin, xf.basis.get_scale().y), xf.origin))
+	for sp: String in by_sp:
+		var list: Array = by_sp[sp]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_custom_data = true
+		mm.mesh = TreeKit.mesh(sp)
+		mm.instance_count = list.size()
+		for i in list.size():
+			mm.set_instance_transform(i, list[i])
+			mm.set_instance_custom_data(i, TreeKit.tint((list[i] as Transform3D).origin, sp))
+		var mi := MultiMeshInstance3D.new()
+		mi.name = "Trees_" + sp
+		mi.multimesh = mm
+		mi.visibility_range_end = 900.0
+		_target.add_child(mi)
 
 
 ## Container stacks and quay cranes in the logistics district.

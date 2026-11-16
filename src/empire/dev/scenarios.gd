@@ -697,6 +697,8 @@ func _run() -> void:
 		await scenario_g()
 	if want("H"):
 		await scenario_h()
+	if want("P"):
+		await scenario_p()
 	if _which.split(",").has("B"):
 		await scenario_b()
 	for k in ["XA", "XV", "XN", "XD", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS"]:
@@ -1071,6 +1073,49 @@ func scenario_h() -> void:
 	game.clear_gps()
 	check(not game.gps.active() and not e.flags.has("gps"), "Cancel route clears it (and the save)")
 	print("(status before: %s)" % st0[1])
+
+
+# ------------------------------------- P: walking into your parked car
+## The hero walks (and runs) into the side of the parked car: it doesn't move,
+## you stop against it, and it still drives once you're in.
+func scenario_p() -> void:
+	print("--- P: the hero and the parked car")
+	var vid: String = game.empire.vehicles[0]["id"]
+	var car: Car = game.cars[vid]
+	await stand(car.global_position + car.global_basis.x * 4.0)
+	await until(func(): return car.freeze, 10.0)
+	check(car.freeze, "the parked car settles and locks (frozen=%s)" % car.freeze)
+	var before := car.global_transform
+	var w := _Walk.new()
+	var p := game.player
+	p.bot = w
+	for amt: float in [0.65, 1.0]:
+		await stand(car.global_position + car.global_basis.x * 4.0)
+		p.bot = w
+		w.amount = amt
+		# (Aim at its middle: you can't get there, only up against the side.)
+		await _walk_to(w, car.global_position, 5.0)
+		var moved := car.global_position.distance_to(before.origin)
+		var turned := rad_to_deg(car.global_basis.z.angle_to(before.basis.z))
+		var side := absf((p.global_position - car.global_position).dot(car.global_basis.x))
+		check(moved < 0.02 and turned < 0.5, "%s into the car: it moved %.3f m, turned %.2f°" % ["walking" if amt < 0.8 else "running", moved, turned])
+		check(side > float(car.spec["size"].x) * 0.5, "%s: you stop against the side (%.2f m from its middle)" % ["walking" if amt < 0.8 else "running", side])
+	p.bot = null
+	game.enter_vehicle(vid)
+	game.drive_input.enabled = false
+	var x0 := car.global_position
+	await until(func():
+		car.throttle = 1.0
+		car.brake = 0.0
+		car.handbrake = false
+		return car.global_position.distance_to(x0) > 3.0, 10.0)
+	check(not car.freeze and car.global_position.distance_to(x0) > 3.0, "it drives off once you're in (%.1f m)" % car.global_position.distance_to(x0))
+	car.throttle = 0.0
+	await until(func():
+		car.brake = 1.0
+		return car.speed < 0.5, 10.0)
+	game.drive_input.enabled = true
+	game.exit_vehicle()
 
 
 # ------------------------------------- W: walking in and out of every shop

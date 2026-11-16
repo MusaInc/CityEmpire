@@ -10,6 +10,7 @@
 // edge. All of it is maths on one 2-D lookup – no extra geometry.
 shader_type spatial;
 render_mode cull_back, diffuse_burley;
+#include "res://src/world/shaders/grass.gdshaderinc"
 
 uniform sampler2D road_field : filter_linear, repeat_disable;
 uniform vec4 road_rect = vec4(0.0, 0.0, 1.0, 1.0);  // x, z origin, x, z size (m)
@@ -241,7 +242,7 @@ void fragment() {
 		} else if (grass) {
 			// Lawn: mowing stripes, soft colour drift, a gravel path round the edge.
 			float stripe = step(0.5, fract(p.x / 6.0));
-			albedo = c * (0.9 + 0.16 * vnoise(p * 0.18)) * (1.0 + 0.06 * (stripe - 0.5) * near);
+			albedo = grass_shade(c, v_world.xz, near, (fwidth(v_world.x) + fwidth(v_world.z)) * 0.5) * (1.0 + 0.07 * (stripe - 0.5) * near);
 			float path = band(kerb - 4.8, 1.0, aa);
 			albedo = mix(albedo, vec3(0.62, 0.56, 0.45) * (0.92 + 0.12 * n), path);
 		}

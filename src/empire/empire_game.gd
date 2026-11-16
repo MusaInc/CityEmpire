@@ -112,6 +112,9 @@ func _ready() -> void:
 	player.swing_enabled = false
 	player.everyday = true
 	add_child(player)
+	# Cars are solid to walk into (you stop against the door, you don't walk
+	# into the hull); parked ones are park_lock'ed so it doesn't shove them.
+	player.collision_mask |= Car.BODY_LAYER
 	player.ground_fn = layout.ground_y
 	player.add_to_group("door_openers")  # the stockroom door opens for you
 	player.steer_fn = _door_assist
@@ -1544,6 +1547,7 @@ func _spawn_car(v: Dictionary) -> Car:
 	var c := Car.new()
 	c.name = "Car_" + String(v["id"])
 	c.setup(_car_spec(v["model"]), "player")
+	c.park_lock = true
 	add_child(c)
 	var vis := CarVisual.new()
 	c.add_child(vis)
@@ -1561,6 +1565,8 @@ func enter_vehicle(vid: String) -> void:
 	if c == null:
 		return
 	driving = vid
+	c.occupied = true
+	c.freeze = false
 	player.input_enabled = false
 	player.visible = false
 	player.process_mode = Node.PROCESS_MODE_DISABLED
@@ -1594,6 +1600,7 @@ func exit_vehicle() -> void:
 	c.throttle = 0.0
 	c.brake = 1.0
 	c.handbrake = true
+	c.occupied = false
 	driving = ""
 	player.process_mode = Node.PROCESS_MODE_INHERIT
 	player.visible = true

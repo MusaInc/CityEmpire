@@ -280,11 +280,28 @@ func max_steer_angle() -> float:
 	return clampf(ideal, minf(fast, lock), lock)
 
 
+## A game's own parked car (`park_lock`): once it has settled with nobody
+## in it, it locks in place (frozen static), so walking into it doesn't shove
+## it; getting in (`occupied`) or place() releases it.
+var park_lock := false
+var occupied := false
+var _still := 0.0
+
+
 func _physics_process(dt: float) -> void:
 	Prof.begin("car")
 	if freeze:
 		Prof.end("car")
 		return
+	if park_lock and not occupied:
+		_still = _still + dt if linear_velocity.length() < 0.15 and angular_velocity.length() < 0.15 else 0.0
+		if _still > 0.6:
+			freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+			freeze = true
+			linear_velocity = Vector3.ZERO
+			angular_velocity = Vector3.ZERO
+			Prof.end("car")
+			return
 	_time += dt
 	var xf := global_transform
 	var b := xf.basis
@@ -838,6 +855,9 @@ func _wear_part(pn: String, k: float, at: Vector3, n: Vector3) -> void:
 
 ## Teleport (recovery / pooling): zero momentum, clear wheel history.
 func place(xf: Transform3D, vel := Vector3.ZERO) -> void:
+	if park_lock:
+		freeze = false
+		_still = 0.0
 	global_transform = xf
 	linear_velocity = vel
 	angular_velocity = Vector3.ZERO

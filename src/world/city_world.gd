@@ -668,7 +668,7 @@ func _load_meshes(name: String) -> Array:
 
 
 func _load_props() -> void:
-	for k in ["streetlight", "tree", "tree_tall", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
+	for k in ["streetlight", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
 			"harbour_dome", "beacon", "cathedral_top", "traffic_light", "roof_hut", "cooling_tower"]:
 		var m := _load_mesh(k)
 		if m:
@@ -681,6 +681,9 @@ func _load_props() -> void:
 						_lamp_base = _lamp_mat.emission_energy_multiplier
 						m.surface_set_material(i, _lamp_mat)
 			prop_meshes[k] = m
+	# Street/park trees: TreeKit species (replace the single glTF tree).
+	for sp in TreeKit.SPECIES:
+		prop_meshes["tree_" + sp] = TreeKit.mesh(sp)
 	for mode in 2:
 		var gm := ShaderMaterial.new()
 		gm.shader = load("res://src/world/shaders/lamp_glow.gdshader")
@@ -1151,7 +1154,7 @@ func _prop_boxes(kind: String) -> Array:
 			return [[Vector3(0.3, 6.2, 0.3), Vector3(0, 2.8, 0)]]
 		"sign_post":
 			return [[Vector3(0.14, 2.9, 0.14), Vector3(0, 1.45, 0)]]
-		"tree", "tree_tall":
+		"tree", "tree_tall", "tree_plane", "tree_lime", "tree_birch", "tree_pine", "tree_cherry", "tree_poplar":
 			return [[Vector3(0.36, 2.6, 0.36), Vector3(0, 1.3, 0)]]
 		"antenna":
 			return [[Vector3(0.3, 14.3, 0.3), Vector3(0, 7.15, 0)]]
@@ -1647,13 +1650,12 @@ func chunk_props(key: Vector2i) -> Array:
 			continue
 		var kind: String = p[0]
 		var xf: Transform3D = p[1]
-		if kind == "tree":
-			# Mix in the columnar tree and turn each one differently (looks
-			# only: the layout's tree positions don't change).
-			var h := hash(Vector2i(int(xf.origin.x * 4.0), int(xf.origin.z * 4.0)))
-			if h % 5 < 2 and prop_meshes.has("tree_tall"):
-				kind = "tree_tall"
-			xf.basis = xf.basis * Basis(Vector3.UP, (h % 628) * 0.01)
+		if kind == "tree" or kind == "tree_tall":
+			# A TreeKit species (mostly one per street), its own height,
+			# width, lean and turn (looks only: positions don't change).
+			var sc := xf.basis.get_scale().y
+			kind = "tree_" + TreeKit.pick(xf.origin)
+			xf.basis = TreeKit.shape(xf.origin, sc)
 		out.append([kind, xf])
 	return out
 
@@ -1696,14 +1698,18 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 		var list: Array = by_kind[kind]
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
+		var is_tree: bool = kind.begins_with("tree_")
+		mm.use_custom_data = is_tree
 		mm.mesh = mesh
 		mm.instance_count = list.size()
 		for j in list.size():
 			mm.set_instance_transform(j, list[j])
+			if is_tree:
+				mm.set_instance_custom_data(j, TreeKit.tint((list[j] as Transform3D).origin, kind.trim_prefix("tree_")))
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "Props_" + kind
 		mmi.multimesh = mm
-		mmi.visibility_range_end = PROP_RANGES.get(kind, 300.0)
+		mmi.visibility_range_end = PROP_RANGES.get(kind, 320.0 if is_tree else 300.0)
 		mmi.visibility_range_end_margin = 20.0
 		if kind in ["ac_unit", "streetlight", "traffic_light"]:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
