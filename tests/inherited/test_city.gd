@@ -98,9 +98,12 @@ func test_island_has_sea_round_it(t) -> void:
 			return
 
 
-func test_every_district_is_swingable(t) -> void:
-	# Swinging needs anchors well over the street: in every district most
-	# roofs (by footprint area) stand at least 45 m above their street.
+func test_districts_have_their_own_skyline(t) -> void:
+	# City Empire (CityLayout._district_character): the commercial core
+	# (CBD, midtown) keeps most roof area 45 m+ as generated; the old town
+	# and the docks come down to mid- and low-rise (roof area mostly under
+	# 45 m) so the districts read apart from the air. (CitySwing's rule was
+	# "every district swingable" – City Empire's hero walks and drives.)
 	var l := CityLayout.new().generate()
 	var area := {}
 	var tall := {}
@@ -127,8 +130,19 @@ func test_every_district_is_swingable(t) -> void:
 	for d in area:
 		var share: float = tall.get(d, 0.0) / area[d]
 		line += "%s %d%%  " % [d, roundi(share * 100.0)]
-		t.check(share >= (0.4 if d == "docks" else 0.55), "%s: %d%% of roof area is 45 m+" % [d, roundi(share * 100.0)])
+		if d in ["cbd", "midtown"]:
+			t.check(share >= 0.55, "%s: %d%% of roof area is 45 m+" % [d, roundi(share * 100.0)])
+		elif d in ["georgian", "docks"]:
+			t.check(share <= 0.45, "%s reads low: %d%% of roof area is 45 m+" % [d, roundi(share * 100.0)])
 	t.note(line)
+	t.check(l.district_lowered > 100, "district character pass lowered %d buildings" % l.district_lowered)
+	# Nothing a unit or a home is cut into was touched: their rooms sit in
+	# the building as placed.
+	for b in l.buildings:
+		if b.has("apt"):
+			var apt: Dictionary = b["apt"]
+			var tt: Array = b["tiers"][int(apt.get("t", 0))]
+			t.check(float(apt["y1"]) <= float(tt[5]) + 0.01, "unit/home inside its building at %s" % [CityLayout.base_center(b)])
 
 
 func test_world_builds_collision_and_streams(t) -> void:

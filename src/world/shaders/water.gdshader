@@ -89,11 +89,17 @@ void fragment() {
 	// Warp the plane a little and vary the swell's strength in broad
 	// patches, so the wave trains never read as a regular grid.
 	vec2 p0 = v_world.xz;
-	vec2 p = p0 + vec2(vnoise(p0 * 0.018), vnoise(p0 * 0.018 + 17.3)) * 9.0;
+	// (Two scales: 60 m bends and 250 m meanders, so no crest runs straight.)
+	vec2 p = p0 + vec2(gnoise(p0 * 0.004 + 3.1), gnoise(p0 * 0.004 + 41.7)) * 28.0
+		+ vec2(vnoise(p0 * 0.018), vnoise(p0 * 0.018 + 17.3)) * 9.0;
 	float patchy = 0.55 + 0.9 * vnoise(p0 * 0.009 + TIME * 0.01);
 	float dist = length(v_world - CAMERA_POSITION_WORLD);
 	float near = 1.0 - smoothstep(60.0, 420.0, dist);
 	float mid = 1.0 - smoothstep(250.0, 1600.0, dist);
+	// Helicopter height: from up high the regular wave trains add up into
+	// bands and a diamond lattice; there the sea is shaped by a noise field
+	// (wind patches, slicks, swell groups) instead.
+	float alt = smoothstep(35.0, 260.0, CAMERA_POSITION_WORLD.y - v_world.y);
 	float blow = clamp(rain, 0.0, 1.0);
 	float depth = seabed_max;
 	float rocky = 1.0;
@@ -153,7 +159,7 @@ void fragment() {
 	vec2 pock = vec2(vnoise(q2 + vec2(0.3, 0.0)) - r0, vnoise(q2 + vec2(0.0, 0.3)) - r0) * 0.5 * blow;
 	// (Far off the swell's slopes fade more: seen from height the trains
 	// interfere into a regular ripple grid.)
-	vec2 slope = w.yz * mix(0.12, 1.0, mid * mid) + (chop + pock) * near * (1.0 - smoothstep(0.15, 0.6, fp));
+	vec2 slope = w.yz * mix(0.12, 1.0, mid * mid) * mix(1.0, 0.3, alt) + (chop + pock) * near * (1.0 - smoothstep(0.15, 0.6, fp));
 	// (Over the shallows the surface is glassier still: no swell grid over
 	// a bright sandy floor.)
 	slope *= mix(0.35, 1.0, smoothstep(1.0, 10.0, depth));
@@ -164,9 +170,27 @@ void fragment() {
 	// (Far off only the longest trains survive their fade and cross into a
 	// diamond lattice: calm them there and let broad wind patches – cat's
 	// paws and slicks – shape the reflection instead.)
-	float farw = smoothstep(180.0, 800.0, dist);
+	float farw = max(smoothstep(180.0, 800.0, dist), alt);
 	slope *= mix(1.0, 0.5, farw);
-	slope += vec2(gnoise(p0 * 0.011 + wd * TIME * 0.05), gnoise(p0 * 0.011 + 17.3 - wd * TIME * 0.04)) * 0.07 * farw * (1.0 + blow);
+	// Multi-scale noise slopes (90 m, 31 m, 11 m), each octave rotated and
+	// drifting downwind, the finest dropped once a pixel spans it: no period,
+	// no direction, cheap (gradient noise, finite differences).
+	vec2 nsl = vec2(0.0);
+	float oct_s = 0.011;
+	float oct_a = 0.075;
+	mat2 rot = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8));
+	vec2 pn = p0;
+	for (int o = 0; o < 3; o++) {
+		vec2 qn = pn * oct_s + wd * TIME * (0.05 + 0.04 * float(o));
+		float e0 = 0.35;
+		float n0 = gnoise(qn);
+		vec2 gn = vec2(gnoise(qn + vec2(e0, 0.0)) - n0, gnoise(qn + vec2(0.0, e0)) - n0) / e0;
+		nsl += rot * gn * oct_a * (1.0 - smoothstep(0.12, 0.45, fp * oct_s * 2.0));
+		pn = rot * pn + 13.7;
+		oct_s *= 2.85;
+		oct_a *= 0.62;
+	}
+	slope += nsl * farw * (1.0 + blow) * calm;
 	vec3 nw = normalize(vec3(-slope.x, 1.0, -slope.y));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 
@@ -180,8 +204,13 @@ void fragment() {
 
 	// Body: crests the light shines through go turquoise, troughs deep.
 	float crest = clamp(w.x / (1.1 * (1.0 + 0.8 * blow)), 0.0, 1.0);
+	// (The crest tint banded the whole sea turquoise from the air: keep it
+	// for close-up waves; further off/up the tint follows broad, irregular
+	// patches – wind-roughened lanes and calm slicks – at three scales.)
+	float broad = gnoise(p0 * 0.0023 + 5.3) * 0.5 + gnoise(p0 * 0.0071 - 2.9) * 0.3 + gnoise(p0 * 0.019 + 8.1) * 0.2;
+	float tintk = mix(crest, 0.42 + 0.3 * broad, max(farw, 1.0 - near));
 	float through = clamp(dot(normalize(vec3(sun_dir.x, 0.0, sun_dir.z)), -view_w) * 0.5 + 0.5, 0.0, 1.0);
-	vec3 body = mix(deep, shallow, crest * (0.45 + 0.55 * through) * (1.0 - night * 0.8));
+	vec3 body = mix(deep, shallow, tintk * mix(0.45 + 0.55 * through, 0.5, farw) * (1.0 - night * 0.8));
 	body *= mix(1.0, 0.25, night);
 	body *= mix(vec3(1.0), vec3(0.75, 0.82, 0.85), blow);  // grey under a storm sky
 
@@ -201,17 +230,21 @@ void fragment() {
 	float lines = sin(depth * 7.5 + TIME * 2.2 + vnoise(p0 * 0.08) * 3.0) * 0.5 + 0.5;
 	float surf = surf_zone * smoothstep(0.62, 0.92, lines) * smoothstep(0.3, 0.7, vnoise(p0 * 0.12 + vec2(TIME * 0.15, 0.0)))
 		* mix(0.75, 1.0, rocky) * (0.65 + 0.6 * blow) * mid;
+	// (From the air the surf lines alias into white blobs a pixel wide:
+	// once a pixel spans the lines, a soft even wash along the shore.)
+	float surf_far = smoothstep(0.35, 1.4, fp);
+	surf = mix(surf, surf_zone * smoothstep(0.6, 2.0, depth) * 0.22 * mix(0.75, 1.0, rocky), surf_far);
 	foam = max(foam, surf);
 
 	// The seabed seen through the water. Absorption per metre (red first),
 	// over a path that lengthens at grazing angles; a storm stirs it up.
-	vec3 kd = vec3(0.34, 0.088, 0.064) * (1.0 + 1.6 * blow);
+	vec3 kd = vec3(0.42, 0.13, 0.105) * (1.0 + 1.6 * blow);
 	float path = depth * (1.0 + 1.0 / max(ndv, 0.25));
 	vec3 tr = exp(-kd * path);
 	// (Parallax: the bottom sits below the surface, offset along the view.)
 	vec2 bp = p0 - view_w.xz / max(view_w.y, 0.25) * depth * 0.55;
 	float ripple = sin(dot(bp, vec2(0.83, 0.55)) * 2.6 + vnoise(bp * 0.35) * 4.0) * 0.5 + 0.5;
-	vec3 sand_c = vec3(0.86, 0.79, 0.62) * (0.86 + 0.14 * ripple) * (0.9 + 0.2 * vnoise(bp * 0.05));
+	vec3 sand_c = vec3(0.8, 0.76, 0.62) * (0.86 + 0.14 * ripple) * (0.9 + 0.2 * vnoise(bp * 0.05));
 	float stones = vnoise(bp * 0.45) * 0.6 + vnoise(bp * 1.7) * 0.4;
 	vec3 rock_c = mix(vec3(0.16, 0.17, 0.14), vec3(0.34, 0.33, 0.27), stones) * (0.8 + 0.4 * vnoise(bp * 0.06 + 3.0));
 	vec3 floor_c = mix(sand_c, rock_c, smoothstep(0.25, 0.75, rocky));
@@ -220,8 +253,8 @@ void fragment() {
 	floor_c *= 1.0 + caus * day * exp(-depth * 0.35) * (1.0 - blow);
 	floor_c *= mix(1.0, 0.12, night) * mix(1.0, 0.7, blow);
 	// Far off the bottom's detail aliases: fade it to its mean.
-	float fdet = 1.0 - smoothstep(0.3, 2.5, fp);
-	floor_c = mix(mix(vec3(0.78, 0.72, 0.56), vec3(0.24, 0.24, 0.2), smoothstep(0.25, 0.75, rocky)) * mix(1.0, 0.12, night), floor_c, fdet);
+	float fdet = 1.0 - smoothstep(0.12, 0.9, fp);
+	floor_c = mix(mix(vec3(0.72, 0.69, 0.56), vec3(0.3, 0.3, 0.26), smoothstep(0.25, 0.75, rocky)) * mix(1.0, 0.12, night), floor_c, fdet);
 	vec3 water_c = body;
 	body = floor_c * tr + body * (vec3(1.0) - tr);
 

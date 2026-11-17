@@ -510,63 +510,171 @@ static func plan(layout: CityLayout) -> Dictionary:
 		return _plan
 	var z0 := PIVOT.y
 	var P := {}
-	var J := Vector3(BRIDGE_ROAD_X, LAND_Y, z0)     # Bridge Road meets the avenue
-	var A := Vector3(BRIDGE_ISLAND_X, LAND_Y, z0)
-	var B := Vector3(1610.0, LAND_Y, z0)
-	var H := Vector3(1890.0, LAND_Y, z0)
-	var C := Vector3(1960.0, LAND_Y, z0)
-	var D := Vector3(2330.0, LAND_Y, z0)
-	var T1 := Vector3(1610.0, LAND_Y, -176.0)
-	var I := Vector3(1890.0, LAND_Y, 110.0)
 	var y := func(x: float, zz: float) -> Vector3: return Vector3(x, LAND_Y, zz)
-	# Roads: [name, points, width, on a bridge]. Junctions are shared end
-	# points. (The bridges themselves are world-space: P["bridges"].)
-	var roads: Array = [
-		["Bridge Road", PackedVector3Array([y.call(BRIDGE_ROAD_X, LANDINGS[0]), J]), 18.0, false],
-		["Bridge Road", PackedVector3Array([J, y.call(BRIDGE_ROAD_X, LANDINGS[1])]), 18.0, false],
-		["Skyport Avenue", PackedVector3Array([J, A]), 22.0, false],
-		["Skyport Avenue", PackedVector3Array([A, B]), 22.0, false],
-		["Skyport Avenue", PackedVector3Array([B, H]), 22.0, false],
-		["Skyport Avenue", PackedVector3Array([H, C]), 22.0, false],
-		["Skyport Avenue", PackedVector3Array([C, y.call(2220, z0)]), 22.0, false],
-		["Skyport Avenue", PackedVector3Array([y.call(2220, z0), D]), 22.0, false],
+	# The bridges first: the approach roads leave each deck on its heading.
+	P["bridges"] = _plan_bridges(layout)
+	# ------------------------------------------------------------ the roads
+	# A planned airport district (2026-11-17), as one hierarchy:
+	#  * the gateway: each bridge sweeps on off its deck as an approach road
+	#    and the two merge in a Y into Skyport Avenue at M (a landscaped gore
+	#    with the island's sign between them) – no quay T-junction;
+	#  * Skyport Avenue, the spine, with Terminal Circus (a roundabout) where
+	#    the terminal, the town and the industrial estate branch off;
+	#  * the terminal loop: Terminal Approach → Departures (past the hotel and
+	#    Airport Central station) → the forecourt kerb → Arrivals → back out
+	#    to the avenue (Terminal Exit) or round the car parks; parking access;
+	#  * the town: Tower Road's loop, Marina Drive, Quay Street, Harbour Row
+	#    (the waterfront towers) and Dock Street;
+	#  * Aviation Way to Hangar Lane (catering, academy, hangars, hotel),
+	#    the gated airside service road to the fire station and helipads;
+	#  * Industrial Way, the Cargo Road loop and the fuel farm gate.
+	# Junctions are shared end points; roads: [name, points, width, bridge].
+	var M: Vector3 = y.call(1570.0, z0)                 # the merge
+	var B: Vector3 = y.call(1625.0, z0)                 # Tower Road
+	var AV: Vector3 = y.call(1735.0, z0)                # Aviation Way
+	var RC := Vector2(1954.0, z0)               # Terminal Circus
+	var RR := 26.0              # ring centreline (two lanes, 12 m: 20–32 m from the centre)
+	var RN: Vector3 = y.call(RC.x - RR, z0)
+	var RS: Vector3 = y.call(RC.x + RR, z0)
+	var RW: Vector3 = y.call(RC.x, z0 + RR)
+	var RE: Vector3 = y.call(RC.x, z0 - RR)
+	var TX: Vector3 = y.call(2270.0, z0)                # Terminal Exit
+	var D: Vector3 = y.call(2330.0, z0)                 # Industrial Way
+	var CG: Vector3 = y.call(2420.0, z0)                # Cargo Road
+	var A1: Vector3 = y.call(1954.0, 40.0)
+	var A2: Vector3 = y.call(1954.0, 152.0)
+	var A3: Vector3 = y.call(2270.0, 152.0)
+	var A4: Vector3 = y.call(2270.0, 40.0)
+	var HL: Vector3 = y.call(1954.0, 112.0)
+	var T1: Vector3 = y.call(1625.0, -176.0)
+	var T2: Vector3 = y.call(1954.0, -176.0)
+	var T3: Vector3 = y.call(1890.0, -176.0)
+	var Q1: Vector3 = y.call(1482.0, -176.0)
+	var roads: Array = []
+	# The gateway: the Harbour Bridge's road is the main line – one sweep
+	# off the deck that straightens into Skyport Avenue (no junction) – and
+	# the Westbank Bridge's joins it as a slip road from the side at a
+	# shallow angle (~15°) at M, like an on-ramp: no Y of two equal roads,
+	# no wide triangle between them.
+	var ends: Array = []
+	for bi in 2:
+		var Bd: Dictionary = P["bridges"][bi]
+		var J0: Vector3 = y.call(BRIDGE_ROAD_X, float(LANDINGS[bi]))
+		var u3: Vector3 = Bd["u"]
+		var ul := l(w(J0) + u3) - J0
+		ul.y = 0.0
+		ends.append([J0, ul.normalized()])
+	var H0: Vector3 = y.call(1530.0, z0)
+	var hp := _bez(ends[0][0], ends[0][1], H0, Vector3(1, 0, 0), 40.0, 34.0, 16)   # (H0 at x 1530)
+	hp.append(M)
+	roads.append(["Harbour Approach", hp, 22.0, false])
+	# (Beside the main line edge to edge – 22 m between centrelines – at
+	# x 1500, then a 70 m S-taper into it: the lanes merge.)
+	var S0: Vector3 = y.call(1500.0, z0 + 22.0)
+	var wp := _bez(ends[1][0], ends[1][1], S0, Vector3(1, 0, 0), 30.0, 26.0, 14)
+	# (The taper: a smooth S from beside the main line into it, ~10° at M.)
+	var tp := _bez(S0, Vector3(1, 0, 0), M, Vector3(0.985, 0.0, -0.174), 30.0, 30.0, 12)
+	for k in range(1, tp.size()):
+		wp.append(tp[k])
+	roads.append(["Westbank Approach", wp, 22.0, false])
+	P["merge"] = {"node": M, "slip": "Westbank Approach", "taper": 52.0}
+	roads.append_array([
+		["Skyport Avenue", PackedVector3Array([M, B]), 22.0, false],
+		["Skyport Avenue", PackedVector3Array([B, AV]), 22.0, false],
+		["Skyport Avenue", PackedVector3Array([AV, RN]), 22.0, false],
+		["Skyport Avenue", PackedVector3Array([RS, TX]), 22.0, false],
+		["Skyport Avenue", PackedVector3Array([TX, D]), 22.0, false],
+		["Skyport Avenue", PackedVector3Array([D, CG]), 22.0, false],
+		["Fuel Farm Road", PackedVector3Array([CG, y.call(2466.0, z0)]), 12.0, false],
+		# The town.
 		["Tower Road", PackedVector3Array([B, T1]), 14.0, false],
-		["Tower Road", PackedVector3Array([T1, y.call(1890.0, -176.0), H]), 14.0, false],
-		["Marina Drive", PackedVector3Array([T1, y.call(1500.0, -176.0)]), 12.0, false],
-		["Industrial Way", PackedVector3Array([C, y.call(1960.0, -180.0), y.call(2330.0, -180.0), D]), 16.0, false],
-		["Terminal Road", PackedVector3Array([H, I]), 16.0, false],
-		# (Ends at the cargo terminal: the east inlet cuts in where it used to
-		# run back up to the avenue.)
-		["Terminal Road", PackedVector3Array([I, y.call(1960, 150), y.call(2096, 150)]), 16.0, false],
-		["Terminal Road", PackedVector3Array([y.call(2096, 150), y.call(2220, 150)]), 16.0, false],
-		["Terminal Road", PackedVector3Array([y.call(2220, 150), y.call(2392, 150)]), 16.0, false],
-		["Terminal Approach", PackedVector3Array([y.call(2220, z0), y.call(2220, 150)]), 16.0, false],
-		["Parking Access", PackedVector3Array([y.call(2096, 150), y.call(2096, 134)]), 10.0, false],
-		["Hangar Lane", PackedVector3Array([I, y.call(1700, 112), y.call(1618, 150)]), 12.0, false],
-		["Airport Service Road", PackedVector3Array([y.call(1618, 150), y.call(1558, 150), y.call(1558, 316)]), 12.0, false],
-		# On past the industrial estate to the fuel farm.
-		["Fuel Farm Road", PackedVector3Array([D, y.call(2466.0, z0)]), 12.0, false],
-	]
+		["Tower Road", PackedVector3Array([T1, T3]), 14.0, false],
+		["Tower Road", PackedVector3Array([T3, T2]), 14.0, false],
+		["Tower Road", PackedVector3Array([T2, RE]), 14.0, false],
+		["Marina Drive", PackedVector3Array([Q1, T1]), 12.0, false],
+		["Marina Drive", PackedVector3Array([Q1, y.call(1436.0, -176.0)]), 12.0, false],   # (the marina's car park)
+		["Quay Street", PackedVector3Array([Q1, y.call(1482.0, -259.0)]), 10.0, false],
+		["Harbour Row", PackedVector3Array([y.call(1482.0, -259.0), y.call(1890.0, -259.0)]), 10.0, false],
+		["Dock Street", PackedVector3Array([y.call(1890.0, -259.0), T3]), 10.0, false],
+		# Industry and cargo.
+		["Industrial Way", PackedVector3Array([T2, y.call(2330.0, -176.0)]), 16.0, false],
+		["Industrial Way", PackedVector3Array([y.call(2330.0, -176.0), D]), 16.0, false],
+		["Cargo Road", PackedVector3Array([CG, y.call(2420.0, 152.0)]), 14.0, false],
+		["Cargo Road", PackedVector3Array([y.call(2420.0, 152.0), A3]), 14.0, false],
+		# The terminal loop.
+		["Terminal Approach", PackedVector3Array([RW, A1]), 16.0, false],
+		["Departures", PackedVector3Array([A1, HL]), 14.0, false],
+		["Departures", PackedVector3Array([HL, A2]), 14.0, false],
+		["Terminal Forecourt", PackedVector3Array([A2, y.call(2096.0, 152.0)]), 16.0, false],
+		["Terminal Forecourt", PackedVector3Array([y.call(2096.0, 152.0), A3]), 16.0, false],
+		["Parking Access", PackedVector3Array([y.call(2096.0, 152.0), y.call(2096.0, 134.0)]), 10.0, false],
+		["Arrivals", PackedVector3Array([A3, A4]), 14.0, false],
+		["Car Park Road", PackedVector3Array([A4, A1]), 12.0, false],
+		["Terminal Exit", PackedVector3Array([A4, TX]), 14.0, false],
+		# Aviation.
+		["Aviation Way", PackedVector3Array([AV, y.call(1735.0, 112.0)]), 12.0, false],
+		["Hangar Lane", PackedVector3Array([y.call(1558.0, 112.0), y.call(1656.0, 112.0)]), 12.0, false],
+		["Hangar Lane", PackedVector3Array([y.call(1656.0, 112.0), y.call(1735.0, 112.0)]), 12.0, false],
+		["Hangar Lane", PackedVector3Array([y.call(1735.0, 112.0), HL]), 12.0, false],
+		["Airside Service Road", PackedVector3Array([y.call(1558.0, 112.0), y.call(1558.0, 316.0)]), 10.0, false],
+		["Hangar Access", PackedVector3Array([y.call(1656.0, 112.0), y.call(1656.0, 166.0)]), 10.0, false],
+	])
+	# Terminal Circus: the ring (one road per quarter, between the arms).
+	var ring := [RN, RE, RS, RW]
+	for qi in 4:
+		var r0: Vector3 = ring[qi]
+		var r1: Vector3 = ring[(qi + 1) % 4]
+		var a0 := atan2(r0.z - RC.y, r0.x - RC.x)
+		var a1 := atan2(r1.z - RC.y, r1.x - RC.x)
+		var da := wrapf(a1 - a0, -PI, PI)
+		var arc := PackedVector3Array()
+		for k in 9:
+			var t := a0 + da * k / 8.0
+			arc.append(y.call(RC.x + cos(t) * RR, RC.y + sin(t) * RR))
+		arc[0] = ring[qi]
+		arc[8] = ring[(qi + 1) % 4]
+		roads.append(["Terminal Circus", arc, 12.0, false])
 	# Round internal bends without moving shared junction endpoints. The same
 	# centreline feeds rendering, minimap, pedestrians and vehicle navigation.
 	for r: Array in roads:
 		r[1] = _round_road(r[1])
 	P["roads"] = roads
-	P["bridges"] = _plan_bridges(layout)
-	P["bridge_foot"] = J
+	P["bridge_foot"] = M
+	# The Airport Line, planned with the roads (buildings and trees keep
+	# clear of its corridor).
+	AirportRail.plan(P, layout)
+	P["circus"] = [RC, RR]
 	# Surfaces (areas): [kind, polygon, colour]. Kinds as island_ground.gdshader.
 	var areas: Array = []
 	var grass := Geometry2D.intersect_polygons(_rect(1390, 410, 2470, 600), outline())
 	for g in grass:
 		areas.append([1, g, COL_GRASS])
-	areas.append([1, _rect(1470, -125, 1590, -58), COL_GRASS])            # pocket park by the bridges
+	# The gateway gore between the two approach curves (landscaped, the
+	# island's sign in it) and Terminal Circus's planted island.
+	var ha: PackedVector3Array = roads[0][1]
+	var wa: PackedVector3Array = roads[1][1]
+	var region := PackedVector2Array()
+	for v in ha:
+		region.append(Vector2(v.x, v.z))
+	for k in range(wa.size() - 2, -1, -1):
+		region.append(Vector2(wa[k].x, wa[k].z))
+	var gore := PackedVector2Array()
+	var shrunk := Geometry2D.offset_polygon(region, -17.0)
+	if not shrunk.is_empty():
+		gore = shrunk[0]
+		areas.append([1, gore, COL_GRASS])
+	P["gore"] = gore
+	var isle := PackedVector2Array()
+	for k in 24:
+		isle.append(RC + Vector2(cos(TAU * k / 24.0), sin(TAU * k / 24.0)) * (RR - 6.0))
+	areas.append([1, isle, COL_GRASS])
 	areas.append([5, _rect(1560, 170, 1880, 385), COL_APRON])              # hangar apron
 	areas.append([5, _rect(1895, 242, 2330, 385), COL_APRON])              # terminal apron
 	areas.append([5, _rect(2335, 160, 2462, 385), COL_APRON])              # cargo apron
-	areas.append([5, _rect(1965, 58, 2255, 132), COL_APRON])               # terminal car park
+	areas.append([5, _rect(1965, 58, 2255, 132), COL_APRON, "bays"])       # terminal car park (bays, parked cars)
 	areas.append([5, _rect(2140, -300, 2450, -196), COL_APRON])            # container yard
-	for f in [[1630, 8, 1725, 96], [1745, 8, 1875, 96], [1975, 8, 2075, 96]]:
-		areas.append([0, _rect(f[0], f[1], f[2], f[3]), Color(0.62, 0.6, 0.57)])  # dealer forecourts (paved)
+	for f in [[1630, 8, 1725, 96], [1745, 8, 1875, 96], [2350, -80, 2448, -50]]:
+		areas.append([0, _rect(f[0], f[1], f[2], f[3]), Color(0.62, 0.6, 0.57), "bays"])  # dealer forecourts (display bays)
 	P["areas"] = areas
 	# Airport strips: [kind, from, to, half width].
 	var strips: Array = [
@@ -609,16 +717,212 @@ static func plan(layout: CityLayout) -> Dictionary:
 	P["sites"] = {
 		"dealer_budget": {"name": "Kestrel Motors", "door": Vector3(1678, LAND_Y, 4), "lot": Rect2(1630, 8, 95, 88), "face": Vector3(0, 0, -1)},
 		"dealer_luxury": {"name": "Meridian Prestige", "door": Vector3(1810, LAND_Y, 4), "lot": Rect2(1745, 8, 130, 88), "face": Vector3(0, 0, -1)},
-		"dealer_commercial": {"name": "Skyport Commercials", "door": Vector3(2025, LAND_Y, 4), "lot": Rect2(1975, 8, 100, 88), "face": Vector3(0, 0, -1)},
+		# (On the avenue by the industrial estate: its old lot sat in the
+		# terminal's car-park loop.)
+		"dealer_commercial": {"name": "Skyport Commercials", "door": Vector3(2399, LAND_Y, -80), "lot": Rect2(2352, -76, 94, 24), "face": Vector3(0, 0, 1)},
 		"clothes_everyday": {"name": "Threadline", "door": Vector3(1685, LAND_Y, -52), "face": Vector3(0, 0, 1)},
 		"clothes_premium": {"name": "Maison Arden", "door": Vector3(1815, LAND_Y, -52), "face": Vector3(0, 0, 1)},
-		"aviation": {"name": "Skyport Aviation", "door": Vector3(1675, LAND_Y, 300), "face": Vector3(0, 0, 1)},
+		# (Its sales office is the hangar's landside annex, on Hangar Access.)
+		"aviation": {"name": "Skyport Aviation", "door": Vector3(1656, LAND_Y, 176), "face": Vector3(0, 0, -1)},
 		"marina": {"name": "Skyport Marina", "door": Vector3(1410, LAND_Y, -192), "face": Vector3(0, 0, 1)},
 		"cargo": {"name": "Skyport Cargo", "door": Vector3(2398, LAND_Y, 155), "face": Vector3(0, 0, -1)},
 		"terminal": {"name": "Skyport Airport", "door": Vector3(2110, LAND_Y, 160), "face": Vector3(0, 0, -1)},
 	}
 	_plan = P
 	return P
+
+
+## Metres from q (local) to the nearest road's kerb (negative: on it).
+static func road_clearance(P: Dictionary, q: Vector2) -> float:
+	var best := INF
+	for r in P.get("roads", []):
+		var pts: PackedVector3Array = r[1]
+		var hw := float(r[2]) * 0.5
+		for i in pts.size() - 1:
+			var cp := Geometry2D.get_closest_point_to_segment(q, Vector2(pts[i].x, pts[i].z), Vector2(pts[i + 1].x, pts[i + 1].z))
+			best = minf(best, cp.distance_to(q) - hw)
+	return best
+
+
+## Metres from q (local) to the Airport Line's centreline less its deck
+## half-width (INF without one).
+static func rail_clearance(P: Dictionary, q: Vector2) -> float:
+	var best := INF
+	for ln in P.get("rail_local", []):
+		var pts: PackedVector2Array = ln
+		for i in range(0, pts.size() - 1):
+			var cp := Geometry2D.get_closest_point_to_segment(q, pts[i], pts[i + 1])
+			best = minf(best, cp.distance_to(q) - AirportRail.DECK_HALF)
+	return best
+
+
+## Terminal Circus's arms: [[unit radial dir (local, flat), half width,
+## road name]] for every road ending on the ring.
+func _circus_arms() -> Array:
+	var circ: Array = plan_data.get("circus", [])
+	var out: Array = []
+	if circ.is_empty():
+		return out
+	var C: Vector2 = circ[0]
+	var RR: float = circ[1]
+	for r in plan_data["roads"]:
+		if r[0] == "Terminal Circus":
+			continue
+		var pts: PackedVector3Array = r[1]
+		for e: Vector3 in [pts[0], pts[-1]]:
+			var q := Vector2(e.x, e.z)
+			if absf(q.distance_to(C) - RR) < 1.0:
+				out.append([(q - C).normalized(), float(r[2]) * 0.5, r[0]])
+	return out
+
+
+## Terminal Circus as one engineered roundabout (the ring roads stay in the
+## plan for lanes and the GPS, but are drawn here): a two-lane annulus, the
+## entries flared with curved kerbs into it, white edge lines and a dashed
+## lane line round it (broken at the entries), and on every arm a give-way
+## line with a yield triangle and a zebra set back past the splitter
+## island's nose (the islands and planting: SkyportAirport.build_circus).
+func _circus_surface(st: SurfaceTool) -> void:
+	var circ: Array = plan_data.get("circus", [])
+	if circ.is_empty():
+		return
+	var C: Vector2 = circ[0]
+	var RR: float = circ[1]
+	var Ro := RR + 6.0
+	var Ri := RR - 6.0
+	var Y := LAND_Y
+	var road := Color(COL_ROAD.r, COL_ROAD.g, COL_ROAD.b, 2.5 / 8.0)
+	var pave := Color(COL_PAVE.r, COL_PAVE.g, COL_PAVE.b, 0.5 / 8.0)
+	var v3 := func(q: Vector2, lift: float) -> Vector3: return Vector3(q.x, Y + lift, q.y)
+	var fill := func(poly: PackedVector2Array, col: Color, lift: float) -> void:
+		var tri := Geometry2D.triangulate_polygon(poly)
+		for i in range(0, tri.size(), 3):
+			var a := poly[tri[i]]
+			var b := poly[tri[i + 1]]
+			var c := poly[tri[i + 2]]
+			var vs := [a, b, c]
+			if (b - a).cross(c - a) > 0.0:
+				vs = [a, c, b]
+			for v: Vector2 in vs:
+				st.set_color(col)
+				st.set_normal(Vector3.UP)
+				st.set_uv(Vector2(50.0, 0.0))     # (plain: no lane lines)
+				st.set_uv2(Vector2(100.0, 0.0))
+				st.add_vertex(v3.call(v, lift))
+	var paint := func(a: Vector2, b: Vector2, c: Vector2, d: Vector2) -> void:
+		var vs := [a, b, c, a, c, d]
+		if (b - a).cross(c - a) > 0.0:
+			vs = [a, c, b, a, d, c]
+		for v: Vector2 in vs:
+			st.set_color(road)
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(9.4, 0.0))      # (the edge-line band: solid white)
+			st.set_uv2(Vector2(10.0, 1.0))
+			st.add_vertex(v3.call(v, 0.04))
+	var arms := _circus_arms()
+	# Flares: each entry's kerbs curve out into the ring (asphalt), with the
+	# pavement following them round.
+	for arm: Array in arms:
+		var u: Vector2 = arm[0]
+		var hw: float = arm[1]
+		var nrm := Vector2(-u.y, u.x)
+		for sg: float in [-1.0, 1.0]:
+			for layer in 2:
+				var h := hw + (5.0 if layer == 1 else 0.0)
+				var R := Ro + (5.0 if layer == 1 else 0.0)
+				var te := sqrt(maxf(R * R - h * h, 1.0))
+				var E := C + u * te + nrm * sg * h
+				var P0 := C + u * (te + 16.0) + nrm * sg * h
+				var aE := (E - C).angle()
+				var turn := signf(u.cross(nrm * sg))
+				var aF := aE + turn * (18.0 / R)
+				var F := C + Vector2.from_angle(aF) * R
+				# Control: where the edge line meets the ring's tangent at F.
+				var tF := Vector2.from_angle(aF).orthogonal()
+				var dl := u
+				var den := dl.cross(tF)
+				var Q := E
+				if absf(den) > 1e-4:
+					var tt := (F - P0).cross(tF) / den
+					Q = P0 + dl * tt
+				var poly := PackedVector2Array([E, P0])
+				for k in range(1, 12):
+					var t := float(k) / 12.0
+					poly.append(P0.lerp(Q, t).lerp(Q.lerp(F, t), t))
+				poly.append(F)
+				for k in range(1, 6):
+					poly.append(C + Vector2.from_angle(aF + (aE - aF) * k / 6.0) * R)
+				fill.call(poly, pave if layer == 1 else road, 0.009 if layer == 1 else 0.033)
+	# The ring itself, over the arms' ends.
+	var seg := 72
+	for k in seg:
+		var a0 := TAU * k / seg
+		var a1 := TAU * (k + 1) / seg
+		fill.call(PackedVector2Array([C + Vector2.from_angle(a0) * Ri, C + Vector2.from_angle(a0) * Ro,
+			C + Vector2.from_angle(a1) * Ro, C + Vector2.from_angle(a1) * Ri]), road, 0.034)
+	# Lines: inner edge, outer edge and the dashed lane line (broken at the
+	# entries).
+	var mouth := func(ang: float) -> bool:
+		for arm: Array in arms:
+			var au := (arm[0] as Vector2).angle()
+			if absf(wrapf(ang - au, -PI, PI)) < (float(arm[1]) + 6.0) / Ro:
+				return true
+		return false
+	for k in 144:
+		var a0 := TAU * k / 144.0
+		var a1 := TAU * (k + 1) / 144.0
+		var d0 := Vector2.from_angle(a0)
+		var d1 := Vector2.from_angle(a1)
+		paint.call(C + d0 * (Ri + 0.35), C + d0 * (Ri + 0.5), C + d1 * (Ri + 0.5), C + d1 * (Ri + 0.35))
+		if not mouth.call((a0 + a1) * 0.5):
+			paint.call(C + d0 * (Ro - 0.5), C + d0 * (Ro - 0.35), C + d1 * (Ro - 0.35), C + d1 * (Ro - 0.5))
+			if k % 3 == 0:
+				paint.call(C + d0 * (RR - 0.07), C + d0 * (RR + 0.07), C + d1 * (RR + 0.07), C + d1 * (RR - 0.07))
+	# Each entry: a double dashed give-way line across the lanes coming in
+	# (keep right: on the right of travel towards the ring), a yield
+	# triangle in them, and a zebra set back in the splitter island's gap.
+	for arm: Array in arms:
+		var u: Vector2 = arm[0]
+		var hw: float = arm[1]
+		var din := -u
+		var rin := Vector2(-din.y, din.x)       # (right of travel: x × up)
+		var lat := 0.6
+		while lat < hw - 0.6:
+			for row: float in [0.4, 1.0]:
+				var b0 := C + u * (Ro + row) + rin * lat
+				paint.call(b0, b0 + rin * 0.6, b0 + rin * 0.6 + u * 0.3, b0 + u * 0.3)
+			lat += 1.2
+		# Yield triangle: base towards the ring, apex towards the driver.
+		var mid := C + u * (Ro + 6.5) + rin * (hw * 0.5)
+		var tip := C + u * (Ro + 11.5) + rin * (hw * 0.5)
+		var bl := mid - rin * 1.3
+		var br := mid + rin * 1.3
+		for e: Array in [[bl, br], [br, tip], [tip, bl]]:
+			var a: Vector2 = e[0]
+			var b: Vector2 = e[1]
+			var nn := (b - a).orthogonal().normalized() * 0.11
+			paint.call(a - nn, b - nn, b + nn, a + nn)
+		# Zebra across the whole arm, 12–15 m out (the splitter's gap).
+		var off := -hw + 0.8
+		while off + 0.6 < hw - 0.6:
+			var z0 := C + u * (Ro + 12.0) + rin * off
+			paint.call(z0, z0 + rin * 0.6, z0 + rin * 0.6 + u * 3.0, z0 + u * 3.0)
+			off += 1.2
+
+
+## A cubic Bézier from a (leaving along ta) to b (arriving along tb), n
+## segments – the gateway's approach curves.
+static func _bez(a: Vector3, ta: Vector3, b: Vector3, tb: Vector3, la: float, lb: float, n: int) -> PackedVector3Array:
+	var c1 := a + ta * la
+	var c2 := b - tb * lb
+	var out := PackedVector3Array()
+	for i in n + 1:
+		var t := float(i) / n
+		var u := 1.0 - t
+		out.append(a * u * u * u + c1 * 3.0 * u * u * t + c2 * 3.0 * u * t * t + b * t * t * t)
+	out[0] = a
+	out[n] = b
+	return out
 
 
 static func _rect(x0: float, z0: float, x1: float, z1: float) -> PackedVector2Array:
@@ -1051,13 +1355,14 @@ static func _buildings(P: Dictionary) -> Array:
 	# forecourts) and two clothing stores.
 	out.append(_b([[1640, 66, 1720, 96, LAND_Y, LAND_Y + 8.0]], S.MODERN, Color(0.86, 0.85, 0.8), 0.31, "normal"))
 	out.append(_b([[1750, 60, 1870, 96, LAND_Y, LAND_Y + 11.0]], S.DARK_GLASS, Color(0.2, 0.22, 0.25), 0.62, "normal"))
-	out.append(_b([[1980, 60, 2072, 96, LAND_Y, LAND_Y + 10.0]], S.WAREHOUSE, Color(0.62, 0.64, 0.66), 0.17, "normal"))
 	# Keep storefronts and their plinths outside the avenue and its pavement.
 	out.append(_b([[1662, -80, 1708, -56, LAND_Y, LAND_Y + 9.0]], S.BRICK, Color(0.66, 0.4, 0.32), 0.44, "normal"))
 	out.append(_b([[1790, -84, 1840, -56, LAND_Y, LAND_Y + 11.0]], S.STONE, Color(0.84, 0.81, 0.74), 0.77, "normal"))
 	# Industrial & logistics.
-	var ind := [[1985, -160, 2160, -60, 16.0], [2180, -160, 2312, -60, 12.0], [2350, -160, 2448, -60, 13.0],
-		[1990, -296, 2130, -200, 14.0]]
+	# (The first and last leave the Airport Line's corridor at x 2014; the
+	# third fronts the avenue as Skyport Commercials' showroom.)
+	var ind := [[2032, -160, 2160, -60, 16.0], [2180, -160, 2312, -60, 12.0], [2350, -150, 2448, -82, 13.0],
+		[2032, -296, 2130, -200, 14.0]]
 	for r in ind:
 		out.append(_b([[r[0], r[1], r[2], r[3], LAND_Y, LAND_Y + r[4]]], S.WAREHOUSE,
 			[Color(0.6, 0.62, 0.64), Color(0.42, 0.5, 0.58), Color(0.55, 0.52, 0.48)][rng.randi() % 3], rng.randf()))
@@ -1082,9 +1387,30 @@ static func _buildings(P: Dictionary) -> Array:
 	# end: four engine bays facing the taxiway, a training tower.
 	out.append(_b([[1492, 300, 1548, 334, LAND_Y, LAND_Y + 9.0], [1530, 300, 1548, 312, LAND_Y + 9.0, LAND_Y + 18.0]], S.BRICK,
 		Color(0.62, 0.3, 0.24), 0.71))
-	for k in 3:
-		var hx := 1640.0 + k * 80.0
-		out.append(_b([[hx, 190, hx + 72, 288, LAND_Y, LAND_Y + 20.0]], S.WAREHOUSE, Color(0.78, 0.79, 0.8), 0.2 + k * 0.1))
+	# Hangars: three different buildings (a line of identical sheds read as
+	# clones from the air) – the aviation company's maintenance hangar, a
+	# wide-body bay and a small GA hangar – each with a ridged roof (stepped
+	# tiers along the span) and a lean-to office annex on the landside.
+	# (Doors face the apron; the first keeps its front at z 288 for the
+	# Skyport Aviation door.)
+	var hangars := [
+		[1640, 192, 1712, 288, 20.0, Color(0.8, 0.81, 0.82), 0.21, true],
+		[1722, 184, 1808, 292, 25.0, Color(0.62, 0.68, 0.74), 0.33, false],
+		[1818, 204, 1870, 282, 15.0, Color(0.84, 0.8, 0.7), 0.47, true],
+	]
+	for hg: Array in hangars:
+		var x0: float = hg[0]
+		var z0: float = hg[1]
+		var x1: float = hg[2]
+		var z1: float = hg[3]
+		var hh: float = hg[4]
+		var span := x1 - x0
+		var tiers: Array = [[x0, z0, x1, z1, LAND_Y, LAND_Y + hh],
+			[x0 + span * 0.18, z0, x1 - span * 0.18, z1, LAND_Y + hh, LAND_Y + hh + 2.2],
+			[x0 + span * 0.38, z0, x1 - span * 0.38, z1, LAND_Y + hh + 2.2, LAND_Y + hh + 3.4]]
+		out.append(_b(tiers, S.WAREHOUSE, hg[5], hg[6]))
+		if hg[7]:
+			out.append(_b([[x0, z0 - 14.0, x0 + span * 0.45, z0, LAND_Y, LAND_Y + 8.0]], S.MODERN, Color(0.86, 0.86, 0.84), float(hg[6]) + 0.05))
 	out.append(_b([[2340, 170, 2455, 290, LAND_Y, LAND_Y + 15.0]], S.WAREHOUSE, Color(0.45, 0.52, 0.6), 0.9))
 	# Landside aviation businesses on the open ground south of Hangar Lane:
 	# flight catering (a loading dock towards the apron) and an aviation
@@ -1253,9 +1579,10 @@ func _start_near() -> void:
 		func(): SkyportAirport.build_tower(near_root, self),
 		func(): SkyportAirport.build_parked(plan_data, near_root, self),
 		func(): SkyportAirport.build_masts(near_root, body, self),
-		func(): SkyportAirport.build_link(plan_data, near_root, body, self),
 		func(): SkyportAirport.build_fuel_farm(near_root, body, self),
 		func(): SkyportAirport.build_car_park(near_root, body, self),
+		func(): SkyportAirport.build_apron_kit(plan_data, near_root, self),
+		func(): SkyportAirport.build_circus(plan_data, near_root, self, _circus_arms()),
 		func(): _near(_build_industry), func(): _near(_build_trees),
 		func():
 			var at := AirTraffic.new()
@@ -1343,7 +1670,7 @@ func _ground_mat() -> ShaderMaterial:
 
 
 ## A flat polygon at height y, kind k (UV = world x/z).
-static func _poly_tris(st: SurfaceTool, poly: PackedVector2Array, yv: float, kind: int, col: Color) -> void:
+static func _poly_tris(st: SurfaceTool, poly: PackedVector2Array, yv: float, kind: int, col: Color, flag := 0.0) -> void:
 	# (One winding for every polygon, so all faces point up.)
 	if not Geometry2D.is_polygon_clockwise(poly):
 		poly = poly.duplicate()
@@ -1356,7 +1683,7 @@ static func _poly_tris(st: SurfaceTool, poly: PackedVector2Array, yv: float, kin
 			st.set_color(c)
 			st.set_normal(Vector3.UP)
 			st.set_uv(Vector2(v.x, v.y))
-			st.set_uv2(Vector2(0, 0))
+			st.set_uv2(Vector2(flag, 0))   # (3 = a car park: island_ground paints bays)
 			st.add_vertex(Vector3(v.x, yv, v.y))
 
 
@@ -1453,10 +1780,19 @@ static func _junction_surfaces(st: SurfaceTool, nodes: Dictionary, lift: float) 
 		var hmax := 0.0
 		for a: Array in arms:
 			hmax = maxf(hmax, float(a[1]))
-		for i in 24:
-			var a0 := TAU * i / 24.0
-			var a1 := TAU * (i + 1) / 24.0
-			tri.call(N, N + Vector3(cos(a0), 0, sin(a0)) * hmax, N + Vector3(cos(a1), 0, sin(a1)) * hmax)
+		# (A road carrying straight through – a T, a roundabout's ring –
+		# covers the junction itself: no fill disc, which bulged out past
+		# its far kerb; the kerb returns below do the corners.)
+		var through := false
+		for a: Array in arms:
+			for b: Array in arms:
+				if (a[0] as Vector3).dot(b[0]) < -0.9:
+					through = true
+		if not through:
+			for i in 24:
+				var a0 := TAU * i / 24.0
+				var a1 := TAU * (i + 1) / 24.0
+				tri.call(N, N + Vector3(cos(a0), 0, sin(a0)) * hmax, N + Vector3(cos(a1), 0, sin(a1)) * hmax)
 		for i in arms.size():
 			var A: Array = arms[i]
 			var B: Array = arms[(i + 1) % arms.size()]
@@ -1505,6 +1841,10 @@ static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: fl
 	var total := 0.0
 	for i in range(1, pts.size()):
 		total += pts[i].distance_to(pts[i - 1])
+	var mark0 := box0 > 0.0
+	var mark1 := box1 > 0.0
+	box0 = absf(box0)
+	box1 = absf(box1)
 	if box0 > 0.0 or box1 > 0.0:
 		pts = _split_at(pts, [box0 + CROSS_RUN, total - box1 - CROSS_RUN])
 	var c := Color(col.r, col.g, col.b, (kind + 0.5) / 8.0)
@@ -1543,7 +1883,7 @@ static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: fl
 			st.add_vertex(v + Vector3.UP * (lift + 0.004))
 	for e in 2:
 		var bx := box1 if e == 1 else box0
-		if bx <= 0.0:
+		if bx <= 0.0 or not (mark1 if e == 1 else mark0):
 			continue
 		var sg := -1.0 if e == 1 else 1.0   # (away from the junction, along)
 		var jat := total if e == 1 else 0.0
@@ -1617,7 +1957,7 @@ func _build_ground(street: StaticBody3D) -> void:
 		for q in poly:
 			_poly_tris(st, q, pave_y, 0, COL_PAVE.lightened(0.04))
 	for a in plan_data["areas"]:
-		_poly_tris(st, a[1], LAND_Y + (0.011 if int(a[0]) == 1 else 0.014), int(a[0]), a[2])
+		_poly_tris(st, a[1], LAND_Y + (0.011 if int(a[0]) == 1 else 0.014), int(a[0]), a[2], 3.0 if a.size() > 3 and a[3] == "bays" else 0.0)
 	for s in plan_data["strips"]:
 		_strip(st, PackedVector3Array([s[1], s[2]]), s[3], 0.025 if int(s[0]) == 3 else 0.02, int(s[0]), COL_RUNWAY if int(s[0]) == 3 else COL_APRON.darkened(0.15))
 	# Junctions (3+ road ends meet): each road's markings stop at the
@@ -1635,25 +1975,87 @@ func _build_ground(street: StaticBody3D) -> void:
 			if not ends.has(k):
 				ends[k] = []
 			(ends[k] as Array).append(float(r[2]) * 0.5)
-	var box := func(e: Vector3, hw: float) -> float:
-		var hs: Array = ends.get(key.call(e), [])
-		if hs.size() < 3:
-			return 0.0
-		var widest := 0.0
-		var mine := false
-		for h: float in hs:
-			if not mine and absf(h - hw) < 0.01:
-				mine = true   # (skip this road's own end once)
-				continue
-			widest = maxf(widest, h)
-		return widest + 1.0
-	_junction_surfaces(st, _road_nodes(plan_data["roads"]), 0.027)
+	# Junction boxes (metres at a road's end with no lines; > 0: a zebra and
+	# a stop line outside it, < 0: plain only). Priority: at a junction
+	# where two arms carry straight on (a T, a roundabout's ring), that road
+	# keeps its lines right through and only the side road stops; the
+	# gateway's slip road tapers into the main line with no markings.
+	var dirs := {}   # node key -> [[road index, unit dir from the node, hw]]
+	var ri := 0
 	for r in plan_data["roads"]:
+		if not r[3]:
+			var rp: PackedVector3Array = r[1]
+			for e in 2:
+				var p0 := rp[0] if e == 0 else rp[-1]
+				var q := _point_at(rp, 6.0) if e == 0 else _point_at(rp, _length(rp) - 6.0)
+				var dv := q - p0
+				dv.y = 0.0
+				var k: Vector2i = key.call(p0)
+				if not dirs.has(k):
+					dirs[k] = []
+				(dirs[k] as Array).append([ri, dv.normalized(), float(r[2]) * 0.5])
+		ri += 1
+	var merge: Dictionary = plan_data.get("merge", {})
+	var box := func(e: Vector3, hw: float, idx: int) -> float:
+		var arms: Array = dirs.get(key.call(e), [])
+		if arms.size() < 3:
+			return 0.0
+		var me: Array = []
+		for a: Array in arms:
+			if int(a[0]) == idx:
+				me = a
+		if me.is_empty():
+			return 0.0
+		var name: String = plan_data["roads"][idx][0]
+		if not merge.is_empty() and key.call(e) == key.call(merge["node"]):
+			return -float(merge["taper"]) if name == merge["slip"] else 0.0
+		# A through pair (arms ~opposite): this road is on it → no box.
+		var through_hw := 0.0
+		for a: Array in arms:
+			for b: Array in arms:
+				if int(a[0]) < int(b[0]) and (a[1] as Vector3).dot(b[1]) < -0.9:
+					if int(a[0]) == idx or int(b[0]) == idx:
+						return 0.0
+					through_hw = maxf(through_hw, maxf(float(a[2]), float(b[2])))
+		if through_hw > 0.0:
+			return through_hw + 1.0
+		var widest := 0.0
+		for a: Array in arms:
+			if int(a[0]) != idx:
+				widest = maxf(widest, float(a[2]))
+		return widest + 1.0
+	var jn := _road_nodes(plan_data["roads"])
+	var circ0: Array = plan_data.get("circus", [])
+	if not circ0.is_empty():
+		for k in jn.keys():
+			var np: Vector3 = jn[k]["p"]
+			if Vector2(np.x, np.z).distance_to(circ0[0]) < float(circ0[1]) + 1.0:
+				jn.erase(k)
+	_junction_surfaces(st, jn, 0.027)
+	var ridx := 0
+	for r in plan_data["roads"]:
+		ridx += 1
 		if r[3]:
 			continue  # (the bridge deck draws its own road)
 		var rp2: PackedVector3Array = r[1]
 		var hw := float(r[2]) * 0.5
-		_strip(st, rp2, hw, 0.03, 2, COL_ROAD, box.call(rp2[0], hw), box.call(rp2[-1], hw))
+		# (The merging slip road a hair under the main line: where it tapers
+		# in, the main line's lane markings carry on over it.)
+		if r[0] == "Terminal Circus":
+			continue   # (drawn as one ring: _circus_surface)
+		var lift := 0.029 if not merge.is_empty() and r[0] == merge["slip"] else 0.03
+		var circ: Array = plan_data.get("circus", [])
+		var b0: float = box.call(rp2[0], hw, ridx - 1)
+		var b1: float = box.call(rp2[-1], hw, ridx - 1)
+		# (Roundabout arms: no stop box – the ring's give-way, splitter and
+		# set-back crossing are drawn with it.)
+		if not circ.is_empty():
+			if Vector2(rp2[0].x, rp2[0].z).distance_to(circ[0]) < float(circ[1]) + 1.0:
+				b0 = 0.0
+			if Vector2(rp2[-1].x, rp2[-1].z).distance_to(circ[0]) < float(circ[1]) + 1.0:
+				b1 = 0.0
+		_strip(st, rp2, hw, lift, 2, COL_ROAD, b0, b1)
+	_circus_surface(st)
 	for hp: Vector3 in plan_data["helipads"]:
 		if hp.y > LAND_Y + 1.0:
 			continue
@@ -1995,6 +2397,17 @@ func _build_bridge(_street: StaticBody3D) -> void:
 	root.global_transform = Transform3D.IDENTITY
 	for B: Dictionary in plan_data["bridges"]:
 		_build_one_bridge(B, root)
+	# The Airport Line (world space, always loaded: it's seen from both
+	# cities): viaduct, stations, access; decks and platforms walkable.
+	if plan_data.has("rail"):
+		var rr := Node3D.new()
+		rr.name = "AirportLine"
+		root.add_child(rr)
+		var rb := StaticBody3D.new()
+		rb.name = "Structure"
+		rb.collision_layer = 1 | (1 << 1)
+		rr.add_child(rb)
+		AirportRail.build(rr, rb, self, _layout)
 
 
 func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
@@ -2417,21 +2830,73 @@ func _build_marina(street: StaticBody3D) -> void:
 func _build_trees() -> void:
 	var xfs: Array = []
 	var e := Vector3(0.0, LAND_Y, PIVOT.y)   # (Skyport Avenue's line)
-	var x := BRIDGE_ISLAND_X + 20.0
+	var x := BRIDGE_ISLAND_X + 70.0
 	while x < 2320.0:
-		if absf(x - 1610.0) > 14.0 and absf(x - 1890.0) > 14.0 and absf(x - 1960.0) > 14.0:
+		if absf(x - 1625.0) > 14.0 and absf(x - 1735.0) > 12.0 and absf(x - 1954.0) > 34.0 and absf(x - 2270.0) > 12.0 \
+				and absf(x - 2014.0) > 8.0:
 			for sg: float in [-1.0, 1.0]:
 				xfs.append(Transform3D(Basis(Vector3.UP, x * 0.37), Vector3(x, LAND_Y, e.z + sg * 15.0)))
 		x += 18.0
 	var zz := -160.0
 	while zz < -40.0:
-		for xx: float in [1597.0, 1623.0, 1877.0, 1903.0]:
-			xfs.append(Transform3D(Basis(Vector3.UP, zz * 0.51), Vector3(xx, LAND_Y, zz)))
+		for xx: float in [1612.0, 1638.0, 1941.0, 1967.0]:
+			if xx < 1900.0 or zz < -68.0:
+				xfs.append(Transform3D(Basis(Vector3.UP, zz * 0.51), Vector3(xx, LAND_Y, zz)))
 		zz += 20.0
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 77
-	for k in 70:
-		var p := Vector3(rng.randf_range(1475, 1585), LAND_Y, rng.randf_range(-122, -62))
+	# Landscaped verges: a tree every ~22 m both sides of every public road,
+	# just beyond its pavement, clear of junctions (25 m), of the other
+	# carriageways, of buildings and of the rail corridor (filtered below).
+	var nodes := {}
+	for r in plan_data["roads"]:
+		for re: Vector3 in [(r[1] as PackedVector3Array)[0], (r[1] as PackedVector3Array)[-1]]:
+			nodes[Vector2i(roundi(re.x), roundi(re.z))] = Vector2(re.x, re.z)
+	for r in plan_data["roads"]:
+		if String(r[0]) in ["Airside Service Road", "Terminal Forecourt", "Parking Access", "Terminal Circus"]:
+			continue
+		var pts: PackedVector3Array = r[1]
+		var off := float(r[2]) * 0.5 + 5.0 + 2.5
+		var tot := _length(pts)
+		var sd := 11.0
+		while sd < tot - 6.0:
+			var pa := _point_at(pts, sd)
+			var pb := _point_at(pts, minf(sd + 1.0, tot))
+			var dv := pb - pa
+			dv.y = 0.0
+			var nv := Vector3(-dv.z, 0.0, dv.x).normalized()
+			for sg: float in [-1.0, 1.0]:
+				var q := pa + nv * off * sg
+				var near := false
+				for k in nodes:
+					if (nodes[k] as Vector2).distance_to(Vector2(q.x, q.z)) < 25.0:
+						near = true
+						break
+				if near:
+					continue
+				var inb := false
+				for bd: Dictionary in plan_data["buildings"]:
+					var t0: Array = bd["tiers"][0]
+					if Rect2(t0[0], t0[1], float(t0[2]) - float(t0[0]), float(t0[3]) - float(t0[1])).grow(3.0).has_point(Vector2(q.x, q.z)):
+						inb = true
+						break
+				if not inb:
+					xfs.append(Transform3D(Basis(Vector3.UP, sd * 0.37).scaled(Vector3.ONE * (0.85 + 0.3 * fposmod(sd * 0.137, 1.0))), q))
+			sd += 22.0
+	# Terminal Circus: three ornamental trees in the middle of its island.
+	var circ: Array = plan_data.get("circus", [])
+	if not circ.is_empty():
+		for o: Vector2 in [Vector2(0.0, 0.0), Vector2(4.5, 3.0), Vector2(-4.0, -3.5)]:
+			var cq: Vector2 = (circ[0] as Vector2) + o
+			xfs.append(Transform3D(Basis(Vector3.UP, o.x).scaled(Vector3.ONE * 1.15), Vector3(cq.x, LAND_Y, cq.y)))
+	var gore: PackedVector2Array = plan_data.get("gore", PackedVector2Array())
+	var gb := Rect2(gore[0], Vector2.ZERO) if not gore.is_empty() else Rect2()
+	for v in gore:
+		gb = gb.expand(v)
+	for k in 140:
+		var p := Vector3(rng.randf_range(gb.position.x, gb.end.x), LAND_Y, rng.randf_range(gb.position.y, gb.end.y))
+		if gore.is_empty() or not Geometry2D.is_point_in_polygon(Vector2(p.x, p.z), gore):
+			p = Vector3.INF
 		if rng.randf() < 0.5:
 			p = Vector3(rng.randf_range(1410, 1610), LAND_Y, rng.randf_range(15, 155))
 		xfs.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.2)), p))
@@ -2447,8 +2912,20 @@ func _build_trees() -> void:
 	var o := outline()
 	var kept: Array = []
 	for xf: Transform3D in xfs:
+		if not xf.origin.is_finite():
+			continue
 		var q := Vector2(xf.origin.x, xf.origin.z)
 		if not Geometry2D.is_point_in_polygon(q, o) or _shore_dist(q) < 12.0:
+			continue
+		# (Off every carriageway and out of the rail corridor's piers.)
+		if road_clearance(plan_data, q) < 3.5 or rail_clearance(plan_data, q) < 5.0:
+			continue
+		var paved := false
+		for ar in plan_data["areas"]:
+			if int(ar[0]) != 1 and Geometry2D.is_point_in_polygon(q, ar[1]):
+				paved = true   # (aprons, car parks, forecourts)
+				break
+		if paved:
 			continue
 		xf.origin.y = LAND_Y + knoll_h(q.x, q.y)
 		kept.append(xf)
@@ -2537,8 +3014,12 @@ static func lanes(layout: CityLayout, step: float) -> Array:
 		return false
 	for r in all:
 		var pts: PackedVector3Array = r[1]
-		var speed := 22.0 if String(r[0]).ends_with("Bridge") or r[0] == "Skyport Avenue" else 13.0
-		for dir in [1, -1]:
+		var speed := 22.0 if String(r[0]).ends_with("Bridge") or r[0] in ["Skyport Avenue", "Harbour Approach", "Westbank Approach"] else 13.0
+		# (Terminal Circus: one way round – traffic keeps right, so the ring
+		# runs anticlockwise from above: against its points' direction.)
+		var dirs_l: Array = [-1] if r[0] == "Terminal Circus" else [1, -1]
+		var n_before := out.size()
+		for dir in dirs_l:
 			var src := pts.duplicate()
 			if dir < 0:
 				src.reverse()
@@ -2564,8 +3045,9 @@ static func lanes(layout: CityLayout, step: float) -> Array:
 				out[id]["city_start"] = true
 			if at_city.call(src[src.size() - 1]):
 				out[id]["city_end"] = true
-		out[out.size() - 2]["u"] = out.size() - 1
-		out[out.size() - 1]["u"] = out.size() - 2
+		if out.size() - n_before == 2:
+			out[out.size() - 2]["u"] = out.size() - 1
+			out[out.size() - 1]["u"] = out.size() - 2
 	for kk in ends:
 		var ins: Array = ends[kk]["in"]
 		var outs: Array = ends[kk]["out"]

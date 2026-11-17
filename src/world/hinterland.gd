@@ -26,19 +26,49 @@ const SEA_Y := -1.6
 static func height_at(x: float, z: float) -> float:
 	var q := Vector2((x - BAY_C.x) / BAY_R.x, (z - BAY_C.y) / BAY_R.y)
 	var r := q.length()
-	# Metres outside the bay's shoreline (roughly; the ellipse is stretched).
-	var noise_r := 0.06 * (_fbm(Vector2(x, z) * 0.0011, 3) - 0.5)
+	var ang := atan2(q.y, q.x)                    # 0 = east, ±PI = west, +PI/2 = south
+	# The bay's shore, not an ellipse: broad bulges round it (smooth in the
+	# angle, no seam) and fjord-like inlets cutting into the land. Both only
+	# ever push the shore outward, so the islands keep their open water.
+	var dirv := Vector2(cos(ang), sin(ang))
+	var lobes := clampf((_fbm(dirv * 2.4 + Vector2(3.3, 1.1), 3) - 0.4) * 1.7, 0.0, 0.5)
+	var inl := clampf((_fbm(Vector2(x, z) * 0.0009 + Vector2(5.0, 2.0), 3) - 0.44) * 2.6, 0.0, 1.0)
+	var noise_r := 0.02 * (_fbm(Vector2(x, z) * 0.0011, 3) - 0.5) + lobes + 0.45 * inl * inl
 	var out := (r - 1.0 - noise_r) * minf(BAY_R.x, BAY_R.y)
 	if out < -40.0:
 		return -30.0
-	var ang := atan2(q.y, q.x)                    # 0 = east, ±PI = west
 	var west := clampf(-cos(ang), 0.0, 1.0)       # 1 behind Westbank
 	var east := clampf(cos(ang), 0.0, 1.0)
-	# Open sea to the east: the land falls away there.
-	var lift := 1.0 - smoothstep(0.35, 0.85, east)
+	var south := clampf(sin(ang), 0.0, 1.0)
+	# Open sea to the east, and a wide sound out to the south past Skyport:
+	# the land falls away there (no ring of hills round the bay).
+	# (Noise on where it opens, so those coasts wind instead of running out
+	# along straight radial lines.)
+	var en := east + 0.4 * (_fbm(Vector2(x, z) * 0.00035 + Vector2(7.0, 3.0), 2) - 0.5)
+	var sn := south + 0.4 * (_fbm(Vector2(x, z) * 0.00035 + Vector2(1.0, 9.0), 2) - 0.5)
+	var wn := west + 0.5 * (_fbm(Vector2(x, z) * 0.0005 + Vector2(4.0, 6.0), 2) - 0.5)
+	var lift := (1.0 - smoothstep(0.3, 0.68, en)) * (1.0 - smoothstep(0.5, 0.82, sn) * (1.0 - smoothstep(0.05, 0.45, wn)))
+	# Open sea south of Skyport (2026-11-17, the user's sketch): no land
+	# below the airport island east of the western mainland, whose coast
+	# winds on south (noisy edges, not a ruled line).
+	var so := smoothstep(1400.0, 1850.0, z + 260.0 * (_fbm(Vector2(x, z) * 0.0006 + Vector2(2.0, 8.0), 2) - 0.5)) \
+		* smoothstep(-1800.0, -1350.0, x + 560.0 * (_fbm(Vector2(x, z) * 0.0011 + Vector2(9.0, 1.0), 3) - 0.5))
+	lift *= 1.0 - so
 	var peak := lerpf(360.0, 1150.0, pow(west, 1.4))
+	# Separate massifs, not one even wall: a slow noise lifts some stretches
+	# into high peaks and drops others to saddles, and river valleys cut in
+	# toward the bay at irregular spacing (only the mountain part – the
+	# shoreline and foothills stay exactly where they were).
+	var xz := Vector2(x, z)
+	var mass := 0.68 + 0.6 * _fbm(xz * 0.00024 + Vector2(4.7, 1.9), 3)
+	var vph := ang * 5.0 + 4.5 * _fbm(xz * 0.00035 + Vector2(2.3, 8.1), 2)
+	var valley := lerpf(0.68, 1.0, smoothstep(0.02, 0.45, absf(sin(vph))))
+	peak *= mass * valley
 	var rise := smoothstep(0.0, 1.0, clampf(out / lerpf(1400.0, 1900.0, west), 0.0, 1.0))
-	var ridges := 0.55 + 0.75 * _ridged(Vector2(x, z) * 0.00042)
+	# (Domain-warped: ridgelines wander and branch instead of running in
+	# parallel with the shore.)
+	var warp := Vector2(_fbm(xz * 0.0006, 2), _fbm(xz * 0.0006 + Vector2(9.2, 3.4), 2)) - Vector2(0.5, 0.5)
+	var ridges := 0.45 + 0.95 * _ridged(xz * 0.00042 + warp * 1.4)
 	var hills := 30.0 * smoothstep(-40.0, 120.0, out) * (0.6 + _fbm(Vector2(x, z) * 0.004, 2))
 	# Spurs and gullies down the slopes (finer ridged noise, strongest on
 	# the steep middle of the rise), and knolls on the foothills: the land

@@ -62,7 +62,9 @@ static func build(img: Image, rect: Rect2, max_depth: float) -> MeshInstance3D:
 		c.a = 0.5 / 8.0
 		st.set_color(c)
 		st.set_uv(Vector2(x, z))
-		st.set_uv2(Vector2(0.0, -1.0))   # (island_ground: shore surface)
+		# (island_ground: shore surface; x = 1 + rock share, +2 = the
+		# cities' darker stone – the shader blends sand and rock smoothly.)
+		st.set_uv2(Vector2(1.0 + clampf(rk[id], 0.0, 1.0) + (0.0 if rc == rock else 2.0), -1.0))
 		st.add_vertex(Vector3(x, SEA_Y - maxf(d, 0.3), z))
 		vidx[id] = vidx.size()
 		return vidx[id]

@@ -557,3 +557,177 @@ static func build_car_park(target: Node3D, body: StaticBody3D, isl: SkyportIslan
 	m.solid(r.end.x, r.position.y + 20, r.end.x + 6.0, r.position.y + 28, Y, Y + 15.5, Color(0.3, 0.38, 0.45))
 	CityWorld._add_box(body, AABB(Vector3(r.end.x, Y, r.position.y + 20), Vector3(6.0, 15.5, 8.0)))
 	isl._mesh_into(m, "CarPark", target, 0.0, 1800.0)
+
+
+# ----------------------------------------------------------- the apron kit
+## What makes the apron read as a working airport from the air and on foot
+## (one merged mesh, no collision – it's all low and on the concrete):
+##  * the airside service road between the hall and the equipment restraint
+##    line (white edge lines, dashed centre), running on to the hangar and
+##    cargo aprons – the tugs' route, so the gates don't sit in bare concrete;
+##  * a stand box at every gate (white safety outline round the nose
+##    position) and the stand number bar on the lead-in line;
+##  * the equipment staging rows behind the restraint line: baggage tugs
+##    with cart trains, ground power units, pushback tractors, a few spare
+##    belt loaders;
+##  * cars in the terminal's surface car park (bays painted by the ground).
+static func build_apron_kit(P: Dictionary, target: Node3D, isl: SkyportIsland) -> void:
+	var Y := SkyportIsland.LAND_Y + 0.03
+	var m := BuildingMesher.new()
+	var white := Color(0.9, 0.9, 0.87)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 47011
+	# Service road: z 244..254 across the gates, on along the aprons.
+	var x0 := 1575.0
+	var x1 := 2330.0
+	for z: float in [244.0, 254.0]:
+		m.solid(x0, z - 0.1, x1, z + 0.1, Y, Y + 0.015, white)
+	var x := x0
+	while x < x1:
+		m.solid(x, 248.9, x + 3.0, 249.1, Y, Y + 0.015, white)
+		x += 9.0
+	# (Clear of the hangar fronts: the road turns off along the apron's
+	# landside edge to the cargo apron in the east.)
+	for z: float in [244.0, 254.0]:
+		m.solid(x1, z - 0.1, x1 + 0.2, z + 0.1, Y, Y + 0.015, white)
+	# Stand boxes and stop bars at the four gates.
+	for sx: float in STANDS_AT:
+		var r := Rect2(sx - 9.0, 266.0, 18.0, 12.0)
+		for e: Array in [[r.position, Vector2(r.end.x, r.position.y)], [Vector2(r.position.x, r.end.y), r.end],
+				[r.position, Vector2(r.position.x, r.end.y)], [Vector2(r.end.x, r.position.y), r.end]]:
+			var a: Vector2 = e[0]
+			var b: Vector2 = e[1]
+			m.solid(minf(a.x, b.x) - 0.1, minf(a.y, b.y) - 0.1, maxf(a.x, b.x) + 0.1, maxf(a.y, b.y) + 0.1, Y, Y + 0.015, white)
+		# Hatched no-parking zone under the jet bridge's swing.
+		var hz := 268.0
+		while hz < 276.0:
+			m.solid(sx - 8.0, hz, sx - 2.0, hz + 0.35, Y, Y + 0.015, Color(0.75, 0.2, 0.15))
+			hz += 1.6
+	# Staging rows behind the restraint line (z 255..261), between gates.
+	var yellow := Color(0.9, 0.7, 0.12)
+	for gi in STANDS_AT.size() - 1:
+		var gx: float = STANDS_AT[gi] + 18.0
+		var end_x: float = STANDS_AT[gi + 1] - 18.0
+		var cx := gx
+		while cx < end_x - 6.0:
+			var pick := rng.randf()
+			if pick < 0.45:
+				# Baggage tug and a train of 2-4 covered carts.
+				m.solid(cx, 256.0, cx + 2.6, 257.6, Y, Y + 1.3, yellow)
+				m.solid(cx + 0.3, 256.1, cx + 1.4, 257.5, Y + 1.3, Y + 2.0, Color(0.2, 0.22, 0.24))
+				var n := rng.randi_range(2, 4)
+				for k in n:
+					var kx := cx + 3.2 + k * 3.2
+					m.solid(kx, 256.0, kx + 2.8, 257.7, Y + 0.3, Y + 1.7, Color(0.62, 0.64, 0.66))
+					m.solid(kx, 256.0, kx + 2.8, 257.7, Y + 1.7, Y + 1.8, Color(0.25, 0.3, 0.45))
+				cx += 4.0 + n * 3.2
+			elif pick < 0.65:
+				# Ground power unit.
+				m.solid(cx, 256.2, cx + 2.4, 257.6, Y, Y + 1.5, Color(0.92, 0.92, 0.9))
+				cx += 4.0
+			elif pick < 0.85:
+				# Pushback tractor (low and long).
+				m.solid(cx, 255.8, cx + 6.0, 258.4, Y, Y + 1.2, yellow)
+				m.solid(cx + 4.2, 256.2, cx + 5.6, 258.0, Y + 1.2, Y + 2.2, Color(0.2, 0.22, 0.24))
+				cx += 8.0
+			else:
+				# A spare belt loader.
+				m.solid(cx, 256.2, cx + 7.0, 257.6, Y, Y + 1.0, yellow)
+				m.beam(Vector3(cx + 0.8, Y + 1.0, 256.9), Vector3(cx + 6.6, Y + 2.8, 256.9), 1.0, 0.2, Color(0.2, 0.2, 0.2))
+				cx += 9.0
+			cx += 1.5
+	# Cars in the terminal's surface car park (rows match the painted bays:
+	# 17 m modules from z 59, 5 m bays either side of the aisle).
+	var cols := [Color(0.85, 0.85, 0.86), Color(0.15, 0.16, 0.18), Color(0.55, 0.12, 0.12), Color(0.2, 0.3, 0.5),
+		Color(0.6, 0.62, 0.64), Color(0.32, 0.34, 0.3)]
+	var lot := Rect2(1965, 58, 290, 74)
+	var cp := CAR_PARK.grow(4.0)
+	var zm := 59.0
+	while zm < lot.end.y - 5.0:
+		for row: float in [zm + 2.5, zm + 14.5]:
+			if row > lot.end.y - 2.6:
+				continue
+			var bx := lot.position.x + 1.3
+			while bx < lot.end.x - 1.5:
+				var c := Vector2(bx, row)
+				if not cp.has_point(c) and rng.randf() < 0.62:
+					var cc: Color = cols[rng.randi() % cols.size()]
+					m.solid(c.x - 0.9, c.y - 2.2, c.x + 0.9, c.y + 2.2, Y, Y + 0.85, cc)
+					m.solid(c.x - 0.78, c.y - 1.1, c.x + 0.78, c.y + 1.0, Y + 0.85, Y + 1.4, cc.darkened(0.4))
+				bx += 2.6
+		zm += 17.0
+	isl._mesh_into(m, "ApronKit", target, 0.0, 1400.0)
+
+
+# ------------------------------------------------------- Terminal Circus
+## The roundabout's raised parts (SkyportIsland._circus_surface draws the
+## carriageway): a kerbed central island – grass mound, a clipped hedge
+## ring, flower beds in the island's colours – and a kerbed splitter island
+## on every arm between the entry and exit lanes, in two parts with the
+## zebra crossing through the gap (a pedestrian refuge). Low (kerb height):
+## no collision – cars that clip a kerb ride over it.
+static func build_circus(P: Dictionary, target: Node3D, isl: SkyportIsland, arms: Array) -> void:
+	var circ: Array = P.get("circus", [])
+	if circ.is_empty():
+		return
+	var C: Vector2 = circ[0]
+	var RR: float = circ[1]
+	var Ri := RR - 6.0
+	var Ro := RR + 6.0
+	var Y := SkyportIsland.LAND_Y
+	var m := BuildingMesher.new()
+	var kerb := Color(0.78, 0.77, 0.74)
+	var grass := Color(0.3, 0.46, 0.22)
+	var hedge := Color(0.13, 0.27, 0.12)
+	# Central island: kerb, mound, hedge ring, flower beds.
+	m.prism(_ring(C, Ri - 0.1, 48), Y, Y + 0.18, kerb)
+	m.prism(_ring(C, Ri - 0.55, 48), Y + 0.18, Y + 0.24, grass)
+	m.prism(_ring(C, Ri - 6.0, 32), Y + 0.24, Y + 0.5, grass.lightened(0.05))
+	var n_h := 28
+	for k in n_h:
+		if k % 7 == 0:
+			continue   # (gaps: the gardeners' way in)
+		var a0 := TAU * k / n_h
+		var a1 := TAU * (k + 0.85) / n_h
+		var p0 := C + Vector2.from_angle(a0) * (Ri - 2.2)
+		var p1 := C + Vector2.from_angle(a1) * (Ri - 2.2)
+		m.beam(Vector3(p0.x, Y + 0.7, p0.y), Vector3(p1.x, Y + 0.7, p1.y), 1.1, 0.95, hedge)
+	var flowers := [Color(0.86, 0.42, 0.62), Color(0.62, 0.4, 0.78), Color(0.95, 0.93, 0.9), Color(0.92, 0.7, 0.2)]
+	for k in 8:
+		var a := TAU * (k + 0.5) / 8.0
+		var c := C + Vector2.from_angle(a) * 10.5
+		m.prism(_ring(c, 2.6, 10, 0.3), Y + 0.24, Y + 0.55, Color(0.32, 0.22, 0.14))   # (bed: soil)
+		for j in 7:
+			var q := c + Vector2.from_angle(a * 3.1 + j * 0.9) * (0.4 + 0.3 * j)
+			m.prism(_ring(q, 0.55, 7, 0.5), Y + 0.5, Y + 0.95 + 0.08 * (j % 3), flowers[(k + j) % flowers.size()])
+	# Splitter islands: two kerbed teardrops on each arm's centre line.
+	for arm: Array in arms:
+		var u: Vector2 = arm[0]
+		var nrm := Vector2(-u.y, u.x)
+		for seg: Array in [[Ro + 1.5, Ro + 11.5, 1.3], [Ro + 15.5, Ro + 30.0, 1.6]]:
+			var r0: float = seg[0]
+			var r1: float = seg[1]
+			var wmax: float = seg[2]
+			var left := PackedVector2Array()
+			var right := PackedVector2Array()
+			for k in 13:
+				var t := float(k) / 12.0
+				var half := wmax * pow(sin(PI * clampf(t * 0.92 + 0.04, 0.0, 1.0)), 0.55)
+				var q := C + u * lerpf(r0, r1, t)
+				left.append(q + nrm * half)
+				right.append(q - nrm * half)
+			right.reverse()
+			var poly := left
+			poly.append_array(right)
+			m.prism(poly, Y, Y + 0.16, kerb)
+			var inner := PackedVector2Array()
+			var cen := C + u * ((r0 + r1) * 0.5)
+			for v in poly:
+				inner.append(cen + (v - cen) * 0.8)
+			m.prism(inner, Y + 0.16, Y + 0.2, grass)
+			# A keep-left bollard at the nose facing the ring.
+			if seg[0] < Ro + 5.0:
+				var b := C + u * (r0 + 1.0)
+				m.beam(Vector3(b.x, Y, b.y), Vector3(b.x, Y + 1.0, b.y), 0.35, 0.35, Color(0.92, 0.92, 0.9))
+				m.beam(Vector3(b.x, Y + 0.6, b.y), Vector3(b.x, Y + 0.9, b.y), 0.4, 0.4, Color(0.15, 0.35, 0.75))
+	isl._mesh_into(m, "TerminalCircus", target, 0.0, 1400.0)
