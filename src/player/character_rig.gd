@@ -29,6 +29,13 @@ signal footstep(pos: Vector3)
 
 const MODEL_PATH := "res://assets/models/character.glb"
 const GEAR_PATH := "res://assets/models/gear.glb"
+const WEAVE_PATH := "res://assets/models/fabric_weave_normal.png"
+## Materials that take the shared weave: [repeats per UV unit, strength].
+const FABRIC_DETAIL := {"hero_shirt": [30.0, 0.35], "hero_shirt_trim": [6.0, 0.25], "hero_tee": [30.0, 0.3],
+	"hero_polo": [24.0, 0.4], "hero_knit": [18.0, 0.45], "hero_rib": [6.0, 0.2], "hero_blazer": [80.0, 0.3],
+	"hero_skin": [110.0, 0.14, PORE_PATH], "hero_skin_body": [110.0, 0.12, PORE_PATH]}
+const PORE_PATH := "res://assets/models/skin_pore_normal.png"
+const SKIN_MATERIALS := ["hero_skin", "hero_skin_body", "hero_lips"]
 ## Gear pieces that ride a bone other than the head (gadgets).
 const GEAR_BONES := {"jet_l": "foot_l", "jet_r": "foot_r", "jet_l_fire": "foot_l", "jet_r_fire": "foot_r",
 	"glider": "chest", "glider_open": "chest", "chrono": "forearm_l", "magnet": "hips"}
@@ -86,6 +93,7 @@ var ragdolling := false
 var _rag_low := 0.0  # 0 = pelvis at the capsule's centre, 1 = lying on the ground
 var _hero_materials: Array[Dictionary] = []
 var _glove_mesh: MeshInstance3D
+var _hand_mesh: MeshInstance3D  # bare anatomical hands (Skin_Hands), shown instead of the glove when bare_hands
 var _finger_curl := {"l": 0.0, "r": 0.0}
 var _mat: ShaderMaterial
 var skeleton: Skeleton3D
@@ -288,13 +296,18 @@ func _ready() -> void:
 ## Keep the authored UV/PBR surfaces. Each actor owns its tint/cloth uniforms.
 func _install_hero_materials(mi: MeshInstance3D) -> void:
 	if mi.mesh.get_blend_shape_count() > 0 and mi.find_blend_shape_by_name("Grip_r") >= 0:
-		_glove_mesh = mi
+		if String(mi.name) == "Skin_Hands":
+			_hand_mesh = mi
+		else:
+			_glove_mesh = mi
 	for surface in mi.mesh.get_surface_count():
 		var source := mi.mesh.surface_get_material(surface) as StandardMaterial3D
 		if source == null:
 			continue
 		var material := ShaderMaterial.new()
-		material.shader = load("res://src/player/shaders/hero_pbr.gdshader")
+		var mapped := (source.normal_enabled and source.normal_texture != null) or FABRIC_DETAIL.has(source.resource_name)
+		material.shader = load("res://src/player/shaders/hero_skin.gdshader" if source.resource_name in SKIN_MATERIALS or source.resource_name.begins_with("hero_skin_face")
+			else ("res://src/player/shaders/hero_pbr.gdshader" if mapped else "res://src/player/shaders/hero_pbr_plain.gdshader"))
 		material.set_shader_parameter("base_color", source.albedo_color)
 		material.set_shader_parameter("roughness", source.roughness)
 		if source.roughness_texture:
@@ -303,7 +316,17 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			material.set_shader_parameter("albedo_map", source.albedo_texture)
 		if source.normal_enabled and source.normal_texture:
 			material.set_shader_parameter("normal_map", source.normal_texture)
-			material.set_shader_parameter("normal_strength", minf(source.normal_scale, 0.45))
+			material.set_shader_parameter("normal_strength", minf(source.normal_scale, 1.0))
+		# Woven garments share one tiling weave (garment_kit.py); scale is
+		# per UV layout (repeats per UV unit), strength per fabric.
+		if source.resource_name in ["hero_shirt_trim", "hero_cap", "hero_cap_peak", "hero_beanie"]:
+			material.set_shader_parameter("inside_shade", 0.8)
+		var dkey: String = "hero_skin" if source.resource_name.begins_with("hero_skin_face") else source.resource_name
+		if FABRIC_DETAIL.has(dkey) and ResourceLoader.exists(FABRIC_DETAIL[dkey][2] if FABRIC_DETAIL[dkey].size() > 2 else WEAVE_PATH):
+			var fd: Array = FABRIC_DETAIL[dkey]
+			material.set_shader_parameter("detail_normal_map", load(fd[2] if fd.size() > 2 else WEAVE_PATH))
+			material.set_shader_parameter("detail_scale", fd[0])
+			material.set_shader_parameter("detail_strength", fd[1])
 		if source.ao_enabled and source.ao_texture:
 			material.set_shader_parameter("ao_map", source.ao_texture)
 		# A readable slate shell and muted teal lens give the masked hero a
@@ -313,22 +336,42 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 		elif source.resource_name == "hero_lens":
 			material.set_shader_parameter("base_color", Color(0.15, 0.40, 0.43))
 			material.set_shader_parameter("surface_emission", Vector3(0.015, 0.045, 0.05))
+		if source.resource_name == "hero_shade_lens":
+			var lens := ShaderMaterial.new()
+			lens.shader = load("res://src/player/shaders/hero_lens.gdshader")
+			mi.set_surface_override_material(surface, lens)
+			continue
 		mi.set_surface_override_material(surface, material)
 		var region := ""
 		var reference := Color.WHITE
+		if source.resource_name.begins_with("hero_skin_face"):
+			region = "skin"  # per-face baked albedo (lips, scalp and brow shading are in the texture)
+			reference = source.albedo_color
+		if source.resource_name.begins_with("hero_hair_") and source.resource_name != "hero_hair_tie":
+			region = "hair"  # per-style strand textures (build_character.hair_material)
+			reference = source.albedo_color
 		match source.resource_name:
 			"hero_jacket":
 				region = "suit"
 				reference = Color(0.22, 0.24, 0.26)
 			# Skin-tight tops, the face and its parts: tints are relative to
 			# the authored colour (the shop colour replaces it exactly).
-			"hero_top", "hero_top_collar", "hero_bandana", "hero_tee", "hero_knit", "hero_shirt", "hero_blazer", "hero_fleece":
+			"hero_top", "hero_top_collar", "hero_bandana", "hero_tee", "hero_knit", "hero_shirt", "hero_shirt_trim", "hero_polo", "hero_blazer", "hero_fleece":
 				region = "suit"
 				reference = source.albedo_color
 			# Ribbing and satin lapels: the same colour, a shade deeper.
 			"hero_rib":
 				region = "suit"
 				reference = source.albedo_color * 1.15
+			"hero_cap", "hero_beanie":
+				region = "suit"
+				reference = source.albedo_color
+			"hero_cap_peak":
+				region = "suit"
+				reference = source.albedo_color * 1.2
+			"hero_buttonhole":
+				region = "suit"
+				reference = source.albedo_color * 1.12
 			"hero_lapel":
 				region = "suit"
 				reference = source.albedo_color * 1.3
@@ -347,6 +390,9 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			"hero_iris":
 				region = "iris"
 				reference = source.albedo_color
+			"hero_waistband":
+				region = "pants"
+				reference = source.albedo_color * 1.05
 			"hero_cargo", "hero_cargo_pocket":
 				region = "pants"
 				reference = Color(0.24, 0.26, 0.28)
@@ -429,6 +475,12 @@ func _show_variants() -> void:
 	var cut: String = look_state.get("top", "long")
 	var mask: String = look_state.get("mask", "")
 	var hat: String = look_state.get("head", "")
+	var eyewear: String = look_state.get("face", "")
+	# Hats fitted to this face (Acc_<model>_<face>) sit on a known hair volume:
+	# taller cuts are worn as a crop under a cap, a buzz under a beanie.
+	var hat_fitted := _has_acc(hat, face)
+	if hat_fitted and HAT_HAIR.has(hat):
+		style = HAT_HAIR[hat].get(style, HAT_HAIR[hat].get("*", style))
 	for mi in skeleton.find_children("*", "MeshInstance3D", true, false):
 		var n := String(mi.name)
 		if n == "Top_Collar":
@@ -437,6 +489,10 @@ func _show_variants() -> void:
 			mi.visible = n.to_lower() == "top_" + cut
 		elif n.begins_with("Topx_"):
 			mi.visible = n.to_lower().begins_with("topx_" + cut + "_")
+		elif n == "Courier_Gloves":
+			mi.visible = not (look_state.get("bare_hands", false) and is_instance_valid(_hand_mesh))
+		elif n == "Skin_Hands":
+			mi.visible = look_state.get("bare_hands", false)
 		elif n.begins_with("Cargo_gusset"):
 			mi.visible = look_state.get("trousers", "cargo") == "cargo"
 		elif n.begins_with("Skin_Arms_"):
@@ -444,9 +500,30 @@ func _show_variants() -> void:
 		elif n.begins_with("Face_"):
 			mi.visible = n == "Face_" + face and mask != "courier"
 		elif n.begins_with("Hair_"):
-			mi.visible = n == "Hair_%s_%s" % [style, face] and not mask in Shop.HAIR_MASKS and hat != "beanie"
+			mi.visible = n == "Hair_%s_%s" % [style, face] and not mask in Shop.HAIR_MASKS and (hat != "beanie" or hat_fitted)
+		elif n.begins_with("Acc_"):
+			var bits := n.split("_")
+			mi.visible = bits.size() == 3 and bits[2] == face and (bits[1] == hat or bits[1] == eyewear) \
+				and mask != "courier"
 		elif n.begins_with("Mask_"):
 			mi.visible = mask != "" and (n == "Mask_" + mask or n.begins_with("Mask_%s_" % mask))
+
+
+## Hair worn under a fitted hat: style -> style ("*" = any style).
+const HAT_HAIR := {"cap": {"fade": "crop", "curls": "crop"}, "headphones": {}, "beanie": {"*": "buzz"}}
+var _acc_names := {}
+
+
+## Whether the character model has an accessory fitted to this face
+## (tools/blender/accessories.py: Acc_<model>_<face>).
+func _has_acc(model: String, face: String) -> bool:
+	if model == "" or skeleton == null:
+		return false
+	if _acc_names.is_empty():
+		for mi in skeleton.find_children("Acc_*", "MeshInstance3D", true, false):
+			_acc_names[String(mi.name)] = true
+		_acc_names["_"] = true
+	return _acc_names.has("Acc_%s_%s" % [model, face])
 
 
 func _show_gear() -> void:
@@ -456,6 +533,9 @@ func _show_gear() -> void:
 	if _gadget_on and g.get("swap", false):
 		parts = []
 	for key in _gear:
+		if _has_acc(key, look_state.get("hero", "kai")):
+			(_gear[key] as MeshInstance3D).visible = false  # the fitted Acc_ mesh is shown instead
+			continue
 		(_gear[key] as MeshInstance3D).visible = key == look_state.get("head", "") \
 			or key == look_state.get("face", "") or key in parts or (_gadget_on and key in active)
 
@@ -505,7 +585,10 @@ func _load_parts() -> Dictionary:
 		add_child(skeleton)
 		for mi in skeleton.find_children("*", "MeshInstance3D", true, false):
 			mi.owner = null
-			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			# Eyewear is too fine to cast a useful shadow and self-shadows into
+			# acne on its thin parts; everything else casts.
+			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF \
+				if String(mi.name).begins_with("Acc_shades") else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	for child in inst.find_children("*", "MeshInstance3D", true, false):
 		var key := String(child.name).to_lower()
 		child.get_parent().remove_child(child)
@@ -1028,11 +1111,13 @@ func _no_pops(dt: float) -> void:
 
 
 func _set_grip(side: String, on: bool) -> void:
-	if is_instance_valid(_glove_mesh):
-		var index := _glove_mesh.find_blend_shape_by_name("Grip_" + side)
-		if index >= 0:
-			_finger_curl[side] = move_toward(_finger_curl[side], 1.0 if on else 0.0, get_process_delta_time() * 9.0)
-			_glove_mesh.set_blend_shape_value(index, _finger_curl[side])
+	if is_instance_valid(_glove_mesh) or is_instance_valid(_hand_mesh):
+		_finger_curl[side] = move_toward(_finger_curl[side], 1.0 if on else 0.0, get_process_delta_time() * 9.0)
+		for gm: MeshInstance3D in [_glove_mesh, _hand_mesh]:
+			if is_instance_valid(gm):
+				var index := gm.find_blend_shape_by_name("Grip_" + side)
+				if index >= 0:
+					gm.set_blend_shape_value(index, _finger_curl[side])
 	if _grips.has(side) and _grips[side][0] and _grips[side][1]:
 		_grips[side][0].visible = not on
 		_grips[side][1].visible = on

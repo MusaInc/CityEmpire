@@ -377,6 +377,14 @@ func _after_start() -> void:
 				var o := instance_from_id(id)
 				if o is Node3D and (o as Node).name in names:
 					(o as Node3D).visible = false
+	if args.has("outfit"):
+		# Captures: dress the hero through the normal look path, e.g.
+		# --outfit="top=top_shirt;top_col=#d9822b;eyewear=face_shades;face=hero_ade"
+		var pv := {}
+		for kv in String(args["outfit"]).split(";"):
+			if "=" in kv:
+				pv[kv.get_slice("=", 0)] = kv.get_slice("=", 1)
+		apply_hero_look(pv)
 	if args.has("view"):
 		# Captures: a fixed camera relative to the hero: "x,y,z,lx,ly,lz" offsets (m).
 		var v := String(args["view"]).split(",")

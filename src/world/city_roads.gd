@@ -266,7 +266,7 @@ func _roundabouts(majors: Array) -> void:
 	for rb in roundabouts:
 		var ring := _circle(rb["c"], rb["r"], 28)
 		ring.append(ring[0])
-		roads.append({"pts": ring, "w": rb["w"], "kind": "major", "loop": true})
+		roads.append({"pts": ring, "w": rb["w"], "kind": "major", "loop": true, "ring": true})
 
 
 # ---------------------------------------------------------------- blocks
@@ -380,11 +380,19 @@ func bake_field(cell := 1.5) -> void:
 	for r in roads:
 		var pts := _simplify(r["pts"], 0.25)
 		var hw: float = float(r["w"]) * 0.5
+		# (A roundabout's ring: its half width carries +0.25 m as a flag – real
+		# half widths are whole half-metres – so the ground paints it one-way.)
+		if r.get("ring", false):
+			hw += 0.25
 		var along := 0.0
 		for i in pts.size() - 1:
 			var a := pts[i]
 			var b := pts[i + 1]
-			_add_seg([a, b, hw, int(r["id"]), along, r["kind"] != "minor"])
+			# Boulevards stop at a roundabout's ring centre line: carried on
+			# through, their carriageway covered the whole ring and the ground
+			# painted it as one big junction (no lane lines anywhere on it).
+			for piece: Array in _outside_rings(a, b, r):
+				_add_seg([piece[0], piece[1], hw, int(r["id"]), along + a.distance_to(piece[0]), r["kind"] != "minor"])
 			along += a.distance_to(b)
 	_extend_ends()
 	var stripes := ceili(field_h / 16.0)
@@ -396,6 +404,40 @@ func bake_field(cell := 1.5) -> void:
 	for st in _stripe_out:
 		field.append_array(st)
 	_stripe_out.clear()
+
+
+## The parts of segment a–b outside every roundabout's centre-line circle
+## (roads that aren't rings; the field only – traffic keeps its own lanes).
+func _outside_rings(a: Vector2, b: Vector2, r: Dictionary) -> Array:
+	var parts: Array = [[a, b]]
+	if r.get("loop", false):
+		return parts
+	for rb in roundabouts:
+		var c: Vector2 = rb["c"]
+		var R: float = float(rb["r"])
+		var next: Array = []
+		for pc: Array in parts:
+			var p0: Vector2 = pc[0]
+			var p1: Vector2 = pc[1]
+			var d := p1 - p0
+			var L := d.length()
+			if L < 0.01:
+				continue
+			var u := d / L
+			var t0 := (c - p0).dot(u)
+			var h2 := R * R - (p0 + u * t0 - c).length_squared()
+			if h2 <= 0.0:
+				next.append(pc)
+				continue
+			var hh := sqrt(h2)
+			var e0 := clampf(t0 - hh, 0.0, L)
+			var e1 := clampf(t0 + hh, 0.0, L)
+			if e0 > 0.05:
+				next.append([p0, p0 + u * e0])
+			if e1 < L - 0.05:
+				next.append([p0 + u * e1, p1])
+		parts = next
+	return parts
 
 
 func _add_seg(s: Array) -> void:

@@ -101,6 +101,9 @@ void fragment() {
 	} else if (has_streets && flat_top) {
 		vec4 rf = texture(road_field, (p - road_rect.xy) / road_rect.zw);
 		float hw = abs(rf.y);
+		// (A roundabout's ring carries +0.25 on its half width: see CityRoads.bake_field.)
+		float ring = step(0.3, fract(hw * 2.0)) * step(fract(hw * 2.0), 0.7);
+		hw -= 0.25 * ring;
 		float a = abs(rf.x);
 		bool on = a < hw;
 		float other = rf.w;                     // metres from the nearest other road's kerb (< 0: junction)
@@ -158,23 +161,27 @@ void fragment() {
 				float wear = 0.82 + 0.18 * vnoise(p * 1.7);
 				// Faded paint on older streets: it greys and breaks up.
 				wear *= mix(1.0, 0.55 + 0.45 * vnoise(p * 0.9 + 3.0), sa);
-				float centre = avenue > 0.5
+				float centre = avenue > 0.5 && ring < 0.5
 					? band(a - 0.22, 0.07, aa) * step(4.6, from_j)
 					: band(across, 0.07, aa) * step(5.0, from_j) * step(fract(along / 8.0), 0.375);
-				albedo = mix(albedo, (avenue > 0.5 ? yellow : white) * wear, centre);
+				// Roundabouts: one way round – a dashed white lane divider (above),
+				// no centre lines, no crossings or parking on the ring.
+				albedo = mix(albedo, (avenue > 0.5 && ring < 0.5 ? yellow : white) * wear, centre);
 				// Boulevards: dashed lane dividers between the two lanes each way.
-				float divider = avenue * step(10.0, hw) * band(a - 5.1, 0.07, aa) * step(5.0, from_j)
+				float divider = avenue * (1.0 - ring) * step(10.0, hw) * band(a - 5.1, 0.07, aa) * step(5.0, from_j)
 					* step(fract(along / 9.0), 0.33);
 				albedo = mix(albedo, white * wear, divider);
 				float zebra_u = fract((across + hw - 1.5) / 1.2);
 				float zebra = band(zebra_u - 0.5, 0.25, aa / 1.2) * step(from_j, 4.0) * step(1.0, from_j)
 					* step(a, hw - 1.0);
 				float stop = band(from_j - 4.8, 0.22, aa) * step(0.3, a) * step(a, hw - 0.3);
+				zebra *= 1.0 - ring;
+				stop *= 1.0 - ring;
 				albedo = mix(albedo, white * wear, max(zebra, stop));
 				// Kerbside parking on the wider side streets (CityWorld parks
 				// cars 1.5 m in from the kerb on minor roads ≥ 14 m): the bay
 				// edge line, broken at junctions, and a bay mark every 13.5 m.
-				float bays = (1.0 - avenue) * step(6.9, hw) * step(8.0, from_j);
+				float bays = (1.0 - avenue) * (1.0 - ring) * step(6.9, hw) * step(8.0, from_j);
 				float bay_edge = band(a - (hw - 2.55), 0.05, aa) * bays;
 				float bay_tick = band(fract(along / 13.5) * 13.5 - 6.75, 0.05, aa) * step(hw - 2.55, a) * step(a, hw - 0.45) * bays;
 				albedo = mix(albedo, white * wear, max(bay_edge, bay_tick) * 0.9);

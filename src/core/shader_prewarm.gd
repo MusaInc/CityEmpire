@@ -24,6 +24,9 @@ const SHADERS := [
 	"res://src/world/shaders/hinterland.gdshader",
 	"res://src/world/shaders/water.gdshader",
 	"res://src/player/shaders/hero_pbr.gdshader",
+	"res://src/player/shaders/hero_pbr_plain.gdshader",
+	"res://src/player/shaders/hero_lens.gdshader",
+	"res://src/player/shaders/hero_skin.gdshader",
 	"res://src/player/shaders/character.gdshader",
 ]
 const FRAMES := 3

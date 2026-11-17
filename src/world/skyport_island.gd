@@ -1391,6 +1391,112 @@ static func _road_side(pts: PackedVector3Array, i: int, hw: float) -> Vector3:
 	return m * hw / maxf(m.dot(nb), 0.5)
 
 
+## Metres from a junction box's edge to its stop line: a zebra crossing
+## (1–4 m out) and the stop line; no lane markings in between.
+const CROSS_RUN := 5.5
+
+
+## Road nodes where two or more ends meet: {key: {p, arms: [[dir, hw]]}}
+## (dir: unit, flat, from the node along the road).
+static func _road_nodes(roads: Array) -> Dictionary:
+	var nodes := {}
+	for r in roads:
+		if r[3]:
+			continue
+		var pts: PackedVector3Array = r[1]
+		var hw := float(r[2]) * 0.5
+		for e in 2:
+			var p := pts[0] if e == 0 else pts[-1]
+			var q := _point_at(pts, 6.0) if e == 0 else _point_at(pts, _length(pts) - 6.0)
+			var d := q - p
+			d.y = 0.0
+			var k := Vector2i(roundi(p.x), roundi(p.z))
+			if not nodes.has(k):
+				nodes[k] = {"p": p, "arms": []}
+			(nodes[k]["arms"] as Array).append([d.normalized(), hw])
+	return nodes
+
+
+static func _length(pts: PackedVector3Array) -> float:
+	var t := 0.0
+	for i in range(1, pts.size()):
+		t += pts[i].distance_to(pts[i - 1])
+	return t
+
+
+## Junction surfaces under the road strips (plain asphalt): a disc at the
+## node (closes the wedge two strips leave meeting at an angle) and a
+## kerb-radius fillet in every corner between neighbouring arms, so the
+## kerb line turns the corner on a curve instead of a square notch.
+static func _junction_surfaces(st: SurfaceTool, nodes: Dictionary, lift: float) -> void:
+	var c := Color(COL_ROAD.r, COL_ROAD.g, COL_ROAD.b, 2.5 / 8.0)
+	var tri := func(a: Vector3, b: Vector3, d: Vector3) -> void:
+		var t3 := [a, b, d]
+		if ((t3[1] - t3[0]) as Vector3).cross(t3[2] - t3[0]).y > 0.0:
+			t3 = [a, d, b]
+		for v: Vector3 in t3:
+			st.set_color(c)
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(50.0, 0.0))   # (no lane lines)
+			st.set_uv2(Vector2(100.0, 0.0))
+			st.add_vertex(v + Vector3.UP * lift)
+	for k in nodes:
+		var N: Vector3 = nodes[k]["p"]
+		var arms: Array = nodes[k]["arms"]
+		if arms.size() < 2:
+			continue
+		arms.sort_custom(func(x: Array, y: Array) -> bool:
+			return atan2((x[0] as Vector3).z, (x[0] as Vector3).x) < atan2((y[0] as Vector3).z, (y[0] as Vector3).x))
+		var straight := arms.size() == 2 and (arms[0][0] as Vector3).dot(arms[1][0]) < -0.985
+		if straight:
+			continue   # (a road carrying on: nothing to fill, keep its lines)
+		var hmax := 0.0
+		for a: Array in arms:
+			hmax = maxf(hmax, float(a[1]))
+		for i in 24:
+			var a0 := TAU * i / 24.0
+			var a1 := TAU * (i + 1) / 24.0
+			tri.call(N, N + Vector3(cos(a0), 0, sin(a0)) * hmax, N + Vector3(cos(a1), 0, sin(a1)) * hmax)
+		for i in arms.size():
+			var A: Array = arms[i]
+			var B: Array = arms[(i + 1) % arms.size()]
+			var da: Vector3 = A[0]
+			var db: Vector3 = B[0]
+			var cross_y := da.x * db.z - da.z * db.x
+			if cross_y <= 0.02:
+				continue   # (the corner is 180° or more: the outside of a bend)
+			# Kerb lines: arm A's edge on B's side, B's edge on A's side.
+			var na := Vector3(-da.z, 0, da.x)   # (towards B: rotating da towards db)
+			var nb := Vector3(db.z, 0, -db.x)
+			var pa := N + na * float(A[1])
+			var pb := N + nb * float(B[1])
+			# Corner C: pa + da t = pb + db s.
+			var den := da.x * db.z - da.z * db.x
+			var w := pb - pa
+			var t := (w.x * db.z - w.z * db.x) / den
+			var C := pa + da * t
+			var theta := acos(clampf(da.dot(db), -1.0, 1.0))
+			var R := 9.0 if minf(float(A[1]), float(B[1])) >= 7.0 else 6.0
+			var dd := R / tan(theta * 0.5)
+			if dd > 30.0:
+				continue
+			var Ta := C + da * dd
+			var Tb := C + db * dd
+			var O := C + (da + db).normalized() * (R / sin(theta * 0.5))
+			# Fan from C over the arc Ta → Tb (the arc bulges back towards C).
+			var va := Ta - O
+			var vb := Tb - O
+			var ang0 := atan2(va.z, va.x)
+			var ang1 := atan2(vb.z, vb.x)
+			var dang := wrapf(ang1 - ang0, -PI, PI)
+			var prev := Ta
+			for s2 in range(1, 9):
+				var an := ang0 + dang * s2 / 8.0
+				var q := O + Vector3(cos(an), 0, sin(an)) * R
+				tri.call(C, prev, q)
+				prev = q
+
+
 ## A continuous strip: UV.x across, UV.y along; UV2 = half width, length.
 ## box0 / box1: metres at the start / end inside a junction – plain asphalt
 ## there (no lines), and a stop line across the lanes arriving at it.
@@ -1400,7 +1506,7 @@ static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: fl
 	for i in range(1, pts.size()):
 		total += pts[i].distance_to(pts[i - 1])
 	if box0 > 0.0 or box1 > 0.0:
-		pts = _split_at(pts, [box0, total - box1])
+		pts = _split_at(pts, [box0 + CROSS_RUN, total - box1 - CROSS_RUN])
 	var c := Color(col.r, col.g, col.b, (kind + 0.5) / 8.0)
 	var acc := 0.0
 	for i in pts.size() - 1:
@@ -1414,7 +1520,7 @@ static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: fl
 		var q := [a - sa, a + sa, b + sb, b - sb]
 		var u := [Vector2(-hw, acc), Vector2(hw, acc), Vector2(hw, acc + L), Vector2(-hw, acc + L)]
 		var mid := acc + L * 0.5
-		var plain := (box0 > 0.0 and mid < box0) or (box1 > 0.0 and mid > total - box1)
+		var plain := (box0 > 0.0 and mid < box0 + CROSS_RUN) or (box1 > 0.0 and mid > total - box1 - CROSS_RUN)
 		for j in [0, 2, 1, 0, 3, 2]:
 			st.set_color(c)
 			st.set_normal(Vector3.UP)
@@ -1422,27 +1528,43 @@ static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: fl
 			st.set_uv2(Vector2(100.0, total) if plain else Vector2(hw, total))
 			st.add_vertex((q[j] as Vector3) + Vector3.UP * lift)
 		acc += L
-	# Stop lines (traffic keeps right: arriving at the end, its lanes are on
-	# the +side; arriving at the start, on the −side).
+	# At each junction mouth: a zebra crossing just outside the box, then a
+	# stop line across the arriving lanes (traffic keeps right: arriving at
+	# the end, its lanes are on the +side; arriving at the start, the −side).
+	var white := func(a3: Vector3, b3: Vector3, c3: Vector3, d3: Vector3, at: float) -> void:
+		var vs := [a3, b3, c3, a3, c3, d3]
+		if (b3 - a3).cross(c3 - a3).y > 0.0:   # (wind so the face points up, whichever way the road runs)
+			vs = [a3, c3, b3, a3, d3, c3]
+		for v: Vector3 in vs:
+			st.set_color(c)
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(hw - 0.6, at))   # (on the edge-line band: solid white)
+			st.set_uv2(Vector2(hw, total))
+			st.add_vertex(v + Vector3.UP * (lift + 0.004))
 	for e in 2:
 		var bx := box1 if e == 1 else box0
 		if bx <= 0.0:
 			continue
-		var at := total - bx if e == 1 else bx
-		var p0 := _point_at(pts, at - (0.25 if e == 1 else -0.25))
-		var p1 := _point_at(pts, at - (0.75 if e == 1 else -0.75))
+		var sg := -1.0 if e == 1 else 1.0   # (away from the junction, along)
+		var jat := total if e == 1 else 0.0
+		var z0 := _point_at(pts, jat + sg * (bx + 1.0))
+		var z1 := _point_at(pts, jat + sg * (bx + 4.0))
+		var zd := z1 - z0
+		zd.y = 0.0
+		var zn := Vector3(-zd.z, 0.0, zd.x).normalized()
+		var off := -hw + 0.7
+		while off + 0.6 < hw - 0.6:
+			white.call(z0 + zn * off, z0 + zn * (off + 0.6), z1 + zn * (off + 0.6), z1 + zn * off, jat + sg * bx)
+			off += 1.2
+		var at := jat + sg * (bx + CROSS_RUN - 0.6)
+		var p0 := _point_at(pts, at)
+		var p1 := _point_at(pts, at + sg * 0.5)
 		var d := p1 - p0
 		d.y = 0.0
 		var side := Vector3(-d.z, 0.0, d.x).normalized() * (1.0 if e == 1 else -1.0)
 		var o0 := 0.2
 		var o1 := hw - 0.5
-		var q2 := [p0 + side * o0, p0 + side * o1, p1 + side * o1, p1 + side * o0]
-		for j in [0, 1, 2, 0, 2, 3]:
-			st.set_color(c)
-			st.set_normal(Vector3.UP)
-			st.set_uv(Vector2(hw - 0.6, at))   # (on the edge-line band: solid white)
-			st.set_uv2(Vector2(hw, total))
-			st.add_vertex((q2[j] as Vector3) + Vector3.UP * (lift + 0.004))
+		white.call(p0 + side * o0, p0 + side * o1, p1 + side * o1, p1 + side * o0, at)
 
 
 ## The polyline with points inserted at these distances along it.
@@ -1525,6 +1647,7 @@ func _build_ground(street: StaticBody3D) -> void:
 				continue
 			widest = maxf(widest, h)
 		return widest + 1.0
+	_junction_surfaces(st, _road_nodes(plan_data["roads"]), 0.027)
 	for r in plan_data["roads"]:
 		if r[3]:
 			continue  # (the bridge deck draws its own road)
