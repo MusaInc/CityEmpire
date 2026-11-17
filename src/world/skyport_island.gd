@@ -1625,10 +1625,19 @@ static func _junction_surfaces(st: SurfaceTool, nodes: Dictionary, lift: float) 
 		var hmax := 0.0
 		for a: Array in arms:
 			hmax = maxf(hmax, float(a[1]))
-		for i in 24:
-			var a0 := TAU * i / 24.0
-			var a1 := TAU * (i + 1) / 24.0
-			tri.call(N, N + Vector3(cos(a0), 0, sin(a0)) * hmax, N + Vector3(cos(a1), 0, sin(a1)) * hmax)
+		# (A road carrying straight through – a T, a roundabout's ring –
+		# covers the junction itself: no fill disc, which bulged out past
+		# its far kerb; the kerb returns below do the corners.)
+		var through := false
+		for a: Array in arms:
+			for b: Array in arms:
+				if (a[0] as Vector3).dot(b[0]) < -0.9:
+					through = true
+		if not through:
+			for i in 24:
+				var a0 := TAU * i / 24.0
+				var a1 := TAU * (i + 1) / 24.0
+				tri.call(N, N + Vector3(cos(a0), 0, sin(a0)) * hmax, N + Vector3(cos(a1), 0, sin(a1)) * hmax)
 		for i in arms.size():
 			var A: Array = arms[i]
 			var B: Array = arms[(i + 1) % arms.size()]
@@ -1849,7 +1858,7 @@ func _build_ground(street: StaticBody3D) -> void:
 		var through_hw := 0.0
 		for a: Array in arms:
 			for b: Array in arms:
-				if int(a[0]) < int(b[0]) and (a[1] as Vector3).dot(b[1]) < -0.97:
+				if int(a[0]) < int(b[0]) and (a[1] as Vector3).dot(b[1]) < -0.9:
 					if int(a[0]) == idx or int(b[0]) == idx:
 						return 0.0
 					through_hw = maxf(through_hw, maxf(float(a[2]), float(b[2])))
