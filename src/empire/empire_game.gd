@@ -385,6 +385,8 @@ func _after_start() -> void:
 			var from := o + Vector3(float(v[0]), float(v[1]), float(v[2]))
 			var to := o + Vector3(float(v[3]), float(v[4]), float(v[5]))
 			return [Transform3D(Basis.looking_at(to - from, Vector3.UP if absf((to - from).normalized().y) < 0.99 else Vector3.FORWARD), from), 62.0]
+	if args.has("nohud"):
+		ui.visible = false   # (captures: the world only)
 	if args.has("cam"):
 		# Captures: a fixed camera in world metres, "x,y,z,lx,ly,lz" (unlike
 		# --view, independent of where the hero lands; y is above the ground).
@@ -2212,6 +2214,16 @@ func _capture(path: String, at: float) -> void:
 	var img := get_viewport().get_texture().get_image()
 	img.save_png(path)
 	print("SHOT ", path)
+	if args.has("stats"):
+		# Captures: render cost of this frame (tools/aerial_audit.sh).
+		var ri := func(k): return RenderingServer.get_rendering_info(k)
+		print("RENDER_STATS ", JSON.stringify({"shot": path.get_file(),
+			"draw_calls": ri.call(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
+			"prims": ri.call(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME),
+			"objects": ri.call(RenderingServer.RENDERING_INFO_TOTAL_OBJECTS_IN_FRAME),
+			"video_mb": snappedf(ri.call(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0, 0.1),
+			"tex_mb": snappedf(ri.call(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED) / 1048576.0, 0.1),
+			"static_mb": snappedf(OS.get_static_memory_usage() / 1048576.0, 0.1)}))
 	get_tree().quit()
 
 
