@@ -463,6 +463,81 @@ func scenario_xv() -> void:
 	await until(func():
 		car.brake = 1.0
 		return car.speed < 1.0, 30.0)
+	car.brake = 0.0   # (released: the next scenario drives this car)
+	game.drive_input.enabled = true
+	game.exit_vehicle()
+
+
+## XR: drive every airport route: from each bridge's island end, a GPS
+## road route to every Skyport place (terminal, cargo, aviation, dealers,
+## marina, Airport Central's entrance), driven by a physics car following
+## it: reaches the end, never stalls, never drops below the road, never
+## touches a structure (buildings, rail piers, railings).
+func scenario_xr() -> void:
+	print("--- XR: driving routes from both bridges to every airport destination")
+	var P: Dictionary = game.skyport.plan_data
+	var vid := String(game.empire.vehicles[0]["id"])
+	game.enter_vehicle(vid)
+	var car: Car = game.cars[vid]
+	game.drive_input.enabled = false
+	game.skyport.load_near_now()
+	var dests: Array = []
+	for id in ["terminal", "cargo", "aviation", "dealer_commercial", "dealer_luxury", "marina"]:
+		dests.append([id, game.skyport_play.site(id)["door"]])
+	dests.append(["Airport Central", SkyportIsland.w(Vector3(1910.0, SkyportIsland.LAND_Y, 76.0))])
+	var only := OS.get_environment("XR_ONLY")
+	for B: Dictionary in P["bridges"]:
+		var u: Vector3 = B["u"]
+		var L: float = B["L"]
+		for dd: Array in dests:
+			if only != "" and not String(dd[0]).contains(only):
+				continue
+			var start := _bp(B, L - 30.0, -3.8)
+			start.y = _road_y(start)
+			var r: Dictionary = game.gps.plan(start, dd[1], "drive", u)
+			var route: PackedVector3Array = r["points"]
+			if route.size() < 2:
+				check(false, "%s → %s: no route (%s)" % [B["name"], dd[0], r["error"]])
+				continue
+			car.place(Transform3D(Basis(Vector3.UP, atan2(-u.x, -u.z)), start + Vector3.UP * 0.6), u * 8.0)
+			var st := {"i": 0, "low": 0.0, "slow": 0.0, "hits": {}}
+			var goal := route[route.size() - 1]
+			var ok := await until(func():
+				var p := car.global_position
+				var i: int = st["i"]
+				while i < route.size() - 1 and Vector2(route[i].x - p.x, route[i].z - p.z).length() < 12.0:
+					i += 1
+				st["i"] = i
+				# Pure pursuit: a point ~12 m ahead on the route.
+				var tgt := route[i]
+				var fwd := -car.global_basis.z
+				fwd.y = 0.0
+				var des := Vector3(tgt.x - p.x, 0.0, tgt.z - p.z).normalized()
+				var cy := fwd.normalized().cross(des).y
+				var ang := fwd.normalized().angle_to(des)
+				car.steer = clampf(-signf(cy) * ang * 1.6, -1.0, 1.0)
+				var want := 13.0 if ang < 0.25 else 7.0
+				car.throttle = 0.7 if car.forward_speed < want else 0.0
+				car.brake = 0.4 if car.forward_speed > want + 3.0 else 0.0
+				st["low"] = minf(float(st["low"]), p.y - _road_y(p))
+				if car.speed < 0.5:
+					st["slow"] = float(st["slow"]) + get_process_delta_time()
+				else:
+					st["slow"] = 0.0
+				for bdy in car.get_colliding_bodies():
+					var co := bdy as CollisionObject3D
+					if co and (co.collision_layer & 1) != 0 and (co.collision_layer & (1 << 3)) == 0:
+						(st["hits"] as Dictionary)[String(co.get_path())] = true
+				return Vector2(goal.x - p.x, goal.z - p.z).length() < 14.0 or float(st["slow"]) > 10.0, 240.0)
+			var reached := Vector2(goal.x - car.global_position.x, goal.z - car.global_position.z).length() < 14.0
+			check(ok and reached and float(st["low"]) > -0.6 and (st["hits"] as Dictionary).is_empty(),
+				"%s → %s: %s (%.0f m route, lowest %.2f m, hits %s)" % [B["name"], dd[0], "arrived" if reached else "stopped %.0f m short" % Vector2(goal.x - car.global_position.x, goal.z - car.global_position.z).length(),
+				float(r["length"]), float(st["low"]), (st["hits"] as Dictionary).keys().slice(0, 2)])
+			car.throttle = 0.0
+			await until(func():
+				car.brake = 1.0
+				return car.speed < 1.0, 20.0)
+			car.brake = 0.0
 	game.drive_input.enabled = true
 	game.exit_vehicle()
 
@@ -554,6 +629,7 @@ func scenario_xd() -> void:
 	var reached := await until(func():
 		var f := _bf(B, car.global_position)
 		car.throttle = 0.75
+		car.brake = 0.0   # (an earlier scenario may have left it held: XV stops with brake 1)
 		car.steer = -clampf((f.y + 3.8) * 0.08, -0.3, 0.3)
 		mm["low"] = minf(mm["low"], car.global_position.y - _road_y(car.global_position))
 		return f.x > L + 14.0, 180.0)
@@ -564,6 +640,7 @@ func scenario_xd() -> void:
 	await until(func():
 		car.brake = 1.0
 		return car.speed < 1.0, 30.0)
+	car.brake = 0.0
 	game.drive_input.enabled = true
 	game.exit_vehicle()
 	check(game.driving == "", "stopped and got out on the island")
@@ -960,7 +1037,7 @@ func _run() -> void:
 		await scenario_p()
 	if _which.split(",").has("B"):
 		await scenario_b()
-	for k in ["XO", "XA", "XV", "XN", "XD", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS", "XW"]:
+	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS", "XW"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())
 	if _which.split(",").has("W"):

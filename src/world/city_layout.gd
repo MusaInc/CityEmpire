@@ -157,6 +157,11 @@ func generate(p_seed := 1207) -> CityLayout:
 	CityInfrastructure.open_ground(self, rail_lines)
 	if mainland != null:
 		CityInfrastructure.open_ground(mainland, rail_lines)
+	# The Airport Line (planned with Skyport's roads) runs on the city's
+	# trains: Westbank – Airport Central – Skyport Commercial – Harbour Quay.
+	if SkyportIsland.enabled:
+		for ln: Dictionary in SkyportIsland.plan(self).get("rail", []):
+			rail.lines.append(ln)
 	return self
 
 
@@ -2169,7 +2174,7 @@ func _bridge_approach(x0: float, zc: float, deck: float) -> void:
 const CHARACTER := {
 	# district: [[share, min top, max top], ...] (m above the street)
 	"georgian": [[0.62, 18.0, 34.0], [0.3, 34.0, 56.0], [0.08, 60.0, 90.0]],
-	"docks": [[0.55, 16.0, 30.0], [0.35, 30.0, 52.0], [0.1, 58.0, 88.0]],
+	"docks": [[0.65, 14.0, 28.0], [0.3, 28.0, 42.0], [0.05, 58.0, 80.0]],
 	"waterfront": [[0.35, 28.0, 48.0], [0.45, 48.0, 82.0], [0.2, 86.0, 120.0]],
 }
 
@@ -2202,6 +2207,17 @@ func _district_character() -> void:
 				break
 		if want >= top - 2.0:
 			continue
+		# Rooftop spawns (CityWorld.rooftop_spawns: 50–150 m roofs with an
+		# 18 m top) stay exactly as they were – the shared city's spawn pool
+		# and its order must not change – and no roof is brought down into
+		# that band (it would join the pool).
+		var tw := float(tiers[-1][2]) - float(tiers[-1][0])
+		var td := float(tiers[-1][3]) - float(tiers[-1][1])
+		var wide := tw >= 18.0 and td >= 18.0
+		if wide and top >= 50.0 and top <= 150.0:
+			continue
+		if wide and want >= 50.0:
+			want = crng.randf_range(38.0, 48.0)
 		var k := want / top
 		var ry_old := BuildingMesher.roof_y(b)
 		var t5_old := float(tiers[-1][5])
