@@ -657,3 +657,77 @@ static func build_apron_kit(P: Dictionary, target: Node3D, isl: SkyportIsland) -
 				bx += 2.6
 		zm += 17.0
 	isl._mesh_into(m, "ApronKit", target, 0.0, 1400.0)
+
+
+# ------------------------------------------------------- Terminal Circus
+## The roundabout's raised parts (SkyportIsland._circus_surface draws the
+## carriageway): a kerbed central island – grass mound, a clipped hedge
+## ring, flower beds in the island's colours – and a kerbed splitter island
+## on every arm between the entry and exit lanes, in two parts with the
+## zebra crossing through the gap (a pedestrian refuge). Low (kerb height):
+## no collision – cars that clip a kerb ride over it.
+static func build_circus(P: Dictionary, target: Node3D, isl: SkyportIsland, arms: Array) -> void:
+	var circ: Array = P.get("circus", [])
+	if circ.is_empty():
+		return
+	var C: Vector2 = circ[0]
+	var RR: float = circ[1]
+	var Ri := RR - 6.0
+	var Ro := RR + 6.0
+	var Y := SkyportIsland.LAND_Y
+	var m := BuildingMesher.new()
+	var kerb := Color(0.78, 0.77, 0.74)
+	var grass := Color(0.3, 0.46, 0.22)
+	var hedge := Color(0.13, 0.27, 0.12)
+	# Central island: kerb, mound, hedge ring, flower beds.
+	m.prism(_ring(C, Ri - 0.1, 48), Y, Y + 0.18, kerb)
+	m.prism(_ring(C, Ri - 0.55, 48), Y + 0.18, Y + 0.24, grass)
+	m.prism(_ring(C, Ri - 6.0, 32), Y + 0.24, Y + 0.5, grass.lightened(0.05))
+	var n_h := 28
+	for k in n_h:
+		if k % 7 == 0:
+			continue   # (gaps: the gardeners' way in)
+		var a0 := TAU * k / n_h
+		var a1 := TAU * (k + 0.85) / n_h
+		var p0 := C + Vector2.from_angle(a0) * (Ri - 2.2)
+		var p1 := C + Vector2.from_angle(a1) * (Ri - 2.2)
+		m.beam(Vector3(p0.x, Y + 0.7, p0.y), Vector3(p1.x, Y + 0.7, p1.y), 1.1, 0.95, hedge)
+	var flowers := [Color(0.86, 0.42, 0.62), Color(0.62, 0.4, 0.78), Color(0.95, 0.93, 0.9), Color(0.92, 0.7, 0.2)]
+	for k in 8:
+		var a := TAU * (k + 0.5) / 8.0
+		var c := C + Vector2.from_angle(a) * 10.5
+		m.prism(_ring(c, 2.6, 10, 0.3), Y + 0.24, Y + 0.55, Color(0.32, 0.22, 0.14))   # (bed: soil)
+		for j in 7:
+			var q := c + Vector2.from_angle(a * 3.1 + j * 0.9) * (0.4 + 0.3 * j)
+			m.prism(_ring(q, 0.55, 7, 0.5), Y + 0.5, Y + 0.95 + 0.08 * (j % 3), flowers[(k + j) % flowers.size()])
+	# Splitter islands: two kerbed teardrops on each arm's centre line.
+	for arm: Array in arms:
+		var u: Vector2 = arm[0]
+		var nrm := Vector2(-u.y, u.x)
+		for seg: Array in [[Ro + 1.5, Ro + 11.5, 1.3], [Ro + 15.5, Ro + 30.0, 1.6]]:
+			var r0: float = seg[0]
+			var r1: float = seg[1]
+			var wmax: float = seg[2]
+			var left := PackedVector2Array()
+			var right := PackedVector2Array()
+			for k in 13:
+				var t := float(k) / 12.0
+				var half := wmax * pow(sin(PI * clampf(t * 0.92 + 0.04, 0.0, 1.0)), 0.55)
+				var q := C + u * lerpf(r0, r1, t)
+				left.append(q + nrm * half)
+				right.append(q - nrm * half)
+			right.reverse()
+			var poly := left
+			poly.append_array(right)
+			m.prism(poly, Y, Y + 0.16, kerb)
+			var inner := PackedVector2Array()
+			var cen := C + u * ((r0 + r1) * 0.5)
+			for v in poly:
+				inner.append(cen + (v - cen) * 0.8)
+			m.prism(inner, Y + 0.16, Y + 0.2, grass)
+			# A keep-left bollard at the nose facing the ring.
+			if seg[0] < Ro + 5.0:
+				var b := C + u * (r0 + 1.0)
+				m.beam(Vector3(b.x, Y, b.y), Vector3(b.x, Y + 1.0, b.y), 0.35, 0.35, Color(0.92, 0.92, 0.9))
+				m.beam(Vector3(b.x, Y + 0.6, b.y), Vector3(b.x, Y + 0.9, b.y), 0.4, 0.4, Color(0.15, 0.35, 0.75))
+	isl._mesh_into(m, "TerminalCircus", target, 0.0, 1400.0)
