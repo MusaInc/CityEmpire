@@ -141,18 +141,26 @@ void fragment() {
 		// The same standard as the cities (ground.gdshader): yellow parts
 		// opposing traffic – a double solid line on multi-lane roads, dashed
 		// (3 m in 9 m) on two-lane ones; white runs with it (lane dividers,
-		// edge lines; kind 7 one-way roads have a white centre divider).
-		float lanes = floor(hw / 3.5 + 0.01);
-		float centre = lanes >= 2.0 && v_kind == 2.0
+		// edge lines). Kind 7 (bridge decks) the same: they carry two-way
+		// traffic (their old white centre line read as a one-way road).
+		// Roads 20 m and wider (Skyport Avenue, the approaches, the bridge
+		// decks) are laid out exactly like the cities' 22–26 m roads, so the
+		// lines run straight on across every bridge joint: lanes divided at
+		// 5.1 m (the island's traffic keeps 3.4 m off the centre: inside the
+		// first lane – the old 3.5 m divider had cars driving on it), an edge
+		// line 2.5 m off the kerb. Narrower roads: one lane each way, the
+		// edge line clear of the traffic.
+		bool wide = hw >= 10.0;
+		float centre = wide
 			? band(abs(uv.x) - 0.22, 0.07, aa)
 			: band(uv.x, 0.08, aa) * step(fract(uv.y / 9.0), 0.333);
-		float edge = band(abs(uv.x) - (hw - 0.6), 0.08, aa);
+		float edge = band(abs(uv.x) - (wide ? hw - 2.5 : max(hw - 1.8, min(4.6, hw - 0.5))), 0.08, aa);
 		float dash = 0.0;
-		if (lanes >= 2.0) {
-			dash = band(abs(uv.x) - 3.5, 0.07, aa) * step(fract(uv.y / 9.0), 0.333);
+		if (wide) {
+			dash = band(abs(uv.x) - 5.1, 0.07, aa) * step(fract(uv.y / 9.0), 0.333);
 		}
 		albedo = mix(albedo, white, max(edge, dash) * 0.95);
-		albedo = mix(albedo, v_kind == 7.0 ? white : yellow, centre * 0.95);
+		albedo = mix(albedo, yellow, centre * 0.95);
 		float tracks = band(abs(fract(abs(uv.x) / 3.5) - 0.5) * 3.5 - 0.9, 0.3, 0.2) * near;
 		albedo *= 1.0 - 0.06 * tracks;
 		// Patch repairs, the odd oil stain and a darker gutter by the kerb.

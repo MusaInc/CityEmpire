@@ -117,6 +117,12 @@ arm = (1 - ring) * (zf >= 0.5)
 from_j = other
 lane = on & (other > 0)
 lines_from = np.where(arm > 0.5, 10.0, np.where(avenue > 0.5, 6.0, 5.6))
+# Junction straight ahead along the road? (ground.gdshader: j_aligned)
+gaz, gax = np.gradient(along)
+gaz = gaz * (np.abs(gaz) < 8 * px); gax = gax * (np.abs(gax) < 8 * px)
+gfz, gfx = np.gradient(other)
+fj_cos = (gax * gfx + gaz * gfz) / (np.hypot(gax, gaz) * np.hypot(gfx, gfz) + 1e-5)
+j_aligned = np.clip((np.abs(fj_cos) - 0.72) / 0.1, 0, 1)
 yel = ring < 0.5
 centre = np.where((avenue > 0.5) & (ring < 0.5), band(a - 0.22, 0.07, aa) * (from_j >= lines_from),
                   band(across, 0.07, aa) * (from_j >= lines_from) * (np.mod(along / 9.0, 1.0) <= 0.333))
@@ -124,11 +130,11 @@ divider = avenue * (1 - ring) * (hw >= 10.0) * band(a - 5.1, 0.07, aa) * (from_j
 edge = avenue * (1 - ring) * band(a - (hw - 2.5), 0.07, aa) * (from_j >= lines_from)
 z_lo = np.where(arm > 0.5, 5.5, 1.0)
 zu = np.mod((across + hw - 1.5) / 1.2, 1.0)
-zebra = band(zu - 0.5, 0.25, aa / 1.2) * (from_j <= z_lo + 3.0) * (from_j >= z_lo) * (a <= hw - 1.0) * (1 - ring)
-stop = band(from_j - 4.8, 0.22, aa) * (a >= 0.3) * (a <= hw - 0.3) * (1 - ring) * (1 - arm)
+zebra = band(zu - 0.5, 0.25, aa / 1.2) * (from_j <= z_lo + 3.0) * (from_j >= z_lo) * (a <= hw - 1.0) * (1 - ring) * j_aligned
+stop = band(from_j - 4.8, 0.22, aa) * (a >= 0.3) * (a <= hw - 0.3) * (1 - ring) * (1 - arm) * j_aligned
 entry = arm * (across * flag_side >= 0) * (a >= 1.4) * (a <= hw - 0.3)
-giveway = entry * np.maximum(band(from_j - 0.45, 0.15, aa), band(from_j - 1.05, 0.15, aa)) * (np.mod(a, 1.0) <= 0.6)
-ghost = arm * (from_j >= 0.3) * (from_j <= z_lo - 0.7) * (a <= 1.25) * np.maximum(band(a - 1.15, 0.07, aa), band(np.mod((along + a) / 1.4, 1.0) - 0.5, 0.12, aa / 1.4))
+giveway = j_aligned * entry * np.maximum(band(from_j - 0.45, 0.15, aa), band(from_j - 1.05, 0.15, aa)) * (np.mod(a, 1.0) <= 0.6)
+ghost = j_aligned * arm * (from_j >= 0.3) * (from_j <= z_lo - 0.7) * (a <= 1.25) * np.maximum(band(a - 1.15, 0.07, aa), band(np.mod((along + a) / 1.4, 1.0) - 0.5, 0.12, aa / 1.4))
 ring_in = ring * (across * flag_side >= 0)
 ring_edge = ring * (1 - ring_in) * band(a - (hw - 0.45), 0.07, aa) * (from_j >= 1.5)
 apron = ring_in * (a >= hw - 3.0)

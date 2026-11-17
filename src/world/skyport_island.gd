@@ -816,7 +816,7 @@ func _circus_surface(st: SurfaceTool) -> void:
 		for v: Vector2 in vs:
 			st.set_color(road)
 			st.set_normal(Vector3.UP)
-			st.set_uv(Vector2(9.4, 0.0))      # (the edge-line band: solid white)
+			st.set_uv(Vector2(edge_line_x(10.0), 0.0))   # (on the edge-line band: solid white)
 			st.set_uv2(Vector2(10.0, 1.0))
 			st.add_vertex(v3.call(v, 0.04))
 	var arms := _circus_arms()
@@ -1878,7 +1878,7 @@ static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: fl
 		for v: Vector3 in vs:
 			st.set_color(c)
 			st.set_normal(Vector3.UP)
-			st.set_uv(Vector2(hw - 0.6, at))   # (on the edge-line band: solid white)
+			st.set_uv(Vector2(edge_line_x(hw), at))   # (on the edge-line band: solid white)
 			st.set_uv2(Vector2(hw, total))
 			st.add_vertex(v + Vector3.UP * (lift + 0.004))
 	for e in 2:
@@ -1905,6 +1905,13 @@ static func _strip(st: SurfaceTool, pts: PackedVector3Array, hw: float, lift: fl
 		var o0 := 0.2
 		var o1 := hw - 0.5
 		white.call(p0 + side * o0, p0 + side * o1, p1 + side * o1, p1 + side * o0, at)
+
+
+## Where island_ground.gdshader draws a road's solid edge line (metres from
+## its centre line, half width hw) – painted quads that must come out solid
+## white (zebras, stop lines, the roundabout's lines) put their UV.x on it.
+static func edge_line_x(hw: float) -> float:
+	return hw - 2.5 if hw >= 10.0 else maxf(hw - 1.8, minf(4.6, hw - 0.5))
 
 
 ## The polyline with points inserted at these distances along it.

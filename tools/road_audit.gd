@@ -33,6 +33,9 @@ func _go() -> void:
 	if layout.mainland != null:
 		_city("westbank", layout.mainland)
 	_skyport(layout)
+	_lanes("island", layout)
+	if layout.mainland != null:
+		_lanes("westbank", layout.mainland)
 	var counts := {}
 	for d: Dictionary in out["defects"]:
 		counts[d["kind"]] = int(counts.get(d["kind"], 0)) + 1
@@ -354,6 +357,30 @@ func _skyport(layout: CityLayout) -> void:
 						_defect("skyport", "overlap", SkyportIsland.w2(q), "%s / %s" % [a[0], b[0]])
 				else:
 					run = 0
+
+
+## Traffic lanes (Traffic.build_network): a lane that ends with nowhere to
+## go (dead), or that nothing feeds and no car can turn into (orphan).
+func _lanes(island: String, L: CityLayout) -> void:
+	var t := Traffic.new()
+	t.layout = L
+	t.build_network()
+	var dead := 0
+	var orphan := 0
+	var base := 0
+	for li in t.l_base.size():
+		if t.l_piece[li] < 0:
+			continue
+		base += 1
+		var lp: PackedVector3Array = t._lane_pts[li]
+		if t.l_loop[li] == 0 and (t.l_ends[li] as Array).is_empty() and t.l_next[li] < 0:
+			dead += 1
+			_defect(island, "lanes", Vector2(lp[-1].x, lp[-1].z), "dead lane end (%d m lane)" % int(t.l_len[li]))
+		if (t.l_feeds[li] as Array).is_empty() and t.l_loop[li] == 0:
+			orphan += 1
+			_defect(island, "lanes", Vector2(lp[0].x, lp[0].z), "orphan lane start (nothing turns into it)")
+	print("ROAD_AUDIT lanes %s: %d lanes, %d dead ends, %d orphans" % [island, base, dead, orphan])
+	t.free()
 
 
 var _sky_coast_cache := PackedVector2Array()

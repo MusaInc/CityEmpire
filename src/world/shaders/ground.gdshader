@@ -136,6 +136,17 @@ void fragment() {
 		albedo = c * (0.9 + 0.1 * n);  // old painted geometry (prototype world)
 	} else if (has_streets && flat_top) {
 		vec4 rf = road_sample(p);
+		// Screen derivatives of 'along' (mod-64 wrap skipped) and of the
+		// distance to the junction, taken here (not inside the paint branches,
+		// where neighbouring pixels can take other paths): their angle says
+		// whether the junction lies straight ahead along the road (stop lines,
+		// crossings, arrows) or off to one side round a corner.
+		float along_d = mod(rf.z, 64.0);
+		vec2 g_al = vec2(dFdx(along_d), dFdy(along_d));
+		g_al *= step(abs(g_al), vec2(8.0));
+		vec2 g_fj = vec2(dFdx(rf.w), dFdy(rf.w));
+		float fj_cos = dot(g_al, g_fj) / (length(g_al) * length(g_fj) + 1e-5);
+		float j_aligned = smoothstep(0.72, 0.82, abs(fj_cos));
 		float hw = abs(rf.y);
 		// (A roundabout's ring carries +0.25 on its half width: see CityRoads.bake_field.)
 		float ring = step(0.3, fract(hw * 2.0)) * step(fract(hw * 2.0), 0.7);
@@ -228,6 +239,20 @@ void fragment() {
 					* step(fract(along / 9.0), 0.333);
 				float edge = avenue * (1.0 - ring) * band(a - (hw - 2.5), 0.07, aa) * step(lines_from, from_j);
 				albedo = mix(albedo, white * wear, max(divider, edge));
+				// Lane arrows on the boulevards' approaches, pointing at the
+				// junction, in the lanes heading for it (keep right: the + side
+				// travels with 'along'). Which way the junction lies comes from
+				// how from_j changes along the road (screen derivatives; the
+				// mod-64 wrap of 'along' is skipped).
+				float j_ahead = -sign(fj_cos) * step(0.5, j_aligned);   // + : the junction is towards +along
+				float arr_from = lines_from + 3.0;
+				float arr_u = arr_from + 5.0 - from_j;          // 0 at the tail, 5 at the head
+				float lane_c = a < 5.1 ? 2.66 : 5.1 + (hw - 2.5 - 5.1) * 0.5;
+				float arr_v = abs(a - lane_c);
+				float shaft = step(0.0, arr_u) * step(arr_u, 3.2) * step(arr_v, 0.15);
+				float head = step(3.2, arr_u) * step(arr_u, 5.0) * step(arr_v, 0.62 * (5.0 - arr_u) / 1.8);
+				float arrow = avenue * (1.0 - ring) * max(shaft, head) * step(0.5, j_ahead * sign(across)) * near;
+				albedo = mix(albedo, white * wear, arrow);
 				// Crossings: at the mouth (1–4 m), or set back one car length on
 				// a roundabout's arms (5.5–8.5 m) behind its give-way line.
 				float z_lo = arm > 0.5 ? 5.5 : 1.0;
@@ -243,8 +268,12 @@ void fragment() {
 					* step(fract(a / 1.0), 0.6);
 				float ghost = arm * step(0.3, from_j) * step(from_j, z_lo - 0.7) * step(a, 1.25)
 					* max(band(a - 1.15, 0.07, aa), band(fract((along + a) / 1.4) - 0.5, 0.12, aa / 1.4));
-				zebra *= 1.0 - ring;
-				stop *= 1.0 - ring;
+				// (Only where the junction is ahead: round a corner of a
+				// multi-road junction the from_j contour bent them into Ls.)
+				zebra *= (1.0 - ring) * j_aligned;
+				stop *= (1.0 - ring) * j_aligned;
+				giveway *= j_aligned;
+				ghost *= j_aligned;
 				albedo = mix(albedo, white * wear, max(max(zebra, stop), max(giveway, ghost)));
 				// The ring: a dashed lane divider (the centre line above), an edge
 				// line along the outer kerb broken at every entry, and a truck
@@ -278,9 +307,14 @@ void fragment() {
 				kerb = 1.0;
 			}
 			if (kerb < 0.32) {
-				// Kerb stones: lighter granite with joints.
-				float j = step(0.94, fract((p.x + p.y) / 0.9));
-				albedo = c * 1.12 * (1.0 - 0.15 * j * near);
+				// Kerb stones: lighter granite, 0.9 m long, the joints square
+				// across the kerb (they ran diagonally whichever way it faced),
+				// each stone its own tone; a darker arris along the road edge.
+				float ka_along = mod(rf.z, 64.0) / 0.9;
+				float j = band(fract(ka_along) - 0.5, 0.47, fwidth(ka_along) + 0.01);
+				j = 1.0 - j;
+				albedo = c * 1.12 * (0.95 + 0.1 * hash12(vec2(floor(ka_along), hw))) * (1.0 - 0.2 * j * near);
+				albedo *= 1.0 - 0.18 * (1.0 - smoothstep(0.0, 0.06, kerb));
 				// Worn kerbs: chipped, scuffed and darker on older streets.
 				float ka = street_age(p);
 				albedo *= 1.0 - 0.22 * ka * step(0.72, hash12(floor(p / 0.9) + 5.0)) * near;

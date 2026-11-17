@@ -115,7 +115,9 @@ func build_network() -> void:
 		var pieces: Array = [line]
 		if kind != "ring" and not ring_kerb.is_empty() and not loop:
 			pieces = Geometry2D.intersect_polyline_with_polygon(line, ring_kerb)
-		if kind != "minor" and kind != "ring":
+		# (Side streets too: one ending at a roundabout started its outbound
+		# lane inside the ring, where no exit could reach it.)
+		if kind != "ring":
 			var cut := false
 			for d in discs:
 				var next: Array = []
@@ -141,6 +143,17 @@ func build_network() -> void:
 			for o in offs:
 				for sgn: float in [1.0, -1.0]:
 					var ln := CityLayout._offset_line(base_line, o * sgn)
+					# (A road meeting a roundabout at a slant: its lane on the
+					# inside of the bend still poked into the ring after the
+					# centre line was trimmed – trim each lane too.)
+					if not loop:
+						for d in discs:
+							var keep := PackedVector2Array()
+							for part: PackedVector2Array in Geometry2D.clip_polyline_with_polygon(ln, d):
+								if CityRoads.length_of(part) > CityRoads.length_of(keep):
+									keep = part
+							if keep.size() >= 2:
+								ln = keep
 					if sgn < 0.0:
 						ln.reverse()
 					_add_lane(ln, loop, LANE_V.get(kind, 10.0), piece)
@@ -156,7 +169,11 @@ func build_network() -> void:
 			axis.append(Vector2(x, CityLayout.BRIDGE_Z))
 			x -= 6.0
 		axis.append(Vector2(CityLayout.APPROACH_END + 4.0, CityLayout.BRIDGE_Z))
-		for o: float in [3.2, 7.0]:
+		# (The middle of the deck's painted lanes – BuildingMesher's bridge:
+		# double yellow ±0.25, dividers ±3.8, edge lines ±7.5, walkways from
+		# ±8: at the streets' 3.2 / 7.0 cars drove on the divider and the
+		# outer ones brushed the walkway kerb.)
+		for o: float in [2.0, 5.6]:
 			for sgn: float in [1.0, -1.0]:
 				var ln := CityLayout._offset_line(axis, o * sgn)
 				if sgn < 0.0:

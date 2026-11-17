@@ -423,9 +423,11 @@ func bake_field(cell := 1.5) -> void:
 					# A road's own ends are square too (a round cap bulged hw
 					# past the end: a disc of junction into a ring, onto the
 					# esplanade, or past a short end extension).
-					if open_road and i == 0 and (piece[0] as Vector2).distance_to(a) < 0.01:
+					# (And every joint within hw of an end: a short last segment
+					# left the one before it a round cap that bulged past the end.)
+					if open_road and (piece[0] as Vector2).distance_to(span[0]) < hw:
 						sq |= 2
-					if open_road and i == span.size() - 2 and (piece[1] as Vector2).distance_to(b) < 0.01:
+					if open_road and (piece[1] as Vector2).distance_to(span[-1]) < hw:
 						sq |= 1
 					_add_seg([piece[0], piece[1], hw, int(r["id"]), along + a.distance_to(piece[0]), r["kind"] != "minor", sq])
 				along += a.distance_to(b)
