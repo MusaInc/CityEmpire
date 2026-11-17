@@ -12,7 +12,7 @@ shader_type spatial;
 render_mode cull_back, diffuse_burley;
 #include "res://src/world/shaders/grass.gdshaderinc"
 
-uniform sampler2D road_field : filter_linear, repeat_disable;
+uniform sampler2D road_field : filter_nearest, repeat_disable;
 uniform vec4 road_rect = vec4(0.0, 0.0, 1.0, 1.0);  // x, z origin, x, z size (m)
 uniform bool has_streets = false;
 global uniform float wetness;
@@ -38,6 +38,42 @@ float vnoise(vec2 p) {
 // 1 inside a band of half-width h around 0, antialiased by aa.
 float band(float d, float h, float aa) {
 	return 1.0 - smoothstep(h - aa, h + aa, abs(d));
+}
+
+// The road field at p, blended by hand (texelFetch) so the blend can't
+// invent road between texels: the half width and kind come from the nearest
+// texel (constant per road – blended across two roads it read as a third,
+// narrower one); the offset is signed near a centre line but blended as a
+// magnitude once any texel lies beyond its kerb (the sign flips where the
+// nearest road changes, and a signed blend passed through 0: a false lane a
+// few metres behind every kerb); the distance along is unwrapped (mod 64)
+// before blending and keeps the nearest texel's roundabout flag (+64/+128).
+vec4 road_sample(vec2 p) {
+	ivec2 sz = textureSize(road_field, 0);
+	vec2 uv = (p - road_rect.xy) / road_rect.zw;
+	if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+		return vec4(100.0, 0.0, 0.0, 100.0);   // off the network
+	}
+	vec2 tc = uv * vec2(sz) - 0.5;
+	vec2 f = fract(tc);
+	ivec2 i0 = ivec2(floor(tc));
+	ivec2 mx = sz - 1;
+	vec4 t00 = texelFetch(road_field, clamp(i0, ivec2(0), mx), 0);
+	vec4 t10 = texelFetch(road_field, clamp(i0 + ivec2(1, 0), ivec2(0), mx), 0);
+	vec4 t01 = texelFetch(road_field, clamp(i0 + ivec2(0, 1), ivec2(0), mx), 0);
+	vec4 t11 = texelFetch(road_field, clamp(i0 + ivec2(1, 1), ivec2(0), mx), 0);
+	vec4 wt = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+	vec4 tn = f.x < 0.5 ? (f.y < 0.5 ? t00 : t01) : (f.y < 0.5 ? t10 : t11);
+	vec4 xs = vec4(t00.x, t10.x, t01.x, t11.x);
+	vec4 hws = abs(vec4(t00.y, t10.y, t01.y, t11.y));
+	if (any(greaterThan(abs(xs), hws + 1.0))) {
+		xs = abs(xs);
+	}
+	vec4 zs = vec4(t00.z, t10.z, t01.z, t11.z);
+	vec4 zl = zs - floor(zs / 64.0) * 64.0;
+	zl += 64.0 * vec4(lessThan(zl - zl.x, vec4(-32.0))) - 64.0 * vec4(greaterThan(zl - zl.x, vec4(32.0)));
+	float z = mod(dot(zl, wt), 64.0) + floor(tn.z / 64.0) * 64.0;
+	return vec4(dot(xs, wt), tn.y, z, dot(vec4(t00.w, t10.w, t01.w, t11.w), wt));
 }
 
 void vertex() {
@@ -99,7 +135,7 @@ void fragment() {
 	} else if (c.r > 0.85) {
 		albedo = c * (0.9 + 0.1 * n);  // old painted geometry (prototype world)
 	} else if (has_streets && flat_top) {
-		vec4 rf = texture(road_field, (p - road_rect.xy) / road_rect.zw);
+		vec4 rf = road_sample(p);
 		float hw = abs(rf.y);
 		// (A roundabout's ring carries +0.25 on its half width: see CityRoads.bake_field.)
 		float ring = step(0.3, fract(hw * 2.0)) * step(fract(hw * 2.0), 0.7);
@@ -128,14 +164,25 @@ void fragment() {
 			float patch2 = step(1.0 - 0.18 * sa, hash12(pc2)) * near;
 			albedo *= 1.0 - 0.1 * patch2;
 			float cn = vnoise(p * 0.45 + vnoise(p * 0.11) * 2.5);
-			float crack = (1.0 - smoothstep(0.0, 0.012 + aa * 0.4, abs(cn - 0.5))) * smoothstep(0.45, 0.7, vnoise(p * 0.035 + 7.0));
-			albedo *= 1.0 - 0.38 * crack * sa * near;
+			// (Hairlines: as a line shrinks below a pixel it fades instead of
+			// widening – widened with distance they read as big dark loops.)
+			float cfw = fwidth(cn);
+			float crack = (1.0 - smoothstep(0.0, 0.01 + cfw, abs(cn - 0.5))) * (0.01 / (0.01 + cfw))
+				* smoothstep(0.55, 0.75, vnoise(p * 0.035 + 7.0));
+			albedo *= 1.0 - 0.3 * crack * sa * near;
 			float oil = smoothstep(0.72, 0.85, vnoise(p * 0.6 + 13.0)) * smoothstep(0.5, 0.8, vnoise(p * 0.08));
 			albedo *= 1.0 - 0.2 * oil * (0.4 + 0.6 * sa) * near;
 			if (on && other > 0.0) {
 				float across = rf.x;
 				float avenue = rf.y < 0.0 ? 1.0 : 0.0;
-				float along = rf.z;                 // metres along the road (mod 64)
+				// rf.z = metres along the road (mod 64) + a roundabout flag: +64 or
+				// +128 = on a ring (+64: the + side of its centre line is the
+				// island side) or on an arm meeting one (+64: the lanes entering
+				// the ring are on the + side) – see CityRoads._sample.
+				float zf = floor(rf.z / 64.0);
+				float along = rf.z - zf * 64.0;
+				float flag_side = zf < 1.5 ? 1.0 : -1.0;
+				float arm = (1.0 - ring) * step(0.5, zf);
 				float from_j = other;               // metres past the junction mouth
 				// Tyre tracks: two polished bands per 3.5 m lane.
 				float lane_d = abs(fract(a / 3.5) - 0.5) * 3.5;
@@ -151,9 +198,9 @@ void fragment() {
 				float cell = floor(along / 32.0);
 				float mh_on = step(0.55, hash12(vec2(cell, hw + sign(across))));
 				vec2 mh = vec2(fract(along / 32.0) * 32.0 - 16.0, a - min(1.9, hw * 0.5));
-				float ring = length(mh);
-				albedo *= 1.0 - 0.25 * band(ring, 0.38, aa) * mh_on * near;
-				albedo *= 1.0 - 0.35 * band(ring - 0.38, 0.04, aa) * mh_on * near;
+				float mh_r = length(mh);
+				albedo *= 1.0 - 0.25 * band(mh_r, 0.38, aa) * mh_on * near;
+				albedo *= 1.0 - 0.35 * band(mh_r - 0.38, 0.04, aa) * mh_on * near;
 				// Paint: centre line (double yellow on boulevards, dashed white on
 				// streets), zebra crossings and stop lines at every junction mouth.
 				vec3 white = vec3(0.9, 0.9, 0.86);
@@ -161,36 +208,75 @@ void fragment() {
 				float wear = 0.82 + 0.18 * vnoise(p * 1.7);
 				// Faded paint on older streets: it greys and breaks up.
 				wear *= mix(1.0, 0.55 + 0.45 * vnoise(p * 0.9 + 3.0), sa);
+				// One standard everywhere (traffic keeps right): boulevards a
+				// double yellow centre line, a dashed divider between their two
+				// lanes each way and a solid edge line 2.5 m off the kerb;
+				// streets a dashed yellow centre line; every junction mouth a zebra
+				// and a stop line; roundabouts give way to the ring (below). Paint
+				// stops where the road meets another (from_j < the mouth's setback)
+				// and never runs through a junction box (other < 0).
+				float lines_from = arm > 0.5 ? 10.0 : (avenue > 0.5 ? 6.0 : 5.6);
+				// (Yellow parts opposing traffic – solid double on boulevards,
+				// dashed on streets; white runs with it: a ring's lane divider,
+				// lane dividers, edge lines, stop lines. Dashes 3 m in every 9 m,
+				// as on Skyport.)
 				float centre = avenue > 0.5 && ring < 0.5
-					? band(a - 0.22, 0.07, aa) * step(4.6, from_j)
-					: band(across, 0.07, aa) * step(5.0, from_j) * step(fract(along / 8.0), 0.375);
-				// Roundabouts: one way round – a dashed white lane divider (above),
-				// no centre lines, no crossings or parking on the ring.
-				albedo = mix(albedo, (avenue > 0.5 && ring < 0.5 ? yellow : white) * wear, centre);
-				// Boulevards: dashed lane dividers between the two lanes each way.
-				float divider = avenue * (1.0 - ring) * step(10.0, hw) * band(a - 5.1, 0.07, aa) * step(5.0, from_j)
-					* step(fract(along / 9.0), 0.33);
-				albedo = mix(albedo, white * wear, divider);
+					? band(a - 0.22, 0.07, aa) * step(lines_from, from_j)
+					: band(across, 0.07, aa) * step(lines_from, from_j) * step(fract(along / 9.0), 0.333);
+				albedo = mix(albedo, (ring < 0.5 ? yellow : white) * wear, centre);
+				float divider = avenue * (1.0 - ring) * step(10.0, hw) * band(a - 5.1, 0.07, aa) * step(lines_from, from_j)
+					* step(fract(along / 9.0), 0.333);
+				float edge = avenue * (1.0 - ring) * band(a - (hw - 2.5), 0.07, aa) * step(lines_from, from_j);
+				albedo = mix(albedo, white * wear, max(divider, edge));
+				// Crossings: at the mouth (1–4 m), or set back one car length on
+				// a roundabout's arms (5.5–8.5 m) behind its give-way line.
+				float z_lo = arm > 0.5 ? 5.5 : 1.0;
 				float zebra_u = fract((across + hw - 1.5) / 1.2);
-				float zebra = band(zebra_u - 0.5, 0.25, aa / 1.2) * step(from_j, 4.0) * step(1.0, from_j)
+				float zebra = band(zebra_u - 0.5, 0.25, aa / 1.2) * step(from_j, z_lo + 3.0) * step(z_lo, from_j)
 					* step(a, hw - 1.0);
-				float stop = band(from_j - 4.8, 0.22, aa) * step(0.3, a) * step(a, hw - 0.3);
+				float stop = band(from_j - 4.8, 0.22, aa) * step(0.3, a) * step(a, hw - 0.3) * (1.0 - arm);
+				// Roundabout arms: a double dashed give-way line across the lanes
+				// entering the ring and a hatched ghost island between the entry
+				// and exit lanes up to the crossing.
+				float entry = arm * step(0.0, across * flag_side) * step(1.4, a) * step(a, hw - 0.3);
+				float giveway = entry * max(band(from_j - 0.45, 0.15, aa), band(from_j - 1.05, 0.15, aa))
+					* step(fract(a / 1.0), 0.6);
+				float ghost = arm * step(0.3, from_j) * step(from_j, z_lo - 0.7) * step(a, 1.25)
+					* max(band(a - 1.15, 0.07, aa), band(fract((along + a) / 1.4) - 0.5, 0.12, aa / 1.4));
 				zebra *= 1.0 - ring;
 				stop *= 1.0 - ring;
-				albedo = mix(albedo, white * wear, max(zebra, stop));
+				albedo = mix(albedo, white * wear, max(max(zebra, stop), max(giveway, ghost)));
+				// The ring: a dashed lane divider (the centre line above), an edge
+				// line along the outer kerb broken at every entry, and a truck
+				// apron of granite setts round the island behind a white line.
+				float ring_in = ring * step(0.0, across * flag_side);
+				float ring_edge = ring * (1.0 - ring_in) * band(a - (hw - 0.45), 0.07, aa) * step(1.5, from_j);
+				float apron = ring_in * step(hw - 3.0, a);
+				vec2 sett = fract(p / 0.24);
+				vec3 setts = vec3(0.47, 0.43, 0.4) * (0.86 + 0.2 * hash12(floor(p / 0.24)))
+					* (1.0 - 0.3 * max(band(sett.x, 0.06, aa / 0.24), band(sett.y, 0.06, aa / 0.24)) * near);
+				albedo = mix(albedo, setts, apron);
+				float apron_line = ring_in * band(a - (hw - 3.15), 0.1, aa);
+				albedo = mix(albedo, white * wear, max(ring_edge, apron_line));
 				// Kerbside parking on the wider side streets (CityWorld parks
 				// cars 1.5 m in from the kerb on minor roads ≥ 14 m): the bay
 				// edge line, broken at junctions, and a bay mark every 13.5 m.
-				float bays = (1.0 - avenue) * (1.0 - ring) * step(6.9, hw) * step(8.0, from_j);
+				float bays = (1.0 - avenue) * (1.0 - ring) * (1.0 - arm) * step(6.9, hw) * step(8.0, from_j);
 				float bay_edge = band(a - (hw - 2.55), 0.05, aa) * bays;
 				float bay_tick = band(fract(along / 13.5) * 13.5 - 6.75, 0.05, aa) * step(hw - 2.55, a) * step(a, hw - 0.45) * bays;
 				albedo = mix(albedo, white * wear, max(bay_edge, bay_tick) * 0.9);
-				rough = mix(rough, 0.7, max(centre, max(zebra, stop)));
+				rough = mix(rough, 0.7, max(max(centre, edge), max(max(zebra, stop), max(giveway, ring_edge))));
 			} else if (on) {
 				albedo *= 1.03;  // junctions: a touch lighter, worn smooth
 			}
 		} else if (pave) {
 			c *= vec3(0.8, 0.83, 0.88);
+			// Pavement the field calls carriageway (a junction box reaching over
+			// a block corner at a skewed or staggered junction): paving, not a
+			// slab of kerb stone – the kerb is only where the surface ends.
+			if (kerb < -0.4) {
+				kerb = 1.0;
+			}
 			if (kerb < 0.32) {
 				// Kerb stones: lighter granite with joints.
 				float j = step(0.94, fract((p.x + p.y) / 0.9));
@@ -224,7 +310,9 @@ void fragment() {
 				albedo *= 1.0 - 0.3 * slab_crack * near;
 				// Tactile paving where a zebra meets the kerb: a buff strip of
 				// raised blisters (the crossings stopped dead at grey slabs).
-				float tact = step(a - hw, 1.15) * step(1.0, other) * step(other, 4.0);
+				float arm_p = (1.0 - ring) * step(1.0, floor(rf.z / 64.0));
+				float z_lo_p = arm_p > 0.5 ? 5.5 : 1.0;
+				float tact = step(a - hw, 1.15) * step(z_lo_p, other) * step(other, z_lo_p + 3.0);
 				if (tact > 0.0) {
 					vec2 bl = fract(p / 0.066) - 0.5;
 					float blister = 1.0 - smoothstep(0.18, 0.3, length(bl));

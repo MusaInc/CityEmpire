@@ -138,12 +138,18 @@ void fragment() {
 	} else if (v_kind == 2.0 || v_kind == 7.0) {
 		albedo = c * tone;
 		// Centre line, lane dashes, edge lines.
+		// The same standard as the cities (ground.gdshader): yellow parts
+		// opposing traffic – a double solid line on multi-lane roads, dashed
+		// (3 m in 9 m) on two-lane ones; white runs with it (lane dividers,
+		// edge lines; kind 7 one-way roads have a white centre divider).
 		float lanes = floor(hw / 3.5 + 0.01);
-		float centre = band(uv.x, 0.1, aa) * step(fract(uv.y / 9.0), 0.6);
+		float centre = lanes >= 2.0 && v_kind == 2.0
+			? band(abs(uv.x) - 0.22, 0.07, aa)
+			: band(uv.x, 0.08, aa) * step(fract(uv.y / 9.0), 0.333);
 		float edge = band(abs(uv.x) - (hw - 0.6), 0.08, aa);
 		float dash = 0.0;
 		if (lanes >= 2.0) {
-			dash = band(abs(uv.x) - 3.5, 0.07, aa) * step(fract(uv.y / 8.0), 0.35);
+			dash = band(abs(uv.x) - 3.5, 0.07, aa) * step(fract(uv.y / 9.0), 0.333);
 		}
 		albedo = mix(albedo, white, max(edge, dash) * 0.95);
 		albedo = mix(albedo, v_kind == 7.0 ? white : yellow, centre * 0.95);
