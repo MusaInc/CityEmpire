@@ -91,6 +91,8 @@ var kit_hulls: Array = []
 var pieces: SetPieces
 ## The railway the trains run on (and the City Loop's viaduct, stations and bridge).
 var rail: RailNetwork
+## Buildings _district_character lowered (tools/tests read it).
+var district_lowered := 0
 ## The five homes (Apartments.place, after everything else is laid out).
 var apartments: Apartments
 ## City Empire: shop units and wholesale warehouses cut into ground floors (Premises).
@@ -147,6 +149,7 @@ func generate(p_seed := 1207) -> CityLayout:
 	_place_plant()
 	apartments = Apartments.place(self)
 	premises = Premises.place(self)
+	_district_character()
 	# Last: plazas and parks on both shores, clear of the City Loop.
 	var rail_lines: Array = []
 	for ln in rail.lines:
@@ -2148,3 +2151,124 @@ func _bridge_approach(x0: float, zc: float, deck: float) -> void:
 
 
 
+
+
+# ------------------------------------------------------- district character
+## The skyline by quarter, seen from the air: the CBD's towers and midtown's
+## commercial blocks stand as generated; the old town (georgian) comes down
+## to mansion blocks with the odd civic tower, the docks to lofts and
+## sheds, the strait-side waterfront to mid-rise flats – so the core reads
+## as a downtown rising out of lower, different districts instead of one
+## field of towers. Runs after Apartments/Premises have chosen their
+## buildings with the old heights (claimed buildings, "apt", are never
+## touched, nor anything carrying or carried by another building, so every
+## unit, home and id stays as it was) and only ever lowers, so nothing new
+## can meet the rail line, a sky bridge or a neighbour. What stood on a
+## lowered roof (roof huts, plant, water towers, antennas, spires, signs)
+## comes down with it. Own random stream per building (position-seeded).
+const CHARACTER := {
+	# district: [[share, min top, max top], ...] (m above the street)
+	"georgian": [[0.62, 18.0, 34.0], [0.3, 34.0, 56.0], [0.08, 60.0, 90.0]],
+	"docks": [[0.55, 16.0, 30.0], [0.35, 30.0, 52.0], [0.1, 58.0, 88.0]],
+	"waterfront": [[0.35, 28.0, 48.0], [0.45, 48.0, 82.0], [0.2, 86.0, 120.0]],
+}
+
+
+func _district_character() -> void:
+	if is_mainland:
+		return
+	var moved := 0
+	var tops: Array = []   # [b, world AABB of the top tier, old roof y, dy]
+	for b: Dictionary in buildings:
+		if b["kind"] != "normal" or b.has("apt") or b.has("roof_blocked"):
+			continue
+		var base := BuildingMesher.base_of(b)
+		var tiers: Array = b["tiers"]
+		if absf(float(tiers[0][4]) - base) > 0.05:
+			continue  # (stands on another building: a twin tower, a campanile)
+		var c := base_center(b)
+		var dist := district(c.x, c.y)
+		if not CHARACTER.has(dist) or c.distance_to(AdScreens.DISTRICT) < AdScreens.DISTRICT_R + 40.0:
+			continue
+		var top: float = float(tiers[-1][5]) - base
+		var crng := RandomNumberGenerator.new()
+		crng.seed = hash(Vector2i(int(c.x * 4.0), int(c.y * 4.0))) ^ 0x2c1d
+		var x := crng.randf()
+		var want := top
+		for band: Array in CHARACTER[dist]:
+			x -= float(band[0])
+			if x < 0.0:
+				want = crng.randf_range(float(band[1]), float(band[2]))
+				break
+		if want >= top - 2.0:
+			continue
+		var k := want / top
+		var ry_old := BuildingMesher.roof_y(b)
+		var t5_old := float(tiers[-1][5])
+		for t: Array in tiers:
+			t[4] = base + (float(t[4]) - base) * k
+			t[5] = base + (float(t[5]) - base) * k
+		b.erase("_crown")
+		b.erase("_features")
+		# Lower, the old style may no longer fit the quarter: lofts and
+		# flats are masonry, not curtain glass.
+		if want < 60.0 and int(b["style"]) in [Style.GLASS, Style.DARK_GLASS]:
+			var ns: int = [Style.BRICK, Style.MODERN, Style.SANDSTONE][crng.randi() % 3] if dist != "docks" \
+				else [Style.BRICK, Style.BRICK, Style.WAREHOUSE][crng.randi() % 3]
+			b["style"] = ns
+			var cols: Array = STYLE_COLORS[ns]
+			b["color"] = (cols[crng.randi() % cols.size()] as Color).lightened(crng.randf_range(-0.05, 0.05))
+		var dy := BuildingMesher.roof_y(b) - ry_old
+		var tt: Array = tiers[-1]
+		tops.append([b, Rect2(float(tt[0]), float(tt[1]), float(tt[2]) - float(tt[0]), float(tt[3]) - float(tt[1])), t5_old, dy])
+		moved += 1
+	if tops.is_empty():
+		return
+	# Bring down what stood on each lowered roof: props, roof structures
+	# (huts, spires, sign frames) and swing anchors over its top tier.
+	# (A coarse grid so each lookup only tries the roofs nearby.)
+	var grid := {}
+	for e: Array in tops:
+		var b: Dictionary = e[0]
+		var cc := base_center(b)
+		var key := Vector2i(floori(cc.x / 64.0), floori(cc.y / 64.0))
+		if not grid.has(key):
+			grid[key] = []
+		grid[key].append(e)
+	var near_roof := func(p: Vector3) -> Array:
+		var k0 := Vector2i(floori(p.x / 64.0), floori(p.z / 64.0))
+		for dx in range(-1, 2):
+			for dz in range(-1, 2):
+				for e: Array in grid.get(k0 + Vector2i(dx, dz), []):
+					var b: Dictionary = e[0]
+					var q := p if float(b.get("rot", 0.0)) == 0.0 else bxf(b).affine_inverse() * p
+					if (e[1] as Rect2).grow(0.5).has_point(Vector2(q.x, q.z)) and q.y > float(e[2]) - 0.6:
+						return e
+		return []
+	for i in props.size():
+		var xf: Transform3D = props[i][1]
+		var e: Array = near_roof.call(xf.origin)
+		if not e.is_empty():
+			props[i][1] = xf.translated(Vector3(0.0, float(e[3]), 0.0))
+	for b2: Dictionary in buildings:
+		if not String(b2["kind"]) in ["structure", "spire", "sign", "frame"]:
+			continue
+		var t0: Array = b2["tiers"][0]
+		var p := Vector3((float(t0[0]) + float(t0[2])) * 0.5, float(t0[4]), (float(t0[1]) + float(t0[3])) * 0.5)
+		if float(b2.get("rot", 0.0)) != 0.0:
+			p = bxf(b2) * p
+		var e: Array = near_roof.call(p)
+		if e.is_empty():
+			continue
+		for t: Array in b2["tiers"]:
+			t[4] = float(t[4]) + float(e[3])
+			t[5] = float(t[5]) + float(e[3])
+		if b2.has("roof"):
+			b2["roof"] = float(b2["roof"]) + float(e[3])
+	for i in anchor_lines.size():
+		var a: Vector3 = anchor_lines[i][0]
+		var e: Array = near_roof.call(a)
+		if not e.is_empty():
+			var d := Vector3(0.0, float(e[3]), 0.0)
+			anchor_lines[i] = [anchor_lines[i][0] + d, anchor_lines[i][1] + d]
+	district_lowered = moved

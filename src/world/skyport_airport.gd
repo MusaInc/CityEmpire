@@ -557,3 +557,103 @@ static func build_car_park(target: Node3D, body: StaticBody3D, isl: SkyportIslan
 	m.solid(r.end.x, r.position.y + 20, r.end.x + 6.0, r.position.y + 28, Y, Y + 15.5, Color(0.3, 0.38, 0.45))
 	CityWorld._add_box(body, AABB(Vector3(r.end.x, Y, r.position.y + 20), Vector3(6.0, 15.5, 8.0)))
 	isl._mesh_into(m, "CarPark", target, 0.0, 1800.0)
+
+
+# ----------------------------------------------------------- the apron kit
+## What makes the apron read as a working airport from the air and on foot
+## (one merged mesh, no collision – it's all low and on the concrete):
+##  * the airside service road between the hall and the equipment restraint
+##    line (white edge lines, dashed centre), running on to the hangar and
+##    cargo aprons – the tugs' route, so the gates don't sit in bare concrete;
+##  * a stand box at every gate (white safety outline round the nose
+##    position) and the stand number bar on the lead-in line;
+##  * the equipment staging rows behind the restraint line: baggage tugs
+##    with cart trains, ground power units, pushback tractors, a few spare
+##    belt loaders;
+##  * cars in the terminal's surface car park (bays painted by the ground).
+static func build_apron_kit(P: Dictionary, target: Node3D, isl: SkyportIsland) -> void:
+	var Y := SkyportIsland.LAND_Y + 0.03
+	var m := BuildingMesher.new()
+	var white := Color(0.9, 0.9, 0.87)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 47011
+	# Service road: z 244..254 across the gates, on along the aprons.
+	var x0 := 1575.0
+	var x1 := 2330.0
+	for z: float in [244.0, 254.0]:
+		m.solid(x0, z - 0.1, x1, z + 0.1, Y, Y + 0.015, white)
+	var x := x0
+	while x < x1:
+		m.solid(x, 248.9, x + 3.0, 249.1, Y, Y + 0.015, white)
+		x += 9.0
+	# (Clear of the hangar fronts: the road turns off along the apron's
+	# landside edge to the cargo apron in the east.)
+	for z: float in [244.0, 254.0]:
+		m.solid(x1, z - 0.1, x1 + 0.2, z + 0.1, Y, Y + 0.015, white)
+	# Stand boxes and stop bars at the four gates.
+	for sx: float in STANDS_AT:
+		var r := Rect2(sx - 9.0, 266.0, 18.0, 12.0)
+		for e: Array in [[r.position, Vector2(r.end.x, r.position.y)], [Vector2(r.position.x, r.end.y), r.end],
+				[r.position, Vector2(r.position.x, r.end.y)], [Vector2(r.end.x, r.position.y), r.end]]:
+			var a: Vector2 = e[0]
+			var b: Vector2 = e[1]
+			m.solid(minf(a.x, b.x) - 0.1, minf(a.y, b.y) - 0.1, maxf(a.x, b.x) + 0.1, maxf(a.y, b.y) + 0.1, Y, Y + 0.015, white)
+		# Hatched no-parking zone under the jet bridge's swing.
+		var hz := 268.0
+		while hz < 276.0:
+			m.solid(sx - 8.0, hz, sx - 2.0, hz + 0.35, Y, Y + 0.015, Color(0.75, 0.2, 0.15))
+			hz += 1.6
+	# Staging rows behind the restraint line (z 255..261), between gates.
+	var yellow := Color(0.9, 0.7, 0.12)
+	for gi in STANDS_AT.size() - 1:
+		var gx: float = STANDS_AT[gi] + 18.0
+		var end_x: float = STANDS_AT[gi + 1] - 18.0
+		var cx := gx
+		while cx < end_x - 6.0:
+			var pick := rng.randf()
+			if pick < 0.45:
+				# Baggage tug and a train of 2-4 covered carts.
+				m.solid(cx, 256.0, cx + 2.6, 257.6, Y, Y + 1.3, yellow)
+				m.solid(cx + 0.3, 256.1, cx + 1.4, 257.5, Y + 1.3, Y + 2.0, Color(0.2, 0.22, 0.24))
+				var n := rng.randi_range(2, 4)
+				for k in n:
+					var kx := cx + 3.2 + k * 3.2
+					m.solid(kx, 256.0, kx + 2.8, 257.7, Y + 0.3, Y + 1.7, Color(0.62, 0.64, 0.66))
+					m.solid(kx, 256.0, kx + 2.8, 257.7, Y + 1.7, Y + 1.8, Color(0.25, 0.3, 0.45))
+				cx += 4.0 + n * 3.2
+			elif pick < 0.65:
+				# Ground power unit.
+				m.solid(cx, 256.2, cx + 2.4, 257.6, Y, Y + 1.5, Color(0.92, 0.92, 0.9))
+				cx += 4.0
+			elif pick < 0.85:
+				# Pushback tractor (low and long).
+				m.solid(cx, 255.8, cx + 6.0, 258.4, Y, Y + 1.2, yellow)
+				m.solid(cx + 4.2, 256.2, cx + 5.6, 258.0, Y + 1.2, Y + 2.2, Color(0.2, 0.22, 0.24))
+				cx += 8.0
+			else:
+				# A spare belt loader.
+				m.solid(cx, 256.2, cx + 7.0, 257.6, Y, Y + 1.0, yellow)
+				m.beam(Vector3(cx + 0.8, Y + 1.0, 256.9), Vector3(cx + 6.6, Y + 2.8, 256.9), 1.0, 0.2, Color(0.2, 0.2, 0.2))
+				cx += 9.0
+			cx += 1.5
+	# Cars in the terminal's surface car park (rows match the painted bays:
+	# 17 m modules from z 59, 5 m bays either side of the aisle).
+	var cols := [Color(0.85, 0.85, 0.86), Color(0.15, 0.16, 0.18), Color(0.55, 0.12, 0.12), Color(0.2, 0.3, 0.5),
+		Color(0.6, 0.62, 0.64), Color(0.32, 0.34, 0.3)]
+	var lot := Rect2(1965, 58, 290, 74)
+	var cp := CAR_PARK.grow(4.0)
+	var zm := 59.0
+	while zm < lot.end.y - 5.0:
+		for row: float in [zm + 2.5, zm + 14.5]:
+			if row > lot.end.y - 2.6:
+				continue
+			var bx := lot.position.x + 1.3
+			while bx < lot.end.x - 1.5:
+				var c := Vector2(bx, row)
+				if not cp.has_point(c) and rng.randf() < 0.62:
+					var cc: Color = cols[rng.randi() % cols.size()]
+					m.solid(c.x - 0.9, c.y - 2.2, c.x + 0.9, c.y + 2.2, Y, Y + 0.85, cc)
+					m.solid(c.x - 0.78, c.y - 1.1, c.x + 0.78, c.y + 1.0, Y + 0.85, Y + 1.4, cc.darkened(0.4))
+				bx += 2.6
+		zm += 17.0
+	isl._mesh_into(m, "ApronKit", target, 0.0, 1400.0)

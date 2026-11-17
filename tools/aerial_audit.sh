@@ -31,8 +31,10 @@ views=(
   "shore_skyport:-700,1500:-860,10,1460,-700,0,1560"
   "shore_seawall:200,585:300,6,640,180,2,560"
   # Bridge ends (city and Skyport sides), from the air and from the road.
-  "harbour_city_end:200,585:250,10,520,140,8,660"
-  "westbank_city_end:-560,458:-600,10,400,-500,8,540"
+  "harbour_city_end:200,585:120,60,700,215,0,570"
+  "westbank_city_end:-560,458:-470,60,560,-575,0,445"
+  "harbour_sky_end:-130,950:-60,45,880,-140,0,960"
+  "westbank_sky_end:-270,950:-340,45,880,-260,0,960"
   "harbour_ramp:236,545:236,3.5,545,175,3,611"
   "westbank_ramp:-587,414:-587,7,414,-544,6,485"
   "skyport_bridges:-200,980:-120,60,860,-220,4,1000"

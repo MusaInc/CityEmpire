@@ -34,6 +34,62 @@ float band(float d, float h, float aa) {
 	return 1.0 - smoothstep(h - aa, h + aa, abs(d));
 }
 
+// Shore surfaces: sand, rock or quay concrete, chosen by colour c.
+vec3 shore_look(vec3 c, vec2 p, float y, float fp, float near, float tone, inout float rough) {
+	vec3 albedo = c;
+	float wet = 1.0 - smoothstep(-0.2, 0.9, y);
+	if (c.r > c.b + 0.1) {
+		// (Wet only in the swash band: under the water the sea's own tint
+		// does the darkening – doubled up it ringed every beach brown.)
+		float under = 1.0 - smoothstep(-1.4, -0.5, y);
+		wet *= 1.0 - under;
+		float rip = sin(p.x * 1.7 + p.y * 1.1 + vnoise(p * 0.3) * 4.0) * 0.5 + 0.5;
+		albedo = c * (0.9 + 0.12 * vnoise(p * 2.3) * near + 0.05 * rip * near);
+		albedo *= 1.0 - 0.12 * smoothstep(0.02, 0.0, abs(y - 0.45));   // tide line
+		albedo = mix(albedo, albedo * 0.62, wet);
+		albedo *= mix(1.0, 0.7, under);   // (under water: a little darker, the sea tints the rest)
+		rough = mix(0.95, 0.4, max(wet, under));
+	} else if (c.r < 0.2) {
+		// Natural rock: rounded boulders of mixed sizes (two jittered
+		// cell scales, nearest-centre distance – no masonry grid), lichen
+		// and salt-bleached tops above the splash zone, weed and wet
+		// below it. The fine detail fades once a pixel spans a boulder,
+		// so from the air (and through the water) it reads as one even,
+		// mottled shore instead of a speckled ring.
+		float det = 1.0 - smoothstep(0.25, 1.1, fp);
+		float shade = 0.0;
+		float gap = 1.0;
+		for (int s = 0; s < 2; s++) {
+			float sz = s == 0 ? 2.6 : 0.9;
+			vec2 q = p / sz + vec2(float(s) * 7.3, y * 0.35);
+			vec2 ci = floor(q);
+			float dmin = 9.0;
+			float hb = 0.0;
+			for (int k = 0; k < 4; k++) {
+				vec2 o = ci + vec2(float(k % 2), float(k / 2));
+				vec2 ctr = o + 0.2 + 0.6 * vec2(hash12(o), hash12(o + 3.7));
+				float d = length(q - ctr);
+				if (d < dmin) { dmin = d; hb = hash12(o + 11.0); }
+			}
+			gap = min(gap, smoothstep(0.42, 0.7, dmin) * (s == 0 ? 1.0 : 0.6));
+			shade += (hb - 0.5) * (s == 0 ? 0.45 : 0.25);
+		}
+		float mott = vnoise(p * 0.07) - 0.5;
+		albedo = c * (1.0 + mott * 0.35 + shade * det) * (1.0 - 0.4 * gap * det * near);
+		// Warm/cool stone and pale lichen on the dry tops.
+		albedo *= mix(vec3(1.0), vec3(1.08, 1.0, 0.9), smoothstep(0.3, 0.7, vnoise(p * 0.035 + 2.0)));
+		float dry = smoothstep(0.8, 2.2, y);
+		albedo = mix(albedo, vec3(0.5, 0.49, 0.44) * (0.85 + 0.3 * vnoise(p * 0.5)), dry * 0.35 * step(0.45, vnoise(p * 0.21 + 4.0)));
+		albedo = mix(albedo, vec3(0.12, 0.16, 0.1), wet * 0.6 * smoothstep(0.35, 0.5, vnoise(p * 0.8)));
+		albedo = mix(albedo, albedo * 0.6, wet);
+		rough = mix(0.9, 0.5, wet);
+	} else {
+		albedo = c * tone * (1.0 - 0.3 * wet);
+		albedo = mix(albedo, vec3(0.14, 0.17, 0.12), wet * 0.7);
+	}
+	return albedo;
+}
+
 void vertex() {
 	v_kind = floor(COLOR.a * 8.0);   // (kinds stored as (k + 0.5) / 8: an alpha of 0 is dropped)
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -66,6 +122,19 @@ void fragment() {
 	} else if (v_kind == 1.0) {
 		albedo = grass_shade(c, p, near, (fwidth(p.x) + fwidth(p.y)) * 0.5);
 		rough = 0.97;
+		if (hw < -0.5) {
+			// Landform tops near a beach (Landforms: UV2.x = -(metres to the
+			// beach + 1)): dry sand, then dune grass in tufts, then turf,
+			// along a ragged line – not a hard edge.
+			float d = -hw - 1.0;
+			float rag = vnoise(p * 0.09) * 6.0 + vnoise(p * 0.45) * 2.0 * near;
+			float sandk = 1.0 - smoothstep(3.0, 8.0, d + rag - 3.0);
+			float dune = (1.0 - smoothstep(7.0, 14.0, d + rag - 3.0)) * (1.0 - sandk);
+			vec3 sand = vec3(0.6, 0.51, 0.33) * (0.92 + 0.12 * vnoise(p * 1.9));
+			vec3 marram = mix(albedo, vec3(0.42, 0.42, 0.24), 0.55) * (0.85 + 0.3 * vnoise(p * 1.3));
+			albedo = mix(albedo, mix(sand, marram, step(0.45, vnoise(p * 0.8))), dune);
+			albedo = mix(albedo, sand, sandk);
+		}
 	} else if (v_kind == 2.0 || v_kind == 7.0) {
 		albedo = c * tone;
 		// Centre line, lane dashes, edge lines.
@@ -119,30 +188,39 @@ void fragment() {
 		albedo = mix(albedo, white, max(ring, max(hbar, hleg)) * 0.95);
 		albedo = mix(albedo, yellow, band(r - 8.6, 0.25, aa));
 	}
+	if ((v_kind == 0.0 || v_kind == 5.0) && hw > 2.5 && hw < 3.5) {
+		// A car park (SkyportIsland areas flagged "bays", UV = island-local
+		// metres): rows of 2.6 m bays from x 1965, 5 m deep either side of a
+		// 7 m aisle in 17 m modules from z 59 (SkyportAirport.build_apron_kit
+		// parks its cars on the same grid), white lines, oil drips mid-bay.
+		float mod_z = fract((uv.y - 59.0) / 17.0) * 17.0;
+		float in_bay = step(mod_z, 5.0) + step(12.0, mod_z);
+		float bx = fract((uv.x - 1965.0) / 2.6) * 2.6;
+		float line = band(min(bx, 2.6 - bx), 0.06, aa) * in_bay;
+		float ends = band(mod_z - 5.0, 0.06, aa) + band(mod_z - 12.0, 0.06, aa);
+		albedo = mix(albedo, vec3(0.86, 0.86, 0.82), clamp(max(line, ends), 0.0, 1.0) * 0.9);
+		albedo *= 1.0 - 0.15 * in_bay * smoothstep(0.55, 0.85, vnoise(p * 0.6)) * near;
+	}
 	if (UV2.y < -0.5) {
-		// Shore (SkyportIsland._shore_bands): sand, rock or quay concrete by
-		// colour. Sand: fine grain, ripples and a tide line; rock: boulders
-		// (cells), dark gaps, weed and wet below the waterline.
-		float y = v_world.y;
-		float wet = 1.0 - smoothstep(-0.2, 0.9, y);
-		if (c.r > c.b + 0.1) {
-			float rip = sin(p.x * 1.7 + p.y * 1.1 + vnoise(p * 0.3) * 4.0) * 0.5 + 0.5;
-			albedo = c * (0.9 + 0.12 * vnoise(p * 2.3) * near + 0.05 * rip * near);
-			albedo *= 1.0 - 0.12 * smoothstep(0.02, 0.0, abs(y - 0.45));   // tide line
-			albedo = mix(albedo, albedo * 0.62, wet);
-			rough = mix(0.95, 0.4, wet);
-		} else if (c.r < 0.2) {
-			vec2 cell = floor(p / 1.6 + vec2(0.0, floor(y * 0.6)));
-			float hb = hash12(cell);
-			vec2 fc = fract(p / 1.6) - 0.5;
-			float gap = smoothstep(0.32, 0.5, max(abs(fc.x), abs(fc.y)));
-			albedo = c * (0.75 + 0.5 * hb) * (1.0 - 0.45 * gap * near);
-			albedo = mix(albedo, vec3(0.12, 0.16, 0.1), wet * 0.6 * step(0.4, vnoise(p * 0.8)));
-			albedo = mix(albedo, albedo * 0.6, wet);
-			rough = mix(0.9, 0.5, wet);
+		// Shore (SkyportIsland._shore_bands, Landforms, SeabedMesh): sand,
+		// rock or quay concrete by colour. The sea floor (SeabedMesh) passes
+		// its rock share in UV2.x (1 + share, +2 for the cities' darker
+		// stone) and is blended between both looks: its vertex colours used
+		// to mix and flip between the branches pixel by pixel – blotches.
+		float sfp = fwidth(p.x) + fwidth(p.y);
+		if (UV2.x > 0.5) {
+			float code = UV2.x - 1.0;
+			float dark = step(1.5, code);
+			float rk = smoothstep(0.3, 0.8, clamp(code - 2.0 * dark, 0.0, 1.0));
+			vec3 rockc = mix(pow(vec3(0.42, 0.4, 0.37), vec3(2.2)), pow(vec3(0.23, 0.225, 0.225), vec3(2.2)), dark);
+			float r1 = rough;
+			float r2 = rough;
+			vec3 sa = shore_look(pow(vec3(0.8, 0.72, 0.55), vec3(2.2)), p, v_world.y, sfp, near, tone, r1);
+			vec3 ro = shore_look(rockc, p, v_world.y, sfp, near, tone, r2);
+			albedo = mix(sa, ro, rk);
+			rough = mix(r1, r2, rk);
 		} else {
-			albedo = c * tone * (1.0 - 0.3 * wet);
-			albedo = mix(albedo, vec3(0.14, 0.17, 0.12), wet * 0.7);
+			albedo = shore_look(c, p, v_world.y, sfp, near, tone, rough);
 		}
 	}
 	ALBEDO = albedo * (1.0 - 0.22 * wetness);

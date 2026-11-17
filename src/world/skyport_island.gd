@@ -563,10 +563,10 @@ static func plan(layout: CityLayout) -> Dictionary:
 	areas.append([5, _rect(1560, 170, 1880, 385), COL_APRON])              # hangar apron
 	areas.append([5, _rect(1895, 242, 2330, 385), COL_APRON])              # terminal apron
 	areas.append([5, _rect(2335, 160, 2462, 385), COL_APRON])              # cargo apron
-	areas.append([5, _rect(1965, 58, 2255, 132), COL_APRON])               # terminal car park
+	areas.append([5, _rect(1965, 58, 2255, 132), COL_APRON, "bays"])       # terminal car park (bays, parked cars)
 	areas.append([5, _rect(2140, -300, 2450, -196), COL_APRON])            # container yard
 	for f in [[1630, 8, 1725, 96], [1745, 8, 1875, 96], [1975, 8, 2075, 96]]:
-		areas.append([0, _rect(f[0], f[1], f[2], f[3]), Color(0.62, 0.6, 0.57)])  # dealer forecourts (paved)
+		areas.append([0, _rect(f[0], f[1], f[2], f[3]), Color(0.62, 0.6, 0.57), "bays"])  # dealer forecourts (display bays)
 	P["areas"] = areas
 	# Airport strips: [kind, from, to, half width].
 	var strips: Array = [
@@ -1082,9 +1082,30 @@ static func _buildings(P: Dictionary) -> Array:
 	# end: four engine bays facing the taxiway, a training tower.
 	out.append(_b([[1492, 300, 1548, 334, LAND_Y, LAND_Y + 9.0], [1530, 300, 1548, 312, LAND_Y + 9.0, LAND_Y + 18.0]], S.BRICK,
 		Color(0.62, 0.3, 0.24), 0.71))
-	for k in 3:
-		var hx := 1640.0 + k * 80.0
-		out.append(_b([[hx, 190, hx + 72, 288, LAND_Y, LAND_Y + 20.0]], S.WAREHOUSE, Color(0.78, 0.79, 0.8), 0.2 + k * 0.1))
+	# Hangars: three different buildings (a line of identical sheds read as
+	# clones from the air) – the aviation company's maintenance hangar, a
+	# wide-body bay and a small GA hangar – each with a ridged roof (stepped
+	# tiers along the span) and a lean-to office annex on the landside.
+	# (Doors face the apron; the first keeps its front at z 288 for the
+	# Skyport Aviation door.)
+	var hangars := [
+		[1640, 192, 1712, 288, 20.0, Color(0.8, 0.81, 0.82), 0.21, true],
+		[1722, 184, 1808, 292, 25.0, Color(0.62, 0.68, 0.74), 0.33, false],
+		[1818, 204, 1870, 282, 15.0, Color(0.84, 0.8, 0.7), 0.47, true],
+	]
+	for hg: Array in hangars:
+		var x0: float = hg[0]
+		var z0: float = hg[1]
+		var x1: float = hg[2]
+		var z1: float = hg[3]
+		var hh: float = hg[4]
+		var span := x1 - x0
+		var tiers: Array = [[x0, z0, x1, z1, LAND_Y, LAND_Y + hh],
+			[x0 + span * 0.18, z0, x1 - span * 0.18, z1, LAND_Y + hh, LAND_Y + hh + 2.2],
+			[x0 + span * 0.38, z0, x1 - span * 0.38, z1, LAND_Y + hh + 2.2, LAND_Y + hh + 3.4]]
+		out.append(_b(tiers, S.WAREHOUSE, hg[5], hg[6]))
+		if hg[7]:
+			out.append(_b([[x0, z0 - 14.0, x0 + span * 0.45, z0, LAND_Y, LAND_Y + 8.0]], S.MODERN, Color(0.86, 0.86, 0.84), float(hg[6]) + 0.05))
 	out.append(_b([[2340, 170, 2455, 290, LAND_Y, LAND_Y + 15.0]], S.WAREHOUSE, Color(0.45, 0.52, 0.6), 0.9))
 	# Landside aviation businesses on the open ground south of Hangar Lane:
 	# flight catering (a loading dock towards the apron) and an aviation
@@ -1256,6 +1277,7 @@ func _start_near() -> void:
 		func(): SkyportAirport.build_link(plan_data, near_root, body, self),
 		func(): SkyportAirport.build_fuel_farm(near_root, body, self),
 		func(): SkyportAirport.build_car_park(near_root, body, self),
+		func(): SkyportAirport.build_apron_kit(plan_data, near_root, self),
 		func(): _near(_build_industry), func(): _near(_build_trees),
 		func():
 			var at := AirTraffic.new()
@@ -1343,7 +1365,7 @@ func _ground_mat() -> ShaderMaterial:
 
 
 ## A flat polygon at height y, kind k (UV = world x/z).
-static func _poly_tris(st: SurfaceTool, poly: PackedVector2Array, yv: float, kind: int, col: Color) -> void:
+static func _poly_tris(st: SurfaceTool, poly: PackedVector2Array, yv: float, kind: int, col: Color, flag := 0.0) -> void:
 	# (One winding for every polygon, so all faces point up.)
 	if not Geometry2D.is_polygon_clockwise(poly):
 		poly = poly.duplicate()
@@ -1356,7 +1378,7 @@ static func _poly_tris(st: SurfaceTool, poly: PackedVector2Array, yv: float, kin
 			st.set_color(c)
 			st.set_normal(Vector3.UP)
 			st.set_uv(Vector2(v.x, v.y))
-			st.set_uv2(Vector2(0, 0))
+			st.set_uv2(Vector2(flag, 0))   # (3 = a car park: island_ground paints bays)
 			st.add_vertex(Vector3(v.x, yv, v.y))
 
 
@@ -1617,7 +1639,7 @@ func _build_ground(street: StaticBody3D) -> void:
 		for q in poly:
 			_poly_tris(st, q, pave_y, 0, COL_PAVE.lightened(0.04))
 	for a in plan_data["areas"]:
-		_poly_tris(st, a[1], LAND_Y + (0.011 if int(a[0]) == 1 else 0.014), int(a[0]), a[2])
+		_poly_tris(st, a[1], LAND_Y + (0.011 if int(a[0]) == 1 else 0.014), int(a[0]), a[2], 3.0 if a.size() > 3 and a[3] == "bays" else 0.0)
 	for s in plan_data["strips"]:
 		_strip(st, PackedVector3Array([s[1], s[2]]), s[3], 0.025 if int(s[0]) == 3 else 0.02, int(s[0]), COL_RUNWAY if int(s[0]) == 3 else COL_APRON.darkened(0.15))
 	# Junctions (3+ road ends meet): each road's markings stop at the

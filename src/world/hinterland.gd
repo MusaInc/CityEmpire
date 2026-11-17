@@ -37,8 +37,20 @@ static func height_at(x: float, z: float) -> float:
 	# Open sea to the east: the land falls away there.
 	var lift := 1.0 - smoothstep(0.35, 0.85, east)
 	var peak := lerpf(360.0, 1150.0, pow(west, 1.4))
+	# Separate massifs, not one even wall: a slow noise lifts some stretches
+	# into high peaks and drops others to saddles, and river valleys cut in
+	# toward the bay at irregular spacing (only the mountain part – the
+	# shoreline and foothills stay exactly where they were).
+	var xz := Vector2(x, z)
+	var mass := 0.68 + 0.6 * _fbm(xz * 0.00024 + Vector2(4.7, 1.9), 3)
+	var vph := ang * 5.0 + 4.5 * _fbm(xz * 0.00035 + Vector2(2.3, 8.1), 2)
+	var valley := lerpf(0.68, 1.0, smoothstep(0.02, 0.45, absf(sin(vph))))
+	peak *= mass * valley
 	var rise := smoothstep(0.0, 1.0, clampf(out / lerpf(1400.0, 1900.0, west), 0.0, 1.0))
-	var ridges := 0.55 + 0.75 * _ridged(Vector2(x, z) * 0.00042)
+	# (Domain-warped: ridgelines wander and branch instead of running in
+	# parallel with the shore.)
+	var warp := Vector2(_fbm(xz * 0.0006, 2), _fbm(xz * 0.0006 + Vector2(9.2, 3.4), 2)) - Vector2(0.5, 0.5)
+	var ridges := 0.45 + 0.95 * _ridged(xz * 0.00042 + warp * 1.4)
 	var hills := 30.0 * smoothstep(-40.0, 120.0, out) * (0.6 + _fbm(Vector2(x, z) * 0.004, 2))
 	# Spurs and gullies down the slopes (finer ridged noise, strongest on
 	# the steep middle of the rise), and knolls on the foothills: the land

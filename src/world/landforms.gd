@@ -162,11 +162,24 @@ static func forms(layout: CityLayout = null) -> Array:
 			for v in pts:
 				cen += v
 			cen /= pts.size()
+			# (Inland along the join's own normal, the esplanade's top over the
+			# first 3–9 m: sampled along "away from the centroid" a long join
+			# could land on the shore apron, and the landform then sat metres
+			# below the esplanade with the sea wall's face showing over it.)
 			var jh := PackedFloat32Array()
-			for v in join:
-				var inl := v + (v - cen).normalized() * 5.0
-				var hz := L.ground_y(inl.x, inl.y)
-				jh.append(hz if not is_nan(hz) else 1.0)
+			for ji in join.size():
+				var v: Vector2 = join[ji]
+				var tg := (join[mini(ji + 1, join.size() - 1)] - join[maxi(ji - 1, 0)]).normalized()
+				var nv := Vector2(-tg.y, tg.x)
+				if nv.dot(v - cen) < 0.0:
+					nv = -nv
+				var best := -INF
+				for dd: float in [3.0, 5.0, 7.0, 9.0]:
+					var inl := v + nv * dd
+					var hz := L.ground_y(inl.x, inl.y)
+					if not is_nan(hz) and not L.is_water(Vector3(inl.x, 0.0, inl.y)):
+						best = maxf(best, hz)
+				jh.append(best + 0.02 if best > -INF else 1.0)
 			f["join"] = join
 			f["jh"] = jh
 		_forms.append(f)
@@ -369,8 +382,6 @@ func _build_form(f: Dictionary, body: StaticBody3D) -> void:
 		gx += 9.0
 	var tri := Geometry2D.triangulate_delaunay(pts)
 	var grass := Color(0.33, 0.47, 0.26, 1.5 / 8.0)
-	var sand := Color(0.8, 0.72, 0.55)
-	var path := Color(0.66, 0.62, 0.55, 0.5 / 8.0)
 	for i in range(0, tri.size(), 3):
 		var a := pts[tri[i]]
 		var b := pts[tri[i + 1]]
@@ -389,19 +400,21 @@ func _build_form(f: Dictionary, body: StaticBody3D) -> void:
 		for v: Vector3 in v3:
 			# A sandy fringe along beach stretches, a gravel path ring inland.
 			var e := _beach_dist(f, Vector2(v.x, v.z))
+			# (The beach edge is drawn by the shader from the distance in
+			# UV2.x (negative = "metres to the beach + 1"): vertex colours
+			# zig-zagged along the 9 m triangles as beige patches.)
 			var col := grass
 			var marker := 0.0
+			# (Capped, never 0 on a landform: a 0 beside a capped vertex
+			# interpolated through "near a beach" and drew a sand line.)
+			var beach := -(minf(e, 40.0) + 1.0)
 			if f.get("paved", false):
 				col = Color(0.6, 0.59, 0.56, 0.5 / 8.0)
-			elif e < 9.0:
-				col = sand
-				marker = -1.0
-			elif absf(_edge_dist(f, Vector2(v.x, v.z)) - 16.0) < 2.2 and _join_dist(f, Vector2(v.x, v.z)) > 10.0:
-				col = path
+				beach = 0.0
 			st.set_color(col)
 			st.set_normal(nrm)
 			st.set_uv(Vector2(v.x, v.z))
-			st.set_uv2(Vector2(0.0, marker))
+			st.set_uv2(Vector2(beach, marker))
 			st.add_vertex(v)
 			faces.append(v)
 	# Shore bands round the free edges.
@@ -424,8 +437,12 @@ func _build_form(f: Dictionary, body: StaticBody3D) -> void:
 			for idx in order:
 				var v: Vector3 = q[idx]
 				var cc := col2
-				if k == 1 and v.y < 0.4:
-					cc = col2.darkened(0.28)
+				if k == 1 and v.y < 0.4 and v.y > -0.6:
+					cc = col2.darkened(0.12)   # (the swash band only: below it the water tints it)
+				elif k == 2 and r == 0 and idx < 2:
+					# (Scrub over the rock's top edge: turf doesn't stop on a
+					# ruled line where the rock begins.)
+					cc = Color(0.3, 0.36, 0.22)
 				cc.a = 0.5 / 8.0
 				st.set_color(cc)
 				st.set_uv(Vector2(v.x, v.z))
