@@ -1782,14 +1782,21 @@ func _build_warehouse(st: _Batch) -> void:
 	st.box(R(tx - 0.2, 4.6, 1.1), R(tx + 0.2, 4.65, 1.45), Color(0.05, 0.05, 0.06))
 	_glow_quad(R(tx - 0.18, 4.58, 1.14), R(tx + 0.18, 4.58, 1.42), Color(0.3, 0.8, 0.5))
 	spots.append({"kind": "trade", "pos": R(tx, 3.4, 0.0), "label": "TRADE COUNTER"})
-	# Hanging sign over the counter.
+	# Hanging sign over the counter: a board on two rods from the ceiling
+	# (the words used to float in mid-air with nothing behind them).
+	var sy := minf(H - 1.0, 3.4)
+	st.box(R(tx - 2.2, 5.03, sy - 0.48), R(tx + 2.2, 5.09, sy + 0.48), Color(0.1, 0.17, 0.3))
+	st.box(R(tx - 2.24, 5.02, sy + 0.48), R(tx + 2.24, 5.1, sy + 0.52), Color(1.0, 0.78, 0.25))
+	for e: float in [-1.6, 1.6]:
+		st.box(R(tx + e - 0.012, 5.05, sy + 0.52), R(tx + e + 0.012, 5.07, H), Color(0.3, 0.3, 0.32))
 	var sign := Label3D.new()
 	sign.text = "TRADE COUNTER\nCash & card · Trade prices"
-	sign.font_size = 72
+	sign.font_size = 60
 	sign.pixel_size = 0.005
 	sign.shaded = false
+	sign.double_sided = false
 	sign.modulate = Color(1.0, 0.85, 0.3)
-	sign.position = R(tx, 5.0, minf(H - 1.0, 3.4))
+	sign.position = R(tx, 5.0, sy)
 	_static.add_child(sign)
 	# Roller shutter head + fascia outside.
 	var oh: float = float(unit["oy1"]) - float(unit["oy0"])

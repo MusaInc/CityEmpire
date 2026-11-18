@@ -2154,7 +2154,11 @@ func objective() -> Array:
 	var no_shop := empire.businesses.is_empty()
 	if no_shop and not f.get("seen_car", false) and not empire.vehicles.is_empty():
 		var vid: String = empire.vehicles[0]["id"]
-		return ["Find your car – it's parked on this street", vehicle_position(vid), "Your car", ""]
+		var cp := vehicle_position(vid)
+		var far := player.global_position.distance_to(cp) > 60.0
+		# (Walked off before finding it: "on this street" was wrong; the
+		# distance is the GPS's, by road.)
+		return ["Find your car – follow the route to it" if far else "Find your car – it's parked on this street", cp, "Your car", ""]
 	if no_shop and not f.get("opened_map", false):
 		return ["Open the map: tap the minimap", Vector3.INF, "", "map"]
 	if no_shop and not f.get("inspected_property", false):
