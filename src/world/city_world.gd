@@ -117,8 +117,8 @@ var _glow_mats: Array[ShaderMaterial] = []  # [pool, halo]
 var _glow_meshes: Array[Mesh] = []  # [pool (PlaneMesh), halo (QuadMesh)]
 var _glow_nodes: Array = []
 var _glow_on := false
-## Lamp head in the streetlight model's frame (build_kit.py streetlight()).
-const LAMP_HEAD := Vector3(0.0, 6.72, -1.45)
+## Lamp head (the LED panel) in the streetlight model's frame (ws_street.py).
+const LAMP_HEAD := Vector3(0.0, 6.85, -1.45)
 var _furn_src := {}             # kind -> [verts, normals, colors, indices] (material colours baked in)
 var _furniture_by_chunk := {}   # Vector2i -> Array of [kind, Transform3D]
 var _walk_paths: Array = []  # [from, to] pavement segments (directional)
