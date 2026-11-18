@@ -22,6 +22,7 @@ varying vec3 v_col;
 varying float v_rough;
 varying float v_front;
 varying flat int v_part;
+varying float v_near;   // 0 at the lens .. 1 from 1.8 m: dithered out up close
 
 vec3 srgb(vec3 c) {
 	return pow(c, vec3(2.2));
@@ -66,9 +67,21 @@ void vertex() {
 	person_pose_w(v, n, person_limb(UV), UV2.x, 1.0 - UV2.y, stride / 0.72 * 3.14159, walk, carry, look);
 	VERTEX = v;
 	NORMAL = n;
+	// Someone right in front of the lens dissolves instead of filling the
+	// screen (as crowd.gdshader does outside: in a narrow aisle or doorway
+	// a customer between you and the camera hid half the shop).
+	float cd = length((MODELVIEW_MATRIX * vec4(0.0, 0.9, 0.0, 1.0)).xyz);
+	v_near = clamp((cd - 0.7) / 1.1, 0.0, 1.0);
 }
 
 void fragment() {
+	if (v_near < 0.999) {
+		vec2 g = mod(floor(FRAGCOORD.xy), 4.0);
+		float bayer = (mod(g.x + g.y * 2.0, 4.0) * 4.0 + mod(g.x * 3.0 + g.y, 4.0)) / 16.0;
+		if (v_near <= bayer) {
+			discard;
+		}
+	}
 	vec3 c = v_col;
 	if (v_part == 4 && apron > 0.5 && v_front < -0.06) {
 		c = vec3(0.12, 0.42, 0.33);  // staff apron (the studio's green)
