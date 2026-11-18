@@ -39,7 +39,7 @@ const BASE := {
 
 const CARS := {
 	"kestrel": {
-		"name": "Kestrel", "class": "Street Hatch", "price": 0, "body": "kestrel", "wheel": "steel", "engine_sound": "i4",
+		"name": "Kestrel", "class": "Street Hatch", "price": 0, "body": "kestrel", "wheel": "kestrel", "engine_sound": "i4",
 		"blurb": "Everybody's first car. Grippy, honest, not very fast.",
 		"perk": "PATCH-UP · slowly repairs itself between hits",
 		"mass": 1150.0, "engine": 6.2, "top_speed": 50.0, "grip": 1.4, "grip_front": 1.05, "grip_rear": 1.08, "drive": "fwd",

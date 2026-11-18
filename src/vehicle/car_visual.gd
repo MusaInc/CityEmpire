@@ -62,9 +62,10 @@ static func shared_mat(name: String) -> Material:
 	if _mat_cache.has(name):
 		return _mat_cache[name]
 	var m := StandardMaterial3D.new()
-	if name == "glass":
+	if name == "glass" or name == "glass_clear":
 		var g := ShaderMaterial.new()
-		g.shader = GLASS_SHADER
+		# (glass_clear: bodies with a modelled cabin - see-through)
+		g.shader = GLASS_SHADER if name == "glass" else preload("res://src/vehicle/car_glass_clear.gdshader")
 		_mat_cache[name] = g
 		return g
 	match name:
@@ -128,6 +129,30 @@ static func shared_mat(name: String) -> Material:
 		"plate":
 			m.albedo_color = Color(0.9, 0.88, 0.78)
 			m.roughness = 0.6
+		"plate_rear":
+			m.albedo_color = Color(0.95, 0.76, 0.1)
+			m.roughness = 0.5
+		# Kestrel kit (tools/blender/kestrel.py).
+		"rubber":
+			m.albedo_color = Color(0.02, 0.02, 0.022)
+			m.roughness = 0.8
+		"plastic":
+			m.albedo_color = Color(0.035, 0.035, 0.038)
+			m.roughness = 0.62
+		"interior":
+			m.albedo_color = Color(0.05, 0.05, 0.055)
+			m.roughness = 0.9
+		"reflector":
+			m.albedo_color = Color(0.85, 0.86, 0.88)
+			m.metallic = 1.0
+			m.roughness = 0.2
+		"lens", "lens_red":
+			# Clear headlamp cover / red tail-lamp lens over the modelled
+			# lamp inside (one transparent sheet per lamp).
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.albedo_color = Color(0.9, 0.93, 0.97, 0.06) if name == "lens" else Color(0.55, 0.03, 0.03, 0.7)
+			m.roughness = 0.03
+			m.metallic_specular = 0.9
 		"lamp_rev":
 			m.albedo_color = Color(0.85, 0.85, 0.85)
 			m.roughness = 0.2
@@ -532,7 +557,7 @@ func reset_dents() -> void:
 ## are fractions of the body's bounds, so one rule fits every model; glass,
 ## lamps and the dark under-liners always stay on the car.
 const NO_PART := 255
-const KEEP_MATS := ["glass", "liner", "lamp_head", "lamp_tail", "lamp_rev", "lamp_housing", "beacon_red", "beacon_blue",
+const KEEP_MATS := ["glass", "glass_clear", "lens", "lens_red", "interior", "reflector", "liner", "lamp_head", "lamp_tail", "lamp_rev", "lamp_housing", "beacon_red", "beacon_blue",
 	"tyre", "tyre_wall", "rim", "rim_dark", "disc", "caliper"]
 static var _part_cache := {}
 static var _profile_cache := {}

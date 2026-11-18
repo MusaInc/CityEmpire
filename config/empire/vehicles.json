@@ -8,7 +8,7 @@
    "cargo": 8,
    "price": 0,
    "top_speed": 34.0,
-   "paint": "#c9c6bd",
+   "paint": "#3b5470",
    "class": "car"
   },
   "van": {

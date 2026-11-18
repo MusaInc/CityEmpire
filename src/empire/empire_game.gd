@@ -395,6 +395,20 @@ func _after_start() -> void:
 			return [Transform3D(Basis.looking_at(to - from, Vector3.UP if absf((to - from).normalized().y) < 0.99 else Vector3.FORWARD), from), 62.0]
 	if args.has("nohud"):
 		ui.visible = false   # (captures: the world only)
+	if args.has("carcam") and not empire.vehicles.is_empty():
+		# Captures: a fixed camera on your first car - front34, rear34, side,
+		# side_l, front, rear, nose, tail - for checking the car in the game.
+		var cc: Car = cars.get(String(empire.vehicles[0]["id"]))
+		var views := {"front34": [Vector3(3.4, 1.3, -4.2), 0.55], "rear34": [Vector3(-3.4, 1.5, 4.4), 0.6],
+			"side": [Vector3(6.2, 1.0, 0.0), 0.6], "side_l": [Vector3(-6.2, 1.0, 0.0), 0.6], "front": [Vector3(0.0, 1.0, -6.5), 0.55],
+			"rear": [Vector3(0.0, 1.1, 6.5), 0.6], "nose": [Vector3(1.6, 1.0, -3.6), 0.5], "tail": [Vector3(-1.6, 1.15, 3.7), 0.6]}
+		var vw: Array = views.get(String(args["carcam"]), views["front34"])
+		camera.cine = func(_dt: float) -> Array:
+			if cc == null or not is_instance_valid(cc):
+				return [camera.global_transform, 62.0]
+			var from := cc.global_transform * (vw[0] as Vector3)
+			var to := cc.global_transform * Vector3(0, float(vw[1]), 0)
+			return [Transform3D(Basis.looking_at(to - from, Vector3.UP), from), 50.0]
 	if args.has("cam"):
 		# Captures: a fixed camera in world metres, "x,y,z,lx,ly,lz" (unlike
 		# --view, independent of where the hero lands; y is above the ground).
@@ -1539,6 +1553,11 @@ func _car_spec(model: String) -> Dictionary:
 		s["engine"] = 5.2
 	else:
 		s = CarCatalog.spec(String(m["base"]))
+	if m.has("art"):
+		# Its own body (tools/blender/build_player_cars.py), same handling:
+		# the van and box truck you own aren't the traffic's light civ_* meshes.
+		s["body"] = String(m["art"])
+		CarCatalog._fit_body(s)
 	s["top_speed"] = float(m.get("top_speed", s["top_speed"]))
 	s["paint"] = Color.from_string(String(m.get("paint", "#cccccc")), Color.WHITE)
 	s["nitro"] = 0.0
