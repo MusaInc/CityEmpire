@@ -144,7 +144,7 @@ var fixed_hour := false
 
 func configure(args: Dictionary, world: Node) -> void:
 	_world = world
-	var capture := args.has("shot") or args.has("cam")
+	var capture := args.has("shot") or args.has("cam") or args.has("tour")
 	live = not capture
 	if args.has("time"):
 		hour = fposmod(float(args["time"]), 24.0)

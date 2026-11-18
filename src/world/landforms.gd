@@ -154,7 +154,7 @@ static func forms(layout: CityLayout = null) -> Array:
 			var hz := L.ground_y(ax, z) if L != null else 1.0
 			h0[int(floorf(z / 4.0))] = hz if not is_nan(hz) else 1.0
 			z += 4.0
-		var f := {"name": sp[0], "poly": pts, "kinds": kinds, "bbox": bb, "attach_x": ax, "side": side, "h0": h0,
+		var f := {"name": sp[0], "poly": pts, "kinds": kinds, "bbox": bb, "attach_x": ax, "side": side, "h0": h0, "L": L,
 			"paved": String(sp[0]).ends_with("Mole")}
 		if not join.is_empty():
 			# Heights along the join, sampled 5 m inside the city's sea wall.
@@ -182,6 +182,7 @@ static func forms(layout: CityLayout = null) -> Array:
 				jh.append(best + 0.02 if best > -INF else 1.0)
 			f["join"] = join
 			f["jh"] = jh
+			f["join_i"] = pts.size() - join.size() + 1
 		_forms.append(f)
 	return _forms
 
@@ -437,7 +438,7 @@ func _build_form(f: Dictionary, body: StaticBody3D) -> void:
 			for idx in order:
 				var v: Vector3 = q[idx]
 				var cc := col2
-				if k == 1 and v.y < 0.4 and v.y > -0.6:
+				if k == 1 and v.y < -1.2 and v.y > -2.2:
 					cc = col2.darkened(0.12)   # (the swash band only: below it the water tints it)
 				elif k == 2 and r == 0 and idx < 2:
 					# (Scrub over the rock's top edge: turf doesn't stop on a
@@ -478,30 +479,51 @@ func _beach_dist(f: Dictionary, q: Vector2) -> float:
 
 
 ## A profile row at outline point i (kind k): from the top's edge down to the
-## sea bed (as SkyportIsland.SHORE_PROFILES, measured from this top height).
+## sea bed, 1 + BuildingMesher.SHORE_ROWS points (the first is the top's
+## edge). Where the landform leaves its island's coast (the two ends of its
+## join) the row IS the city's shore row there, under the top's edge, so
+## the city's apron and the landform's bands meet on one line (they used to
+## cross: rock and sand slabs through each other at every headland). Rows
+## are clamped to under half the open water in front (BuildingMesher.
+## shore_reach), so they never cross a neighbour's.
 func _row(f: Dictionary, o: PackedVector2Array, i: int, k: int) -> PackedVector3Array:
 	var p := o[i]
 	var nn := SkyportIsland._out_n(o, i)
 	var top := _height(f, p.x, p.y)
+	var row := PackedVector3Array()
+	row.append(Vector3(p.x, top, p.y))
+	var L: CityLayout = f.get("L")
+	if f.has("join") and L != null and (i == 0 or i == int(f.get("join_i", -1))):
+		var cr: Array = BuildingMesher.shore_row_at(L, p)[0]
+		if cr.size() == BuildingMesher.SHORE_ROWS:
+			for v: Vector3 in cr:
+				row.append(Vector3(v.x, minf(v.y, top - 0.05), v.z))
+			return row
 	var prof: Array
 	match k:
 		0:
-			prof = [[0.0, top], [0.0, -8.0]]
+			prof = [[0.0, top], [0.0, top - 2.0], [0.0, 0.0], [0.0, -1.0], [0.0, -2.0], [0.0, -4.0], [0.0, -6.0], [0.0, -9.0]]
 		1:
-			prof = [[0.0, top], [4.0, lerpf(top, 0.15, 0.4)], [12.0, 0.15], [22.0, -1.05], [32.0, -4.0]]
+			prof = [[0.0, top], [4.0, lerpf(top, 0.15, 0.4)], [8.0, lerpf(top, 0.15, 0.75)], [12.0, 0.15], [17.0, -0.6],
+				[23.0, -1.6], [32.0, -4.0], [46.0, -9.0]]
 		_:
 			# (A high top gets wider, sloping rocky flanks, not a wall.)
 			var sc := clampf(top / 5.0, 1.0, 4.0)
-			prof = [[0.0, top], [3.0 * sc, top - 0.5 - top * 0.25], [7.0 * sc, 0.1], [12.0 * sc, -2.3], [16.0 * sc, -6.5]]
-	var row := PackedVector3Array()
+			prof = [[0.0, top], [1.6 * sc, top - 0.3 - top * 0.12], [3.0 * sc, top - 0.5 - top * 0.3],
+				[5.0 * sc, lerpf(top, 0.1, 0.75)], [7.0 * sc, 0.1], [9.5 * sc, -1.0], [13.0 * sc, -3.2], [18.0 * sc, -9.0]]
+	var reach := BuildingMesher.shore_reach(L, p, nn) if L != null else 999.0
+	var ext: float = prof[-1][0]
+	var sc2 := minf(1.0, reach / maxf(ext, 0.01))
+	prof = BuildingMesher.fit_row(prof, reach)
 	for r in prof.size():
 		var d: float = prof[r][0]
 		var y: float = prof[r][1]
-		if k == 2 and r > 0:
+		if k == 2 and r > 0 and r < prof.size() - 1:
 			var hh := sin(p.x * 1.37 + p.y * 0.91 + r * 2.1) * 0.5 + sin(p.x * 0.43 - p.y * 1.7 + r) * 0.5
-			d += hh * 1.6
+			d += hh * 1.6 * sc2
 			y += hh * 0.45
 		row.append(Vector3(p.x + nn.x * d, y, p.y + nn.y * d))
+	SeabedMesh.tuck(row)
 	return row
 
 
@@ -541,17 +563,33 @@ func _trees(f: Dictionary) -> void:
 
 
 func _foam(f: Dictionary) -> void:
+	# (At the water's edge on each row: the sea is at -1.6.)
 	var o: PackedVector2Array = f["poly"]
 	var kinds: PackedByteArray = f["kinds"]
-	var edges: Array = []
-	var dist := [0.0, 18.0, 8.0]
+	var wl := PackedVector2Array()
+	var ok := PackedByteArray()
 	for i in o.size():
-		var k := kinds[i]
-		if k == 3:
+		var k := kinds[i] if kinds[i] != 3 else kinds[(i - 1 + o.size()) % o.size()]
+		var row := _row(f, o, i, k)
+		var q := o[i]
+		var found := 0
+		for j in row.size() - 1:
+			if row[j].y >= BuildingMesher.SEA_SURFACE and row[j + 1].y < BuildingMesher.SEA_SURFACE:
+				var v := row[j].lerp(row[j + 1], (row[j].y - BuildingMesher.SEA_SURFACE) / maxf(row[j].y - row[j + 1].y, 0.001))
+				q = Vector2(v.x, v.z)
+				found = 1
+				break
+		wl.append(q)
+		ok.append(found)
+	var edges: Array = []
+	for i in o.size():
+		if kinds[i] == 3:
 			continue
 		var j := (i + 1) % o.size()
-		var a := o[i] + SkyportIsland._out_n(o, i) * float(dist[k])
-		var b := o[j] + SkyportIsland._out_n(o, j) * float(dist[k])
+		if ok[i] == 0 or ok[j] == 0 or wl[i].distance_to(wl[j]) > 30.0:
+			continue
+		var a := wl[i]
+		var b := wl[j]
 		var dd := (b - a).normalized()
 		var on := Vector2(dd.y, -dd.x)
 		if on.dot(SkyportIsland._out_n(o, i)) < 0.0:

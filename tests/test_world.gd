@@ -319,3 +319,93 @@ func test_seabed_matches_the_coasts(t) -> void:
 	t.check(float(depth.call(mid_ch.x, mid_ch.z)) > 6.0, "deep in the channel off the strait (%.1f m)" % float(depth.call(mid_ch.x, mid_ch.z)))
 	SkyportIsland.enabled = was_s
 	Landforms.enabled = was_l
+
+
+## Every coast is finished (2026-11-18 coast overhaul): both city islands
+## have a sea wall and shore all round (Westbank had none – its whole coast
+## was skipped as if it were the strait quay, the esplanade ending in mid-air
+## over the sea floor), every shore row runs down through the sea surface
+## (-1.6: beaches built for a waterline at 0 stood 40 m of dry sand out into
+## coves), rows never fold back or reach past half the open water in front
+## (facing beaches crossed into sand ridges), headlands take over the city's
+## shore where they join it and meet it on one row, and the coast kit
+## (lookouts, jetties, viewpoints) is built.
+func test_every_coast_has_a_finished_shore(t) -> void:
+	var was_s := SkyportIsland.enabled
+	var was_l := Landforms.enabled
+	SkyportIsland.enabled = true
+	Landforms.enabled = true
+	var L0 := CityLayout.new().generate()
+	SkyportIsland.plan(L0)
+	Landforms._built = false
+	Landforms._forms = []
+	Landforms.forms(L0)
+	for L: CityLayout in [L0, L0.mainland]:
+		var nm := "Westbank" if L.is_mainland else "the Commercial Island"
+		L.shore_cache = []
+		var sr := BuildingMesher.shore_rows(L)
+		var smp: Array = sr[0]
+		var rows: Array = sr[1]
+		var covered: Array = sr[3]
+		t.check(smp.size() > 300, "%s has a shore all round (%d samples)" % [nm, smp.size()])
+		var dry := 0
+		var folds := 0
+		var inland := 0
+		var under := 0
+		var aprons := 0
+		for i in smp.size():
+			var row: Array = rows[i]
+			var p: Vector2 = smp[i][0]
+			var ext := Vector2((row[-1] as Vector3).x - p.x, (row[-1] as Vector3).z - p.y).length()
+			if ext < 0.5:
+				continue   # (the docks' plain quay)
+			aprons += 1
+			if covered[i]:
+				under += 1
+			if (row[-1] as Vector3).y > BuildingMesher.SEA_SURFACE - 0.5:
+				dry += 1
+			var last_d := -0.01
+			for v: Vector3 in row:
+				var d := Vector2(v.x - p.x, v.z - p.y).length()
+				if d < last_d - 0.05:
+					folds += 1
+					break
+				last_d = d
+			var end := Vector2((row[-1] as Vector3).x, (row[-1] as Vector3).z)
+			if ext > 3.0 and (Geometry2D.is_point_in_polygon(end, L.coast) or SkyportIsland.contains(end.x, end.y)):
+				inland += 1
+		t.check(aprons > 250, "%s: %d shore rows with an apron" % [nm, aprons])
+		t.check(dry == 0, "%s: every shore row reaches under the sea (%d end dry)" % [nm, dry])
+		t.check(folds == 0, "%s: no shore row folds back on itself (%d)" % [nm, folds])
+		t.check(inland == 0, "%s: no shore row ends on other land (%d)" % [nm, inland])
+		t.check(under > 10, "%s: headlands take over the shore where they join (%d samples)" % [nm, under])
+	# Headlands joined along a coast start their bands on the city's own row.
+	for f: Dictionary in Landforms.forms():
+		if not f.has("join"):
+			continue
+		var o: PackedVector2Array = f["poly"]
+		var lf := Landforms.new()
+		var r0 := lf._row(f, o, 0, 2)
+		var cr: Array = BuildingMesher.shore_row_at(f["L"], o[0])[0]
+		t.check(r0.size() == BuildingMesher.SHORE_ROWS + 1 and (r0[-1] as Vector3).is_equal_approx(cr[-1]),
+			"%s meets the city's shore on one row" % f["name"])
+		lf.free()
+	# Skyport: beaches and rock run under the sea, none crosses a cove.
+	var o2 := SkyportIsland.outline()
+	var sdry := 0
+	var sin_land := 0
+	for i in o2.size():
+		var row := SkyportIsland._blend_row(o2, i)
+		if row[-1].y > BuildingMesher.SEA_SURFACE - 0.3:
+			sdry += 1
+		var end := Vector2(row[-1].x, row[-1].z)
+		if end.distance_to(o2[i]) > 3.0 and Geometry2D.is_point_in_polygon(end, o2):
+			sin_land += 1
+	t.check(sdry == 0, "Skyport: every shore row reaches under the sea (%d dry)" % sdry)
+	t.check(sin_land == 0, "Skyport: no shore row ends back on the island (%d)" % sin_land)
+	# The places to go.
+	var counts := CoastKit.new(L0).build()
+	t.check(int(counts["lookout"]) >= 3 and int(counts["jetty"]) >= 3 and int(counts["viewpoint"]) >= 3,
+		"the Commercial Island's coast has lookouts, jetties and viewpoints (%s)" % [counts])
+	SkyportIsland.enabled = was_s
+	Landforms.enabled = was_l

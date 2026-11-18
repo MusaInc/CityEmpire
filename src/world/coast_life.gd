@@ -115,11 +115,13 @@ func _beach() -> void:
 			_lifeguard(k, p + n * 34.0, n, t, _sand_y(sm, 34.0))
 		elif posmod(int(s / 7.5), 17) == 5:
 			_net(k, q, t, y)
-		elif rng.randf() < 0.8:
+		elif rng.randf() < 0.8 and y > -1.1:
 			_umbrella(k, q, n, t, y, UMBRELLAS[rng.randi() % UMBRELLAS.size()])
 		if rng.randf() < 0.45:
 			var d2 := rng.randf_range(54.0, 64.0)
-			_umbrella(k, p + n * d2 + t * 3.5, n, t, _sand_y(sm, d2), UMBRELLAS[rng.randi() % UMBRELLAS.size()])
+			var y2 := _sand_y(sm, d2)
+			if y2 > -1.1:   # (dry sand only: the sea is at -1.6)
+				_umbrella(k, p + n * d2 + t * 3.5, n, t, y2, UMBRELLAS[rng.randi() % UMBRELLAS.size()])
 
 
 func _steps(k: Dictionary, p: Vector2, n: Vector2, t: Vector2, top: float, sand: float) -> void:

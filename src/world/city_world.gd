@@ -167,6 +167,17 @@ func _ready() -> void:
 		# (Also before the ground: the quay railing opens where land joins.)
 		Landforms.forms(layout)
 		BuildingMesher.rail_gaps.append_array(Landforms.rail_gaps())
+	# (The shore apron's rows, once, on this thread: chunk builders only read them.)
+	BuildingMesher.shore_rows(layout)
+	if Landforms.enabled:
+		# Lookouts, cove steps, jetties, quay ladders, headland viewpoints
+		# (before collision and structures; they open the railing).
+		BuildingMesher.rail_gaps.append_array(CoastKit.gaps)
+		var ck := CoastKit.new(layout).build()
+		print("CoastKit%s: %s" % [" (mainland)" if layout.is_mainland else "", ck])
+		if OS.get_cmdline_user_args().has("--coast-places"):
+			for pl: Array in CoastKit.places:
+				print("COAST_PLACE %s %.1f %.1f %.1f %.3f %.3f" % [pl[0], pl[1].x, pl[1].y, pl[1].z, pl[2].x, pl[2].y])
 	_by_chunk = layout.buildings_by_chunk()
 	_props_by_chunk = layout.props_by_chunk()
 	var settings := get_node_or_null("/root/Settings")
@@ -1404,7 +1415,10 @@ func outer_ground_rects() -> Array:
 func _build_water() -> void:
 	# Foam along the sea walls and quays (one transparent strip).
 	if layout.coast.size() >= 3:
-		add_child(Shoreline.build(Shoreline.polygon_edges(layout.coast)))
+		# (Along the water's edge out on the beaches and rocks; it used to
+		# follow the sea wall, buried under the shore.)
+		var fe: Array = BuildingMesher.waterline_edges(layout) if Landforms.enabled else Shoreline.polygon_edges(layout.coast)
+		add_child(Shoreline.build(fe))
 	var m := BuildingMesher.new()
 	for w in layout.water:
 		if w in layout.basins:

@@ -401,19 +401,25 @@ static func waterline_edges() -> Array:
 	# (Where each shore row crosses the sea surface: beaches and rock blend
 	# and vary in width, so the waterline is read off the row itself.)
 	var wl := PackedVector2Array()
+	var ok := PackedByteArray()
 	for i in o.size():
 		var row := _blend_row(o, i)
 		var q := o[i]
+		var found := 0
 		for j in row.size() - 1:
-			if row[j].y >= 0.0 and row[j + 1].y < 0.0:
-				var t := row[j].y / maxf(row[j].y - row[j + 1].y, 0.001)
+			if row[j].y >= BuildingMesher.SEA_SURFACE and row[j + 1].y < BuildingMesher.SEA_SURFACE:
+				var t := (row[j].y - BuildingMesher.SEA_SURFACE) / maxf(row[j].y - row[j + 1].y, 0.001)
 				var v := row[j].lerp(row[j + 1], t)
 				q = Vector2(v.x, v.z)
+				found = 1
 				break
 		wl.append(q)
+		ok.append(found)
 	for i in o.size():
 		var a := wl[i]
 		var b := wl[(i + 1) % o.size()]
+		if ok[i] == 0 or ok[(i + 1) % o.size()] == 0 or a.distance_to(b) > 40.0:
+			continue
 		var dd := (b - a).normalized()
 		var on := Vector2(dd.y, -dd.x)
 		if on.dot(_out_n(o, i)) < 0.0:
@@ -2225,7 +2231,10 @@ static func _blend_row(o: PackedVector2Array, i: int) -> PackedVector3Array:
 	return _row_as(o, i, _sandiness(o, i))
 
 
-## Point i's row with sandiness sd (−1: a quay wall).
+## Point i's row with sandiness sd (−1: a quay wall). Clamped to under half
+## the open water in front (a narrow cove's two beaches used to cross and
+## stand up as a sand ridge over the water and the grass), its last point
+## tucked under the baked sea floor.
 static func _row_as(o: PackedVector2Array, i: int, sd: float) -> PackedVector3Array:
 	if sd < 0.0:
 		return _shore_row(o, i, 0)
@@ -2236,7 +2245,44 @@ static func _row_as(o: PackedVector2Array, i: int, sd: float) -> PackedVector3Ar
 	var t := smoothstep(0.0, 1.0, sd)
 	for j in bch.size():
 		row.append(rck[j].lerp(bch[j], t))
+	var p := o[i]
+	var nn := _out_n(o, i)
+	var prof: Array = []
+	for v in row:
+		prof.append([nn.dot(Vector2(v.x, v.z) - p), v.y])
+	prof = BuildingMesher.fit_row(prof, _reach_at(o, i))
+	var side: Array = []
+	for v in row:
+		side.append(Vector2(v.x, v.z) - p - nn * nn.dot(Vector2(v.x, v.z) - p))
+	for j in row.size():
+		var q: Vector2 = p + nn * float(prof[j][0]) + (side[j] as Vector2)
+		row[j] = Vector3(q.x, float(prof[j][1]), q.y)
+	SeabedMesh.tuck(row, xform())
 	return row
+
+
+static var _reach := PackedFloat32Array()
+
+
+## How far point i's shore may reach: under half the distance to the next
+## land along its normal (this island across a cove, a city, a landform).
+static func _reach_at(o: PackedVector2Array, i: int) -> float:
+	if _reach.size() != o.size():
+		_reach.resize(o.size())
+		for k in o.size():
+			var p := o[k]
+			var nn := _out_n(o, k)
+			var r := 200.0
+			var t := 4.0
+			while t < 400.0:
+				var q := p + nn * t
+				var wq := w2(q)
+				if Geometry2D.is_point_in_polygon(q, o) or (Landforms.enabled and Landforms.contains(wq.x, wq.y)):
+					r = t * 0.45
+					break
+				t += 3.0 if t < 80.0 else 8.0
+			_reach[k] = r
+	return _reach[i]
 
 
 ## Shore geometry into st (sand / rock / concrete, UV2.y = -1 marks shore for
@@ -2258,8 +2304,8 @@ func _shore_bands(st: SurfaceTool) -> PackedVector3Array:
 		for vi in 3:
 			var v: Vector3 = q[vi]
 			var c: Color = cs[vi]
-			if v.y < 0.4 and c.r > 0.7:
-				c = c.darkened(0.28)   # wet sand
+			if v.y < -1.2 and c.r > 0.7:
+				c = c.darkened(0.28)   # wet sand (the sea is at -1.6)
 			c.a = 0.5 / 8.0
 			st.set_color(c)
 			st.set_normal(nrm)
@@ -2723,8 +2769,16 @@ func _build_airport_dressing() -> void:
 	for end: Array in [[a.x, -1.0], [b.x, 1.0]]:
 		for k in 6:
 			var ax: float = float(end[0]) + float(end[1]) * (30.0 + k * 30.0)
-			m.solid(ax - 0.4, a.z - 8.0, ax + 0.4, a.z + 8.0, LAND_Y - 4.0 + 3.0, LAND_Y + 0.6, Color(0.35, 0.36, 0.38))
-			m.solid(ax - 0.3, a.z - 0.3, ax + 0.3, a.z + 0.3, SEA_Y - 2.0, LAND_Y, Color(0.35, 0.36, 0.38))
+			# (A steel gantry on three piles, lamps along the top – the bar
+			# used to float over the sea on one thin post.)
+			var grey := Color(0.42, 0.43, 0.45)
+			m.solid(ax - 0.25, a.z - 8.0, ax + 0.25, a.z + 8.0, LAND_Y + 0.1, LAND_Y + 0.45, grey)
+			for lz: float in [-6.5, 0.0, 6.5]:
+				m.solid(ax - 0.45, a.z + lz - 0.45, ax + 0.45, a.z + lz + 0.45, SEA_Y - 3.0, SEA_Y + 0.6, Color(0.3, 0.3, 0.29))
+				m.solid(ax - 0.18, a.z + lz - 0.18, ax + 0.18, a.z + lz + 0.18, SEA_Y + 0.6, LAND_Y + 0.1, grey)
+			for li in 7:
+				var lz2 := -7.2 + li * 2.4
+				m.solid(ax - 0.3, a.z + lz2 - 0.3, ax + 0.3, a.z + lz2 + 0.3, LAND_Y + 0.45, LAND_Y + 0.75, Color(0.98, 0.95, 0.85))
 	# Ground service: tugs and baggage carts by the stands.
 	for s: Array in plan_data["stands"]:
 		var p: Vector3 = s[0]

@@ -105,6 +105,8 @@ var is_mainland := false
 ## The mainland's layout, on the island's (CityWorld sets it): is_water and
 ## ground_y answer for both lands.
 var mainland: CityLayout
+## BuildingMesher.shore_rows: the shore apron's rows, computed once.
+var shore_cache: Array = []
 var _plant_candidates: Array = []  # rooftop cooling towers, placed last (_place_plant)
 var _sites: Array = []         # [Rect2 (local), district, rot, pivot] construction lots, built after the blocks
 var _block_grid := {}          # Vector2i (BLOCK_CELL cells) -> block indices
