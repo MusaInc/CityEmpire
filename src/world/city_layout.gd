@@ -112,6 +112,51 @@ const BLOCK_CELL := 40.0
 const BOUNDS := Rect2(30.0, -656.0, 1000.0, 1271.0)
 
 
+## Every streetlight's bracket over the road: turned (about its column, which
+## stays where it is) so the lantern - CityWorld.LAMP_HEAD, on the model's -Z
+## side - points at the nearest road centreline within 20 m. Several placement
+## routines added a quarter turn, so ~94% of lamps hung their lantern along
+## the pavement instead of over the carriageway (tools/lamp_audit.gd).
+func aim_streetlights() -> void:
+	const CELL := 40.0
+	var grid := {}
+	for r: Dictionary in roads.roads:
+		var pts: PackedVector2Array = r["pts"]
+		for j in pts.size() - 1:
+			var a: Vector2 = pts[j]
+			var b: Vector2 = pts[j + 1]
+			var lo := Vector2i(floori(minf(a.x, b.x) / CELL), floori(minf(a.y, b.y) / CELL))
+			var hi := Vector2i(floori(maxf(a.x, b.x) / CELL), floori(maxf(a.y, b.y) / CELL))
+			for cx in range(lo.x, hi.x + 1):
+				for cy in range(lo.y, hi.y + 1):
+					var k := Vector2i(cx, cy)
+					if not grid.has(k):
+						grid[k] = []
+					(grid[k] as Array).append([a, b])
+	for i in props.size():
+		if String(props[i][0]) != "streetlight":
+			continue
+		var xf: Transform3D = props[i][1]
+		if xf.origin.y > ground_y(xf.origin.x, xf.origin.z) + 2.5:
+			continue   # (on a bridge or viaduct: its own routine aims it at the deck)
+		var o := Vector2(xf.origin.x, xf.origin.z)
+		var c := Vector2i(floori(o.x / CELL), floori(o.y / CELL))
+		var best := 20.0
+		var bp := Vector2.INF
+		for dx in range(-1, 2):
+			for dy in range(-1, 2):
+				for seg in grid.get(c + Vector2i(dx, dy), []):
+					var q := Geometry2D.get_closest_point_to_segment(o, seg[0], seg[1])
+					var dd := q.distance_to(o)
+					if dd < best:
+						best = dd
+						bp = q
+		if bp == Vector2.INF or best < 0.5:
+			continue
+		var v := (bp - o).normalized()
+		props[i] = ["streetlight", Transform3D(Basis(Vector3.UP, atan2(-v.x, -v.y)), xf.origin)]
+
+
 func generate(p_seed := 1207) -> CityLayout:
 	seed = p_seed
 	rng.seed = seed
@@ -162,6 +207,9 @@ func generate(p_seed := 1207) -> CityLayout:
 	if SkyportIsland.enabled:
 		for ln: Dictionary in SkyportIsland.plan(self).get("rail", []):
 			rail.lines.append(ln)
+	aim_streetlights()
+	if mainland != null:
+		mainland.aim_streetlights()
 	return self
 
 

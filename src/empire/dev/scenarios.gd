@@ -264,6 +264,11 @@ func scenario_xa() -> void:
 	var road_obstacles: Array = []
 	var clearance := BoxShape3D.new()
 	clearance.size = Vector3(2.0, 1.4, 3.0)
+	# (Your own cars aren't road obstructions: an earlier scenario - XA's
+	# drive - leaves one stopped on an island road.)
+	var own: Array[RID] = []
+	for c in game.cars.values():
+		own.append((c as CollisionObject3D).get_rid())
 	for rd in game.skyport.wplan["roads"]:
 		if rd[3]:
 			continue
@@ -279,9 +284,12 @@ func scenario_xa() -> void:
 					var query := PhysicsShapeQueryParameters3D.new()
 					query.shape = clearance
 					query.collision_mask = 1
+					query.exclude = own
 					query.transform = Transform3D(Basis(Vector3.UP, atan2(-direction.x, -direction.z)), centre + Vector3(-direction.z, 0, direction.x) * offset + Vector3.UP * 1.1)
-					if not game.get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty():
-						road_obstacles.append("%s at %s" % [rd[0], centre])
+					var hits := game.get_world_3d().direct_space_state.intersect_shape(query, 1)
+					if not hits.is_empty():
+						var co: Object = hits[0]["collider"]
+						road_obstacles.append("%s at %s (%s)" % [rd[0], centre, (co as Node).get_path() if co is Node else str(co)])
 				k += 2.0
 	var r2 := _audit_line(island_pts, func(p): return SkyportIsland.LAND_Y + 0.3)   # (all flat)
 	check(int(r2[0]) == 0 and int(r2[1]) == 0, "island roads: %d steps, %d holes over %d samples" % [r2[0], r2[1], island_pts.size()])

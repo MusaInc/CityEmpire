@@ -853,7 +853,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 						var smat := wm.surface_get_material(si)
 						var sn := String(smat.resource_name) if smat else ""
 						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si), 0, wxf)
-			return _commit_traffic(tools, looks, shader)
+			return _commit_traffic(tools, looks, shader, -float(d["L"]) * 0.5, float(d["W"]))
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -871,11 +871,36 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
 			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(tyre, 0, xf)
 			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(hub, 0, xf)
-	return _commit_traffic(tools, looks, shader)
+	return _commit_traffic(tools, looks, shader, -float(d["L"]) * 0.5, float(d["W"]))
 
 
-func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader) -> ArrayMesh:
+const BEAM_SHADER := preload("res://src/world/shaders/traffic_beam.gdshader")
+
+
+## The headlight beam: a widening quad on the road ahead of the bumper,
+## UV.y 0 at the car .. 1 at the far end (traffic_beam.gdshader).
+static func _beam_quad(st: SurfaceTool, front_z: float, w: float) -> void:
+	var y := 0.04
+	var n0 := Vector3(-w * 0.45, y, front_z - 0.4)
+	var n1 := Vector3(w * 0.45, y, front_z - 0.4)
+	var f0 := Vector3(-w * 1.7, y, front_z - 17.0)
+	var f1 := Vector3(w * 1.7, y, front_z - 17.0)
+	for q in [[n0, Vector2(0, 0)], [n1, Vector2(1, 0)], [f1, Vector2(1, 1)], [n0, Vector2(0, 0)], [f1, Vector2(1, 1)], [f0, Vector2(0, 1)]]:
+		st.set_normal(Vector3.UP)
+		st.set_uv(q[1])
+		st.add_vertex(q[0])
+
+
+func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front_z := 0.0, width := 0.0) -> ArrayMesh:
 	var out := ArrayMesh.new()
+	if width > 0.0:
+		var bst := SurfaceTool.new()
+		bst.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_beam_quad(bst, front_z, width)
+		bst.commit(out)
+		var bm := ShaderMaterial.new()
+		bm.shader = BEAM_SHADER
+		out.surface_set_material(0, bm)
 	for g in tools:
 		var look: Array = looks[g]
 		(tools[g] as SurfaceTool).commit(out)
@@ -918,15 +943,23 @@ func _legacy_car_mesh(name: String, shader: Shader) -> Mesh:
 static func _car_far_mesh(full: Mesh) -> Mesh:
 	var paint: Material
 	var glass: Material
+	var bb := AABB()
+	var first := true
 	for i in full.get_surface_count():
 		var m := full.surface_get_material(i) as ShaderMaterial
-		if m == null:
-			continue
+		if m == null or m.shader == BEAM_SHADER:
+			continue   # (the headlight beam: not part of the body's size or looks)
+		var verts: PackedVector3Array = full.surface_get_arrays(i)[Mesh.ARRAY_VERTEX]
+		for v in verts:
+			if first:
+				bb = AABB(v, Vector3.ZERO)
+				first = false
+			else:
+				bb = bb.expand(v)
 		if m.get_shader_parameter("use_instance_color"):
 			paint = m
-		elif is_equal_approx(float(m.get_shader_parameter("roughness")), 0.25):
+		elif is_equal_approx(float(m.get_shader_parameter("roughness") if m.get_shader_parameter("roughness") != null else 0.0), 0.25):
 			glass = m
-	var bb := full.get_aabb()
 	var h := bb.size.y
 	var c := bb.get_center()
 	var out := ArrayMesh.new()
@@ -1839,7 +1872,10 @@ func _add_lamp_glow(root: Node3D, lamps: Array) -> void:
 			var xf: Transform3D = lamps[j]
 			var head := xf * LAMP_HEAD
 			var at := Vector3(head.x, xf.origin.y + 0.03, head.z) if mode == 0 else head
-			mm.set_instance_transform(j, Transform3D(Basis(), at))
+			# The pool is an oval along the road (the lamp's local X), wider
+			# than it is deep, like a real road lantern's throw.
+			var pb := Basis(Vector3.UP, xf.basis.get_euler().y).scaled(Vector3(1.9, 1.0, 1.25)) if mode == 0 else Basis()
+			mm.set_instance_transform(j, Transform3D(pb, at))
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "LampPools" if mode == 0 else "LampHalos"
 		mmi.multimesh = mm

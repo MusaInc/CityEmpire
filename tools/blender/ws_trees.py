@@ -218,6 +218,8 @@ def finish(m, name):
             else:
                 n = poly.normal.copy()
             normals[li] = n
+    for poly in me.polygons:
+        poly.use_smooth = True   # (flat faces export face normals: the crowns came out faceted)
     me.normals_split_custom_set(normals)
     ob = bpy.data.objects.new(name, me)
     bpy.context.scene.collection.objects.link(ob)

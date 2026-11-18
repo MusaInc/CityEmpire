@@ -418,7 +418,10 @@ func _after_start() -> void:
 			mm.use_custom_data = true
 			mm.mesh = mesh
 			mm.instance_count = 1
-			mm.buffer = CityWorld._instance_buffer([[Transform3D(b, at + b.z * 5.0), Color(0.0, 5.0, 10.0, 0.0),
+			# ("fleet=beams": crawling at 1 mm/s so the night headlight beams
+			# show - parked cars keep theirs off.)
+			var spd := 0.001 if lod == "beams" else 0.0
+			mm.buffer = CityWorld._instance_buffer([[Transform3D(b, at + b.z * 5.0), Color(spd, 5.0, 10.0, 0.0),
 				CityWorld.kind_colour(k, CityWorld.CAR_COLORS[k % CityWorld.CAR_COLORS.size()])]])
 			mm.custom_aabb = AABB(base - Vector3(40, 10, 40), Vector3(80, 25, 80))   # (instances are in world space)
 			var mmi := MultiMeshInstance3D.new()

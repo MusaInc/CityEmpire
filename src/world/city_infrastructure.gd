@@ -67,7 +67,9 @@ static func bridge_landing(l: CityLayout) -> void:
 		if i % 7 == 1:
 			for sg: float in [-1.0, 1.0]:
 				var p := a + side * sg * 8.9
-				l.props.append(["streetlight", Transform3D(Basis(Vector3.UP, atan2(d.x, d.z) + (PI if sg > 0 else 0)), p)])
+				# (bracket towards the deck's centre line, across the bridge)
+				var to_deck := -side * sg
+				l.props.append(["streetlight", Transform3D(Basis(Vector3.UP, atan2(-to_deck.x, -to_deck.z)), p)])
 
 static func bridge_height(l: CityLayout, x: float) -> float:
 	if x <= 56.0 or l.bridge_ramp.is_empty():

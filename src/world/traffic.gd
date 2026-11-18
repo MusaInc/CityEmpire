@@ -30,6 +30,7 @@ const TURN_P := 0.28       # chance of turning off at a side street
 const JOIN_R := 24.0       # m: how far a lane end looks for lanes to join
 const NO_STOP := 1.0e9
 const PATH_SHADER := preload("res://src/world/shaders/traffic_path.gdshader")
+const PATH_BEAM_SHADER := preload("res://src/world/shaders/traffic_path_beam.gdshader")
 const LANE_V := {"ring": 13.0, "major": 12.0, "minor": 9.0, "roundabout": 8.0}
 const SPACING := 140.0     # m of lane per car at density 1 (was 72: quieter roads for the detailed civilian cars)
 
@@ -920,7 +921,7 @@ func _make_groups(meshes: Array, far_meshes: Array, mid_meshes: Array) -> void:
 				var old := m.surface_get_material(i) as ShaderMaterial
 				if old:
 					var sm := ShaderMaterial.new()
-					sm.shader = PATH_SHADER
+					sm.shader = PATH_BEAM_SHADER if old.shader == CityWorld.BEAM_SHADER else PATH_SHADER
 					for p in ["tint", "use_instance_color", "emission", "roughness"]:
 						sm.set_shader_parameter(p, old.get_shader_parameter(p))
 					sm.set_shader_parameter("lane_tex", _tex)

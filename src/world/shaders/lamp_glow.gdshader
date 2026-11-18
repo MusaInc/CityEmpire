@@ -29,7 +29,9 @@ void fragment() {
 	float r = length(UV - 0.5) * 2.0;
 	float a;
 	if (mode == 0) {
-		a = pow(clamp(1.0 - r, 0.0, 1.0), 2.2) * 0.42;
+		// A broad, soft throw (most of it at the lamp, a long tail to the
+		// edge) rather than a hot spot under the lantern.
+		a = (pow(clamp(1.0 - r, 0.0, 1.0), 1.5) * 0.3 + pow(clamp(1.0 - r, 0.0, 1.0), 4.0) * 0.18);
 		a *= 1.0 + 0.6 * wetness;  // wet streets throw more of it back
 	} else {
 		a = pow(clamp(1.0 - r, 0.0, 1.0), 3.0) * (0.9 + 0.5 * rain);
