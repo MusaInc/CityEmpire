@@ -400,6 +400,13 @@ func bake_field(cell := 1.5) -> void:
 	for r in roads:
 		var pts := _simplify(r["pts"], 0.25)
 		var hw: float = float(r["w"]) * 0.5
+		if String(r.get("name", "")).ends_with("Approach") and pts.size() >= 2:
+			# A bridge approach's junction box reaches over the coast road's
+			# far lanes to just short of its far kerb (field only): ending at
+			# the centre line, the box's edge wandered across the far edge line
+			# and cut it into squiggles (2026-11-18 bridge-end renders).
+			pts = pts.duplicate()
+			pts[0] -= (pts[1] - pts[0]).normalized() * (RING_W * 0.5 - 3.0)
 		# (A roundabout's ring: its half width carries +0.25 m as a flag – real
 		# half widths are whole half-metres – so the ground paints it one-way.)
 		if r.get("ring", false):

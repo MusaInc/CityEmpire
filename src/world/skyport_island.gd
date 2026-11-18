@@ -1120,10 +1120,16 @@ static func _plan_landing(layout: CityLayout, city: CityLayout, S2: Vector2, u2:
 			al += 0.5
 		var p0: Vector2 = at.call(a_start, c)
 		var h0 := city.terrain.road_y(p0.x, p0.y)
+		# Leave the street on its own grade (a sloping coast road met an eased,
+		# level start: a 6 % sag that bounced cars at 34 m/s); the extra term
+		# fades out with zero slope by the deck.
+		var pb: Vector2 = at.call(a_start - 3.0, c)
+		var g0 := clampf((h0 - city.terrain.road_y(pb.x, pb.y)) / 3.0, -0.08, 0.08)
 		var h := PackedFloat32Array()
 		for i in row.size():
 			var t := (row[i] - a_start) / -a_start
-			var v := lerpf(h0, y_es, _ease_grade(clampf(t, 0.0, 1.0)))
+			var tc := clampf(t, 0.0, 1.0)
+			var v := lerpf(h0, y_es, _ease_grade(tc)) + g0 * (row[i] - a_start) * (1.0 - tc) * (1.0 - tc)
 			for f: Array in fine:
 				v = maxf(v, float(f[1]) - LAND_GRADE * absf(float(f[0]) - row[i]))
 			h.append(v)
@@ -1589,7 +1595,7 @@ func _start_near() -> void:
 		func(): SkyportAirport.build_car_park(near_root, body, self),
 		func(): SkyportAirport.build_apron_kit(plan_data, near_root, self),
 		func(): SkyportAirport.build_circus(plan_data, near_root, self, _circus_arms()),
-		func(): _near(_build_industry), func(): _near(_build_trees),
+		func(): _near(_build_industry), func(): _near(_build_trees), func(): _near(_build_beach_life),
 		func():
 			var at := AirTraffic.new()
 			at.name = "AirTraffic"
@@ -2297,9 +2303,16 @@ func _shore_bands(st: SurfaceTool) -> PackedVector3Array:
 		if sd < 0.0:
 			return quay_c
 		return rock_c.lerp(sand_c, smoothstep(0.35, 0.65, sd))
+	var out_dir := [Vector2.ZERO]   # (the stretch's outward normal: lambdas capture by value)
 	var put := func(q: Array, cs: Array) -> void:
 		var nrm := ((q[2] as Vector3) - (q[0] as Vector3)).cross((q[1] as Vector3) - (q[0] as Vector3)).normalized()
-		if nrm.y < -0.01:
+		var od: Vector2 = out_dir[0]
+		if absf(nrm.y) < 0.5 and od != Vector2.ZERO:
+			# Walls face the sea (a vertical face's sign was arbitrary: half
+			# the quays were lit from behind - flat black from the water).
+			if Vector2(nrm.x, nrm.z).dot(od) < 0.0:
+				nrm = -nrm
+		elif nrm.y < -0.01:
 			nrm = -nrm
 		for vi in 3:
 			var v: Vector3 = q[vi]
@@ -2325,6 +2338,7 @@ func _shore_bands(st: SurfaceTool) -> PackedVector3Array:
 		var cb: Color = colour.call(s2)
 		var A := _row_as(o, i, s1)
 		var B := _row_as(o, i2, s2)
+		out_dir[0] = (_out_n(o, i) + _out_n(o, i2)).normalized()
 		if (s1 < 0.0) != (s2 < 0.0):
 			# Quay meets natural shore: run this stretch with point i's own
 			# profile, then close the step to point i2's with rock.
@@ -2884,6 +2898,133 @@ func _build_marina(street: StaticBody3D) -> void:
 	m.solid(1386, -300, 1400, -190, 0.6, LAND_Y, Color(0.7, 0.7, 0.68))
 	CityWorld._add_box(street, AABB(Vector3(1386, 0.0, -300), Vector3(14, LAND_Y, 110)))
 	_mesh(m, "Marina", 0.0, 1400.0)
+
+
+## Life on Skyport's beaches (2026-11-18: they were empty sand blobs):
+## umbrellas over towels and sun loungers in loose groups along the dry
+## sand, lifeguard towers on stilts every ~160 m, windbreaks. One mesh.
+func _build_beach_life() -> void:
+	var o := outline()
+	var n := o.size()
+	var m := BuildingMesher.new()
+	var cols := [Color(0.92, 0.25, 0.22), Color(0.98, 0.82, 0.25), Color(0.22, 0.52, 0.86), Color(0.2, 0.68, 0.55),
+		Color(0.95, 0.55, 0.2), Color(0.85, 0.35, 0.6)]
+	var white := Color(0.95, 0.95, 0.93)
+	var run := 0.0
+	var next_slot := 6.0
+	var next_tower := 60.0
+	for i in n:
+		var i2 := (i + 1) % n
+		var seg := o[i].distance_to(o[i2])
+		var sd := _sandiness(o, i)
+		var sd2 := _sandiness(o, i2)
+		if sd < 0.85 or sd2 < 0.85:
+			run += seg
+			next_slot = run + 6.0
+			continue
+		var A := _row_as(o, i, sd)
+		var B := _row_as(o, i2, sd2)
+		if A.size() < 3 or B.size() < 3:
+			run += seg
+			continue
+		var s0 := run
+		run += seg
+		while next_slot < run:
+			var f := (next_slot - s0) / seg
+			var h := hash(Vector2i(int(next_slot), 7)) % 1000 / 1000.0
+			var h2 := hash(Vector2i(int(next_slot), 13)) % 1000 / 1000.0
+			var want_tower := next_slot >= next_tower
+			next_slot += 9.0 + h2 * 6.0
+			# Across the dry sand: between the top row (1) and the swash (2).
+			var t := 0.25 + 0.5 * h2 if not want_tower else 0.15
+			var r1 := A[1].lerp(B[1], f)
+			var r2 := A[2].lerp(B[2], f)
+			var q := r1.lerp(r2, t)
+			var wq := w(q)
+			if over_bridge_shore(wq.x, wq.z) or under_bridge(wq.x, wq.z):
+				continue
+			var down := (r2 - r1)
+			down.y = 0.0
+			down = down.normalized()                         # towards the sea
+			var side := Vector3(-down.z, 0.0, down.x)
+			var col: Color = cols[int(h * 97.0) % cols.size()]
+			if want_tower:
+				next_tower = next_slot + 150.0
+				_lifeguard(m, q, down, side)
+				continue
+			if h < 0.42:
+				_umbrella(m, q, col, white)
+				for k in 2:
+					var tq := q + side * (-1.1 + 2.2 * k) + down * 0.6
+					_bx(m, tq - down * 0.9 + Vector3.UP * 0.03, tq + down * 0.9 + Vector3.UP * 0.03, 0.85, 0.03,
+						cols[(int(h * 97.0) + 1 + k * 2) % cols.size()])
+			elif h < 0.66:
+				_umbrella(m, q, col, white)
+				for k in 2:
+					var lq := q + side * (-0.9 + 1.8 * k) + down * 0.3
+					_lounger(m, lq, down, side, white if k == 0 else Color(0.25, 0.45, 0.7))
+			elif h < 0.78:
+				# A striped windbreak and a towel in its lee.
+				for k in 4:
+					var wa := q + side * (-1.8 + k * 1.2)
+					var wb := wa + side * 1.2
+					_bx(m, wa + Vector3.UP * 0.55, wb + Vector3.UP * 0.55, 0.03, 1.1, col if k % 2 == 0 else white)
+					_bx(m, wa + Vector3.DOWN * 0.2, wa + Vector3.UP * 1.15, 0.05, 0.05, Color(0.55, 0.42, 0.3))
+				_bx(m, q + down * 0.4 - side * 0.9 + Vector3.UP * 0.03, q + down * 0.4 + side * 0.9 + Vector3.UP * 0.03, 0.85, 0.03,
+					cols[(int(h * 97.0) + 3) % cols.size()])
+	_mesh(m, "BeachLife", 0.0, 700.0)
+
+
+func _umbrella(m: BuildingMesher, q: Vector3, col: Color, white: Color) -> void:
+	_bx(m, q + Vector3.DOWN * 0.3, q + Vector3.UP * 2.3, 0.06, 0.06, white)
+	# A shallow cone in three tiers, panels alternating with white.
+	for tier in 3:
+		var r := 1.35 - tier * 0.45
+		var y0 := 2.08 + tier * 0.11
+		var ring := PackedVector2Array()
+		for a in 8:
+			ring.append(Vector2(q.x, q.z) + Vector2.from_angle(TAU * (a + 0.5) / 8.0) * r)
+		m.prism(ring, q.y + y0, q.y + y0 + 0.11, col if tier != 1 else col.lerp(white, 0.75))
+
+
+func _lounger(m: BuildingMesher, q: Vector3, down: Vector3, side: Vector3, col: Color) -> void:
+	var frame := Color(0.85, 0.85, 0.82)
+	var foot := q + down * 0.8
+	var hip := q - down * 0.2
+	var head := q - down * 0.85 + Vector3.UP * 0.45
+	_bx(m, foot + Vector3.UP * 0.32, hip + Vector3.UP * 0.32, 0.62, 0.07, col)
+	_bx(m, hip + Vector3.UP * 0.32, head + Vector3.UP * 0.32, 0.62, 0.07, col)
+	for p: Vector3 in [foot, hip - down * 0.1]:
+		for sg: float in [-1.0, 1.0]:
+			var l := p + side * sg * 0.27
+			_bx(m, l, l + Vector3.UP * 0.3, 0.05, 0.05, frame)
+
+
+## A lifeguard tower: a hut on four stilts with a ramp, red roof and flag.
+func _lifeguard(m: BuildingMesher, q: Vector3, down: Vector3, side: Vector3) -> void:
+	var white := Color(0.94, 0.94, 0.9)
+	var red := Color(0.85, 0.18, 0.15)
+	var deck := q.y + 2.2
+	for a: float in [-1.0, 1.0]:
+		for b: float in [-1.0, 1.0]:
+			var l := q + down * a * 1.1 + side * b * 1.1
+			_bx(m, Vector3(l.x, q.y - 0.5, l.z), Vector3(l.x, deck, l.z), 0.18, 0.18, white)
+	var c := Vector3(q.x, deck, q.z)
+	_bx(m, c - down * 1.5, c + down * 1.7, 3.0, 0.15, Color(0.55, 0.42, 0.3))
+	_bx(m, c - down * 1.1 + Vector3.UP * 1.1, c + down * 0.9 + Vector3.UP * 1.1, 2.4, 2.0, white)
+	_bx(m, c + down * 0.88 + Vector3.UP * 1.3, c + down * 0.93 + Vector3.UP * 1.3, 1.9, 0.8, Color(0.2, 0.28, 0.33))   # window
+	_bx(m, c - down * 1.5 + Vector3.UP * 2.2, c + down * 1.4 + Vector3.UP * 2.2, 3.0, 0.25, red)
+	# Ramp down the land side, a rail on the sea side, a flag.
+	_bx(m, c - down * 1.5 + Vector3.UP * 0.05, q - down * 4.8 + Vector3.UP * 0.05, 1.0, 0.1, Color(0.55, 0.42, 0.3))
+	_bx(m, c + down * 1.65 + Vector3.UP * 0.5 - side * 1.4, c + down * 1.65 + Vector3.UP * 0.5 + side * 1.4, 0.06, 0.06, white)
+	var fp := c + side * 1.3 + down * 1.2
+	_bx(m, fp, fp + Vector3.UP * 4.2, 0.06, 0.06, white)
+	_bx(m, fp + Vector3.UP * 3.7 + down * 0.05, fp + Vector3.UP * 3.7 + side * 1.0, 0.03, 0.55, red)
+
+
+## A capped box (short pieces show their ends).
+static func _bx(m: BuildingMesher, a: Vector3, b: Vector3, wd: float, ht: float, col: Color) -> void:
+	m.beam(a, b, wd, ht, col, BuildingMesher.KIND_TRIM, true)
 
 
 ## Street trees along Skyport Avenue and Tower Road, and clumps in the

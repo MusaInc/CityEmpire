@@ -330,8 +330,17 @@ static func _station(m: BuildingMesher, body: StaticBody3D, line: Dictionary, st
 			tower = _toward_land(layout.mainland if layout.mainland else layout, a, b, side, off_pl)
 		"Harbour Quay":
 			tower = _toward_land(layout, a, b, side, off_pl)
+		"Airport Central":
+			# On whichever side keeps the tower out of a carriageway: it stood
+			# in Hangar Lane (2026-11-18 clearance audit); the hall side rises
+			# out of the entrance hall's roof.
+			var t_a := c + side * (off_pl + 5.5)
+			var t_b := c - side * (off_pl + 5.5)
+			var ca := SkyportIsland.road_clearance(P, SkyportIsland.l2(Vector2(t_a.x, t_a.z)))
+			var cb := SkyportIsland.road_clearance(P, SkyportIsland.l2(Vector2(t_b.x, t_b.z)))
+			tower = t_a if ca >= cb else t_b
 		_:
-			tower = c + side * (off_pl + 5.5) * (1.0 if name == "Airport Central" else -1.0)
+			tower = c - side * (off_pl + 5.5)
 	if tower != Vector3.ZERO:
 		var tq := Vector2(tower.x, tower.z)
 		if SkyportIsland.contains(tq.x, tq.y):

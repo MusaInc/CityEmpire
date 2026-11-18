@@ -60,6 +60,15 @@ vec3 rock_look(vec3 base, vec3 wp, vec3 wn, float fp, float near, inout float ro
 	albedo *= 0.8 + 0.42 * mix(0.5, big.y, det) + 0.14 * (small.y - 0.5) * det2;
 	float streak = rk_noise(vec2(along * 0.45, wp.y * 0.04)) * steep;
 	albedo *= 1.0 - 0.18 * smoothstep(0.55, 0.8, streak);
+	// Flat shelves and armour read as heaped boulders, not crazy paving:
+	// each cell domed (shadowed into its gaps), thin cracks only on faces,
+	// some stones warmer, darker gravel and weed in the gaps.
+	float flatk = 1.0 - steep;
+	float dome = smoothstep(0.0, 0.42, big.x) * 0.7 + smoothstep(0.0, 0.3, small.x) * 0.3;
+	albedo *= mix(1.0, 0.5 + 0.56 * dome, flatk * det);
+	albedo *= mix(vec3(1.0), vec3(1.1, 1.0, 0.86), step(0.72, big.y) * flatk);
+	crack *= mix(1.0, 0.3, flatk);
+	crack2 *= mix(1.0, 0.4, flatk);
 	albedo *= 1.0 - 0.55 * crack - 0.3 * crack2;
 	// Ledges catch the light; the undersides of overhangs are dark.
 	albedo *= mix(0.72, 1.08, smoothstep(-0.2, 0.9, up));

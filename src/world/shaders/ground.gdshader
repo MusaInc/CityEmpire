@@ -71,6 +71,13 @@ vec4 road_sample(vec2 p) {
 	if (any(greaterThan(abs(xs), hws + 1.0))) {
 		xs = abs(xs);
 	}
+	// Texels of another road (a jump bigger than a cell) take the nearest
+	// texel's offset: blended across two roads, 'across' swept through 0 and
+	// every line value along a junction box's edge – squiggles of centre and
+	// edge line round the bridge approaches' boxes (2026-11-18).
+	float xn = f.x < 0.5 ? (f.y < 0.5 ? xs.x : xs.z) : (f.y < 0.5 ? xs.y : xs.w);
+	float lim = 1.6 * road_rect.z / float(sz.x);
+	xs = mix(xs, vec4(xn), vec4(greaterThan(abs(xs - xn), vec4(lim))));
 	vec4 zs = vec4(t00.z, t10.z, t01.z, t11.z);
 	vec4 zl = zs - floor(zs / 64.0) * 64.0;
 	zl += 64.0 * vec4(lessThan(zl - zl.x, vec4(-32.0))) - 64.0 * vec4(greaterThan(zl - zl.x, vec4(32.0)));

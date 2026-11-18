@@ -48,15 +48,48 @@ vec3 shore_look(vec3 c, vec2 p, float y, float fp, float near, float tone, vec3 
 		float rip = sin(p.x * 1.7 + p.y * 1.1 + vnoise(p * 0.3) * 4.0) * 0.5 + 0.5;
 		albedo = c * (0.9 + 0.12 * vnoise(p * 2.3) * near + 0.05 * rip * near);
 		albedo *= 1.0 - 0.12 * smoothstep(0.02, 0.0, abs(y - 0.45));   // tide line
+		// Wrack line: a broken band of dried weed and shells above the tide.
+		float wrack = band(y - 1.25 - 0.25 * vnoise(p * 0.07), 0.12, 0.08) * smoothstep(0.35, 0.6, vnoise(p * 0.9 + 4.0));
+		albedo = mix(albedo, vec3(0.2, 0.17, 0.11), wrack * 0.55 * near);
 		albedo = mix(albedo, albedo * 0.62, wet);
 		albedo *= mix(1.0, 0.7, under);   // (under water: a little darker, the sea tints the rest)
 		rough = mix(0.95, 0.4, max(wet, under));
+		// The top of the beach grows into the island's turf through dune
+		// grass along a ragged line (Skyport's beaches met the lawn on a
+		// hard mesh edge: a pasted-on sand blob from the air).
+		float rag = vnoise(p * 0.11) * 0.9 + vnoise(p * 0.5) * 0.35 * near;
+		float topk = smoothstep(3.3, 4.35, y + rag - 0.45);
+		if (topk > 0.0) {
+			vec3 turf = grass_shade(pow(vec3(0.33, 0.47, 0.26), vec3(2.2)), p, near, fp * 0.5);
+			vec3 marram = mix(turf, vec3(0.42, 0.42, 0.24), 0.55) * (0.85 + 0.3 * vnoise(p * 1.3));
+			float tuft = smoothstep(0.42, 0.5, vnoise(p * 0.8 + 3.0) + topk * 0.25);
+			albedo = mix(albedo, mix(albedo * 0.96, marram, tuft), smoothstep(0.0, 0.6, topk));
+			albedo = mix(albedo, turf, smoothstep(0.7, 1.0, topk));
+			rough = mix(rough, 0.97, topk);
+		}
 	} else if (c.r < 0.2) {
 		// Natural rock: rock.gdshaderinc (the cities' cliffs and armour share it).
 		albedo = rock_look(c * 1.55, wp, wn, fp, near, rough);
 	} else {
 		albedo = c * tone * (1.0 - 0.3 * wet);
-		albedo = mix(albedo, vec3(0.14, 0.17, 0.12), wet * 0.7);
+		if (abs(wn.y) < 0.6) {
+			// Quay wall faces: cast-concrete panels (6 m joints, 1.2 m pour
+			// lines), rust and rain streaks from the coping, a pale salt band
+			// and dark weed at the waterline (they were one flat dark slab).
+			vec2 tg = normalize(vec2(-wn.z, wn.x) + vec2(1e-4, 0.0));
+			float s = dot(wp.xz, tg);
+			float joint = band(fract(s / 6.0 + 0.5) - 0.5, 0.012, fp / 6.0 + 0.002);
+			float pour = band(fract(wp.y / 1.2) - 0.5, 0.02, fp / 1.2 + 0.004) * 0.5;
+			float panel = hash12(vec2(floor(s / 6.0), 3.0));
+			albedo *= (0.9 + 0.16 * panel) * (1.0 - 0.3 * joint - 0.12 * pour);
+			float streak = smoothstep(0.55, 0.85, vnoise(vec2(s * 1.7, wp.y * 0.08))) * smoothstep(-0.5, 3.0, y);
+			albedo = mix(albedo, albedo * vec3(0.75, 0.62, 0.5), streak * 0.5);
+			albedo = mix(albedo, albedo * 1.25 + 0.04, band(y - 1.3, 0.35, 0.3) * 0.5);   // salt bloom
+			albedo = mix(albedo, vec3(0.05, 0.08, 0.05), smoothstep(1.0, 0.2, y + 0.3 * vnoise(vec2(s * 0.8, 1.0))) * 0.8);
+			albedo = mix(albedo, vec3(0.62, 0.6, 0.56), smoothstep(4.35, 4.5, y));   // coping
+		} else {
+			albedo = mix(albedo, vec3(0.14, 0.17, 0.12), wet * 0.7);
+		}
 	}
 	return albedo;
 }
