@@ -221,8 +221,12 @@ void fragment() {
 	vec3 sun_col = mix(vec3(1.0, 0.72, 0.45), vec3(1.0, 0.96, 0.88), clamp(sun_dir.y * 2.5, 0.0, 1.0));
 
 	// Whitecaps on the steepest crests when it blows (and a few on a calm day).
-	float foam = smoothstep(0.8, 0.96, crest) * smoothstep(0.55, 0.85, vnoise(p * 0.9 + TIME * 0.3)) * smoothstep(0.4, 0.8, vnoise(p0 * 0.02))
-		* (0.04 + 0.96 * blow) * mid * near;
+	// (Broken into short patches along each crest – one long sine crest
+	// made a straight pale stripe across the water, two or three of them
+	// parallel off every quay on a calm day.)
+	float foam = smoothstep(0.84, 0.97, crest) * smoothstep(0.6, 0.85, vnoise(p * 0.9 + TIME * 0.3))
+		* smoothstep(0.55, 0.8, vnoise(p * 0.23 - TIME * 0.11)) * smoothstep(0.4, 0.8, vnoise(p0 * 0.02))
+		* (0.015 + 0.985 * blow) * mid * near;
 	// Surf: lines along the depth contours running in to the shore over the
 	// sand shelves (rocks get a ragged wash), broken up along their length;
 	// higher seas, bigger surf.

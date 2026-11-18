@@ -864,7 +864,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 						var smat := wm.surface_get_material(si)
 						var sn := String(smat.resource_name) if smat else ""
 						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si), 0, wxf)
-			return _commit_traffic(tools, looks, shader, -float(d["L"]) * 0.5, float(d["W"]))
+			return _commit_traffic(tools, looks, shader)   # (no road beam: the user asked for them gone, 2026-11-18)
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -882,7 +882,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
 			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(tyre, 0, xf)
 			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(hub, 0, xf)
-	return _commit_traffic(tools, looks, shader, -float(d["L"]) * 0.5, float(d["W"]))
+	return _commit_traffic(tools, looks, shader)   # (no road beam: the user asked for them gone, 2026-11-18)
 
 
 const BEAM_SHADER := preload("res://src/world/shaders/traffic_beam.gdshader")
@@ -1424,7 +1424,20 @@ func _build_water() -> void:
 		if w in layout.basins:
 			continue  # (the sea surface runs under the whole island and shows through the basins)
 		var r: Rect2 = w
-		m.top(r.position.x, r.position.y, r.end.x, r.end.y, -1.6, Color.WHITE, 0, 0, 0)
+		# In tiles (200 m near the islands, 1 km beyond): one 470 x 5000 m
+		# quad over the strait interpolated its world position so coarsely
+		# that pale straight stripes ran along it near the quays.
+		var x := r.position.x
+		while x < r.end.x - 0.01:
+			var tx := 200.0 if absf(x) < 3000.0 else 1000.0
+			var x1 := minf(x + tx, r.end.x)
+			var z := r.position.y
+			while z < r.end.y - 0.01:
+				var tz := 200.0 if absf(z) < 3000.0 and absf(x) < 3000.0 else 1000.0
+				var z1 := minf(z + tz, r.end.y)
+				m.top(x, z, x1, z1, -1.6, Color.WHITE, 0, 0, 0)
+				z = z1
+			x = x1
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, m.arrays())
 	var mi := MeshInstance3D.new()

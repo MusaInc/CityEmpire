@@ -2086,6 +2086,33 @@ func _tower_crane(lot: Rect2, site_top: float, brng: RandomNumberGenerator) -> v
 		"trolley": trolley, "hook": hook})
 
 
+## Masonry dress on a bridge anchor housing (they were blank 20 m stone
+## slabs standing in the waterfront plaza): a rusticated plinth, coursed
+## bands, corner pilasters, a moulded cornice and a bronze plaque with lamps.
+func _anchor_dress(x0: float, z0: float, x1: float, z1: float, y1: float) -> void:
+	var k := _kit("bridge_anchor_dress")
+	var stone := Color(0.56, 0.53, 0.48)
+	var dark := Color(0.4, 0.38, 0.35)
+	var o := 0.18
+	_ksolid(k, x0 - 0.35, z0 - 0.35, x1 + 0.35, z1 + 0.35, -0.5, 1.6, dark, false)          # plinth
+	var y := 3.2
+	while y < y1 - 2.0:
+		_ksolid(k, x0 - o * 0.5, z0 - o * 0.5, x1 + o * 0.5, z1 + o * 0.5, y, y + 0.22, dark, false)   # coursing
+		y += 2.6
+	for cx: float in [x0, x1]:
+		for cz: float in [z0, z1]:
+			_ksolid(k, cx - 0.7, cz - 0.7, cx + 0.7, cz + 0.7, 1.6, y1 - 0.8, stone, false)       # pilasters
+	_ksolid(k, x0 - 0.6, z0 - 0.6, x1 + 0.6, z1 + 0.6, y1 - 0.8, y1 - 0.2, stone.lightened(0.08), false)   # cornice
+	_ksolid(k, x0 - 0.9, z0 - 0.9, x1 + 0.9, z1 + 0.9, y1 - 0.2, y1 + 0.3, stone.lightened(0.12), false)
+	# Plaque + two lamps on each long face.
+	var cx2 := (x0 + x1) * 0.5
+	for fz: float in [z0, z1]:
+		var sgn := -1.0 if fz == z0 else 1.0
+		_ksolid(k, cx2 - 2.2, fz + sgn * 0.02, cx2 + 2.2, fz + sgn * 0.14, 3.6, 5.2, Color(0.42, 0.3, 0.16), false)
+		for lx: float in [cx2 - 4.0, cx2 + 4.0]:
+			_ksolid(k, lx - 0.18, fz + sgn * 0.02, lx + 0.18, fz + sgn * 0.5, 4.6, 5.4, Color(0.1, 0.11, 0.11), false)
+
+
 ## Suspension bridge from the waterfront to the far shore: two red towers,
 ## sagging main cables (anchor lines) and a deck to land on.
 func _bridge() -> void:
@@ -2112,6 +2139,8 @@ func _bridge() -> void:
 			maxf(zc + sz * 10.5, zc + sz * 15.0), -2.0, deck + 6.0]], Style.STONE,
 			Color(0.5, 0.47, 0.42), "plain"))
 	CityInfrastructure.bridge_landing(self)
+	for sz: float in [-1.0, 1.0]:
+		_anchor_dress(x_east - 2.0, minf(zc + sz * 10.5, zc + sz * 15.0), x_east + 14.0, maxf(zc + sz * 10.5, zc + sz * 15.0), deck + 6.0)
 	# West anchorage: the roadway runs over it onto the approach viaduct; the
 	# cables go down into stone housings either side.
 	# (The roadway itself is the approach viaduct's first spans, laid over the

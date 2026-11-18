@@ -21,6 +21,25 @@ func _run() -> void:
 	var lines := FileAccess.get_file_as_string(path).split("\n", false)
 	var only := String(args.get("tour-only", ""))
 	await get_tree().create_timer(4.0).timeout
+	if args.has("tour-tree"):
+		for c1 in get_tree().root.get_node("EmpireGame").get_children():
+			var names := []
+			for c2 in c1.get_children():
+				names.append(String(c2.name))
+			var uniq := {}
+			for nm2 in names:
+				uniq[String(nm2).rstrip("0123456789_-")] = true
+			print("TOUR_TREE ", c1.name, ": ", ", ".join(PackedStringArray(uniq.keys())))
+	if args.has("tour-noshadow"):
+		for nd in get_tree().root.find_children("*", "DirectionalLight3D", true, false):
+			(nd as DirectionalLight3D).shadow_enabled = false
+	# --tour-hide=A,B: hide every node whose name starts with one of these
+	# (finding what draws an artefact).
+	for pat in String(args.get("tour-hide", "")).split(",", false):
+		for nd in get_tree().root.find_children(pat + "*", "", true, false):
+			if nd is Node3D:
+				(nd as Node3D).visible = false
+				print("TOUR_HIDE ", nd.get_path())
 	for ln in lines:
 		ln = ln.strip_edges()
 		if ln == "" or ln.begins_with("#"):
@@ -41,6 +60,10 @@ func _run() -> void:
 			(game.get("empire") as Object).set("minute", float(args["hour"]) * 60.0)
 		var from := Vector3(cv[0], cv[1], cv[2])
 		var to := Vector3(cv[3], cv[4], cv[5])
+		if parts.size() > 3 and parts[3] == "rel":
+			# (Heights relative to the ground at the hero's spot.)
+			from.y += gy
+			to.y += gy
 		var cam: Node = game.get("camera")
 		cam.set("cine", func(_dt: float) -> Array:
 			return [Transform3D(Basis.looking_at(to - from, Vector3.UP), from), 62.0])

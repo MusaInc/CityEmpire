@@ -565,7 +565,8 @@ static func plan(layout: CityLayout) -> Dictionary:
 	var ends: Array = []
 	for bi in 2:
 		var Bd: Dictionary = P["bridges"][bi]
-		var J0: Vector3 = y.call(BRIDGE_ROAD_X, float(LANDINGS[bi]))
+		var J0: Vector3 = l(Bd["Jw"] as Vector3)
+		J0.y = LAND_Y
 		var u3: Vector3 = Bd["u"]
 		var ul := l(w(J0) + u3) - J0
 		ul.y = 0.0
@@ -974,6 +975,13 @@ static func _plan_bridges(layout: CityLayout) -> Array:
 		var city: CityLayout = layout if String(bd[3]) == "island" else layout.mainland
 		var R := _coast_road_point(city, bd[2])
 		var u2 := (Vector2(F.x, F.z) - R).normalized()
+		# Jw (where the island's approach road starts) on the bridge's own
+		# axis at Bridge Road's x: it used to be square across from F, so the
+		# road ran LAND_RUN m on and then doglegged sideways to it – a Z step
+		# in the kerbs and markings at every bridge's island end (2026-11-18).
+		var ul2 := l(F + Vector3(u2.x, 0.0, u2.y)) - l(F)
+		if ul2.x > 0.2:
+			Jw = w(l(F) + ul2 * ((BRIDGE_ROAD_X - QUAY_X) / ul2.x))
 		# Out from the road to the sea wall; the deck starts 4 m short of it.
 		var q := R
 		while not layout.is_water(Vector3(q.x, 0.0, q.y)) and q.distance_to(R) < 240.0:
@@ -1596,6 +1604,7 @@ func _start_near() -> void:
 		func(): SkyportAirport.build_apron_kit(plan_data, near_root, self),
 		func(): SkyportAirport.build_circus(plan_data, near_root, self, _circus_arms()),
 		func(): _near(_build_industry), func(): _near(_build_trees), func(): _near(_build_beach_life),
+		func(): _near(_build_quayside.bind(body)),
 		func():
 			var at := AirTraffic.new()
 			at.name = "AirTraffic"
@@ -2900,6 +2909,101 @@ func _build_marina(street: StaticBody3D) -> void:
 	_mesh(m, "Marina", 0.0, 1400.0)
 
 
+## Skyport's quay edges (they were bare wall tops): in the town and by the
+## marina a promenade edge – stone coping, iron railing, lamps every 24 m,
+## benches facing the water; on the working quays east of x 2050 mooring
+## bollards and fender piles instead. Railings collide; gaps at the marina
+## piers and ramp, the bridges' ends and the rail viaduct's piers.
+func _build_quayside(body: StaticBody3D) -> void:
+	var o := outline()
+	var n := o.size()
+	var m := BuildingMesher.new()
+	var iron := Color(0.16, 0.2, 0.2)
+	var stone := Color(0.7, 0.67, 0.62)
+	var lampc := Color(1.0, 0.95, 0.8)
+	var wood := Color(0.55, 0.42, 0.3)
+	var run := 0.0
+	var next_lamp := 12.0
+	var next_bench := 30.0
+	var next_bollard := 6.0
+	var blocked := func(q: Vector2) -> bool:
+		if Rect2(1380, -305, 26, 120).has_point(q):
+			return true   # (the marina ramp and pier roots)
+		for pr: Array in plan_data["piers"]:
+			if Rect2(Vector2((pr[0] as Vector3).x, (pr[0] as Vector3).z), Vector2((pr[1] as Vector3).x - (pr[0] as Vector3).x,
+					(pr[1] as Vector3).z - (pr[0] as Vector3).z)).grow(4.0).has_point(q):
+				return true
+		var wq := w2(q)
+		if under_bridge(wq.x, wq.y) or over_bridge_shore(wq.x, wq.y):
+			return true
+		return rail_clearance(plan_data, q) < 3.0
+	for i in n:
+		var i2 := (i + 1) % n
+		var a := o[i]
+		var b := o[i2]
+		var seg := a.distance_to(b)
+		if shore_kind(i) != 0 or shore_kind(i2) != 0 or seg < 0.5:
+			run += seg
+			continue
+		var nn := ((_out_n(o, i) + _out_n(o, i2)) * 0.5).normalized()
+		var t := (b - a) / seg
+		var town := (a.x + b.x) * 0.5 < 2050.0
+		var s0 := run
+		run += seg
+		next_lamp = maxf(next_lamp, s0 + 6.0)
+		next_bench = maxf(next_bench, s0 + 14.0)
+		next_bollard = maxf(next_bollard, s0 + 3.0)
+		if town:
+			# Coping and railing in 4 m panels (each checked for gaps).
+			var k := 0.0
+			while k < seg:
+				var k1 := minf(k + 4.0, seg)
+				var p0 := a + t * k - nn * 0.35
+				var p1 := a + t * k1 - nn * 0.35
+				if not blocked.call((p0 + p1) * 0.5):
+					var A := Vector3(p0.x, LAND_Y, p0.y)
+					var B := Vector3(p1.x, LAND_Y, p1.y)
+					_bx(m, A + Vector3.UP * 0.12, B + Vector3.UP * 0.12, 0.7, 0.24, stone)
+					m.beam(A + Vector3.UP * 1.05, B + Vector3.UP * 1.05, 0.07, 0.07, iron)
+					m.beam(A + Vector3.UP * 0.6, B + Vector3.UP * 0.6, 0.04, 0.04, iron)
+					_bx(m, A + Vector3.UP * 0.24, A + Vector3.UP * 1.1, 0.08, 0.08, iron)
+					_box_beam(body, A + Vector3.UP * 0.6, B + Vector3.UP * 0.6, 0.3, 1.2)
+				k = k1
+			while next_lamp < run:
+				var q := a + t * (next_lamp - s0) - nn * 1.2
+				next_lamp += 24.0
+				if blocked.call(q):
+					continue
+				_bx(m, Vector3(q.x, LAND_Y, q.y), Vector3(q.x, LAND_Y + 4.2, q.y), 0.14, 0.14, iron)
+				_bx(m, Vector3(q.x, LAND_Y + 4.2, q.y), Vector3(q.x, LAND_Y + 4.6, q.y), 0.34, 0.34, lampc)
+				_bx(m, Vector3(q.x, LAND_Y + 4.6, q.y), Vector3(q.x, LAND_Y + 4.7, q.y), 0.46, 0.46, iron)
+			while next_bench < run:
+				var q2 := a + t * (next_bench - s0) - nn * 2.2
+				next_bench += 36.0
+				if blocked.call(q2):
+					continue
+				var c := Vector3(q2.x, LAND_Y, q2.y)
+				var tv := Vector3(t.x, 0.0, t.y)
+				var nv := Vector3(nn.x, 0.0, nn.y)
+				_bx(m, c - tv * 0.9 + Vector3.UP * 0.45, c + tv * 0.9 + Vector3.UP * 0.45, 0.45, 0.08, wood)
+				_bx(m, c - nv * 0.24 - tv * 0.9 + Vector3.UP * 0.8, c - nv * 0.24 + tv * 0.9 + Vector3.UP * 0.8, 0.06, 0.3, wood)
+				for sg: float in [-0.75, 0.75]:
+					_bx(m, c + tv * sg, c + tv * sg + Vector3.UP * 0.45, 0.5, 0.06, iron)
+		else:
+			while next_bollard < run:
+				var q3 := a + t * (next_bollard - s0) - nn * 0.7
+				next_bollard += 14.0
+				if blocked.call(q3):
+					continue
+				var c3 := Vector3(q3.x, LAND_Y, q3.y)
+				_bx(m, c3, c3 + Vector3.UP * 0.55, 0.36, 0.36, Color(0.12, 0.13, 0.14))
+				_bx(m, c3 + Vector3.UP * 0.55, c3 + Vector3.UP * 0.65, 0.5, 0.5, Color(0.12, 0.13, 0.14))
+				# A fender pile on the wall face below it.
+				var f := q3 + nn * 0.95
+				_bx(m, Vector3(f.x, SEA_Y - 1.0, f.y), Vector3(f.x, LAND_Y - 0.1, f.y), 0.45, 0.45, wood.darkened(0.25))
+	_mesh(m, "Quayside", 0.0, 900.0)
+
+
 ## Life on Skyport's beaches (2026-11-18: they were empty sand blobs):
 ## umbrellas over towels and sun loungers in loose groups along the dry
 ## sand, lifeguard towers on stilts every ~160 m, windbreaks. One mesh.
@@ -3110,8 +3214,50 @@ func _build_trees() -> void:
 			var r := sqrt(rng.randf_range(0.08, 0.8))
 			xfs.append(Transform3D(Basis(Vector3.UP, a).scaled(Vector3.ONE * rng.randf_range(0.85, 1.3)),
 				Vector3(c.x + cos(a) * float(kn[1]) * r, LAND_Y, c.y + sin(a) * float(kn[2]) * r)))
-	# On land only (12 m+ from the shore), standing on the ground (knolls).
+	# Landscape copses and lone trees over the open landside lawns (from the
+	# air the island was a golf course of bare grass between the blocks);
+	# none airside (local z > 175: the taxiways, stands and the runway).
 	var o := outline()
+	var lb := Rect2(o[0], Vector2.ZERO)
+	for v in o:
+		lb = lb.expand(v)
+	var crng := RandomNumberGenerator.new()
+	crng.seed = 9187
+	var extra: Array = []
+	for k in 70:
+		var c := Vector2(crng.randf_range(lb.position.x, lb.end.x), crng.randf_range(lb.position.y, minf(lb.end.y, 175.0)))
+		var n := crng.randi_range(4, 13)
+		var rad := crng.randf_range(9.0, 24.0)
+		for j in n:
+			var a := crng.randf() * TAU
+			var r := sqrt(crng.randf()) * rad
+			extra.append(Transform3D(Basis(Vector3.UP, a).scaled(Vector3.ONE * crng.randf_range(0.8, 1.35)),
+				Vector3(c.x + cos(a) * r, LAND_Y, c.y + sin(a) * r)))
+	for k in 90:
+		extra.append(Transform3D(Basis(Vector3.UP, crng.randf() * TAU).scaled(Vector3.ONE * crng.randf_range(0.9, 1.4)),
+			Vector3(crng.randf_range(lb.position.x, lb.end.x), LAND_Y, crng.randf_range(lb.position.y, minf(lb.end.y, 175.0)))))
+	for xf: Transform3D in extra:
+		var q := Vector2(xf.origin.x, xf.origin.z)
+		if q.y > 175.0 or road_clearance(plan_data, q) < 7.0:
+			continue
+		var inb := false
+		for bd: Dictionary in plan_data["buildings"]:
+			for t0: Array in bd["tiers"]:
+				if Rect2(t0[0], t0[1], float(t0[2]) - float(t0[0]), float(t0[3]) - float(t0[1])).grow(6.0).has_point(q):
+					inb = true
+					break
+			if inb:
+				break
+		for sk in plan_data.get("sites", {}):
+			var site: Dictionary = plan_data["sites"][sk]
+			if site.has("lot") and (site["lot"] as Rect2).grow(5.0).has_point(q):
+				inb = true
+			var dr: Vector3 = site["door"]
+			if Vector2(dr.x, dr.z).distance_to(q) < 22.0:
+				inb = true
+		if not inb:
+			xfs.append(xf)
+	# On land only (12 m+ from the shore), standing on the ground (knolls).
 	var kept: Array = []
 	for xf: Transform3D in xfs:
 		if not xf.origin.is_finite():
