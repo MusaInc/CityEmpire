@@ -558,3 +558,61 @@ func test_day_profit_includes_ventures(t) -> void:
 	e.end_day()
 	var r: Dictionary = got[0]
 	t.check(float(r["profit"]) < 0.0, "the warehouse's upkeep is in the day's profit (%.0f)" % float(r["profit"]))
+
+
+# ------------------------------------------ getting out (audit 2026-11-18)
+## A losing shop could never be given up: rent and utilities ran every day
+## forever. Closing ends the costs, clears the stock at half cost, refunds
+## orders on their way, pays the staff notice and frees the unit.
+func test_closing_a_shop_ends_its_costs(t) -> void:
+	var e := _game()
+	var b := _running_shop(e)
+	e.order_delivery(b, {"crisps": 2})
+	var r := e.close_value(b)
+	t.check(float(r["stock"]) > 0.0 and float(r["orders"]) > 0.0 and float(r["notice"]) > 0.0, "stock, orders and notice all counted")
+	var worth0 := e.net_worth()
+	var cash0 := e.company_cash
+	var got := e.close_business(b)
+	t.check(is_equal_approx(e.company_cash - cash0, float(got["cash"])), "the settlement lands in the company account")
+	t.check(e.businesses.is_empty() and e.business_at(STARTER["id"]) == null, "the unit is free again")
+	t.check(e.net_worth() < worth0, "closing loses money (no clearance profit)")
+	var cash1 := e.company_cash + e.personal_cash
+	e.end_day()
+	e.end_day()
+	t.check(is_equal_approx(e.company_cash + e.personal_cash, cash1), "no rent, wages or utilities after closing (%.2f → %.2f)" % [cash1, e.company_cash + e.personal_cash])
+	t.check(e.rent_premises(STARTER) != null, "and it can be rented again")
+
+
+func test_selling_a_freehold_returns_most_of_its_price(t) -> void:
+	var e := _game()
+	e.personal_cash = 20000.0
+	var b := e.buy_premises(STARTER)
+	var cash0 := e.company_cash + e.personal_cash
+	e.close_business(b)
+	var back := e.company_cash + e.personal_cash - cash0
+	t.check(is_equal_approx(back, float(STARTER["price"]) * Empire.FREEHOLD_SALE_K), "freehold sold for 90%% (%.0f)" % back)
+
+
+## Vehicles (and the aircraft and boats that cost fees every day) can be
+## sold for what they count in net worth; never with cargo aboard.
+func test_selling_a_vehicle(t) -> void:
+	var e := _game()
+	e.personal_cash = 600000.0
+	var v := e.buy_vehicle("van", Vector3.ZERO, 0.0)
+	t.check(not v.is_empty(), "bought a van")
+	(v["cargo"] as Stock).create("crisps", 24)
+	t.check(e.sell_vehicle_block(v) != "" and e.sell_vehicle(v) < 0.0, "not with cargo aboard")
+	Stock.transfer(v["cargo"], Stock.new(0), "crisps", 24)
+	var worth0 := e.net_worth()
+	var n := e.vehicles.size()
+	var got := e.sell_vehicle(v)
+	t.check(got > 0.0 and e.vehicles.size() == n - 1, "sold (%.0f)" % got)
+	t.check(is_equal_approx(e.net_worth(), worth0), "net worth unchanged by the sale (it counted at that value)")
+	var heli := e.buy_vehicle("wren", Vector3.ZERO, 0.0)
+	t.check(e.sell_vehicle(heli) > 0.0, "sold the helicopter")
+	e.end_day()
+	var fees := 0.0
+	for x in e.ledger:
+		if String(x["cat"]) == "fees" and int(x["day"]) == e.day - 1:
+			fees += float(x["amount"])
+	t.check(fees == 0.0, "no hangar fees once the helicopter is sold")

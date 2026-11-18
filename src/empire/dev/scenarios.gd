@@ -943,6 +943,71 @@ func scenario_xf() -> void:
 	game.exit_vehicle()
 
 
+## U: "Stuck? Back to the street" (quality audit 2026-11-18). Puts you, then
+## your car, inside a big building near the start (as a glitch through a
+## wall would) and checks the escape lands you outside it, by a road, on
+## the ground – and the car on a lane, upright, able to drive off.
+func scenario_u() -> void:
+	print("--- U: stuck recovery")
+	await until(func(): return game.gps.ready_net(), 60.0)
+	var start := game.starter_unit()
+	var sp := Premises.door_point(start)
+	var pick := {}
+	var best := INF
+	for b: Dictionary in game.layout.buildings:
+		if String(b.get("kind", "")) in ["invisible", "structure"]:
+			continue
+		var t: Array = b["tiers"][0]
+		if float(t[2]) - float(t[0]) < 24.0 or float(t[3]) - float(t[1]) < 24.0:
+			continue
+		var c := CityLayout.bxf(b) * Vector3((float(t[0]) + float(t[2])) * 0.5, 0.0, (float(t[1]) + float(t[3])) * 0.5)
+		var d := Vector2(c.x - sp.x, c.z - sp.z).length()
+		if d < best:
+			best = d
+			pick = {"b": b, "c": c, "t": t}
+	check(not pick.is_empty(), "a big building near the start (%.0f m)" % best)
+	var inside := func(p: Vector3) -> bool:
+		var l := CityLayout.bxf(pick["b"]).affine_inverse() * p
+		var t: Array = pick["t"]
+		return l.x > float(t[0]) + 0.3 and l.x < float(t[2]) - 0.3 and l.z > float(t[1]) + 0.3 and l.z < float(t[3]) - 0.3
+	var c: Vector3 = pick["c"]
+	var gy := game.layout.ground_y(c.x, c.z)
+	game._teleport(Vector3(c.x, gy + 1.0, c.z), 0.0)
+	await frames(10)
+	check(inside.call(game.player.global_position), "you're wedged inside it")
+	check(game.unstick() == "", "Back to the street")
+	await wait(1.5)
+	var pg := game.player.global_position
+	var lane := game.gps.net.nearest(pg, Vector3.ZERO, 12.0, -1, true)
+	check(not inside.call(pg), "you're out of the building")
+	check(not lane.is_empty(), "beside a road (%.1f m from a lane)" % (float(lane["dist"]) if not lane.is_empty() else -1.0))
+	check(game.player.is_on_floor() and absf(pg.y - game.layout.ground_y(pg.x, pg.z)) < 2.5, "standing on the ground (%.1f m up)" % (pg.y - game.layout.ground_y(pg.x, pg.z)))
+	# The car, jammed into the same building.
+	var vid := String(game.empire.vehicles[0]["id"])
+	var car: Car = game.cars[vid]
+	game.enter_vehicle(vid)
+	await frames(5)
+	car.place(Transform3D(Basis(), Vector3(c.x, gy + 0.6, c.z)))
+	await frames(10)
+	check(game.unstick() == "", "car: Back to the street")
+	await wait(1.0)
+	var cp := car.global_position
+	var cl := game.gps.net.nearest(cp, Vector3.ZERO, 4.0, -1, true)
+	check(not inside.call(cp) and not cl.is_empty(), "the car is on a lane (%.1f m)" % (float(cl["dist"]) if not cl.is_empty() else -1.0))
+	check(car.global_basis.y.dot(Vector3.UP) > 0.95, "upright")
+	game.drive_input.enabled = false
+	var p0 := car.global_position
+	for _i in 240:   # (4 s of physics; wall-clock is ~3 fps under xvfb)
+		car.throttle = 0.7
+		car.brake = 0.0
+		car.steer = 0.0
+		await get_tree().physics_frame
+	car.throttle = 0.0
+	game.drive_input.enabled = true
+	check(car.global_position.distance_to(p0) > 4.0, "and drives off (%.1f m)" % car.global_position.distance_to(p0))
+	game.exit_vehicle()
+
+
 ## L: a long session's resources (quality audit 2026-11-18). Tours eight
 ## places across the three islands three times, staying ~8 s at each so
 ## chunks, interiors, crowds and traffic stream in and out; after every lap
@@ -1128,6 +1193,8 @@ func _run() -> void:
 	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XF", "XG", "XH", "XI", "XS", "XW"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())
+	if _which.split(",").has("U"):
+		await scenario_u()
 	if _which.split(",").has("L"):
 		await scenario_l()
 	if _which.split(",").has("W"):

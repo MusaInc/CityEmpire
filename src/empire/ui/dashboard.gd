@@ -309,7 +309,7 @@ static func _vehicle_sheet(ui: EmpireUI, vid: String) -> void:
 	var veh := g.empire.vehicle(vid)
 	var md := EmpireData.vehicle_model(String(veh["model"]))
 	var cls := String(md.get("class", "car"))
-	var v := ui._open(String(md.get("name", "")), 640, 440)
+	var v := ui._open(String(md.get("name", "")), 740, 440)
 	var h := S.hbox(16)
 	h.add_child(ui.thumbs.vehicle(String(veh["model"]), Vector2(300, 170)))
 	var info := S.vbox(6)
@@ -329,5 +329,18 @@ static func _vehicle_sheet(ui: EmpireUI, vid: String) -> void:
 		del.disabled = not q["ok"]
 		acts.add_child(del)
 	acts.add_child(S.spacer())
+	var worth := g.empire.vehicle_value(veh)
+	var sell := S.button("Sell · %s" % EmpireData.money(worth), func():
+		var err := g.sell_vehicle(vid)
+		ui.toast(err if err != "" else "Sold the %s for %s" % [String(md.get("name", "")), EmpireData.money(worth)], "bad" if err != "" else "good")
+		if err == "":
+			ui.open_phone("vehicles"), false, 170)
+	var why := g.empire.sell_vehicle_block(veh)
+	if why == "" and (g.driving == vid or (g.skyport_play and g.skyport_play.piloting == vid)):
+		why = "Get out first"
+	sell.disabled = why != ""
+	if why != "":
+		sell.tooltip_text = why
+	acts.add_child(sell)
 	acts.add_child(S.button("Back", func(): ui.open_phone("vehicles"), false, 110))
 	v.add_child(acts)

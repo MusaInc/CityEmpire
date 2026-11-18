@@ -1164,6 +1164,39 @@ func _m_overview(v: VBoxContainer, b: Business) -> void:
 			if e.buy_premises(b.premises) == null:
 				toast("Not enough money", "bad")
 			open_manage(b, "overview")))
+	h.add_child(S.spacer())
+	h.add_child(S.button("Sell the shop" if b.owned else "End the lease", func(): _confirm_close(b), false, 200))
+	v.add_child(h)
+
+
+## Closing a business for good: what you'd get back, then confirm.
+func _confirm_close(b: Business) -> void:
+	var r := game.empire.close_value(b)
+	var v := _open(("Sell %s?" if b.owned else "Close %s for good?") % b.name, 640, 340)
+	var lines: Array = []
+	if b.owned:
+		lines.append("Freehold sold: %s (after fees)" % EmpireData.money(float(r["freehold"])))
+	else:
+		lines.append("The lease ends today: no more rent (the deposit stays with the landlord).")
+	if float(r["stock"]) > 0.0:
+		lines.append("Stock cleared at half its cost: %s" % EmpireData.money(float(r["stock"])))
+	if float(r["orders"]) > 0.0:
+		lines.append("Orders on their way cancelled and refunded: %s" % EmpireData.money(float(r["orders"])))
+	if float(r["notice"]) > 0.0:
+		lines.append("Notice pay for %d staff: −%s" % [b.staff.size(), EmpireData.money(float(r["notice"]))])
+	lines.append("In all: %s into the company account." % EmpireData.money(float(r["cash"])))
+	var l := S.label("\n".join(lines), 17, S.PAPER)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size.x = 580
+	v.add_child(l)
+	var h := S.hbox(12)
+	h.add_child(S.button("Keep it", func(): open_manage(b, "overview"), false, 160))
+	h.add_child(S.button("Sell" if b.owned else "Close for good", func():
+		var name := b.name
+		close_panel(true)
+		var got := game.close_business(b)
+		if not got.is_empty():
+			toast("%s closed: %s back" % [name, EmpireData.money(float(got["cash"]))], "info"), true, 220))
 	v.add_child(h)
 
 
@@ -2311,6 +2344,16 @@ func _settings_panel() -> void:
 					game.audio.apply_volumes()
 				_settings_panel(), is_equal_approx(float(Settings.get(key)), lv), 90))
 		v.add_child(vh)
+	var us := S.hbox(10)
+	us.add_child(S.label("Stuck?", 18, S.MUTED))
+	us.add_child(S.button("Back to the street", func():
+		var err := game.unstick()
+		if err != "":
+			toast(err, "bad")
+			return
+		close_panel(true)
+		toast("Back on the street", "info"), false, 240))
+	v.add_child(us)
 	v.add_child(S.label("City Empire saves on this device only. No accounts, no ads, no tracking.", 15, S.MUTED))
 
 

@@ -750,6 +750,56 @@ func _open_business(premises: Dictionary, type_id: String) -> Business:
 	return b
 
 
+## Closing a business for good (quality audit 2026-11-18: there was no way
+## out of a losing shop – a bad location's rent, utilities and hangar-like
+## costs ran every day forever). What it settles, as {cash, stock, orders,
+## freehold}: the goods in it go to a clearance trader at half their cost;
+## orders on their way are cancelled and the goods refunded (delivery fees
+## and import freight are not); staff get their notice pay (fire); a
+## freehold is sold at 90% of the price (agent and legal fees); a lease
+## simply ends (the deposit stays with the landlord).
+const CLEARANCE_K := 0.5
+const FREEHOLD_SALE_K := 0.9
+
+
+func close_value(b: Business) -> Dictionary:
+	var stock := 0.0
+	for pid in EmpireData.product_ids():
+		stock += float(b.backroom.qty(pid) + b.shelf_qty(pid) + b.floor_pile.qty(pid)) * unit_cost(pid) * CLEARANCE_K
+	var orders := 0.0
+	for o: Dictionary in b.orders:
+		orders += float(o.get("cost", 0.0))
+	for o: Dictionary in flags.get("imports", []):
+		if String(o.get("biz", "")) == b.id:
+			for pid in o["lines"]:
+				orders += float(EmpireData.product(pid).get("case_cost", 0.0)) * float(o["lines"][pid])
+	var free := float(b.premises.get("price", 0.0)) * FREEHOLD_SALE_K if b.owned else 0.0
+	var notice := 0.0
+	for s in b.staff:
+		notice += float(s["wage"]) * 8.0
+	return {"stock": stock, "orders": orders, "freehold": free, "notice": notice,
+		"cash": stock + orders + free - notice}
+
+
+func close_business(b: Business) -> Dictionary:
+	if not b in businesses:
+		return {}
+	var v := close_value(b)
+	for s in b.staff.duplicate():
+		fire(b, s)
+	var back := float(v["stock"]) + float(v["orders"]) + float(v["freehold"])
+	company_cash += back
+	if back > 0.0:
+		_book("company", back, "property" if b.owned else "sales",
+			"%s: %s" % [b.name, "sold (freehold, stock, cancelled orders)" if b.owned else "closed (stock cleared, cancelled orders)"], b.id)
+	flags["imports"] = (flags.get("imports", []) as Array).filter(func(o): return String(o.get("biz", "")) != b.id)
+	businesses.erase(b)
+	stats["closed"] = int(stats.get("closed", 0)) + 1
+	_note("%s is closed for good: %s back after notice pay" % [b.name, EmpireData.money(float(v["cash"]))], "info")
+	changed.emit()
+	return v
+
+
 func buy_upgrade(b: Business, u: String) -> String:
 	if b.has_upgrade(u) or not u in b.type_def().get("upgrades", []):
 		return "Not available"
@@ -1018,8 +1068,36 @@ func premises_value() -> float:
 func vehicles_value() -> float:
 	var v := 0.0
 	for x in vehicles:
-		v += float(EmpireData.vehicle_model(x["model"]).get("price", 0.0)) * 0.6 * (0.5 + 0.5 * float(x["condition"]))
+		v += vehicle_value(x)
 	return v
+
+
+## What a trader pays for a vehicle (and what it counts for in net worth).
+func vehicle_value(x: Dictionary) -> float:
+	if x.get("test", false):
+		return 0.0
+	return float(EmpireData.vehicle_model(x["model"]).get("price", 0.0)) * 0.6 * (0.5 + 0.5 * float(x["condition"]))
+
+
+## Why a vehicle can't be sold now ("" = it can). (Aircraft and boats kept
+## costing hangar/marina fees every day with no way to part with them.)
+func sell_vehicle_block(x: Dictionary) -> String:
+	if x.is_empty() or x.get("test", false):
+		return "Not yours to sell"
+	if not (x["cargo"] as Stock).is_empty():
+		return "Unload its cargo first"
+	return ""
+
+
+func sell_vehicle(x: Dictionary) -> float:
+	if sell_vehicle_block(x) != "":
+		return -1.0
+	var val := vehicle_value(x)
+	vehicles.erase(x)
+	company_cash += val
+	_book("company", val, "vehicle", "Sold the %s" % EmpireData.vehicle_model(x["model"]).get("name", x["model"]))
+	changed.emit()
+	return val
 
 
 func net_worth() -> float:

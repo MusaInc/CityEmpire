@@ -1761,6 +1761,55 @@ func delivery_quote(vid: String) -> Dictionary:
 	return out
 
 
+## "Stuck? Back to the street" (quality audit 2026-11-18: wedged between a
+## building and a lamp post, beached on a kerb island, or walked into a gap
+## in the scenery, nothing short of reloading got you out). Puts you – and
+## the car you're in – on the nearest road lane, facing along it. Craft go
+## back to where they last stood (only once landed / stopped). "" or why not.
+func unstick() -> String:
+	if skyport_play and skyport_play.piloting != "":
+		var cr: Craft = skyport_play.crafts.get(skyport_play.piloting)
+		if cr == null:
+			return "Not found"
+		if not cr.can_exit():
+			return "Land first"
+		cr.place(cr.rest_xf)
+		return ""
+	if not gps.ready_net():
+		return "Finding the roads…"
+	var here := player.global_position if driving == "" else (cars[driving] as Node3D).global_position
+	var near := {}
+	for r: float in [40.0, 120.0, 400.0]:
+		near = gps.net.nearest(here, Vector3.ZERO, r, -1, true)
+		if not near.is_empty():
+			break
+	if near.is_empty():
+		return "No road nearby"
+	var lane: int = near["lane"]
+	var s: float = near["s"]
+	var p: Vector3 = gps.net.lane_point(lane, s)
+	var dir := gps.net.lane_dir(lane, s)
+	if floor_unit != "":
+		_end_floor()
+	if driving != "":
+		var c: Car = cars[driving]
+		c.linear_velocity = Vector3.ZERO
+		c.angular_velocity = Vector3.ZERO
+		c.place(Transform3D(Basis.looking_at(dir, Vector3.UP), Vector3(p.x, p.y, p.z) + Vector3.UP * 0.6))
+		return ""
+	# On foot: on the pavement beside that lane (the kerb side), not in it.
+	var side := Vector3(-dir.z, 0.0, dir.x)
+	var to_lane := p - here
+	to_lane.y = 0.0
+	if side.dot(to_lane) > 0.0:
+		side = -side
+	var walk := p + side * 5.5
+	if not gps.net.nearest(walk, Vector3.ZERO, 2.0, -1, true).is_empty():
+		walk = p + side * 2.0   # (a wide road: stand at its edge)
+	_teleport(Vector3(walk.x, maxf(p.y, layout.ground_y(walk.x, walk.z)) + 1.0, walk.z), atan2(-dir.x, -dir.z))
+	return ""
+
+
 ## Pays a driver to bring the vehicle round (it arrives a few seconds later).
 func deliver_vehicle(vid: String) -> String:
 	var q := delivery_quote(vid)
@@ -1867,6 +1916,48 @@ func rent_unit(u: Dictionary, buy := false, type_id := "convenience", fee := 0.0
 		if not kinds.is_empty():
 			b.name = "%s %s" % [String(u.get("shop_name", "Corner")).get_slice(" ", 0), kinds[0]]
 	rebuild_interior(u["id"])
+	save_game()
+	return ""
+
+
+## Closes a business for good (Empire.close_business) and puts the world
+## back: the unit is vacant again (to let), you're no longer on its floor,
+## a GPS route to it ends.
+func close_business(b: Business) -> Dictionary:
+	var uid := String(b.premises.get("id", ""))
+	if floor and floor.biz == b:
+		_end_floor()
+	var r := empire.close_business(b)
+	if r.is_empty():
+		return r
+	if String(gps.ref.get("id", "")) in [b.id, uid]:
+		clear_gps()
+	MapKit.invalidate()
+	if unit_by_id.has(uid):
+		rebuild_interior(uid)
+	save_game()
+	return r
+
+
+## Sells a vehicle (Empire.sell_vehicle) and takes it out of the world.
+func sell_vehicle(vid: String) -> String:
+	var v := empire.vehicle(vid)
+	if driving == vid or (skyport_play and skyport_play.piloting == vid):
+		return "Get out first"
+	var why := empire.sell_vehicle_block(v)
+	if why != "":
+		return why
+	empire.sell_vehicle(v)
+	if cars.has(vid):
+		cars[vid].queue_free()
+		cars.erase(vid)
+		vfx.cars = cars.values()
+	if skyport_play and skyport_play.crafts.has(vid):
+		skyport_play.crafts[vid].queue_free()
+		skyport_play.crafts.erase(vid)
+	if String(gps.ref.get("id", "")) == vid:
+		clear_gps()
+	MapKit.invalidate()
 	save_game()
 	return ""
 
