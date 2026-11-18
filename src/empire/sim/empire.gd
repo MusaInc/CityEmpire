@@ -1086,6 +1086,8 @@ func sell_vehicle_block(x: Dictionary) -> String:
 		return "Not yours to sell"
 	if not (x["cargo"] as Stock).is_empty():
 		return "Unload its cargo first"
+	if vehicle_value(x) <= 0.0:
+		return "No trader would pay for it"
 	return ""
 
 

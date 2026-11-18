@@ -1657,18 +1657,28 @@ func open_phone(tab := "home", focus := {}) -> void:
 				chart.reports = e.day_reports
 				chart.custom_minimum_size = Vector2(940, 110)
 				v.add_child(chart)
+			# Fixed steps you can afford, and "all" (an odd balance like £650
+			# could only ever be moved in hundreds, the rest stuck).
 			var h := S.hbox(10)
-			for amt: float in [100.0, 500.0, 2000.0]:
-				h.add_child(S.button("Put %s in" % EmpireData.money(amt), func():
-					if not e.transfer_to_company(amt):
+			for amt: float in [100.0, 500.0, 2000.0, -1.0]:
+				var a := floorf(e.personal_cash * 100.0) / 100.0 if amt < 0.0 else amt
+				var pb := S.button("Put all in · %s" % EmpireData.money(a, true) if amt < 0.0 else "Put %s in" % EmpireData.money(a), func():
+					if not e.transfer_to_company(a):
 						toast("Not enough savings", "bad")
-					open_phone("bank")))
-			for amt2: float in [100.0, 500.0]:
-				h.add_child(S.button("Take %s out" % EmpireData.money(amt2), func():
-					if not e.draw_from_company(amt2):
-						toast("Not enough in the company", "bad")
-					open_phone("bank")))
+					open_phone("bank"))
+				pb.disabled = a <= 0.0 or e.personal_cash < a
+				h.add_child(pb)
 			v.add_child(h)
+			var ho := S.hbox(10)
+			for amt2: float in [100.0, 500.0, -1.0]:
+				var a2 := floorf(e.company_cash * 100.0) / 100.0 if amt2 < 0.0 else amt2
+				var tb := S.button("Take all out · %s" % EmpireData.money(a2, true) if amt2 < 0.0 else "Take %s out" % EmpireData.money(a2), func():
+					if not e.draw_from_company(a2):
+						toast("Not enough in the company", "bad")
+					open_phone("bank"))
+				tb.disabled = a2 <= 0.0 or e.company_cash < a2
+				ho.add_child(tb)
+			v.add_child(ho)
 			var lim := e.loan_limit()
 			var h2 := S.hbox(10)
 			h2.add_child(S.label("Business loan: up to %s at %.1f%% a day" % [EmpireData.money(lim),

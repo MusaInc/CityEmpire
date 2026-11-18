@@ -598,6 +598,7 @@ func test_selling_a_freehold_returns_most_of_its_price(t) -> void:
 func test_selling_a_vehicle(t) -> void:
 	var e := _game()
 	e.personal_cash = 600000.0
+	t.check(e.sell_vehicle_block(e.vehicles[0]) != "", "the free starter hatchback is worth nothing to a trader")
 	var v := e.buy_vehicle("van", Vector3.ZERO, 0.0)
 	t.check(not v.is_empty(), "bought a van")
 	(v["cargo"] as Stock).create("crisps", 24)
