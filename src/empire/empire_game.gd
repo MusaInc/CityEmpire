@@ -1666,6 +1666,8 @@ func _track_driving() -> void:
 	player.global_position = p + Vector3.UP * 1.5
 	if c.in_water and c.water_t > 2.0:
 		_recover_car(c)
+	elif c.upside_time > 2.0:
+		_right_car(c)
 
 
 ## On foot the sea has a floor (the cars' water collision) but every quay is
@@ -1690,6 +1692,20 @@ func _check_wading(dt: float) -> void:
 	player.respawn(back + Vector3.UP * 0.6)
 	player.last_safe_position = back + Vector3.UP * 0.6
 	ui.toast("Back on dry land", "warn")
+
+
+## On its roof or side for two seconds: back on its wheels where it lies,
+## facing the way it was going (it used to stay upside down for good –
+## Never Stop does the same after 2 s).
+func _right_car(c: Car) -> void:
+	var f := -c.global_basis.z
+	f.y = 0.0
+	if f.length() < 0.1:
+		f = c.global_basis.y.slide(Vector3.UP)
+	var yaw := atan2(-f.x, -f.z) if f.length() > 0.01 else 0.0
+	var p := c.global_position
+	c.place(Transform3D(Basis(Vector3.UP, yaw), Vector3(p.x, maxf(p.y, layout.ground_y(p.x, p.z)) + 1.2, p.z)))
+	ui.toast("Back on its wheels", "warn")
 
 
 func _recover_car(c: Car) -> void:
@@ -2127,7 +2143,7 @@ func save_game() -> void:
 	elif skyport_play and skyport_play.piloting != "":
 		var cr2: Craft = skyport_play.crafts.get(skyport_play.piloting)
 		if cr2:
-			var side2 := skyport_play._step_off(cr2)
+			var side2 := skyport_play.saved_pilot_point(cr2)
 			d["player"] = [side2.x, side2.y + 1.0, side2.z, camera.view_yaw()]
 	var tmp := SAVE_PATH + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)

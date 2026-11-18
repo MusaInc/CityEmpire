@@ -509,3 +509,52 @@ func test_plenty_of_people_looking_for_work(t) -> void:
 		t.check(e2.hire(b, e2.best_candidate("cashier")), "hired cashier %d" % (i + 1))
 	e2.end_day()
 	t.check(e2.candidates.filter(func(c): return c["role"] == "cashier").size() >= 3, "fresh cashiers the next morning")
+
+
+# ------------------------------------------------- Skyport estates (audit)
+## Buying a building and selling it straight back must lose money (it
+## made 0.7% a flip on the warehouse and hangar: an endless money loop),
+## and the buildings must count in net worth (they were left out, so a
+## £1.6M hotel looked like £1.6M lost).
+func test_estates_no_flip_profit_and_count_in_net_worth(t) -> void:
+	var e := _game()
+	e.personal_cash = 5000000.0
+	for d in Ventures.ESTATES:
+		var id := String(d["id"])
+		var worth0 := e.net_worth()
+		t.check(Ventures.buy_estate(e, id) == "", "bought %s" % id)
+		var after := e.net_worth()
+		t.check(after <= worth0 + 0.01, "%s: buying doesn't create money (%.0f → %.0f)" % [id, worth0, after])
+		t.check(after > worth0 - float(d["price"]) * 0.5, "%s counts in net worth (%.0f → %.0f)" % [id, worth0, after])
+		var cash0 := e.personal_cash + e.company_cash
+		Ventures.sell_estate(e, id)
+		var cash1 := e.personal_cash + e.company_cash
+		t.check(cash1 < cash0 + float(d["price"]), "%s: selling straight back is a loss" % id)
+
+
+## Renovations: only when it needs one, and the rent rises only for the first few.
+func test_renovation_needs_wear_and_rent_rise_is_capped(t) -> void:
+	var e := _game()
+	e.personal_cash = 5000000.0
+	Ventures.buy_estate(e, "marina_quay")
+	t.check(Ventures.renovate(e, "marina_quay") == "", "renovated a worn building")
+	t.check(Ventures.renovate(e, "marina_quay") != "", "can't renovate one already in top condition")
+	var st: Dictionary = e.flags["estates"]["marina_quay"]
+	var d := Ventures.estate_def("marina_quay")
+	st["renovated"] = 20
+	var capped := Ventures.unit_rent(d, st)
+	st["renovated"] = Ventures.MAX_RENOVATIONS
+	t.check(is_equal_approx(capped, Ventures.unit_rent(d, st)), "rent stops rising after %d renovations" % Ventures.MAX_RENOVATIONS)
+
+
+## The day's profit includes the Skyport ventures (estate rent and upkeep,
+## dealership, hangar and marina fees): it left them out.
+func test_day_profit_includes_ventures(t) -> void:
+	var e := _game()
+	e.personal_cash = 5000000.0
+	Ventures.buy_estate(e, "logistics")   # (upkeep only, no rent)
+	var got := []
+	e.day_ended.connect(func(r): got.append(r))
+	e.end_day()
+	var r: Dictionary = got[0]
+	t.check(float(r["profit"]) < 0.0, "the warehouse's upkeep is in the day's profit (%.0f)" % float(r["profit"]))

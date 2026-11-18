@@ -200,9 +200,24 @@ static func renovate_cost(id: String) -> float:
 	return float(estate_def(id)["price"]) * 0.08
 
 
-static func renovate(e: Empire, id: String) -> String:
+## Rent rises with the first few renovations only (a new kitchen once
+## lifts the rent; the fifth new kitchen doesn't).
+const MAX_RENOVATIONS := 3
+
+
+static func renovate_block(e: Empire, id: String) -> String:
 	if not owns_estate(e, id):
-		return ""
+		return "You don't own it"
+	var st: Dictionary = e.flags["estates"][id]
+	if float(st["cond"]) >= 0.95:
+		return "Already in top condition"
+	return ""
+
+
+static func renovate(e: Empire, id: String) -> String:
+	var why := renovate_block(e, id)
+	if why != "":
+		return why
 	var c := renovate_cost(id)
 	if not e.pay(c, "property", "Renovated %s" % estate_def(id)["name"]):
 		return "Not enough money (%s)" % EmpireData.money(c)
@@ -221,18 +236,40 @@ static func target_occupancy(st: Dictionary, kind: String) -> float:
 	return clampf(base * lerpf(0.55, 1.05, float(st["cond"])), 0.0, 1.0)
 
 
-## A unit's rent a day (market rent rises 12% a renovation).
+## A unit's rent a day (market rent rises 12% a renovation, the first
+## MAX_RENOVATIONS of them).
 static func unit_rent(d: Dictionary, st: Dictionary) -> float:
-	return float(d["rent"]) * float(st["rent_k"]) * (1.0 + 0.12 * int(st["renovated"]))
+	return float(d["rent"]) * float(st["rent_k"]) * (1.0 + 0.12 * mini(int(st["renovated"]), MAX_RENOVATIONS))
 
 
+## What a buyer would pay: the list price for its condition, more or less
+## the income it makes against a normally let building of its kind (an
+## empty one is worth less, a renovated full one more). A bought building
+## is never worth more than you just paid (no buy-and-sell money loop).
 static func valuation(e: Empire, id: String) -> float:
 	var d := estate_def(id)
 	var st: Dictionary = e.flags.get("estates", {}).get(id, {})
 	if st.is_empty():
 		return float(d["price"])
+	var market_occ := 0.9 * (0.85 if String(d["kind"]) == "hotel" else 1.0)
 	var income_y := unit_rent(d, st) * float(d["units"]) * float(st["occ"]) * 365.0
-	return float(d["price"]) * lerpf(0.82, 1.04, float(st["cond"])) + income_y * 0.6 * (1.0 + 0.1 * int(st["renovated"])) - float(d["rent"]) * float(d["units"]) * 365.0 * 0.5
+	var market_y := float(d["rent"]) * float(d["units"]) * market_occ * 365.0
+	return maxf(float(d["price"]) * lerpf(0.8, 1.0, float(st["cond"])) + (income_y - market_y) * 0.25, float(d["price"]) * 0.4)
+
+
+## Everything Ventures owns at its value (net worth): the buildings and the
+## dealership with the cars on its forecourt.
+static func assets_value(e: Empire) -> float:
+	var v := 0.0
+	for id in e.flags.get("estates", {}):
+		if not estate_def(String(id)).is_empty():
+			v += valuation(e, String(id))
+	var dl: Dictionary = e.flags.get("dealership", {})
+	if not dl.is_empty():
+		v += DEALER_PRICE * 0.8
+		for m in dl.get("stock", {}):
+			v += trade_price(String(m)) * int(dl["stock"][m])
+	return v
 
 
 ## Once a day: occupancy drifts, rent comes in, upkeep goes out, buildings wear.

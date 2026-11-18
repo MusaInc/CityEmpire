@@ -966,6 +966,11 @@ func end_day() -> void:
 			personal_cash += inc
 			_book("personal", inc, "rent_in", "Tenant rent: %s" % q.get("name", ""))
 			report["personal"] = float(report["personal"]) + inc
+	# Skyport ventures: rents, upkeep, the dealership, hangar/marina fees
+	# (part of the day's profit like any other business).
+	var vt := Ventures.end_day(self)
+	report["ventures"] = vt
+	report["profit"] = float(report["profit"]) + float(vt["rent"]) - float(vt["upkeep"]) + float(vt["dealer"]) - float(vt["fees"])
 	if hq_tier() > 0:
 		var up := float(hq_def(hq_tier()).get("upkeep", 0.0))
 		company_cash -= up
@@ -985,8 +990,6 @@ func end_day() -> void:
 		"company": company_cash, "personal": personal_cash, "net_worth": net_worth()})
 	if day_reports.size() > 30:
 		day_reports = day_reports.slice(day_reports.size() - 30)
-	# Skyport ventures: rents, upkeep, the dealership, hangar/marina fees.
-	report["ventures"] = Ventures.end_day(self)
 	day += 1
 	candidates = fresh_candidates()
 	report["weather"] = weather
@@ -1027,7 +1030,7 @@ func net_worth() -> float:
 	for q in properties:
 		props += float(q.get("price", 0.0))
 	return personal_cash + company_cash + stock_value() + premises_value() + vehicles_value() + props \
-		+ float(hq.get("paid", 0.0)) + Club.value(self) - debt
+		+ float(hq.get("paid", 0.0)) + Club.value(self) + Ventures.assets_value(self) - debt
 
 
 # -------------------------------------------------------------- career

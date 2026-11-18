@@ -51,6 +51,9 @@ var gear_down := 1.0      # 1 down .. 0 stowed (planes)
 ## Berths a boat can moor at: [[Vector3, yaw], ...] (the game sets them).
 var berths: Array = []
 var moored_at := -1
+## Where it last stood at rest (landed, parked, stopped on the water):
+## saves made in flight keep this, and a crash recovers the craft here.
+var rest_xf := Transform3D()
 
 
 func setup(p_kind: String, p_model: String, p_spec: Dictionary) -> void:
@@ -88,7 +91,11 @@ func place(xf: Transform3D) -> void:
 	_vy = 0.0
 	if kind == "boat":
 		global_position.y = SEA_Y
+	state = "moored" if kind == "boat" else ("parked" if kind == "plane" else "landed")
+	crashed_t = 0.0
+	throttle = 0.0
 	_apply_basis()
+	rest_xf = global_transform
 
 
 func forward() -> Vector3:
@@ -136,6 +143,11 @@ func _state_word() -> String:
 
 func _physics_process(dt: float) -> void:
 	_t += dt
+	if state == "crashed":
+		# (Wreck: still until the game recovers it to rest_xf – SkyportPlay.)
+		crashed_t = maxf(crashed_t - dt * 0.5, 0.0)
+		velocity = Vector3.ZERO
+		return
 	match kind:
 		"heli":
 			_heli(dt)
@@ -160,6 +172,8 @@ func _physics_process(dt: float) -> void:
 		_gear.scale = Vector3(1.0, maxf(gear_down, 0.02), 1.0)
 		_gear.visible = gear_down > 0.03
 	_apply_basis()
+	if can_exit():
+		rest_xf = global_transform
 
 
 # ---------------------------------------------------------- helicopter

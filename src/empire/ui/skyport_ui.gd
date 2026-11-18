@@ -251,10 +251,14 @@ static func estates(ui: EmpireUI, v: VBoxContainer) -> void:
 			else:
 				c.add_child(S.label("Condition %d%% · upkeep %s a day" % [int(float(st["cond"]) * 100.0), EmpireData.money(float(d["upkeep"]))], 16, S.PAPER, "bold"))
 			acts.add_child(S.spacer())
-			acts.add_child(S.button("Renovate · %s" % EmpireData.money(Ventures.renovate_cost(id)), func():
-				var err := Ventures.renovate(e, id)
-				ui.toast(err if err != "" else "Renovated: like new, and worth more rent", "bad" if err != "" else "good")
-				ui.open_phone("property"), false, 220))
+			if Ventures.renovate_block(e, id) != "":
+				acts.add_child(S.chip("Top condition", S.GREEN))
+			else:
+				acts.add_child(S.button("Renovate · %s" % EmpireData.money(Ventures.renovate_cost(id)), func():
+					var err := Ventures.renovate(e, id)
+					var more := int(e.flags["estates"][id]["renovated"]) <= Ventures.MAX_RENOVATIONS
+					ui.toast(err if err != "" else ("Renovated: like new, and worth more rent" if more else "Renovated: like new"), "bad" if err != "" else "good")
+					ui.open_phone("property"), false, 220))
 			acts.add_child(S.button("GPS", func():
 				ui.game.set_gps(Ventures.estate_at(d), String(d["name"]), {"kind": "place", "id": id})
 				ui.close_panel(true), false, 80))

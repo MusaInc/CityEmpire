@@ -187,6 +187,23 @@ func exit() -> String:
 	return ""
 
 
+## After a crash: the airport's recovery crew brings the craft back to where
+## it last stood (you stay at the controls), for a fee. Without this a wreck
+## froze in place and couldn't be left (a soft lock).
+const RECOVERY_FEE := 400.0
+
+
+func _recover(c: Craft) -> void:
+	c.place(c.rest_xf)
+	_last = c.global_position
+	var v := game.empire.vehicle(piloting)
+	if not v.get("test", false):
+		game.empire.pay(RECOVERY_FEE, "vehicle", "Aircraft recovery")
+		game.ui.toast("Crashed: recovered to where you took off (%s)" % EmpireData.money(RECOVERY_FEE), "bad")
+	else:
+		game.ui.toast("Crashed: the dealer brought it back", "bad")
+
+
 ## Where the pilot steps out: beside the cabin, or (boats) the nearest pier
 ## or quay.
 func _step_off(c: Craft) -> Vector3:
@@ -219,6 +236,8 @@ func track(dt: float) -> void:
 	var c: Craft = crafts.get(piloting)
 	if c == null:
 		return
+	if c.state == "crashed" and c.crashed_t <= 0.0:
+		_recover(c)
 	game.player.global_position = c.global_position + Vector3.UP * 1.5
 	var p := c.global_position
 	_km_acc += p.distance_to(_last) / 1000.0
@@ -235,8 +254,23 @@ func sync_positions() -> void:
 		var c: Craft = crafts[vid]
 		var v := game.empire.vehicle(vid)
 		if c and is_instance_valid(c) and not v.is_empty():
-			v["pos"] = [c.global_position.x, c.global_position.y, c.global_position.z]
-			v["yaw"] = c.global_basis.get_euler().y
+			# In the air (or wrecked): the save keeps where it last stood, so a
+			# reload never leaves it hanging in the sky with you beside it.
+			var xf := c.global_transform if c.can_exit() else c.rest_xf
+			v["pos"] = [xf.origin.x, xf.origin.y, xf.origin.z]
+			v["yaw"] = xf.basis.get_euler().y
+
+
+## Where the pilot would be after a save in flight: beside the craft at its
+## last resting place.
+func saved_pilot_point(c: Craft) -> Vector3:
+	if c.can_exit():
+		return _step_off(c)
+	var now := c.global_transform
+	c.global_transform = c.rest_xf
+	var p := _step_off(c)
+	c.global_transform = now
+	return p
 
 
 ## Controls each physics frame: the touch drive pad and the keys, as for cars.

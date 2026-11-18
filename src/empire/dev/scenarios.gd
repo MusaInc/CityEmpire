@@ -893,6 +893,94 @@ func scenario_xp() -> void:
 	check(sp.exit() == "", "got out on the ground")
 
 
+## XF: flight edge cases (quality audit 2026-11-18). A save made in flight
+## (the 90 s autosave, or iOS closing the app) used to keep the craft and
+## you in mid-air – the helicopter reloaded hovering, frozen, at height;
+## a plane that crashed froze where it hit and could never be left.
+func scenario_xf() -> void:
+	print("--- XF: flight saves and crashes")
+	var sp: SkyportPlay = game.skyport_play
+	game.empire.personal_cash = 600000.0
+	check(sp.buy("wren") == "", "bought a Wren")
+	var vid := String(game.empire.vehicles[-1]["id"])
+	var c: Craft = sp.crafts[vid]
+	var pad := c.global_position
+	sp.enter(vid)
+	await frames(3)
+	check(await _fly(c, {"active": true, "gas": 0.0, "kick": true, "brake": 0.0, "steer": 0.0}, func(): return c.altitude > 40.0, 90.0),
+		"climbing (%.0f m)" % c.altitude)
+	game.save_game()   # (as the autosave would, in the air)
+	sp.script_input = {}
+	game.load_game()
+	await frames(20)
+	var c2: Craft = sp.crafts.get(vid)
+	check(c2 != null and c2.global_position.distance_to(pad) < 3.0, "reloaded: the helicopter is back on its pad (%.0f m away)" % (c2.global_position.distance_to(pad) if c2 else -1.0))
+	var pg := game.player.global_position
+	check(pg.distance_to(pad) < 12.0 and absf(pg.y - pad.y) < 3.0, "and you're standing beside it (%.1f m off, %.1f m up)" % [pg.distance_to(pad), pg.y - pad.y])
+	# A plane that crashes is recovered and can be left again.
+	check(sp.buy("skylark") == "", "bought a Skylark")
+	var pid := String(game.empire.vehicles[-1]["id"])
+	var pl: Craft = sp.crafts[pid]
+	var stand := pl.global_position
+	sp.enter(pid)
+	await frames(3)
+	pl.global_position += Vector3(0, 60, 0)
+	pl.state = "air"
+	pl._crash()
+	var cash := game.empire.personal_cash + game.empire.company_cash
+	check(await until(func(): return pl.state != "crashed", 15.0), "the wreck is recovered (%s)" % pl.state)
+	check(pl.global_position.distance_to(stand) < 3.0, "back where it last stood (%.0f m away)" % pl.global_position.distance_to(stand))
+	check(game.empire.personal_cash + game.empire.company_cash < cash, "the recovery was paid for")
+	check(sp.exit() == "", "and you can get out")
+	# A car on its roof is put back on its wheels (it stayed upside down).
+	var vid2 := String(game.empire.vehicles[0]["id"])
+	var car: Car = game.cars[vid2]
+	game.enter_vehicle(vid2)
+	await frames(5)
+	car.place(Transform3D(Basis(Vector3.FORWARD, PI), car.global_position + Vector3.UP * 1.5))
+	check(await until(func(): return car.global_basis.y.dot(Vector3.UP) > 0.9 and car.upside_time == 0.0, 12.0),
+		"a flipped car is back on its wheels (up·y %.2f)" % car.global_basis.y.dot(Vector3.UP))
+	game.exit_vehicle()
+
+
+## L: a long session's resources (quality audit 2026-11-18). Tours eight
+## places across the three islands three times, staying ~8 s at each so
+## chunks, interiors, crowds and traffic stream in and out; after every lap
+## prints nodes, orphan nodes, objects, static and video memory. A leak
+## shows as growth from lap to lap (the first lap warms the caches).
+## `--sc-laps=N` for longer soaks.
+func scenario_l() -> void:
+	print("--- L: soak")
+	var spots := [Vector2(-800, 0), Vector2(470, -195), Vector2(250, 600), Vector2(-376, 1493),
+		Vector2(124, 1148), Vector2(-560, 458), Vector2(524, 672), Vector2(600, 0)]
+	var laps := int(game.args.get("sc-laps", "3"))
+	var rows: Array = []
+	for lap in laps:
+		for sp: Vector2 in spots:
+			game._teleport(Vector3(sp.x, game.layout.ground_y(sp.x, sp.y) + 1.0, sp.y), 0.0)
+			await wait(8.0)
+		var start := game.starter_unit()
+		game._teleport(Premises.door_point(start) + Premises.outward(start) * 3.0 + Vector3.UP, 0.0)
+		await wait(8.0)
+		var r := {"lap": lap, "nodes": Performance.get_monitor(Performance.OBJECT_NODE_COUNT),
+			"orphans": Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT),
+			"objects": Performance.get_monitor(Performance.OBJECT_COUNT),
+			"resources": Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT),
+			"static_mb": snappedf(OS.get_static_memory_usage() / 1048576.0, 0.1),
+			"video_mb": snappedf(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0, 0.1),
+			"interiors": game.interiors.size()}
+		rows.append(r)
+		print("SOAK ", JSON.stringify(r))
+	if rows.size() >= 3:
+		var a: Dictionary = rows[1]
+		var b: Dictionary = rows[-1]
+		var per := float(rows.size() - 2)
+		check(float(b["nodes"]) - float(a["nodes"]) < 400.0 * per, "nodes steady after warm-up (%d → %d)" % [int(a["nodes"]), int(b["nodes"])])
+		check(float(b["orphans"]) - float(a["orphans"]) < 50.0 * per, "no orphan nodes piling up (%d → %d)" % [int(a["orphans"]), int(b["orphans"])])
+		check(float(b["static_mb"]) - float(a["static_mb"]) < 40.0 * per, "memory steady (%.0f → %.0f MB)" % [float(a["static_mb"]), float(b["static_mb"])])
+		check(float(b["video_mb"]) - float(a["video_mb"]) < 60.0 * per, "GPU memory steady (%.0f → %.0f MB)" % [float(a["video_mb"]), float(b["video_mb"])])
+
+
 ## XG: a boat – buy at the marina, sail out, turn, stop, step off onto a pier.
 func scenario_xg() -> void:
 	print("--- XG: boat")
@@ -1037,9 +1125,11 @@ func _run() -> void:
 		await scenario_p()
 	if _which.split(",").has("B"):
 		await scenario_b()
-	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XG", "XH", "XI", "XS", "XW"]:
+	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XF", "XG", "XH", "XI", "XS", "XW"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())
+	if _which.split(",").has("L"):
+		await scenario_l()
 	if _which.split(",").has("W"):
 		await scenario_w()
 	if _which.split(",").has("V"):
