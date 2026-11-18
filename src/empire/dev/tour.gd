@@ -36,6 +36,9 @@ func _run() -> void:
 		if is_nan(gy):
 			gy = 1.0
 		game.call("_teleport", Vector3(at[0], gy + 1.0, at[1]), 0.0)
+		# (The clock keeps running: every view at the hour asked for.)
+		if args.has("hour"):
+			(game.get("empire") as Object).set("minute", float(args["hour"]) * 60.0)
 		var from := Vector3(cv[0], cv[1], cv[2])
 		var to := Vector3(cv[3], cv[4], cv[5])
 		var cam: Node = game.get("camera")
