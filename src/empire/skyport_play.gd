@@ -78,7 +78,12 @@ func _spawn(v: Dictionary) -> Craft:
 	c.berths = game.skyport.wplan.get("berths", []) if game.skyport else []
 	game.add_child(c)
 	var p := Vector3(float(v["pos"][0]), float(v["pos"][1]), float(v["pos"][2]))
-	c.place(Transform3D(Basis(Vector3.UP, float(v.get("yaw", 0.0))), p))
+	var yaw := float(v.get("yaw", 0.0))
+	if c.kind != "boat" and game.layout.is_water(p) and p.y < Craft.SEA_Y + 0.5 and game.skyport:
+		var slot := free_slot(c.kind)   # (saved sunk in the sea: back on its pad)
+		p = slot[0]
+		yaw = float(slot[1])
+	c.place(Transform3D(Basis(Vector3.UP, yaw), p))
 	crafts[v["id"]] = c
 	return c
 
@@ -194,7 +199,13 @@ const RECOVERY_FEE := 400.0
 
 
 func _recover(c: Craft) -> void:
-	c.place(c.rest_xf)
+	var xf := c.rest_xf
+	# (A rest spot in the sea – an old save, a ditching before this fix –
+	# would recover it straight back into the water: its own pad instead.)
+	if c.kind != "boat" and game.layout.is_water(xf.origin) and xf.origin.y < Craft.SEA_Y + 0.5:
+		var slot := free_slot(c.kind)
+		xf = Transform3D(Basis(Vector3.UP, float(slot[1])), slot[0])
+	c.place(xf)
 	_last = c.global_position
 	var v := game.empire.vehicle(piloting)
 	if not v.get("test", false):
@@ -223,13 +234,11 @@ func _step_off(c: Craft) -> Vector3:
 			best = q
 	if bd < 25.0:
 		return best
-	# Anywhere else: the nearest dry ground within 60 m.
-	for r: float in [6.0, 12.0, 20.0, 30.0, 45.0, 60.0]:
-		for k in 16:
-			var q2 := c.global_position + Vector3(cos(k * TAU / 16.0), 0.0, sin(k * TAU / 16.0)) * r
-			if not game.layout.is_water(q2):
-				return Vector3(q2.x, game.layout.ground_y(q2.x, q2.z), q2.z)
-	return best if best != Vector3.INF else c.global_position + Vector3.UP * 2.0
+	# Anywhere else: the nearest safe dry ground (or road).
+	var f := game.safe.find(c.global_position, EmpireGame.HERO_BOX, {"kind": "foot", "max_r": 400.0, "exclude": [c.get_rid()]})
+	if f["ok"]:
+		return f["pos"]
+	return best if best != Vector3.INF else game._start_point()
 
 
 func track(dt: float) -> void:

@@ -57,6 +57,10 @@ var _stream_t := 0.0
 var _save_t := 0.0
 var _dry_pos := Vector3.INF   # the last dry ground the hero stood on (out of the sea)
 var _wet_t := 0.0
+var _dry_t := 0.0             # safe-position sampling clock
+var safe: SafeGround          # every water recovery asks this where to go
+var _car_safe := {}           # vehicle id -> last safe Transform3D on dry land
+const HERO_BOX := Vector3(0.8, 1.8, 0.8)
 var _last_car_pos := Vector3.ZERO
 var _km_acc := 0.0
 var _clean_t := 0.0
@@ -179,6 +183,7 @@ func _ready() -> void:
 	gps.name = "Gps"
 	add_child(gps)
 	gps.setup(self)
+	safe = SafeGround.new(layout, world, func(): return gps.net if gps.ready_net() else null)
 
 	var has_save := FileAccess.file_exists(SAVE_PATH) or FileAccess.file_exists(SAVE_PATH + ".bak")
 	if args.has("save"):
@@ -755,12 +760,19 @@ func _teleport(p: Vector3, yaw: float) -> void:
 		skyport.load_near_now()   # (arriving at once: its buildings must be solid now)
 	if venues:
 		venues.load_near_now(p)
+	world.build_all_near(p, 300.0)
+	# A save made in (or over) the sea used to reload you there and remember
+	# that spot as dry ground: the wading check then sent you back to it for
+	# ever. Somewhere safe instead.
+	if safe and layout.is_water(p) and not safe.is_safe(p + Vector3.DOWN * 1.0):
+		var f := safe.find(p, HERO_BOX, {"kind": "foot", "fallbacks": [_dry_pos]})
+		if f["ok"]:
+			p = (f["pos"] as Vector3) + Vector3.UP * 1.0
 	player.respawn(p)
 	player.last_safe_position = p
-	_dry_pos = p
+	_dry_pos = p if not layout.is_water(p) else Vector3.INF
 	_wet_t = 0.0
 	camera.face(yaw)
-	world.build_all_near(p, 300.0)
 
 
 ## A point on the street surface near p (car spawns).
@@ -1648,7 +1660,14 @@ func _spawn_car(v: Dictionary) -> Car:
 	vis.setup(c)
 	c.visual = vis
 	var p := Vector3(float(v["pos"][0]), float(v["pos"][1]), float(v["pos"][2]))
-	c.place(Transform3D(Basis(Vector3.UP, float(v.get("yaw", 0.0))), p + Vector3.UP * 0.3))
+	var yaw := float(v.get("yaw", 0.0))
+	if safe and layout.is_water(p) and p.y < Car.WATER_Y + 1.5:
+		# (Saved sunk in the sea: towed out on load, not left to loop.)
+		var f := safe.find(p, c.spec["size"], {"kind": "car"})
+		if f["ok"]:
+			p = f["pos"]
+			yaw = f["yaw"] if not is_nan(float(f["yaw"])) else yaw
+	c.place(Transform3D(Basis(Vector3.UP, yaw), p + Vector3.UP * 0.3))
 	cars[v["id"]] = c
 	vfx.cars = cars.values()
 	return c
@@ -1724,6 +1743,25 @@ func _track_driving() -> void:
 		_recover_car(c)
 	elif c.upside_time > 2.0:
 		_right_car(c)
+	else:
+		_sample_car_safe(driving, c, get_process_delta_time())
+
+
+## The car's last safe place (wheels down on dry land, upright, slow
+## enough to be somewhere it meant to be): the tow's fallback.
+func _sample_car_safe(vid: String, c: Car, dt: float) -> void:
+	_dry_t -= dt
+	if _dry_t > 0.0:
+		return
+	_dry_t = 0.5
+	if c.in_water or c.airtime > 0.0 or c.global_basis.y.y < 0.85:
+		return
+	var p := c.global_position
+	if layout.is_water(p) and p.y < Car.WATER_Y + 1.5:
+		return
+	if safe.is_safe(p, [c.get_rid()]):
+		_car_safe[vid] = c.global_transform
+		safe.settled(vid)
 
 
 ## On foot the sea has a floor (the cars' water collision) but every quay is
@@ -1734,20 +1772,35 @@ func _check_wading(dt: float) -> void:
 	var wet := p.y < Car.WATER_Y + 1.2 and layout.is_water(p)
 	if not wet:
 		_wet_t = 0.0
-		if player.is_on_floor() and not player.stunned:
-			_dry_pos = p
+		_dry_t -= dt
+		# (Sampled, and only where the ground really is dry and solid: a
+		# remembered "dry" spot in the sea is how the old loop began.)
+		if _dry_t <= 0.0 and player.is_on_floor() and not player.stunned and not player.indoors:
+			_dry_t = 0.3
+			if safe.is_safe(p + Vector3.DOWN * 0.9, [player.get_rid()]):
+				_dry_pos = p
+				player.last_safe_position = p + Vector3.UP * 0.2
+				safe.settled("hero")
 		return
 	_wet_t += dt
 	if _wet_t < 1.5:
 		return
 	_wet_t = 0.0
-	var back := _dry_pos
-	if back == Vector3.INF:
-		var s := starter_unit()
-		back = Premises.door_point(s) + Premises.outward(s) * 3.0
-	player.respawn(back + Vector3.UP * 0.6)
-	player.last_safe_position = back + Vector3.UP * 0.6
+	var f := safe.find(p, HERO_BOX, {"kind": "foot", "key": "hero", "exclude": [player.get_rid()],
+		"fallbacks": [_dry_pos, player.last_safe_position, _start_point()]})
+	var back: Vector3 = (f["pos"] as Vector3) + Vector3.UP * 0.6 if f["ok"] else _start_point()
+	player.respawn(back)
+	player.last_safe_position = back
+	_dry_pos = back
+	if f["ok"] and not is_nan(float(f["yaw"])):
+		camera.face(float(f["yaw"]))
 	ui.toast("Back on dry land", "warn")
+
+
+## Where a brand-new game starts you (outside the first shop): the last resort.
+func _start_point() -> Vector3:
+	var s := starter_unit()
+	return Premises.door_point(s) + Premises.outward(s) * 3.0 + Vector3.UP * 0.6
 
 
 ## On its roof or side for two seconds: back on its wheels where it lies,
@@ -1765,9 +1818,29 @@ func _right_car(c: Car) -> void:
 
 
 func _recover_car(c: Car) -> void:
+	# Onto the nearest road (bridges included) or dry ground with room for
+	# the car, never the same spot it sank at (that was the old loop: the
+	# tow put it down in the sea and it was towed again every 2 s).
 	var p := c.global_position
-	var g := _kerb_point(Vector3(p.x, 0.0, p.z))
-	c.place(Transform3D(c.global_basis, g + Vector3.UP * 1.0))
+	var vid := ""
+	for k in cars:
+		if cars[k] == c:
+			vid = k
+	var fb: Array = []
+	if _car_safe.has(vid):
+		fb.append((_car_safe[vid] as Transform3D).origin)
+	var f := safe.find(p, c.spec["size"], {"kind": "car", "key": vid, "exclude": [c.get_rid()], "fallbacks": fb})
+	var xf: Transform3D
+	if f["ok"]:
+		var yaw: float = f["yaw"] if not is_nan(float(f["yaw"])) else c.global_basis.get_euler().y
+		xf = Transform3D(Basis(Vector3.UP, yaw), (f["pos"] as Vector3) + Vector3.UP * 0.6)
+	elif _car_safe.has(vid):
+		xf = _car_safe[vid]
+		xf.origin += Vector3.UP * 0.6
+	else:
+		var sp := _start_point()
+		xf = Transform3D(Basis.IDENTITY, _kerb_point(sp) + Vector3.UP * 0.6)
+	c.place(xf)
 	ui.toast("Towed out of the water (£60)", "warn")
 	empire.pay(60.0, "vehicle", "Recovery")
 

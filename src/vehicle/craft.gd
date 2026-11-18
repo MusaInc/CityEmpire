@@ -54,6 +54,10 @@ var moored_at := -1
 ## Where it last stood at rest (landed, parked, stopped on the water):
 ## saves made in flight keep this, and a crash recovers the craft here.
 var rest_xf := Transform3D()
+## Open water right under it (helicopters and planes can't set down there:
+## the ground ray used to find the sea-floor collision and "land" them under
+## the surface, and a crash then recovered them back into the sea).
+var over_water := false
 
 
 func setup(p_kind: String, p_model: String, p_spec: Dictionary) -> void:
@@ -172,13 +176,24 @@ func _physics_process(dt: float) -> void:
 		_gear.scale = Vector3(1.0, maxf(gear_down, 0.02), 1.0)
 		_gear.visible = gear_down > 0.03
 	_apply_basis()
-	if can_exit():
+	if can_exit() and (kind == "boat" or not over_water):
 		rest_xf = global_transform
 
 
 # ---------------------------------------------------------- helicopter
+## The water under p: true when the first thing below is the sea (or the
+## sea floor), not a deck, a quay or land.
+func _wet_below(p: Vector3, g: float) -> bool:
+	if not water_check.is_valid() or not bool(water_check.call(p)):
+		return false
+	return is_nan(g) or g < SEA_Y + 0.3
+
+
 func _heli(dt: float) -> void:
 	var g := ground_below(global_position, 600.0)
+	over_water = _wet_below(global_position, g)
+	if over_water:
+		g = SEA_Y + 1.5   # (the surface is the floor; it can hover but not set down)
 	altitude = global_position.y - g if not is_nan(g) else global_position.y
 	var on := bool(input["active"])
 	var cruise: float = spec.get("cruise", 38.0)
@@ -221,7 +236,10 @@ func _heli(dt: float) -> void:
 			velocity = Vector3(hv.x, _vy, hv.z)
 			move_and_slide()
 			# Settles onto the ground when low, slow and coming down.
-			if altitude < 1.2 and _vy <= 0.2 and hv.length() < 6.0:
+			if over_water and altitude < 1.0:
+				_vy = maxf(_vy, 0.0)
+				global_position.y = maxf(global_position.y, g)
+			elif altitude < 1.2 and _vy <= 0.2 and hv.length() < 6.0:
 				state = "landed"
 				velocity = Vector3.ZERO
 				_vy = 0.0
@@ -238,6 +256,12 @@ func _heli(dt: float) -> void:
 # --------------------------------------------------------------- plane
 func _plane(dt: float) -> void:
 	var g := ground_below(global_position + Vector3.UP * 2.0, 800.0)
+	over_water = _wet_below(global_position, g)
+	if over_water:
+		g = SEA_Y
+	if over_water and state in ["taxi", "roll", "landing_roll", "parked"]:
+		_crash()   # (rolled off the end into the sea)
+		return
 	altitude = global_position.y - g if not is_nan(g) else global_position.y
 	var on := bool(input["active"])
 	var vr: float = spec.get("vr", 40.0)
@@ -302,7 +326,9 @@ func _plane(dt: float) -> void:
 			velocity = fwd * v + Vector3.UP * _vy
 			var col := move_and_slide()
 			# Touching down: low, slow enough, not dropping fast, on something flat.
-			if altitude < 2.5 and _vy < 1.0:
+			if altitude < 2.5 and _vy < 1.0 and over_water:
+				_crash()   # (ditched: no landing on the water)
+			elif altitude < 2.5 and _vy < 1.0:
 				if v < float(spec.get("land_max", 62.0)) and _vy > -6.0:
 					state = "landing_roll"
 					_vy = 0.0
