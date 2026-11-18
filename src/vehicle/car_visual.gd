@@ -150,7 +150,7 @@ static func shared_mat(name: String) -> Material:
 			# Clear headlamp cover / red tail-lamp lens over the modelled
 			# lamp inside (one transparent sheet per lamp).
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			m.albedo_color = Color(0.9, 0.93, 0.97, 0.06) if name == "lens" else Color(0.55, 0.03, 0.03, 0.7)
+			m.albedo_color = Color(0.9, 0.93, 0.97, 0.06) if name == "lens" else Color(0.75, 0.06, 0.05, 0.42)
 			m.roughness = 0.03
 			m.metallic_specular = 0.9
 		"lamp_rev":

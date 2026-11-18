@@ -35,7 +35,9 @@ func setup(layout: CityLayout, p_world: Node) -> void:
 			cum.append(cum[i - 1] + pts[i].distance_to(pts[i - 1]))
 		lanes.append({"pts": pts, "len": cum[-1], "cum": cum, "speed": float(l["speed"]) * 0.8, "next": l["next"],
 			"city_start": l["city_start"], "city_end": l["city_end"]})
-	var meshes: Array = world.get("car_meshes") if world else []
+	# (one MultiMesh per kind over the whole island, so no per-car LOD: the
+	# ~1.2k-triangle mid models; the full ones are for the city's near band)
+	var meshes: Array = world.get("car_mid_meshes") if world else []
 	if meshes.is_empty():
 		return
 	var kinds: Array = []
@@ -63,7 +65,7 @@ func setup(layout: CityLayout, p_world: Node) -> void:
 			continue
 		var k: int = kinds[_rng.randi() % kinds.size()]
 		cars.append({"lane": li, "s": _rng.randf_range(0.0, float(L["len"]) - 8.0), "v": float(L["speed"]) * 0.6, "kind": k,
-			"col": (CityWorld.CAR_COLORS[_rng.randi() % CityWorld.CAR_COLORS.size()] as Color) if String(CityWorld.CAR_KINDS[k][0]) != "car_taxi" else CityWorld.TAXI_YELLOW,
+			"col": CityWorld.kind_colour(k, CityWorld.CAR_COLORS[_rng.randi() % CityWorld.CAR_COLORS.size()]),
 			"wait": 0.0})
 
 

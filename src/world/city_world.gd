@@ -30,8 +30,11 @@ const FURNITURE_RANGE := 190.0
 ## Traffic: [kind, how common, Never Stop civilian body (assets/vehicles)].
 ## The bodies are ~3x the old build_cars.py models' triangles, so there are
 ## fewer of them (Traffic.SPACING, PARKED_KEEP): quieter roads, better cars.
+## (tools/blender/ws_fleet.py builds them: Kestrel-generator bodies at
+## traffic detail, each with a ~1.2k-triangle "_lod1" for mid distance.)
 const CAR_KINDS := [["car_sedan", 0.32, "civ_sedan"], ["car_hatch", 0.25, "civ_compact"], ["car_suv", 0.2, "civ_suv"],
-	["car_taxi", 0.13, "civ_taxi"], ["car_van", 0.1, "civ_van"]]
+	["car_taxi", 0.13, "civ_taxi"], ["car_van", 0.1, "civ_van"], ["car_police", 0.025, "civ_police"],
+	["car_ambulance", 0.015, "civ_ambulance"]]
 ## Share of the kerbside parking spots that hold a car.
 const PARKED_KEEP := 0.35
 ## Traffic material per glTF material name: [merge group, tint, emission, roughness].
@@ -44,9 +47,27 @@ const TRAFFIC_MATS := {
 	"lamp_head": ["lamp", Color(0.95, 0.93, 0.85), 2.0, 0.3], "lamp_tail": ["lamp_red", Color(0.7, 0.03, 0.02), 1.2, 0.3],
 	"lamp_amber": ["lamp_amber", Color(0.95, 0.5, 0.06), 0.6, 0.3], "sign": ["sign", Color(1.0, 0.86, 0.35), 1.2, 0.4],
 	"tyre": ["tyre", Color(0.045, 0.045, 0.045), 0.0, 0.88], "rim": ["rim", Color(0.42, 0.43, 0.45), 0.0, 0.35],
+	"reflector": ["chrome", Color(0.62, 0.63, 0.66), 0.0, 0.2],
+	"plate_rear": ["plate_rear", Color(0.95, 0.76, 0.1), 0.0, 0.5],
+	"livery_blue": ["livery_blue", Color(0.04, 0.16, 0.62), 0.0, 0.4],
+	"livery_yellow": ["livery_yellow", Color(0.98, 0.85, 0.05), 0.0, 0.4],
+	"livery_green": ["livery_green", Color(0.1, 0.55, 0.22), 0.0, 0.4],
+	"beacon_blue": ["beacon_blue", Color(0.1, 0.3, 1.0), 1.4, 0.3],
 }
 const TRAFFIC_DARK := ["dark", Color(0.035, 0.035, 0.04), 0.0, 0.6]  # trim, liner, grille, seam, cladding, housings
 const TAXI_YELLOW := Color(0.98, 0.76, 0.12)
+
+
+## A kind's body colour: liveried kinds always wear theirs.
+static func kind_colour(k: int, col: Color) -> Color:
+	match String(CAR_KINDS[k][0]):
+		"car_taxi":
+			return TAXI_YELLOW
+		"car_police":
+			return Color(0.92, 0.93, 0.94)
+		"car_ambulance":
+			return Color(0.97, 0.86, 0.1)
+	return col
 const CAR_COLORS := [Color(0.85, 0.85, 0.83), Color(0.1, 0.1, 0.11), Color(0.62, 0.08, 0.07), Color(0.12, 0.24, 0.45),
 	Color(0.55, 0.57, 0.6), Color(0.9, 0.72, 0.15), Color(0.2, 0.35, 0.3)]
 
@@ -71,10 +92,16 @@ var water_mat: ShaderMaterial
 const SEABED := "res://assets/world/seabed.png"
 var prop_meshes := {}
 var car_meshes: Array[Mesh] = []  # CAR_KINDS order; null where the model is missing
-var car_far_meshes: Array[Mesh] = []  # two-box stand-ins (24 tris) for chunks past CAR_NEAR
+var car_mid_meshes: Array[Mesh] = []  # "<body>_lod1" (~1.2k tris) between CAR_NEAR and CAR_MID
+var car_far_meshes: Array[Mesh] = []  # two-box stand-ins (24 tris) past CAR_MID
 ## Full car models only in chunks this close (centre distance); 1 650 tris each
 ## is wasted on a car a few pixels long.
-const CAR_NEAR := 170.0  # (was 260: the detailed civilian bodies cost ~3x the old cars)
+## (ws_fleet bodies are ~9k triangles: full models only this close, the
+## mid LOD beyond. Same total cost as the 170 m band of the old bodies.)
+const CAR_NEAR := 90.0
+## Trees: the Blender-grown model within this range, the procedural one beyond.
+const TREE_NEAR := 110.0
+const CAR_MID := 240.0
 const CAR_FAR := 520.0
 var walker_mesh: Mesh
 var walker_meshes: Array = []   # one per body type
@@ -182,9 +209,10 @@ func _ready() -> void:
 		traffic = Traffic.new()
 		traffic.name = "Traffic"
 		traffic.near_range = CAR_NEAR
+		traffic.mid_range = CAR_MID
 		traffic.far_range = CAR_FAR
 		add_child(traffic)
-		traffic.setup(layout, car_meshes, car_far_meshes, traffic_density)
+		traffic.setup(layout, car_meshes, car_far_meshes, traffic_density, car_mid_meshes)
 	trains = Trains.new()
 	trains.name = "Trains"
 	add_child(trains)
@@ -741,6 +769,8 @@ func _load_props() -> void:
 		if cm == null:  # (the old low-detail model as a fallback)
 			cm = _legacy_car_mesh(String(kind[0]), shader)
 		car_meshes.append(cm)
+		var mid := _traffic_car_mesh(String(kind[2]) + "_lod1", shader, String(kind[2]))
+		car_mid_meshes.append(mid if mid else cm)
 		car_far_meshes.append(_car_far_mesh(cm) if cm else null)
 	# Four body types (tools/blender/build_street.py), one surface each;
 	# pedestrian.gdshader colours and poses them from their UVs.
@@ -775,9 +805,9 @@ func _load_props() -> void:
 ## 16-sided tyre and a hub disc, not the 1.5k-triangle player wheel), all
 ## merged into one mesh with a surface per look. Front along -Z like the
 ## old models; ground at y = 0.
-func _traffic_car_mesh(body: String, shader: Shader) -> Mesh:
+func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 	var path := "res://assets/vehicles/%s.glb" % body
-	var d: Dictionary = BodyDims.DIMS.get(body, {})
+	var d: Dictionary = BodyDims.DIMS.get(dims_of if dims_of != "" else body, {})
 	if not ResourceLoader.exists(path) or d.is_empty():
 		return null
 	var inst := (load(path) as PackedScene).instantiate()
@@ -804,6 +834,26 @@ func _traffic_car_mesh(body: String, shader: Shader) -> Mesh:
 	var wr: float = d["wheel_r"]
 	var tw: float = d["tyre_w"]
 	var track: float = float(d["W"]) - tw - 0.05
+	# The light alloy (ws_fleet wheel_traffic: ~430 triangles, radius 1, width
+	# 0.44, axle X, face +X); the mid LOD keeps the plain cylinders.
+	var wpath := "res://assets/vehicles/wheel_traffic.glb"
+	if dims_of == "" and ResourceLoader.exists(wpath):
+		var wi := (load(wpath) as PackedScene).instantiate()
+		var wmis := wi.find_children("*", "MeshInstance3D", true, false)
+		var wm: Mesh = (wmis[0] as MeshInstance3D).mesh if wmis.size() > 0 else null
+		wi.free()
+		if wm:
+			for az in d["axles"]:
+				for side in [-1.0, 1.0]:
+					var wb := Basis.from_scale(Vector3(tw / 0.44, wr, wr))
+					if side < 0.0:
+						wb = Basis(Vector3.UP, PI) * wb
+					var wxf := Transform3D(wb, Vector3(side * track * 0.5, wr, -float(az)))
+					for si in wm.get_surface_count():
+						var smat := wm.surface_get_material(si)
+						var sn := String(smat.resource_name) if smat else ""
+						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si), 0, wxf)
+			return _commit_traffic(tools, looks, shader)
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -821,6 +871,10 @@ func _traffic_car_mesh(body: String, shader: Shader) -> Mesh:
 			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
 			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(tyre, 0, xf)
 			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(hub, 0, xf)
+	return _commit_traffic(tools, looks, shader)
+
+
+func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader) -> ArrayMesh:
 	var out := ArrayMesh.new()
 	for g in tools:
 		var look: Array = looks[g]
@@ -1748,6 +1802,24 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 		mmi.multimesh = mm
 		mmi.visibility_range_end = PROP_RANGES.get(kind, 320.0 if is_tree else 300.0)
 		mmi.visibility_range_end_margin = 20.0
+		var near: Mesh = TreeKit.near_mesh(kind.trim_prefix("tree_")) if is_tree else null
+		if near:
+			# Blender tree up close, the procedural one from TREE_NEAR on
+			# (same instances, transforms and tints: one buffer).
+			var nm := MultiMesh.new()
+			nm.transform_format = MultiMesh.TRANSFORM_3D
+			nm.use_custom_data = true
+			nm.mesh = near
+			nm.instance_count = list.size()
+			nm.buffer = mm.buffer
+			var nmi := MultiMeshInstance3D.new()
+			nmi.name = "Props_" + kind + "_near"
+			nmi.multimesh = nm
+			nmi.visibility_range_end = TREE_NEAR
+			nmi.visibility_range_end_margin = 10.0
+			root.add_child(nmi)
+			mmi.visibility_range_begin = TREE_NEAR
+			mmi.visibility_range_begin_margin = 10.0
 		if kind in ["ac_unit", "streetlight", "traffic_light"]:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mmi)
@@ -1808,7 +1880,7 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 		if car_meshes[k] == null:
 			k = 0
 		var col: Color = CAR_COLORS[rng.randi() % CAR_COLORS.size()]
-		groups[k].append([xf[i], custom[i], TAXI_YELLOW if CAR_KINDS[k][0] == "car_taxi" else col])
+		groups[k].append([xf[i], custom[i], kind_colour(k, col)])
 	# Cars only ever drive inside their chunk (lanes are clipped to it), so the
 	# chunk itself is an exact culling box for the GPU-moved instances.
 	var bounds := AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 70.0, CHUNK))  # (terrain)
@@ -1819,23 +1891,22 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 		# One packed buffer for both LODs (much cheaper than per-instance setters
 		# on the main thread while chunks stream in).
 		var buf := _instance_buffer(g)
-		for far in [false, true]:
+		for band in 3:   # near full model / mid LOD / far boxes
 			var mm := MultiMesh.new()
 			mm.transform_format = MultiMesh.TRANSFORM_3D
 			mm.use_colors = true
 			mm.use_custom_data = true
-			mm.mesh = car_far_meshes[k] if far else car_meshes[k]
+			mm.mesh = [car_meshes[k], car_mid_meshes[k], car_far_meshes[k]][band]
 			mm.instance_count = g.size()
 			mm.buffer = buf
 			mm.custom_aabb = bounds
 			var mmi := MultiMeshInstance3D.new()
-			mmi.name = "Traffic_" + CAR_KINDS[k][0] + ("_far" if far else "")
+			mmi.name = "Traffic_" + CAR_KINDS[k][0] + ["", "_mid", "_far"][band]
 			mmi.multimesh = mm
-			if far:
-				mmi.visibility_range_begin = CAR_NEAR
-				mmi.visibility_range_end = CAR_FAR
-			else:
-				mmi.visibility_range_end = CAR_NEAR
+			mmi.visibility_range_begin = [0.0, CAR_NEAR, CAR_MID][band]
+			mmi.visibility_range_end = [CAR_NEAR, CAR_MID, CAR_FAR][band]
+			if band == 2:
+				mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			mmi.visibility_range_begin_margin = 20.0
 			mmi.visibility_range_end_margin = 20.0
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

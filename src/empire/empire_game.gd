@@ -395,6 +395,40 @@ func _after_start() -> void:
 			return [Transform3D(Basis.looking_at(to - from, Vector3.UP if absf((to - from).normalized().y) < 0.99 else Vector3.FORWARD), from), 62.0]
 	if args.has("nohud"):
 		ui.visible = false   # (captures: the world only)
+	if args.has("fleet"):
+		# Captures: one of each traffic kind parked in a row ahead of the hero
+		# (the real traffic meshes, shader and instancing, parked encoding),
+		# for judging the fleet in the game. "fleet=mid" shows the mid LODs.
+		var cw: CityWorld = world as CityWorld
+		var lod := String(args["fleet"])
+		var su := starter_unit()
+		var fwd := Premises.outward(su)
+		var base := Premises.door_point(su)
+		var side := fwd.cross(Vector3.UP).normalized()
+		for k in CityWorld.CAR_KINDS.size():
+			var mesh: Mesh = cw.car_mid_meshes[k] if lod == "mid" else cw.car_meshes[k]
+			if mesh == null:
+				continue
+			var at := base + fwd * 10.0 + side * (float(k) - 3.0) * 6.0
+			at.y = layout.ground_y(at.x, at.z)
+			var b := Basis.looking_at(-side, Vector3.UP)
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_colors = true
+			mm.use_custom_data = true
+			mm.mesh = mesh
+			mm.instance_count = 1
+			mm.buffer = CityWorld._instance_buffer([[Transform3D(b, at + b.z * 5.0), Color(0.0, 5.0, 10.0, 0.0),
+				CityWorld.kind_colour(k, CityWorld.CAR_COLORS[k % CityWorld.CAR_COLORS.size()])]])
+			mm.custom_aabb = AABB(base - Vector3(40, 10, 40), Vector3(80, 25, 80))   # (instances are in world space)
+			var mmi := MultiMeshInstance3D.new()
+			mmi.multimesh = mm
+			add_child(mmi)
+			mmi.global_position = Vector3.ZERO
+		var eye := base + fwd * 2.0 + Vector3.UP * 2.4 - side * 1.0
+		var look := base + fwd * 10.0 + Vector3.UP * 0.6
+		camera.cine = func(_dt: float) -> Array:
+			return [Transform3D(Basis.looking_at(look - eye, Vector3.UP), eye), 70.0]
 	if args.has("carcam") and not empire.vehicles.is_empty():
 		# Captures: a fixed camera on your first car - front34, rear34, side,
 		# side_l, front, rear, nose, tail - for checking the car in the game.
@@ -2353,7 +2387,15 @@ func _capture(path: String, at: float) -> void:
 	img.save_png(path)
 	print("SHOT ", path)
 	if args.has("stats"):
-		# Captures: render cost of this frame (tools/aerial_audit.sh).
+		# Captures: cars drawn per traffic LOD (moving "Cars_*", parked/chunk
+		# "Traffic_*"): instances in each band's MultiMeshes.
+		var tc := {}
+		for n in find_children("*", "MultiMeshInstance3D", true, false):
+			var nm := String(n.name)
+			if nm.begins_with("Cars_") or nm.begins_with("Traffic_"):
+				var key := nm.split("_")[0] + ("_mid" if nm.ends_with("_mid") else ("_far" if nm.ends_with("_far") else "_near"))
+				tc[key] = int(tc.get(key, 0)) + (n as MultiMeshInstance3D).multimesh.instance_count
+		print("TRAFFIC_COUNTS ", JSON.stringify(tc))
 		var ri := func(k): return RenderingServer.get_rendering_info(k)
 		print("RENDER_STATS ", JSON.stringify({"shot": path.get_file(),
 			"draw_calls": ri.call(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),

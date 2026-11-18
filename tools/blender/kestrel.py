@@ -71,6 +71,19 @@ Y_WS = 0.08            # windscreen top
 Y_RE = -1.93           # roof end (spoiler lip)
 Y_TG = YR + 0.16       # tailgate glass base
 SILL_Z = 0.31
+REAR_EXP = 2.2         # tail-glass profile (2.2 steep hatch/estate .. 1.2 saloon rear screen)
+TUMBLE = 0.12          # glass tumblehome (m)
+END_RF, END_RR = 0.34, 0.3   # plan corner radii of the nose / tail
+SEALED = False         # traffic detail: no clear lenses (no transparency on instanced cars)
+SEG_K = 1.0            # segment scale for tubes/discs (traffic: 0.5)
+
+
+def coarse(g):
+    """Every other row, every third column of a hit grid (traffic pockets)."""
+    if not SEALED:
+        return g
+    rows = g[::2] if (len(g) - 1) % 2 == 0 else g[::2] + [g[-1]]
+    return [r[::3] if (len(r) - 1) % 3 == 0 else r[::3] + [r[-1]] for r in rows]
 
 
 def sstep(a, b, x):
@@ -120,10 +133,11 @@ def cabin_h(y):
         u = (y - Y_RE) / (Y_WS - Y_RE)
         return ROOF - 0.045 + 0.025 * u + 0.012 * math.sin(u * math.pi) - smooth(DECK, y)
     u = (y - Y_TG) / (Y_RE - Y_TG)            # tailgate glass, steep
-    return (ROOF - 0.05 - smooth(DECK, y)) * (1 - (1 - u) ** 2.2)
+    return (ROOF - 0.05 - smooth(DECK, y)) * (1 - (1 - u) ** REAR_EXP)
 
 
 def superellipse_scale(d, R, p=3.2):
+    d = max(d, 0.0)   # (a support loop rounded a hair past the end gave a complex root)
     if d >= R:
         return 1.0
     t = 1.0 - d / R
@@ -157,7 +171,7 @@ def ring(y):
     zr = max(SILL_Z, zb + 0.06) if abs(y) < WB / 2 - 0.3 else max(zb + 0.08, zl - 0.12)
     belt_x = hw - 0.055                          # shoulder ledge 3-4 cm, not a shelf
     # Greenhouse with tumblehome; on the bonnet the same points spread out.
-    roof_x = belt_x - 0.09 - 0.12 * sstep(0.0, 0.42, h)
+    roof_x = belt_x - 0.09 - TUMBLE * sstep(0.0, 0.42, h)
     xe = (hw - 0.3) * (1 - f) + roof_x * f
     xg = (hw - 0.13) * (1 - f) + (roof_x + belt_x) * 0.5 * f
     zt = deck + h
@@ -204,7 +218,7 @@ def build_shell(material):
     ys = station_ys()
     for y in ys:
         d = min(y - YR, YF - y)
-        sx = superellipse_scale(d, 0.34 if y > 0 else 0.3)
+        sx = superellipse_scale(d, END_RF if y > 0 else END_RR)
         # The ends also close down top and bottom a little.
         sz_top = (1 - superellipse_scale(d, 0.1, 2.0)) * (0.05 if y > 0 else 0.035)
         half = ring(y)
@@ -275,7 +289,7 @@ def cavity_solid():
         dd = min(y - YR, YF - y)
         # Follow the shell's rounded, raked ends (it poked out of the rear
         # corners and left holes round the tail lamps).
-        sx = superellipse_scale(dd, 0.34 if y > 0 else 0.3) - 0.05
+        sx = superellipse_scale(dd, END_RF if y > 0 else END_RR) - 0.05
         r = ring(y)
         h = cabin_h(y)
         ztop = max(smooth(DECK, y) + h - 0.06, smooth(DECK, y) - 0.04)
@@ -580,6 +594,14 @@ def mats():
 
 # ------------------------------------------------------------------ parts
 def tube_path(name, pts, r, material, segs=8):
+    segs = max(4, int(round(segs * SEG_K)))
+    dd = [V(pts[0])]
+    for p in pts[1:]:
+        if (V(p) - dd[-1]).length > 1e-4:
+            dd.append(V(p))
+    pts = dd
+    if len(pts) < 2:
+        return None
     bm = bmesh.new()
     rings = []
     for i, p in enumerate(pts):
@@ -604,6 +626,7 @@ def tube_path(name, pts, r, material, segs=8):
 
 
 def disc_on(name, p, n, r, h, material, segs=20):
+    segs = max(6, int(round(segs * SEG_K)))
     c = cyl(name, r, h, (0, 0, 0), material, segs)
     c.rotation_mode = "QUATERNION"
     c.rotation_quaternion = V(n).to_track_quat("Z", "Y")
@@ -624,7 +647,7 @@ def premium(m):
     p.inputs["Roughness"].default_value = 0.32
     p.inputs["Coat Weight"].default_value = 1.0
     p.inputs["Coat Roughness"].default_value = 0.03
-    for k, a in {"glass_clear": 0.4, "lens": 0.05, "lens_red": 0.5}.items():
+    for k, a in {"glass_clear": 0.4, "lens": 0.05, "lens_red": 0.38}.items():
         b = bsdf(k)
         b.inputs["Alpha"].default_value = a
         b.inputs["Roughness"].default_value = 0.02
@@ -648,12 +671,13 @@ def head_lamp(surf, body, m, out, poly):
         print("LAMP MISSED head")
         return
     n0 = len(out)
-    pk = recess_cutter("pocket", g, 0.075)
+    pk = recess_cutter("pocket", coarse(g), 0.075)
     pk2 = mirror_copy(pk)
     cut(body, pk, m["housing"])
     cut(body, pk2, m["housing"])
-    out.append(sheet("lamp_back", g, -0.07, m["housing"]))
-    out.append(sheet("lamp_lens", g, -0.003, m["lens"]))
+    out.append(sheet("lamp_back", coarse(g), -0.07, m["housing"]))
+    if not SEALED:
+        out.append(sheet("lamp_lens", g, -0.003, m["lens"]))
     navg = sum((c[1] for row in g for c in row if c), V()).normalized()
 
     def at(s, t):
@@ -722,12 +746,13 @@ def tail_lamp(surf, body, m, out, poly):
         print("LAMP MISSED tail")
         return
     n0 = len(out)
-    pk = recess_cutter("pocket", g, 0.06)
+    pk = recess_cutter("pocket", coarse(g), 0.06)
     pk2 = mirror_copy(pk)
     cut(body, pk, m["housing"])
     cut(body, pk2, m["housing"])
-    out.append(sheet("tail_back", g, -0.055, m["housing"]))
-    out.append(sheet("tail_lens", g, -0.003, m["lens_red"]))
+    out.append(sheet("tail_back", coarse(g), -0.055, m["housing"]))
+    # (sealed: traffic draws no transparency - the lens is the lit lamp)
+    out.append(sheet("tail_lens", coarse(g), -0.003, m["lens_red"] if not SEALED else m["tail"]))
     navg = sum((c[1] for row in g for c in row if c), V()).normalized()
 
     def row(j, i0, i1, inset):
@@ -1166,6 +1191,22 @@ def build():
     for o in list(out[n0:]):
         out.append(mirror_copy(o))
     surf = Surface([body])
+    # Lower bumper: a black lip splitter across the chin, a chrome strip over
+    # the intake, vertical air-curtain blades outboard of the fog lamps (the
+    # bumper below the grille was one plain surface).
+    g = patch(surf, "front", poly_fn([(-0.62, 0.17), (0.62, 0.17), (0.66, 0.225), (-0.66, 0.225)]), 22, 2)
+    out.append(sheet("lip", g, 0.0, m["plastic"], thick=0.018))
+    strip = [surf.cast(*ray("front", -0.48 + 0.96 * i / 16, 0.425)) for i in range(17)]
+    strip = [h[0] + h[1] * 0.004 for h in strip if h]
+    if len(strip) > 4:
+        out.append(tube_path("intake_strip", strip, 0.006, m["chrome"], 6))
+    n0 = len(out)
+    gb = patch(surf, "front", poly_fn([(0.775, 0.26), (0.81, 0.27), (0.8, 0.46), (0.765, 0.45)]), 2, 6)
+    pkb = recess_cutter("blade", gb, 0.03)
+    pkb2 = mirror_copy(pkb)
+    cut(body, pkb, m["plastic"])
+    cut(body, pkb2, m["plastic"])
+    surf = Surface([body])
     h = surf.cast(*ray("front", 0.0, zl - 0.05))
     if h:
         out.append(disc_on("badge", h[0] + h[1] * 0.004, h[1], 0.045, 0.01, m["chrome"], 28))
@@ -1338,7 +1379,8 @@ def build():
         f.write("const DIMS := " + json.dumps(dims, indent="\t", sort_keys=True) + "\n")
 
 
-build()
-if "wheels" in ARGS:
-    wheel_kestrel()
-print("KESTREL DONE")
+if __name__ == "__main__":
+    build()
+    if "wheels" in ARGS:
+        wheel_kestrel()
+    print("KESTREL DONE")

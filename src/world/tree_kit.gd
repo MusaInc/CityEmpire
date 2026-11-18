@@ -17,6 +17,29 @@ static var _mat: ShaderMaterial
 static var _ico: PackedVector3Array   # unit sphere, subdivided icosahedron (triangle list)
 
 
+## Near LOD: the Blender-grown tree (tools/blender/ws_trees.py, assets/models/
+## tree_<species>.glb: trunk, three orders of branches, ~120 leaf clumps),
+## drawn within CityWorld.TREE_NEAR; the procedural tree below is the mid/far
+## LOD. null when the model is missing.
+static var _near := {}
+
+
+static func near_mesh(sp: String) -> Mesh:
+	if not _near.has(sp):
+		var path := "res://assets/models/tree_%s.glb" % sp
+		var m: Mesh = null
+		if ResourceLoader.exists(path):
+			var n := (load(path) as PackedScene).instantiate()
+			var mis := n.find_children("*", "MeshInstance3D", true, false)
+			if mis.size() > 0:
+				m = ((mis[0] as MeshInstance3D).mesh as Mesh).duplicate()
+				for i in m.get_surface_count():
+					m.surface_set_material(i, material())
+			n.free()
+		_near[sp] = m
+	return _near[sp]
+
+
 static func mesh(sp: String) -> ArrayMesh:
 	if not _meshes.has(sp):
 		_meshes[sp] = _build(sp)
