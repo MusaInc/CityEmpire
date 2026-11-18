@@ -512,6 +512,10 @@ func _after_start() -> void:
 		var sc: Node = load("res://src/empire/dev/scenarios.gd").new()
 		sc.set("game", self)
 		add_child(sc)
+	if args.has("tour"):
+		var tr: Node = load("res://src/empire/dev/tour.gd").new()
+		tr.set("game", self)
+		add_child(tr)
 	if args.has("autoplay"):
 		var ap: Node = load("res://src/empire/dev/autoplay.gd").new()
 		ap.set("game", self)
@@ -748,10 +752,10 @@ func _play() -> void:
 	camera.snap()
 	player.input_enabled = driving == ""
 	ui.show_hud()
-	if empire.flags.get("intro_done", false) == false and not args.has("shot") and not args.has("autoplay") and not args.has("perf") \
+	if empire.flags.get("intro_done", false) == false and not args.has("shot") and not args.has("tour") and not args.has("autoplay") and not args.has("perf") \
 			and not args.has("scenarios"):
 		ui.intro()
-	if not DisplayServer.is_touchscreen_available() and not args.has("touch") and not args.has("shot"):
+	if not DisplayServer.is_touchscreen_available() and not args.has("touch") and not args.has("shot") and not args.has("tour"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 

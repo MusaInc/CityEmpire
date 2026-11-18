@@ -11,6 +11,53 @@ extends RefCounted
 const CELL := 16.0          # m
 const KEEP_DEPTH := 12.0     # cells shallower than this somewhere are kept (water is opaque by ~6 m)
 const SEA_Y := -1.6
+const RECT := Rect2(-2400.0, -1800.0, 4800.0, 4800.0)
+const MAX_DEPTH := 32.0
+static var _img: Image
+static var _tried := false
+
+
+## A shore row's last point moved to just under the baked floor (world
+## coordinates; rows run from the land out to sea).
+static func tuck(row, xf := Transform3D.IDENTITY) -> void:
+	var n: int = row.size()
+	if n < 2:
+		return
+	var last: Vector3 = xf * (row[n - 1] as Vector3)
+	var fy := floor_y(last.x, last.z)
+	if is_nan(fy):
+		return
+	var prev: Vector3 = row[n - 2]
+	if (row[n - 1] as Vector3).y > -3.0:
+		return  # (a shallow cove's floor: it meets the far side's, not the deep floor)
+	var y := minf(fy - 0.6, prev.y - 0.5)
+	row[n - 1] = Vector3((row[n - 1] as Vector3).x, y, (row[n - 1] as Vector3).z)
+
+
+## The baked sea floor's height at (x, z) (NAN on land or without a bake):
+## shore bands end just under it, so their last row tucks in under the
+## floor mesh instead of standing proud of it as a ledge in clear water.
+static func floor_y(x: float, z: float) -> float:
+	if not _tried:
+		_tried = true
+		if ResourceLoader.exists(CityWorld.SEABED):
+			_img = (load(CityWorld.SEABED) as Texture2D).get_image()
+			if _img and _img.is_compressed():
+				_img.decompress()
+	if _img == null:
+		return NAN
+	var W := _img.get_width()
+	var H := _img.get_height()
+	var fx := clampf((x - RECT.position.x) / RECT.size.x * W - 0.5, 0.0, W - 1.001)
+	var fz := clampf((z - RECT.position.y) / RECT.size.y * H - 0.5, 0.0, H - 1.001)
+	var ix := int(fx)
+	var iz := int(fz)
+	var tx := fx - ix
+	var tz := fz - iz
+	var c := _img.get_pixel(ix, iz).lerp(_img.get_pixel(ix + 1, iz), tx).lerp(
+		_img.get_pixel(ix, iz + 1).lerp(_img.get_pixel(ix + 1, iz + 1), tx), tz)
+	var d := c.r * MAX_DEPTH
+	return SEA_Y - d if d > 0.05 else NAN
 
 
 static func build(img: Image, rect: Rect2, max_depth: float) -> MeshInstance3D:

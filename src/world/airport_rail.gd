@@ -198,9 +198,58 @@ static func build(target: Node3D, body: StaticBody3D, isl: SkyportIsland, layout
 		for sg: float in [-1.0, 1.0]:
 			var q := p + sd * sg * RailNetwork.PAIR - dd * 1.0
 			m.beam(q - sd * 1.2, q + sd * 1.2, 0.8, 1.2, Color(0.75, 0.12, 0.1))
+		_terminus(m, body, p, dd, sd, layout)
 	for st: Dictionary in P["rail_stations"]:
 		_station(m, body, line, st, layout, P)
 	isl._mesh_into(m, "AirportRail_%d" % chunk, target, 0.0, 3800.0)
+
+
+## The end of the line: the viaduct runs into a glazed end house on piers
+## (concourse over the buffers, roof in the line's blue, a roundel facing
+## out) instead of stopping in mid-air over the water (2026-11-18: "the
+## railway that comes from the airport just cuts off").
+static func _terminus(m: BuildingMesher, body: StaticBody3D, p: Vector3, dd: Vector3, sd: Vector3, layout: CityLayout) -> void:
+	var deck := p.y - RailNetwork.RAIL_H
+	var L := 20.0
+	var hw := DECK_HALF + 3.0
+	var a := p + dd * 0.2
+	var b := p + dd * L
+	var mid := (a + b) * 0.5
+	var g := NAN
+	for lay: CityLayout in [layout, layout.mainland]:
+		if lay != null and is_nan(g) and not lay.is_water(Vector3(mid.x, 0.0, mid.z)):
+			g = lay.ground_y(mid.x, mid.z)
+	var base := g if not is_nan(g) else BuildingMesher.SEA_SURFACE - 3.0
+	var glass := Color(0.3, 0.42, 0.5)
+	var A := Vector3(a.x, 0.0, a.z)
+	var B := Vector3(b.x, 0.0, b.z)
+	# Plinth / pile cap, the concourse box (glazed), its roof and fascia.
+	m.beam(A + Vector3.UP * (deck - 2.6), B + Vector3.UP * (deck - 2.6), hw * 2.0, 1.2, CONCRETE_DK)
+	m.beam(A + Vector3.UP * (deck + 3.4), B + Vector3.UP * (deck + 3.4), hw * 2.0 - 0.6, 7.6, glass)
+	m.beam(A + Vector3.UP * (deck + 7.5) - dd * 0.8, B + Vector3.UP * (deck + 7.5) + dd * 0.8, hw * 2.0 + 1.6, 0.5, CANOPY)
+	m.beam(A + Vector3.UP * (deck + 7.0) - dd * 0.8, B + Vector3.UP * (deck + 7.0) + dd * 0.8, hw * 2.0 + 1.7, 0.6, LINE_BLUE)
+	SkyportIsland._box_beam(body, A + Vector3.UP * (deck + 3.4), B + Vector3.UP * (deck + 3.4), hw * 2.0 - 0.6, 7.6)
+	# Mullions round the glass every 3 m.
+	var t := 0.0
+	while t <= L - 0.2:
+		for sg: float in [-1.0, 1.0]:
+			var q := a.lerp(b, t / L) + sd * sg * (hw - 0.25)
+			m.beam(Vector3(q.x, deck - 0.4, q.z), Vector3(q.x, deck + 7.2, q.z), 0.25, 0.25, CANOPY)
+		t += 3.0
+	for sg: float in [-1.0, 1.0]:
+		var q2 := b + sd * sg * (hw - 0.25)
+		m.beam(Vector3(q2.x, deck - 0.4, q2.z), Vector3(q2.x, deck + 7.2, q2.z), 0.4, 0.4, CANOPY)
+	# Piers down to the ground or the sea bed.
+	for f: float in [0.25, 0.75]:
+		for sg: float in [-1.0, 1.0]:
+			var q3 := a.lerp(b, f) + sd * sg * (hw - 2.0)
+			m.beam(Vector3(q3.x, base - 0.5, q3.z), Vector3(q3.x, deck - 3.2, q3.z), 1.6, 1.6, CONCRETE)
+			SkyportIsland._box_beam(body, Vector3(q3.x, base - 0.5, q3.z), Vector3(q3.x, deck - 3.2, q3.z), 1.6, 1.6)
+	# The line's roundel on the end wall.
+	var rp := b + dd * 0.35
+	rp.y = deck + 4.0
+	m.beam(rp + Vector3.DOWN * 1.6, rp + Vector3.UP * 1.6, 3.2, 0.25, LINE_BLUE)
+	m.beam(rp - sd * 2.0, rp + sd * 2.0, 0.6, 0.3, Color(0.95, 0.95, 0.93))
 
 
 static func _pier(m: BuildingMesher, body: StaticBody3D, pts: PackedVector3Array, s: float, P: Dictionary,
@@ -281,8 +330,17 @@ static func _station(m: BuildingMesher, body: StaticBody3D, line: Dictionary, st
 			tower = _toward_land(layout.mainland if layout.mainland else layout, a, b, side, off_pl)
 		"Harbour Quay":
 			tower = _toward_land(layout, a, b, side, off_pl)
+		"Airport Central":
+			# On whichever side keeps the tower out of a carriageway: it stood
+			# in Hangar Lane (2026-11-18 clearance audit); the hall side rises
+			# out of the entrance hall's roof.
+			var t_a := c + side * (off_pl + 5.5)
+			var t_b := c - side * (off_pl + 5.5)
+			var ca := SkyportIsland.road_clearance(P, SkyportIsland.l2(Vector2(t_a.x, t_a.z)))
+			var cb := SkyportIsland.road_clearance(P, SkyportIsland.l2(Vector2(t_b.x, t_b.z)))
+			tower = t_a if ca >= cb else t_b
 		_:
-			tower = c + side * (off_pl + 5.5) * (1.0 if name == "Airport Central" else -1.0)
+			tower = c - side * (off_pl + 5.5)
 	if tower != Vector3.ZERO:
 		var tq := Vector2(tower.x, tower.z)
 		if SkyportIsland.contains(tq.x, tq.y):

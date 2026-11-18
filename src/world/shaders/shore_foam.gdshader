@@ -33,7 +33,9 @@ void fragment() {
 	float out_m = UV.x;
 	float along = UV.y;
 	// The wash: the foam line moves in and out with a slow swell.
-	float wash = 0.8 + 0.6 * sin(TIME * 0.7 + along * 0.05) + 0.4 * sin(TIME * 1.3 + along * 0.13);
+	// (Kept above zero: smoothstep(0, wash, x) with wash <= 0 is 0 everywhere,
+	// and a whole stretch of foam turned into a solid white slab.)
+	float wash = max(0.8 + 0.6 * sin(TIME * 0.7 + along * 0.05) + 0.4 * sin(TIME * 1.3 + along * 0.13), 0.25);
 	float edge = 1.0 - smoothstep(0.0, wash, out_m);
 	float n = vnoise(vec2(along * 0.6, out_m * 1.4 - TIME * 0.4)) * 0.6 + vnoise(vec2(along * 2.1, out_m * 3.0 + TIME * 0.7)) * 0.4;
 	float lace = smoothstep(0.45, 0.7, n) * (1.0 - smoothstep(0.0, width, out_m));

@@ -84,6 +84,11 @@ tn = np.choose(near_i[..., None] * np.ones((1, 1, 4), int), T)
 xs = np.stack([t[..., 0] for t in T]); hws = np.abs(np.stack([t[..., 1] for t in T]))
 mag = (np.abs(xs) > hws + 1.0).any(axis=0)
 xs = np.where(mag[None], np.abs(xs), xs)
+# (Texels of another road – a jump bigger than the cell – take the nearest
+# texel's offset: blended across two roads, 'across' swept through 0 and
+# every line value along a junction box's edge: squiggles.)
+xn = np.choose(near_i, xs)
+xs = np.where(np.abs(xs - xn[None]) > 1.6 * cell, xn[None], xs)
 zs = np.stack([t[..., 2] for t in T]); zl = zs - np.floor(zs / 64.0) * 64.0
 dz = zl - zl[0:1]
 zl = zl + 64.0 * (dz < -32) - 64.0 * (dz > 32)

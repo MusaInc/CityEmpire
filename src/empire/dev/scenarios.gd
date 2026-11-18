@@ -148,6 +148,9 @@ func _audit_line(pts: Array, expect: Callable) -> Array:
 			steps += 1
 			if game.args.has("sc-debug"):
 				print("    step %.2f at %s" % [dev - prev, p])
+				for dx in [-2.0, -1.0, 0.0, 1.0, 2.0]:
+					for dz in [-2.0, -1.0, 0.0, 1.0, 2.0]:
+						_probe_at(p.x + dx, p.z + dz, float(expect.call(p)) + 0.6)
 			if absf(dev - prev) > worst:
 				worst = absf(dev - prev)
 				where = p
@@ -290,6 +293,11 @@ func scenario_xa() -> void:
 					if not hits.is_empty():
 						var co: Object = hits[0]["collider"]
 						road_obstacles.append("%s at %s (%s)" % [rd[0], centre, (co as Node).get_path() if co is Node else str(co)])
+						if OS.has_environment("SC_DEBUG"):
+							var rid: RID = hits[0]["rid"]
+							var si: int = hits[0]["shape"]
+							var srid := PhysicsServer3D.body_get_shape(rid, si)
+							print("OBST ", PhysicsServer3D.body_get_shape_transform(rid, si), " ", PhysicsServer3D.shape_get_data(srid))
 				k += 2.0
 	var r2 := _audit_line(island_pts, func(p): return SkyportIsland.LAND_Y + 0.3)   # (all flat)
 	check(int(r2[0]) == 0 and int(r2[1]) == 0, "island roads: %d steps, %d holes over %d samples" % [r2[0], r2[1], island_pts.size()])
@@ -339,6 +347,12 @@ func scenario_xa() -> void:
 					var q2 := a.lerp(b, k / Ln)
 					# (Only where the street is drawn: the road graph runs a few
 					# metres past the coast, where a headland may now stand.)
+					# (The island's Grand Diagonal west of x 150 is the old bridge's
+					# lane - Traffic skips it too; under the deck it's the plaza
+					# round the bridge piers, not a street.)
+					if not L.is_mainland and rd.get("name", "") == "diagonal" and q2.x < 150.0:
+						k += 2.0
+						continue
 					if not game.layout.is_water(Vector3(q2.x, 0, q2.y)) and not L.is_water(Vector3(q2.x, 0, q2.y)) and not carried.call(q2) \
 							and Geometry2D.is_point_in_polygon(q2, L.coast):
 						pts.append(Vector3(q2.x, 0.0, q2.y))
@@ -347,6 +361,8 @@ func scenario_xa() -> void:
 			var rr := _audit_line(pts, func(p): return L.terrain.road_y(p.x, p.z) + 0.3)
 			if int(rr[0]) > 0 or int(rr[1]) > 0:
 				bad_roads += 1
+				if game.args.has("sc-debug"):
+					print("    BAD ROAD ", rd.get("name", "?"), " ", rd.get("kind", "?"), " ", rp2, " keys ", rd.keys())
 				if float(rr[2]) > worst or int(rr[1]) > 0:
 					worst = maxf(worst, float(rr[2]))
 					wpos = rr[3]
@@ -425,6 +441,14 @@ func scenario_xv() -> void:
 	for B: Dictionary in P["bridges"]:
 		var u: Vector3 = B["u"]
 		var L: float = B["L"]
+		if game.args.has("sc-debug"):
+			var al := _ramp_start(B) - 10.0
+			var line := ""
+			while al < 30.0:
+				var pp := _bp(B, al, 3.8)
+				line += "%.0f:%.2f/%.2f " % [al, _surface(pp.x, pp.z, _road_y(pp) + 2.0), _road_y(pp)]
+				al += 2.0
+			print("    PROFILE ", B["name"], " ", line)
 		for v0: float in speeds:
 			for dir: int in [1, -1]:
 				# Keep right: the lane left of the centreline going towards

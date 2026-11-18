@@ -167,6 +167,17 @@ func _ready() -> void:
 		# (Also before the ground: the quay railing opens where land joins.)
 		Landforms.forms(layout)
 		BuildingMesher.rail_gaps.append_array(Landforms.rail_gaps())
+	# (The shore apron's rows, once, on this thread: chunk builders only read them.)
+	BuildingMesher.shore_rows(layout)
+	if Landforms.enabled:
+		# Lookouts, cove steps, jetties, quay ladders, headland viewpoints
+		# (before collision and structures; they open the railing).
+		BuildingMesher.rail_gaps.append_array(CoastKit.gaps)
+		var ck := CoastKit.new(layout).build()
+		print("CoastKit%s: %s" % [" (mainland)" if layout.is_mainland else "", ck])
+		if OS.get_cmdline_user_args().has("--coast-places"):
+			for pl: Array in CoastKit.places:
+				print("COAST_PLACE %s %.1f %.1f %.1f %.3f %.3f" % [pl[0], pl[1].x, pl[1].y, pl[1].z, pl[2].x, pl[2].y])
 	_by_chunk = layout.buildings_by_chunk()
 	_props_by_chunk = layout.props_by_chunk()
 	var settings := get_node_or_null("/root/Settings")
@@ -853,7 +864,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 						var smat := wm.surface_get_material(si)
 						var sn := String(smat.resource_name) if smat else ""
 						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si), 0, wxf)
-			return _commit_traffic(tools, looks, shader, -float(d["L"]) * 0.5, float(d["W"]))
+			return _commit_traffic(tools, looks, shader)   # (no road beam: the user asked for them gone, 2026-11-18)
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -871,7 +882,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
 			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(tyre, 0, xf)
 			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(hub, 0, xf)
-	return _commit_traffic(tools, looks, shader, -float(d["L"]) * 0.5, float(d["W"]))
+	return _commit_traffic(tools, looks, shader)   # (no road beam: the user asked for them gone, 2026-11-18)
 
 
 const BEAM_SHADER := preload("res://src/world/shaders/traffic_beam.gdshader")
@@ -1404,13 +1415,29 @@ func outer_ground_rects() -> Array:
 func _build_water() -> void:
 	# Foam along the sea walls and quays (one transparent strip).
 	if layout.coast.size() >= 3:
-		add_child(Shoreline.build(Shoreline.polygon_edges(layout.coast)))
+		# (Along the water's edge out on the beaches and rocks; it used to
+		# follow the sea wall, buried under the shore.)
+		var fe: Array = BuildingMesher.waterline_edges(layout) if Landforms.enabled else Shoreline.polygon_edges(layout.coast)
+		add_child(Shoreline.build(fe))
 	var m := BuildingMesher.new()
 	for w in layout.water:
 		if w in layout.basins:
 			continue  # (the sea surface runs under the whole island and shows through the basins)
 		var r: Rect2 = w
-		m.top(r.position.x, r.position.y, r.end.x, r.end.y, -1.6, Color.WHITE, 0, 0, 0)
+		# In tiles (200 m near the islands, 1 km beyond): one 470 x 5000 m
+		# quad over the strait interpolated its world position so coarsely
+		# that pale straight stripes ran along it near the quays.
+		var x := r.position.x
+		while x < r.end.x - 0.01:
+			var tx := 200.0 if absf(x) < 3000.0 else 1000.0
+			var x1 := minf(x + tx, r.end.x)
+			var z := r.position.y
+			while z < r.end.y - 0.01:
+				var tz := 200.0 if absf(z) < 3000.0 and absf(x) < 3000.0 else 1000.0
+				var z1 := minf(z + tz, r.end.y)
+				m.top(x, z, x1, z1, -1.6, Color.WHITE, 0, 0, 0)
+				z = z1
+			x = x1
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, m.arrays())
 	var mi := MeshInstance3D.new()

@@ -18,9 +18,11 @@ uniform bool has_streets = false;
 global uniform float wetness;
 global uniform float rain;
 
+#include "res://src/world/shaders/rock.gdshaderinc"
 varying float v_up;
 varying float v_dist;
 varying vec3 v_world;
+varying vec3 v_wn;
 
 float hash12(vec2 p) {
 	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -69,6 +71,13 @@ vec4 road_sample(vec2 p) {
 	if (any(greaterThan(abs(xs), hws + 1.0))) {
 		xs = abs(xs);
 	}
+	// Texels of another road (a jump bigger than a cell) take the nearest
+	// texel's offset: blended across two roads, 'across' swept through 0 and
+	// every line value along a junction box's edge – squiggles of centre and
+	// edge line round the bridge approaches' boxes (2026-11-18).
+	float xn = f.x < 0.5 ? (f.y < 0.5 ? xs.x : xs.z) : (f.y < 0.5 ? xs.y : xs.w);
+	float lim = 1.6 * road_rect.z / float(sz.x);
+	xs = mix(xs, vec4(xn), vec4(greaterThan(abs(xs - xn), vec4(lim))));
 	vec4 zs = vec4(t00.z, t10.z, t01.z, t11.z);
 	vec4 zl = zs - floor(zs / 64.0) * 64.0;
 	zl += 64.0 * vec4(lessThan(zl - zl.x, vec4(-32.0))) - 64.0 * vec4(greaterThan(zl - zl.x, vec4(32.0)));
@@ -80,6 +89,7 @@ void vertex() {
 	v_up = NORMAL.y;
 	v_dist = length((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_wn = (MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz;
 }
 
 // Street age by quarter (mirrors building.gdshader's quarter()): newer,
@@ -112,26 +122,27 @@ void fragment() {
 	bool shore = abs(COLOR.a * 8.0 - 5.0) < 0.3;  // BuildingMesher.KIND_SHORE
 
 	if (shore) {
-		// Rock round the cliffs (strata, big blotches, lichen on the flats) or
-		// sand on the beaches; everything darkens and shines where it's wet.
-		if (c.r < 0.6) {
-			// Bedding planes: crisp horizontal layers of different tone, gently warped.
-			float yb = v_world.y + 3.0 * vnoise(p * 0.04);
-			float layer = hash12(vec2(floor(yb / 1.7), 3.0));
-			float edge = band(fract(yb / 1.7) - 0.5, 0.47, 0.03);
-			float big = vnoise(p * 0.07);
-			vec3 warm = vec3(0.3, 0.26, 0.22);
-			albedo = mix(c, warm, big) * (0.62 + 0.55 * layer) * (0.75 + 0.25 * edge)
-				* (0.88 + 0.18 * vnoise(p * 1.3 + v_world.y));
-			albedo *= 0.8 + 0.25 * smoothstep(0.2, 0.9, v_up);  // steep faces darker, ledges lighter
-			albedo = mix(albedo, vec3(0.32, 0.37, 0.24), smoothstep(0.8, 0.97, v_up) * 0.45 * vnoise(p * 0.25));
-		} else {
-			albedo = c * (0.93 + 0.08 * vnoise(p * 0.45) + 0.04 * vnoise(p * 3.1));
-			rough = 0.97;
+		// Rock (rock.gdshaderinc: the same look on every shore) or sand on
+		// the beaches, blended by the vertex colour so a beach fades into
+		// rock along the coast instead of switching on a line.
+		float sk = smoothstep(0.35, 0.65, c.r);
+		vec3 rk = vec3(0.0);
+		float rr = 0.9;
+		if (sk < 0.999) {
+			float fp = fwidth(p.x) + fwidth(p.y);
+			rk = rock_look(vec3(0.23, 0.225, 0.225) * mix(1.0, c.r / 0.23, step(c.r, 0.34)), v_world, normalize(v_wn), fp, near, rr);
 		}
-		float wet = 1.0 - smoothstep(-1.4, 0.5, v_world.y);
-		albedo *= 1.0 - 0.38 * wet;
-		rough = mix(rough, 0.35, wet);
+		vec3 sd = vec3(0.0);
+		if (sk > 0.001) {
+			sd = vec3(0.78, 0.7, 0.52) * (0.93 + 0.08 * vnoise(p * 0.45) + 0.04 * vnoise(p * 3.1));
+			float rip = sin(p.x * 1.7 + p.y * 1.1 + vnoise(p * 0.3) * 4.0) * 0.5 + 0.5;
+			sd *= 0.97 + 0.05 * rip * near;
+			sd *= 1.0 - 0.1 * smoothstep(0.03, 0.0, abs(v_world.y + 1.15));   // tide line (sea at -1.6)
+			float wet = 1.0 - smoothstep(-1.7, -1.0, v_world.y);
+			sd *= 1.0 - 0.38 * wet;
+		}
+		albedo = mix(rk, sd, sk);
+		rough = mix(rr, mix(0.97, 0.4, 1.0 - smoothstep(-1.7, -1.0, v_world.y)), sk);
 	} else if (c.r > 0.85) {
 		albedo = c * (0.9 + 0.1 * n);  // old painted geometry (prototype world)
 	} else if (has_streets && flat_top) {

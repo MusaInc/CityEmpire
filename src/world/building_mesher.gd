@@ -1658,7 +1658,13 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 			var x := CityLayout.RIVER_EDGE
 			quad(Vector3(x, 0.0, z0), Vector3(x, 0.0, z1), Vector3(x, -4.0, z1), Vector3(x, -4.0, z0), Vector3.LEFT,
 				Vector2(z0, 0), Vector2(z1, 0), Vector2(z1, -4), Vector2(z0, -4), Color(0.45, 0.4, 0.34), KIND_WALL, 5, 0.3)
-			solid(x, z0, x + 0.6, z1, 0.0, 1.1, Color(0.3, 0.32, 0.33))
+			solid(x, z0, x + 0.6, z1, 0.0, RAIL_PLINTH, Color(0.36, 0.38, 0.39))
+			_iron_bar(Vector3(x + 0.3, RAIL_H - 0.03, z0), Vector3(x + 0.3, RAIL_H - 0.03, z1), Vector3.LEFT, 0.07, 0.06)
+			_iron_bar(Vector3(x + 0.3, RAIL_PLINTH + 0.3, z0), Vector3(x + 0.3, RAIL_PLINTH + 0.3, z1), Vector3.LEFT, 0.035, 0.035)
+			var pz := ceilf(z0 / 2.0) * 2.0
+			while pz < z1:
+				_iron_post(Vector3(x + 0.3, RAIL_PLINTH, pz), RAIL_H - RAIL_PLINTH - 0.03, Vector3.LEFT)
+				pz += 2.0
 
 
 ## The far ground (FarCity): the same surfaces as add_ground – asphalt over
@@ -1884,14 +1890,20 @@ const RAIL_T := 0.5
 
 ## The coast's edges (not the straight strait quay in the west), each as
 ## [a, b, outward normal (2-D)], in order round from the north-west corner.
-static func coast_edges(coast: PackedVector2Array) -> Array:
+## (Westbank's straight quay is on its EAST side, at FAR_SHORE: with only the
+## Commercial Island's test every Westbank edge was dropped – no sea wall or
+## apron anywhere round it, the esplanade slab ending in mid-air and the
+## sea floor's 16 m cells showing through the water as a brown sawtooth.)
+static func coast_edges(coast: PackedVector2Array, mainland := false) -> Array:
 	var n := coast.size()
 	var out: Array = []
 	for i in n:
 		var a := coast[i]
 		var b := coast[(i + 1) % n]
-		if a.x < CityLayout.RIVER_EDGE + 0.5 and b.x < CityLayout.RIVER_EDGE + 0.5:
+		if not mainland and a.x < CityLayout.RIVER_EDGE + 0.5 and b.x < CityLayout.RIVER_EDGE + 0.5:
 			continue  # the strait quay
+		if mainland and a.x > CityLayout.FAR_SHORE - 0.5 and b.x > CityLayout.FAR_SHORE - 0.5:
+			continue  # Westbank's strait quay
 		var d := (b - a).normalized()
 		var o := Vector2(d.y, -d.x)
 		if Geometry2D.is_point_in_polygon((a + b) * 0.5 + o * 0.5, coast):
@@ -1905,7 +1917,7 @@ static func coast_edges(coast: PackedVector2Array) -> Array:
 func _coast(layout: CityLayout, clip: Rect2) -> void:
 	var T := layout.terrain
 	var rail := Color(0.3, 0.32, 0.33)
-	for e in coast_edges(layout.coast):
+	for e in coast_edges(layout.coast, layout.is_mainland):
 		var a: Vector2 = e[0]
 		var b: Vector2 = e[1]
 		var o: Vector2 = e[2]
@@ -1917,6 +1929,9 @@ func _coast(layout: CityLayout, clip: Rect2) -> void:
 			var q := a.lerp(b, float(k + 1) / m)
 			if not clip.has_point((p + q) * 0.5):
 				continue
+			var under := (p + q) * 0.5 + o * 1.5
+			if Landforms.enabled and Landforms.contains(under.x, under.y):
+				continue  # (a landform's ground carries on over it)
 			var yp := T.road_y(p.x, p.y) + CityTerrain.KERB
 			var yq := T.road_y(q.x, q.y) + CityTerrain.KERB
 			var high := maxf(yp, yq) > 6.0
@@ -1926,7 +1941,9 @@ func _coast(layout: CityLayout, clip: Rect2) -> void:
 			var P1 := Vector3(p.x, SEA_WALL_LOW, p.y)
 			var Q1 := Vector3(q.x, SEA_WALL_LOW, q.y)
 			_vface(P0, Q0, Q1, P1, n3, face, KIND_WALL)
-			# Railing: a low stone wall just inside the edge, riding the slope.
+			# Railing: a stone plinth just inside the edge riding the slope, an
+			# iron balustrade on it (posts, mid and hand rails) – a promenade
+			# edge you can see the sea through, not a 1.1 m blank wall.
 			var gap := false
 			for g: Rect2 in rail_gaps:
 				if g.has_point((p + q) * 0.5):
@@ -1935,7 +1952,7 @@ func _coast(layout: CityLayout, clip: Rect2) -> void:
 				continue
 			var pi := p - o * RAIL_T
 			var qi := q - o * RAIL_T
-			var up := Vector3(0, RAIL_H, 0)
+			var up := Vector3(0, RAIL_PLINTH, 0)
 			var Pi := Vector3(pi.x, yp, pi.y)
 			var Qi := Vector3(qi.x, yq, qi.y)
 			_vface(P0 + up, Q0 + up, Q0, P0, n3, rail, KIND_TRIM)
@@ -1945,7 +1962,43 @@ func _coast(layout: CityLayout, clip: Rect2) -> void:
 			if tn.y > 0.0:
 				top.reverse()
 			quad(top[0], top[1], top[2], top[3], Vector3.UP, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO,
-				rail.lightened(0.1), KIND_TRIM, 0, 0)
+				rail.lightened(0.12), KIND_TRIM, 0, 0)
+			var mid_p := (P0 + Pi) * 0.5
+			var mid_q := (Q0 + Qi) * 0.5
+			_iron_bar(mid_p + Vector3(0, RAIL_H - 0.03, 0), mid_q + Vector3(0, RAIL_H - 0.03, 0), n3, 0.07, 0.06)
+			_iron_bar(mid_p + Vector3(0, RAIL_PLINTH + 0.3, 0), mid_q + Vector3(0, RAIL_PLINTH + 0.3, 0), n3, 0.035, 0.035)
+			# Posts every half segment.
+			for f: float in [0.0, 0.5]:
+				var c := mid_p.lerp(mid_q, f)
+				_iron_post(c + Vector3(0, RAIL_PLINTH, 0), RAIL_H - RAIL_PLINTH - 0.03, n3)
+
+
+const RAIL_PLINTH := 0.5
+const RAIL_IRON := Color(0.17, 0.2, 0.2)
+
+
+## A horizontal iron bar from a to b (box: top and both sides).
+func _iron_bar(a: Vector3, b: Vector3, n3: Vector3, w: float, h: float) -> void:
+	var o := n3 * w * 0.5
+	var d := Vector3(0, h, 0)
+	_vface(a + o + d, b + o + d, b + o, a + o, n3, RAIL_IRON, KIND_TRIM)
+	_vface(a - o + d, b - o + d, b - o, a - o, -n3, RAIL_IRON, KIND_TRIM)
+	var tp := [a - o + d, b - o + d, b + o + d, a + o + d]
+	var tn: Vector3 = ((tp[1] - tp[0]) as Vector3).cross(tp[3] - tp[0])
+	if tn.y > 0.0:
+		tp.reverse()
+	quad(tp[0], tp[1], tp[2], tp[3], Vector3.UP, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, RAIL_IRON, KIND_TRIM, 0, 0)
+
+
+## A square iron post of height h standing on c (four sides).
+func _iron_post(c: Vector3, h: float, n3: Vector3) -> void:
+	var t := Vector3(-n3.z, 0, n3.x) * 0.03
+	var o := n3 * 0.03
+	var up := Vector3(0, h, 0)
+	_vface(c + o - t + up, c + o + t + up, c + o + t, c + o - t, n3, RAIL_IRON, KIND_TRIM)
+	_vface(c - o + t + up, c - o - t + up, c - o - t, c - o + t, -n3, RAIL_IRON, KIND_TRIM)
+	_vface(c + t + o + up, c + t - o + up, c + t - o, c + t + o, t.normalized(), RAIL_IRON, KIND_TRIM)
+	_vface(c - t - o + up, c - t + o + up, c - t + o, c - t - o, -t.normalized(), RAIL_IRON, KIND_TRIM)
 
 
 ## A vertical face with the winding quad() wants for normal n.
@@ -1963,10 +2016,10 @@ const SHORE_STEP := 8.0      # m between shoreline samples
 
 ## The shoreline: samples along the coast (not the strait quay) as
 ## [point on the sea wall, outward normal, arc length].
-static func shore_samples(coast: PackedVector2Array) -> Array:
+static func shore_samples(coast: PackedVector2Array, mainland := false) -> Array:
 	var out: Array = []
 	var s := 0.0
-	var edges := coast_edges(coast)
+	var edges := coast_edges(coast, mainland)
 	for ei in edges.size():
 		var e: Array = edges[ei]
 		var a: Vector2 = e[0]
@@ -1995,13 +2048,24 @@ static func _snoise(x: float) -> float:
 	return lerpf(absf(a), absf(b), f)
 
 
-## Profile across the apron at one shoreline sample: [distance out, height]
-## rows from the sea wall's foot to under the water, then the rock share.
-## High ground meets the sea in rocky slopes under the cliffs; low ground in
-## a sand beach under the sea wall; the docks keep a plain quay wall.
+## Profile across the apron at one shoreline sample: SHORE_ROWS [distance
+## out, height] rows from the sea wall's foot to the sea bed, then the rock
+## share. Three kinds of coast, blended:
+##   * cliffs (high ground): the esplanade's top course, a short lip, then a
+##     steep craggy face (~60°, jittered along the coast into buttresses and
+##     gullies) down to a boulder foot just above the water, and a short
+##     rocky shelf into deep water – not the old 100 m striped slope;
+##   * low engineered coasts: rock armour piled against the sea wall;
+##   * sand: the North Beach and the odd cove under a low sea wall.
+## Every row is clamped to under half the open water in front of it (a
+## narrow inlet or a headland close by): rows from facing shores never
+## cross. The docks keep a plain quay wall.
+const SHORE_ROWS := 8
+const SEA_SURFACE := -1.6     # the drawn sea (CityWorld._build_water, SeaAndSky.SEA_Y)
 static func shore_profile(layout: CityLayout, smp: Array) -> Array:
 	var T := layout.terrain
 	var p: Vector2 = smp[0]
+	var nrm: Vector2 = smp[1]
 	var s: float = smp[2]
 	var H := T.road_y(p.x, p.y)
 	var x_taper := smoothstep(CityLayout.RIVER_EDGE + 10.0, CityLayout.RIVER_EDGE + 90.0, p.x)
@@ -2011,45 +2075,113 @@ static func shore_profile(layout: CityLayout, smp: Array) -> Array:
 	var n1 := _snoise(s / 70.0)
 	var n2 := _snoise(s / 23.0 + 40.0)
 	var amt := x_taper * (1.0 - dock)
-	var r := smoothstep(4.0, 9.0, H)
-	# Low engineered coasts are rock armour (a constant-width sand apron
-	# along a straight sea wall read as a beige strip), with sand only in
-	# the odd cove where the shore noise peaks – and on the North Beach.
-	var cove := smoothstep(0.66, 0.84, n1)
-	# (Not under a bridge's end: armour boulders there stopped cars.)
 	if SkyportIsland.over_bridge_shore(p.x, p.y):
 		# Under a bridge's end: a plain quay wall, straight down into the
 		# water (the abutment stands on it; an apron squeezed to nothing
 		# left a 0.9 m lip of sand at the wall's foot).
-		return [[0.0, -1.2], [0.3, -1.8], [0.6, -2.4], [0.9, -3.0], [1.2, -3.8], [1.5, -4.5], 0.0]
-	r = maxf(r, 1.0 - cove)
-	var w := lerpf(16.0 + 30.0 * n1 + 6.0 * n2, 14.0 + H * 0.9 + 46.0 * pow(n1, 1.6) + 9.0 * n2, r) * amt
-	# North Beach (CoastLife): a long, wide, shallow sand beach – a crescent,
-	# widest mid-bay, narrowing towards rocky ends.
+		return [[0.0, -1.2], [0.3, -1.8], [0.6, -2.4], [0.9, -3.0], [1.2, -3.8], [1.5, -4.5], [1.8, -6.0], [2.1, -9.0], 0.0]
+	# Low engineered coasts are rock armour, with sand only in the odd cove
+	# where the shore noise peaks – and on the North Beach.
+	var cove := smoothstep(0.66, 0.84, n1)
+	var cliff := smoothstep(5.0, 14.0, H)
+	var r := maxf(smoothstep(4.0, 9.0, H), 1.0 - cove)
+	var w := (16.0 + 30.0 * n1 + 6.0 * n2) * amt
 	var bk := 0.0 if layout.is_mainland else CoastLife.beach_k(p)
 	if bk > 0.0:
 		r *= 1.0 - bk
 		var bt := clampf((p.x - CoastLife.BEACH_X.x) / (CoastLife.BEACH_X.y - CoastLife.BEACH_X.x), 0.0, 1.0)
 		var crescent := 0.6 + 0.62 * sin(PI * pow(bt, 0.85)) + 0.1 * (n1 - 0.5)
 		w = lerpf(w, CoastLife.BEACH_W * crescent + 6.0 * n2, bk)
-	var j := func(k: int) -> float: return (_snoise(s / 32.0 + k * 17.3) - 0.5) * r
-	var rock := [[0.0, H - 0.5], [w * 0.07 + 2.0 * j.call(1), H * 0.66 + H * 0.14 * j.call(2)],
-		[w * 0.3 + 6.0 * j.call(3), H * 0.32 + H * 0.2 * j.call(4)],
-		[w * 0.6 + 8.0 * j.call(5), 1.2 + 3.0 * absf(j.call(6)) * 2.0],
-		[w * 0.82 + 4.0 * j.call(7), -0.6], [w, -4.5]]
-	var sand := [[0.0, 0.9], [w * 0.12, 0.85], [w * 0.4, 0.45], [w * 0.62, 0.0], [w * 0.8, -0.9], [w, -3.6]]
+	# (The sea is at -1.6: the water's edge about two thirds of the way out.)
+	var sand := [[0.0, 0.9], [w * 0.06, 0.88], [w * 0.2, 0.72], [w * 0.4, 0.3], [w * 0.62, -0.6], [w * 0.8, -1.5],
+		[w, -3.6], [w + 16.0 * amt, -9.0]]
+	# (Jitter along the coast: one value per row, slow and fast.)
+	var j := func(k: int) -> float: return (_snoise(s / 29.0 + k * 17.3) - 0.5) * 0.7 + (_snoise(s / 9.0 + k * 5.1) - 0.5) * 0.3
+	# Rock armour against a low wall.
+	var arm := [[0.0, H - 0.45], [1.3, H - 0.8], [3.2 + 0.8 * j.call(1), lerpf(H, 0.8, 0.45)], [5.6 + 1.2 * j.call(2), 0.7],
+		[8.0 + 1.5 * j.call(3), -0.1], [11.0 + 1.5 * j.call(4), -1.3], [15.0 + 2.0 * j.call(5), -3.6], [24.0, -9.0]]
+	# A cliff: the face's horizontal run is ~half its height (buttresses
+	# stand out, gullies cut back), a boulder foot, a short rocky shelf.
+	var F := H * (0.42 + 0.16 * n2)
+	var foot := 7.0 + 9.0 * _snoise(s / 41.0 + 3.0)
+	# Buttresses stand out and gullies cut back (the whole face moves).
+	var bu := (_snoise(s / 17.0 + 8.0) - 0.5) * 0.7 + (_snoise(s / 6.0 + 2.0) - 0.5) * 0.3
+	var clf := [[0.0, H - 0.6], [0.7 + 0.5 * j.call(6), H - 1.6 - 0.6 * absf(j.call(7))],
+		[F * (0.2 + 0.24 * j.call(8) + 0.3 * bu), H * (0.76 + 0.12 * j.call(9))],
+		[F * (0.46 + 0.3 * j.call(10) + 0.4 * bu), H * (0.48 + 0.14 * j.call(11))],
+		[F * (0.78 + 0.25 * j.call(12) + 0.35 * bu), H * (0.2 + 0.08 * j.call(13)) + 0.8],
+		[F * (1.0 + 0.2 * bu) + 2.5 + 2.0 * j.call(14), 1.1 + 0.8 * absf(j.call(15))],
+		[F * (1.0 + 0.2 * bu) + foot, -1.0], [F * (1.0 + 0.2 * bu) + foot + 14.0, -9.0]]
+	for k in range(1, SHORE_ROWS):
+		clf[k][0] = maxf(float(clf[k][0]), float(clf[k - 1][0]) + 0.4)
+	var rock: Array = []
+	for k in SHORE_ROWS:
+		rock.append([lerpf(arm[k][0], clf[k][0], cliff), lerpf(arm[k][1], clf[k][1], cliff)])
 	var out: Array = []
-	for k in rock.size():
-		out.append([lerpf(sand[k][0], rock[k][0], r), lerpf(sand[k][1], rock[k][1], r)])
+	for k in SHORE_ROWS:
+		out.append([lerpf(sand[k][0], rock[k][0], r) * amt, lerpf(sand[k][1], rock[k][1], r)])
+	# Clamp the reach to under half the open water in front.
+	out = fit_row(out, shore_reach(layout, p, nrm))
 	out.append(r)
 	return out
 
 
-func _shore(layout: CityLayout, clip: Rect2) -> void:
-	var smp := shore_samples(layout.coast)
+## A profile ([distance out, height] rows) fitted into `reach`: where the
+## profile is already under water by then it stops there (a cove's floor
+## stays shallow and meets the far side's), otherwise it's squeezed (a
+## cliff gets steeper, never ends in mid-air).
+static func fit_row(prof: Array, reach: float) -> Array:
+	var ext: float = prof[-1][0]
+	if ext <= reach or ext < 0.01:
+		return prof
+	var y_at := float(prof[-1][1])
+	for k in prof.size() - 1:
+		var a: Array = prof[k]
+		var b: Array = prof[k + 1]
+		if reach <= float(b[0]):
+			y_at = lerpf(float(a[1]), float(b[1]), clampf((reach - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.01), 0.0, 1.0))
+			break
+	var out: Array = []
+	if y_at < SEA_SURFACE - 0.6:
+		for k in prof.size():
+			var d: float = prof[k][0]
+			out.append([minf(d, reach), float(prof[k][1]) if d <= reach else y_at])
+	else:
+		var sc := reach / ext
+		for k in prof.size():
+			out.append([float(prof[k][0]) * sc, prof[k][1]])
+	return out
+
+
+## How far a shore row may reach from p along n: under half the distance
+## to the next land in that direction (own coast, a landform, another
+## island), at most 160 m.
+static func shore_reach(layout: CityLayout, p: Vector2, n: Vector2) -> float:
+	var t := 4.0
+	while t < 320.0:
+		var q := p + n * t
+		var hit := Geometry2D.is_point_in_polygon(q, layout.coast) or (Landforms.enabled and Landforms.contains(q.x, q.y)) \
+			or SkyportIsland.contains(q.x, q.y)
+		if hit:
+			return t * 0.45
+		t += 3.0 if t < 60.0 else 6.0
+	return 160.0
+
+
+## Every shoreline sample's rows (world points) and rock share, once per
+## layout (CityWorld warms it on the main thread before chunks build; the
+## worker threads only read it). [[samples], [rows], [rocky], [covered]] –
+## covered: the stretch from this sample to the next lies under a landform
+## (its own ground and shore bands take over there).
+static func shore_rows(layout: CityLayout) -> Array:
+	if not layout.shore_cache.is_empty():
+		return layout.shore_cache
+	var smp := shore_samples(layout.coast, layout.is_mainland)
 	var rows: Array = []
 	var rocky: Array = []
-	for sm in smp:
+	var covered: Array = []
+	for i in smp.size():
+		var sm: Array = smp[i]
 		var prof := shore_profile(layout, sm)
 		var p: Vector2 = sm[0]
 		var n: Vector2 = sm[1]
@@ -2058,7 +2190,78 @@ func _shore(layout: CityLayout, clip: Rect2) -> void:
 		for k in prof.size():
 			var d: float = prof[k][0]
 			r.append(Vector3(p.x + n.x * d, prof[k][1], p.y + n.y * d))
+		SeabedMesh.tuck(r)
 		rows.append(r)
+		var cov := false
+		if Landforms.enabled and i + 1 < smp.size():
+			var m: Vector2 = (p + (smp[i + 1][0] as Vector2)) * 0.5 + n * 1.5
+			cov = Landforms.contains(m.x, m.y)
+		covered.append(cov)
+	var out := [smp, rows, rocky, covered]
+	if Landforms.enabled == (not Landforms.forms().is_empty()):
+		layout.shore_cache = out
+	return out
+
+
+## Where the shore meets the sea, for the foam (Shoreline): each uncovered
+## stretch's waterline (its rows crossing the sea surface), plus the
+## straight strait quay's wall.
+static func waterline_edges(layout: CityLayout) -> Array:
+	var sr := shore_rows(layout)
+	var smp: Array = sr[0]
+	var rows: Array = sr[1]
+	var covered: Array = sr[3]
+	var wl: Array = []
+	var ok: Array = []
+	for i in smp.size():
+		var row: Array = rows[i]
+		var q: Vector2 = smp[i][0]
+		var found := false
+		for j in row.size() - 1:
+			var a: Vector3 = row[j]
+			var b: Vector3 = row[j + 1]
+			if a.y >= SEA_SURFACE and b.y < SEA_SURFACE:
+				var v := a.lerp(b, (a.y - SEA_SURFACE) / maxf(a.y - b.y, 0.001))
+				q = Vector2(v.x, v.z)
+				found = true
+				break
+		wl.append(q)
+		ok.append(found)
+	var out: Array = []
+	for i in smp.size() - 1:
+		if covered[i] or not ok[i] or not ok[i + 1] or (wl[i] as Vector2).distance_to(wl[i + 1]) > SHORE_STEP * 2.5:
+			continue
+		out.append([wl[i], wl[i + 1], smp[i][1]])
+	var x := CityLayout.FAR_SHORE if layout.is_mainland else CityLayout.RIVER_EDGE
+	for e in Shoreline.polygon_edges(layout.coast):
+		if absf((e[0] as Vector2).x - x) < 0.5 and absf((e[1] as Vector2).x - x) < 0.5:
+			out.append(e)
+	return out
+
+
+## The shore rows at the sample nearest p (Landforms stitches its bands'
+## ends to the city's here): [row (world points), rock share].
+static func shore_row_at(layout: CityLayout, p: Vector2) -> Array:
+	var sr := shore_rows(layout)
+	var smp: Array = sr[0]
+	if smp.is_empty():
+		return [[], 1.0]
+	var bi := 0
+	var bd := INF
+	for i in smp.size():
+		var d := (smp[i][0] as Vector2).distance_squared_to(p)
+		if d < bd:
+			bd = d
+			bi = i
+	return [sr[1][bi], sr[2][bi]]
+
+
+func _shore(layout: CityLayout, clip: Rect2) -> void:
+	var sr := shore_rows(layout)
+	var smp: Array = sr[0]
+	var rows: Array = sr[1]
+	var rocky: Array = sr[2]
+	var covered: Array = sr[3]
 	var rock := Color(0.23, 0.225, 0.225)
 	var sand := Color(0.78, 0.7, 0.52)
 	for i in smp.size() - 1:
@@ -2067,18 +2270,26 @@ func _shore(layout: CityLayout, clip: Rect2) -> void:
 		var mid: Vector3 = (A[0] + B[0]) * 0.5
 		if not clip.has_point(Vector2(mid.x, mid.z)):
 			continue
-		if (A[-1] as Vector3).distance_to(A[0]) < 0.5 and (B[-1] as Vector3).distance_to(B[0]) < 0.5:
+		if covered[i]:
+			continue  # (under a landform: its ground and shore take over)
+		if (A[0] as Vector3).distance_to(B[0]) > SHORE_STEP * 1.6:
+			continue  # (across a skipped straight quay)
+		var ha := Vector2((A[-1] as Vector3).x - (A[0] as Vector3).x, (A[-1] as Vector3).z - (A[0] as Vector3).z)
+		var hb := Vector2((B[-1] as Vector3).x - (B[0] as Vector3).x, (B[-1] as Vector3).z - (B[0] as Vector3).z)
+		if ha.length() < 0.5 and hb.length() < 0.5:
 			continue  # no apron here (docks quay)
-		var high: bool = float(rocky[i]) + float(rocky[i + 1]) > 1.0
+		var ra: float = rocky[i]
+		var rb: float = rocky[i + 1]
 		var out_n := Vector3(smp[i][1].x, 0.0, smp[i][1].y)
 		for k in A.size() - 1:
 			var a: Vector3 = A[k]
 			var b: Vector3 = B[k]
 			var c: Vector3 = B[k + 1]
 			var d: Vector3 = A[k + 1]
-			var col := rock if high else sand
-			if not high and k == A.size() - 2:
-				col = sand.darkened(0.25)
+			# (Per vertex: rock fades into sand along the coast instead of
+			# switching at one quad – the old straight cut across the beach.)
+			var ca := sand.lerp(rock, smoothstep(0.35, 0.65, ra))
+			var cb := sand.lerp(rock, smoothstep(0.35, 0.65, rb))
 			var nn := (c - a).cross(b - d)
 			if nn.length_squared() < 1e-8:
 				nn = (c - a).cross(d - b)
@@ -2087,8 +2298,19 @@ func _shore(layout: CityLayout, clip: Rect2) -> void:
 				b = d
 				d = t
 				nn = -nn
-			quad(a, b, c, d, nn.normalized(), Vector2(a.x, a.z), Vector2(b.x, b.z), Vector2(c.x, c.z),
-				Vector2(d.x, d.z), col, KIND_SHORE, 0, 0)
+				quad_c(a, b, c, d, nn.normalized(), [ca, ca, cb, cb], KIND_SHORE)
+			else:
+				quad_c(a, b, c, d, nn.normalized(), [ca, cb, cb, ca], KIND_SHORE)
+
+
+## A quad with a colour per corner (UV = world x/z; shore bands).
+func quad_c(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, cols: Array, kind: float) -> void:
+	quad(a, b, c, d, n, Vector2(a.x, a.z), Vector2(b.x, b.z), Vector2(c.x, c.z), Vector2(d.x, d.z), cols[0], kind, 0, 0)
+	var nv := verts.size()
+	for k in 4:
+		var cc: Color = cols[k]
+		cc.a = colors[nv - 4 + k].a
+		colors[nv - 4 + k] = cc
 
 
 ## The ground over `r`, dy above the road surface (CityTerrain.road_y): a

@@ -40,6 +40,11 @@ func _go() -> void:
 	land.resize(n * n)
 	var kind := PackedFloat32Array()
 	kind.resize(n * n)
+	# Vertical quay walls (the strait quays, Skyport's quays): deep water at
+	# the foot – a "boulder toe" there drew surf lines a few metres off a
+	# sheer wall (2026-11-18: pale stripes in the strait).
+	var quay := PackedFloat32Array()
+	quay.resize(n * n)
 	SkyportIsland.outline()
 	var sky_k := SkyportIsland._shore_kind
 	for j in n:
@@ -69,6 +74,10 @@ func _go() -> void:
 			var z := RECT.position.y + (j + 0.5) * cell
 			if SkyportIsland.contains(x, z):
 				kind[idx] = _sky_kind(sky_l, sky_k, SkyportIsland.l2(Vector2(x, z)))
+				if _sky_quay(sky_l, sky_k, SkyportIsland.l2(Vector2(x, z))):
+					quay[idx] = 1.0
+			elif absf(x - CityLayout.FAR_SHORE) < 12.0 or absf(x - CityLayout.RIVER_EDGE) < 12.0:
+				quay[idx] = 1.0
 			else:
 				var f := Landforms.at(x, z)
 				if not f.is_empty():
@@ -80,9 +89,12 @@ func _go() -> void:
 	dist.resize(n * n)
 	var nk := PackedFloat32Array()
 	nk.resize(n * n)
+	var nq := PackedFloat32Array()
+	nq.resize(n * n)
 	for idx in n * n:
 		dist[idx] = 0.0 if land[idx] == 1 else 1e9
 		nk[idx] = kind[idx]
+		nq[idx] = quay[idx]
 	var a := cell
 	var b := cell * 1.41421
 	for j in n:
@@ -92,6 +104,7 @@ func _go() -> void:
 				continue
 			var best := dist[idx]
 			var bk := nk[idx]
+			var bq := nq[idx]
 			for o: Array in [[-1, 0, a], [0, -1, a], [-1, -1, b], [1, -1, b]]:
 				var ii: int = i + int(o[0])
 				var jj: int = j + int(o[1])
@@ -101,8 +114,10 @@ func _go() -> void:
 				if c < best:
 					best = c
 					bk = nk[jj * n + ii]
+					bq = nq[jj * n + ii]
 			dist[idx] = best
 			nk[idx] = bk
+			nq[idx] = bq
 	for j in range(n - 1, -1, -1):
 		for i in range(n - 1, -1, -1):
 			var idx := j * n + i
@@ -110,6 +125,7 @@ func _go() -> void:
 				continue
 			var best := dist[idx]
 			var bk := nk[idx]
+			var bq := nq[idx]
 			for o: Array in [[1, 0, a], [0, 1, a], [1, 1, b], [-1, 1, b]]:
 				var ii: int = i + int(o[0])
 				var jj: int = j + int(o[1])
@@ -119,8 +135,10 @@ func _go() -> void:
 				if c < best:
 					best = c
 					bk = nk[jj * n + ii]
+					bq = nq[jj * n + ii]
 			dist[idx] = best
 			nk[idx] = bk
+			nq[idx] = bq
 	print("distance %d ms" % (Time.get_ticks_msec() - t0))
 	# The nearest shore's kind changes abruptly where two shores' reaches
 	# meet; blur it (≈ 40 m, separable box, twice) so the depth profile
@@ -160,6 +178,8 @@ func _go() -> void:
 			var depth := 0.0
 			if land[idx] == 0:
 				depth = depth_at(d, r, x, z)
+				if nq[idx] > 0.5:
+					depth = maxf(depth, lerpf(4.5, depth, smoothstep(20.0, 80.0, d)))
 			img.set_pixel(i, j, Color(depth / MAX_DEPTH, 0.0, 0.0, r))
 	img.save_png(ProjectSettings.globalize_path(OUT))
 	print("seabed %dx%d (%.1f m/px) → %s in %d ms" % [n, n, cell, OUT, Time.get_ticks_msec() - t0])
@@ -198,6 +218,17 @@ static func _sky_kind(o: PackedVector2Array, k: PackedByteArray, lq: Vector2) ->
 			best = dd
 			bk = k[i] if i < k.size() else 2
 	return 0.0 if bk == 1 else 1.0   # (beach: sand; rock or quay: steep)
+
+
+static func _sky_quay(o: PackedVector2Array, k: PackedByteArray, lq: Vector2) -> bool:
+	var best := INF
+	var bk := 2
+	for i in o.size():
+		var dd := Geometry2D.get_closest_point_to_segment(lq, o[i], o[(i + 1) % o.size()]).distance_to(lq)
+		if dd < best:
+			best = dd
+			bk = k[i] if i < k.size() else 2
+	return bk == 0
 
 
 static func _form_kind(f: Dictionary, q: Vector2) -> float:
