@@ -56,7 +56,14 @@ func stand(p: Vector3) -> void:
 	if game.ui.panel_open():
 		game.ui.close_panel(true)
 	if game.driving != "":
+		# (An earlier scenario can leave the car moving: you can only get
+		# out once it has stopped.)
+		var dc: Car = game.cars[game.driving]
+		dc.linear_velocity = Vector3.ZERO
+		dc.angular_velocity = Vector3.ZERO
+		await frames(3)
 		game.exit_vehicle()
+	check(game.driving == "", "on foot")
 	game.player.respawn(p + Vector3.UP * 0.95)
 	game.player.last_safe_position = p + Vector3.UP * 0.95
 	game.world.build_all_near(p, 200.0)
@@ -950,8 +957,21 @@ func scenario_xf() -> void:
 func scenario_u() -> void:
 	print("--- U: stuck recovery")
 	await until(func(): return game.gps.ready_net(), 60.0)
+	if game.driving != "":
+		# (An earlier scenario can leave the car moving: you can only get
+		# out once it has stopped.)
+		var dc: Car = game.cars[game.driving]
+		dc.linear_velocity = Vector3.ZERO
+		dc.angular_velocity = Vector3.ZERO
+		await frames(3)
+		game.exit_vehicle()
+	check(game.driving == "", "on foot")
 	var start := game.starter_unit()
 	var sp := Premises.door_point(start)
+	# (From wherever an earlier scenario left you: back at the start, with
+	# its streets and buildings streamed in, before picking the building.)
+	game._teleport(sp + Premises.outward(start) * 3.0 + Vector3.UP, 0.0)
+	await wait(3.0)
 	var pick := {}
 	var best := INF
 	for b: Dictionary in game.layout.buildings:
