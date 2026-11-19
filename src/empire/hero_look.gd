@@ -5,7 +5,15 @@ extends RefCounted
 ## so it saves with the empire. Everything is free: it's your character, not
 ## a shop.
 
+## Body types (character.glb / character_b.glb): the same clothes, hair and
+## kit on either; each has its own faces. Neutral names, chosen freely.
+const BODIES := [["a", "Build A"], ["b", "Build B"]]
 const FACES := [["hero_ade", "Ade"], ["hero_kai", "Kai"], ["hero_malik", "Malik"], ["hero_ren", "Ren"], ["hero_theo", "Theo"]]
+const FACES_B := [["hero_rio", "Rio"], ["hero_sam", "Sam"], ["hero_noa", "Noa"], ["hero_remy", "Remy"], ["hero_jules", "Jules"]]
+
+
+static func faces_for(body: String) -> Array:
+	return FACES_B if body == "b" else FACES
 const HAIRS := [["hair_natural", "Natural"], ["hair_buzz", "Buzz Cut"], ["hair_crop", "Crop"], ["hair_fade", "High Fade"],
 	["hair_curls", "Curls"], ["hair_pixie", "Pixie"], ["hair_bob", "Bob"], ["hair_ponytail", "Ponytail"], ["hair_bun", "Bun"]]
 const TOPS := [["top_tee", "T-Shirt"], ["top_polo", "Polo"], ["top_shirt", "Shirt"], ["top_jumper", "Jumper"],
@@ -23,7 +31,7 @@ const CLOTH := ["#f2f1ec", "#c9c4b8", "#1a1c20", "#3b3f46", "#1f2d4a", "#3f6db3"
 	"#a8322d", "#d9822b", "#e3c74a", "#2f4a33", "#6f8a52", "#b59a74", "#6b4a3a", "#c96f92"]
 const TROUSERS := ["#1a1c20", "#3b3f46", "#25304a", "#2f4a73", "#8a7a5a", "#c9bc9c", "#3d4530", "#5a3d2c", "#e8e6df"]
 
-const DEFAULT := {"face": "hero_ade", "hair": "hair_natural", "top": "top_polo", "top_col": "#3f6db3",
+const DEFAULT := {"body": "a", "face": "hero_ade", "hair": "hair_natural", "top": "top_polo", "top_col": "#3f6db3",
 	"pants_col": "#3b3f46", "shoes": "shoes_classic", "head": "head_bare", "eyewear": "face_none",
 	"skin": "", "hair_col": ""}
 
@@ -35,6 +43,10 @@ static func current(flags: Dictionary) -> Dictionary:
 		for k in saved:
 			if d.has(k):
 				d[k] = String(saved[k])
+	# (a face belongs to a body type: switching body takes that body's first face)
+	var fl := faces_for(String(d["body"]))
+	if not fl.any(func(f): return f[0] == d["face"]):
+		d["face"] = fl[0][0]
 	return d
 
 
@@ -48,6 +60,7 @@ static func build(l: Dictionary) -> Dictionary:
 		look["skin"] = Color(String(l["skin"]))
 	if String(l.get("hair_col", "")) != "":
 		look["hair"] = Color(String(l["hair_col"]))
+	look["body"] = String(l.get("body", "a"))
 	look["suit"] = Color(String(l.get("top_col", DEFAULT["top_col"])))
 	look["pants"] = Color(String(l.get("pants_col", DEFAULT["pants_col"])))
 	# Bare hands (the hero model always wears gloves): the glove drawn in the

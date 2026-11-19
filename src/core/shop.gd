@@ -47,6 +47,17 @@ const OTHER_ITEMS := [
 		"hair": Color(0.36, 0.22, 0.12), "eyes": Color(0.26, 0.42, 0.55), "price": 0},
 	{"id": "hero_malik", "slot": "hero", "name": "Malik", "face": "malik", "style": "crop", "skin": Color(0.46, 0.3, 0.2),
 		"hair": Color(0.05, 0.04, 0.03), "eyes": Color(0.22, 0.13, 0.06), "price": 0},
+	# Body type B's faces (character_b.glb).
+	{"id": "hero_rio", "slot": "hero", "name": "Rio", "face": "rio", "style": "curls", "body": "b", "skin": Color(0.36, 0.22, 0.15),
+		"hair": Color(0.07, 0.055, 0.045), "eyes": Color(0.17, 0.1, 0.05), "price": 0},
+	{"id": "hero_sam", "slot": "hero", "name": "Sam", "face": "sam", "style": "bob", "body": "b", "skin": Color(0.9, 0.74, 0.64),
+		"hair": Color(0.42, 0.27, 0.15), "eyes": Color(0.3, 0.42, 0.5), "price": 0},
+	{"id": "hero_noa", "slot": "hero", "name": "Noa", "face": "noa", "style": "ponytail", "body": "b", "skin": Color(0.86, 0.68, 0.54),
+		"hair": Color(0.05, 0.04, 0.04), "eyes": Color(0.2, 0.12, 0.06), "price": 0},
+	{"id": "hero_remy", "slot": "hero", "name": "Remy", "face": "remy", "style": "pixie", "body": "b", "skin": Color(0.5, 0.33, 0.22),
+		"hair": Color(0.08, 0.06, 0.045), "eyes": Color(0.22, 0.13, 0.06), "price": 0},
+	{"id": "hero_jules", "slot": "hero", "name": "Jules", "face": "jules", "style": "bun", "body": "b", "skin": Color(0.72, 0.53, 0.4),
+		"hair": Color(0.24, 0.15, 0.09), "eyes": Color(0.25, 0.18, 0.08), "price": 0},
 	# Hair (character.glb Hair_<style>_<face>: every cut is fitted to every
 	# face's own scalp). Natural = the face's own cut; the colour stays the
 	# face's. Hidden under the beanie, the balaclava and the courier hood.
@@ -238,6 +249,7 @@ static func look(preview := {}) -> Dictionary:
 	var hero: Dictionary = pick["hero"]
 	return {
 		"hero": hero["face"],
+		"body": String(hero.get("body", "a")),
 		"hair_style": pick["hair"]["style"] if pick["hair"]["style"] != "" else hero["style"],
 		"skin": hero["skin"],
 		"hair": hero["hair"],

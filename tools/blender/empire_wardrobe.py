@@ -10,7 +10,7 @@
 
 wardrobe = []
 loose_tops = []
-_fm = face_meshes['kai'][0]
+_fm = face_meshes[FACES[0][0]][0]   # (the first face of this body type)
 FRONT = 1.0 if sum(v.co.y for v in _fm.data.vertices) / len(_fm.data.vertices) > J['neck'].y else -1.0
 HIP = Vector((J['hips'].x, J['hips'].y, 0))
 NECK_Y = J['neck'].y
@@ -453,6 +453,8 @@ _nk_faces = [i for i in body if all(1.45 < RB[j].z < 1.72 for j in bf[i])]
 _nk_tree = BVHTree.FromPolygons([RB[j] for j in range(len(RB))], [list(reversed(bf[i])) for i in _nk_faces])
 _nk_ids = sorted({j for i in _nk_faces for j in bf[i]})
 _ys = [RB[j].y for j in _nk_ids if abs(RB[j].x) < .02 and 1.585 < RB[j].z < 1.615 and wsum(j, 'head') < .5]
+if len(_ys) < 2:   # (body type b: a slimmer, shorter neck - widen the band)
+    _ys = [RB[j].y for j in _nk_ids if abs(RB[j].x) < .03 and 1.56 < RB[j].z < 1.64 and wsum(j, 'head') < .8]
 NECK_CY = (max(_ys) + min(_ys)) / 2
 _NK_A = [math.tau * k / 72 for k in range(72)]
 

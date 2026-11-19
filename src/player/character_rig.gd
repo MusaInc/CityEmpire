@@ -28,6 +28,13 @@ signal posed
 signal footstep(pos: Vector3)
 
 const MODEL_PATH := "res://assets/models/character.glb"
+## Body type (character creation): "a" = character.glb, "b" = character_b.glb.
+## Same skeleton, garments and kit; apply_look swaps the model when it changes.
+var body_type := "a"
+
+
+func model_path() -> String:
+	return MODEL_PATH if body_type == "a" else MODEL_PATH.replace("character.glb", "character_%s.glb" % body_type)
 const GEAR_PATH := "res://assets/models/gear.glb"
 const WEAVE_PATH := "res://assets/models/fabric_weave_normal.png"
 ## Materials that take the shared weave: [repeats per UV unit, strength].
@@ -226,6 +233,7 @@ var _scarf_prev: Array[Vector3] = []
 
 func _ready() -> void:
 	_irng.seed = 9137  # idle choices: varied, but repeatable run to run
+	body_type = String(Shop.look().get("body", "a"))
 	var parts := _load_parts()
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://src/player/shaders/character.gdshader")
@@ -426,6 +434,8 @@ func set_suit_color(c: Color) -> void:
 
 ## Dresses the hero in a Shop.look(): region colours and the headwear.
 func apply_look(look: Dictionary) -> void:
+	if String(look.get("body", "a")) != body_type and skeleton != null:
+		_swap_body(String(look.get("body", "a")))
 	look_state = look
 	for region in ["suit", "pants", "shoe", "sole", "glove"]:
 		_tint_hero(region, look[region])
@@ -572,9 +582,9 @@ func _connect_player() -> void:
 
 func _load_parts() -> Dictionary:
 	var out := {}
-	if not ResourceLoader.exists(MODEL_PATH):
+	if not ResourceLoader.exists(model_path()):
 		return out
-	var scene: PackedScene = load(MODEL_PATH)
+	var scene: PackedScene = load(model_path())
 	var inst := scene.instantiate()
 	var skel := inst.find_children("*", "Skeleton3D", true, false)
 	if not skel.is_empty():
@@ -596,6 +606,39 @@ func _load_parts() -> Dictionary:
 		out[key] = child
 	inst.free()
 	return out
+
+
+## Changes the body type: the other model's skeleton and meshes replace this
+## one's (same bones, so the pose, IK and ragdoll carry straight on).
+func _swap_body(b: String) -> void:
+	var path := MODEL_PATH if b == "a" else MODEL_PATH.replace("character.glb", "character_%s.glb" % b)
+	if not ResourceLoader.exists(path):
+		return
+	body_type = b
+	var old := skeleton
+	var pose := {}
+	for i in old.get_bone_count():
+		pose[old.get_bone_name(i)] = old.get_bone_pose(i)
+	skeleton = null
+	_hero_materials.clear()
+	_acc_names.clear()
+	_skel_idx.clear()
+	_skel_fix.clear()
+	_hand_mesh = null
+	_glove_mesh = null
+	_load_parts()
+	if skeleton == null:
+		skeleton = old
+		return
+	old.get_parent().remove_child(old)
+	old.queue_free()
+	for mi in skeleton.find_children("*", "MeshInstance3D", true, false):
+		_install_hero_materials(mi as MeshInstance3D)
+	_bind_skeleton()
+	for i in skeleton.get_bone_count():
+		var n := skeleton.get_bone_name(i)
+		if pose.has(n):
+			skeleton.set_bone_pose(i, pose[n])
 
 
 ## Records, per bone, the fixed transform from the pivot's frame (posed in the

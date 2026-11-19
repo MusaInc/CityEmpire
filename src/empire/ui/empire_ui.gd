@@ -2072,7 +2072,8 @@ func open_style(first := false) -> void:
 	var body := S.vbox(10)
 	match _style_tab:
 		"you":
-			_style_choices(body, "FACE", HeroLook.FACES, l, "face", 3)
+			_style_choices(body, "BODY", HeroLook.BODIES, l, "body", 2)
+			_style_choices(body, "FACE", HeroLook.faces_for(String(l.get("body", "a"))), l, "face", 3)
 			var fc := HeroLook.face_colors(l["face"])
 			_style_colours(body, "SKIN", HeroLook.SKIN, l, "skin", fc["skin"])
 			_style_choices(body, "HAIRCUT", HeroLook.HAIRS, l, "hair", 3)
@@ -2110,7 +2111,8 @@ func open_style(first := false) -> void:
 		var rng := RandomNumberGenerator.new()
 		rng.randomize()
 		var r := {}
-		for pair in [["face", HeroLook.FACES], ["hair", HeroLook.HAIRS], ["top", HeroLook.TOPS], ["shoes", HeroLook.SHOES]]:
+		r["body"] = String(HeroLook.BODIES[rng.randi() % HeroLook.BODIES.size()][0])
+		for pair in [["face", HeroLook.faces_for(r["body"])], ["hair", HeroLook.HAIRS], ["top", HeroLook.TOPS], ["shoes", HeroLook.SHOES]]:
 			var lst: Array = pair[1]
 			r[pair[0]] = lst[rng.randi() % lst.size()][0]
 		r["top_col"] = HeroLook.CLOTH[rng.randi() % HeroLook.CLOTH.size()]

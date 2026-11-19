@@ -6,7 +6,7 @@ No voxel fusion or primitive body construction. The source anatomy weights are
 transferred through the garments' barycentric fitting records, then retargeted
 to the existing gameplay rig. Reproducible .blend + textured GLB output.
 """
-import bpy, bmesh, math, json, sys
+import bpy, bmesh, math, json, sys, os
 from pathlib import Path
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
@@ -14,7 +14,12 @@ import numpy as np
 ROOT=Path(__file__).resolve().parents[2]
 SRC=ROOT/'art/hero/sources'
 OUT=Path(sys.argv[sys.argv.index('--')+1]) if '--' in sys.argv else ROOT/'assets/models'
-TEX=ROOT/'art/hero/textures'
+# Body type (character creation): "a" (assets/models/character.glb) or "b"
+# (character_b.glb) - the same rig, garments, hair and kit, a second body
+# shape from MakeHuman's macro targets with its own five faces.
+BODY=os.environ.get('HERO_BODY','a')
+SUF='' if BODY=='a' else '_'+BODY
+TEX=ROOT/('art/hero/textures'+SUF)
 TEX.mkdir(parents=True,exist_ok=True);OUT.mkdir(parents=True,exist_ok=True)
 bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
 
@@ -32,7 +37,10 @@ def obj_read(path):
     return np.array(vs),np.array(uv),fs,fu,groups
 
 base,_,_,_,_=obj_read(SRC/'base.obj')
-for n,w in [('african-male-young.target',1/3),('asian-male-young.target',1/3),('caucasian-male-young.target',1/3),('universal-male-young-averagemuscle-averageweight.target',.88),('universal-male-young-maxmuscle-averageweight.target',.12)]:
+MACRO={'a':[('african-male-young.target',1/3),('asian-male-young.target',1/3),('caucasian-male-young.target',1/3),('universal-male-young-averagemuscle-averageweight.target',.88),('universal-male-young-maxmuscle-averageweight.target',.12)],
+       'b':[('african-female-young.target',1/3),('asian-female-young.target',1/3),('caucasian-female-young.target',1/3),('universal-female-young-averagemuscle-minweight.target',.18),('universal-female-young-minmuscle-averageweight.target',.08)]}
+ETH_KIND={'a':'male','b':'female'}[BODY]
+for n,w in MACRO[BODY]:
     for l in (SRC/n).read_text().splitlines():
         a=l.split()
         if not a or a[0].startswith('#'):continue
@@ -482,7 +490,7 @@ for f in (SRC/'face_targets').glob('*.target'):
 ETH={}
 for n in ['african','asian','caucasian']:
     d={}
-    for l in (SRC/(n+'-male-young.target')).read_text().splitlines():
+    for l in (SRC/(n+'-%s-young.target'%ETH_KIND)).read_text().splitlines():
         a=l.split()
         if not a or a[0].startswith('#'):continue
         d[int(a[0])]=np.array(list(map(float,a[1:4])))
@@ -499,7 +507,18 @@ FACES=[
 # Expression: each face carries a resting expression of its own, so the
 # character isn't a neutral mask: an asymmetric relaxed smile (mouth corners
 # up and back, cheeks lifted a touch), one brow a little raised. (MH units, dm.)
-EXPRESSION={'kai':(.45,.3,('r',.25)),'ade':(.3,.1,('l',.15)),'ren':(.35,.3,('r',.15)),'theo':(.18,.42,('l',.3)),'malik':(.38,.22,('r',.3))}
+# Body type b's faces (character creation): its own five, each with a
+# default hairstyle of its own.
+FACES_B=[
+    ('rio',{'african':.6,'asian':-.3,'caucasian':-.3},{'cheek_l-cheek-bones-incr':.45,'cheek_r-cheek-bones-incr':.45,'mouth_mouth-upperlip-volume-incr':.3,'mouth_mouth-lowerlip-volume-incr':.3,'nose_nose-point-width-decr':.25,'head_head-oval':.35,'chin_chin-width-decr':.3,'head_head-age-decr':.2},'curls'),
+    ('sam',{'african':-.3,'asian':-.3,'caucasian':.6},{'head_head-oval':.4,'nose_nose-scale-horiz-decr':.3,'nose_nose-point-width-decr':.3,'mouth_mouth-upperlip-volume-incr':.2,'chin_chin-width-decr':.35,'cheek_l-cheek-bones-incr':.3,'cheek_r-cheek-bones-incr':.3,'eyebrows_eyebrows-trans-up':.2},'bob'),
+    ('noa',{'african':-.3,'asian':.6,'caucasian':-.3},{'head_head-round':.25,'cheek_l-cheek-inner-incr':.3,'cheek_r-cheek-inner-incr':.3,'nose_nose-scale-vert-decr':.25,'mouth_mouth-lowerlip-volume-incr':.25,'chin_chin-height-decr':.2,'head_head-age-decr':.25},'ponytail'),
+    ('remy',{'african':.25,'asian':-.15,'caucasian':-.1},{'head_head-diamond':.3,'cheek_l-cheek-bones-incr':.55,'cheek_r-cheek-bones-incr':.55,'nose_nose-curve-convex':.2,'mouth_mouth-upperlip-volume-incr':.3,'chin_chin-prominent-incr':.15},'pixie'),
+    ('jules',{'african':-.15,'asian':.1,'caucasian':.05},{'head_head-oval':.3,'nose_nose-hump-decr':.3,'nose_nose-scale-horiz-decr':.2,'mouth_mouth-scale-horiz-decr':.15,'mouth_mouth-lowerlip-volume-incr':.3,'chin_chin-width-decr':.3,'eyebrows_eyebrows-angle-up':.2},'bun'),
+]
+if BODY=='b':FACES=FACES_B
+EXPRESSION={'rio':(.4,.15,('l',.2)),'sam':(.35,.2,('r',.15)),'noa':(.45,.15,('r',.1)),'remy':(.3,.25,('l',.2)),'jules':(.38,.12,('l',.15)),
+    'kai':(.45,.3,('r',.25)),'ade':(.3,.1,('l',.15)),'ren':(.35,.3,('r',.15)),'theo':(.18,.42,('l',.3)),'malik':(.38,.22,('r',.3))}
 def express(b,fid):
     tongue=np.array(sorted({j for i in GROUP_FACES['helper-tongue'] for j in bf[i]}))
     m=b[tongue].mean(0)
@@ -1100,9 +1119,9 @@ for im in bpy.data.images:
 bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'art/hero/courier.blend'),compress=True)
 bpy.ops.object.select_all(action='DESELECT');rig.select_set(True)
 for ob in all_meshes:ob.select_set(True)
-bpy.ops.export_scene.gltf(filepath=str(OUT/'character.glb'),export_format='GLB',use_selection=True,export_apply=False,export_yup=True,export_materials='EXPORT',export_skins=True,export_animations=False)
+bpy.ops.export_scene.gltf(filepath=str(OUT/('character%s.glb'%SUF)),export_format='GLB',use_selection=True,export_apply=False,export_yup=True,export_materials='EXPORT',export_skins=True,export_animations=False)
 triangles=sum(sum(len(p.vertices)-2 for p in ob.data.polygons) for ob in all_meshes)
-(ROOT/'art/hero/build_report.json').write_text(json.dumps({'triangles':triangles,'meshes':{o.name:len(o.data.vertices) for o in all_meshes},'bones':len(names),'max_influences':4},indent=2))
+(ROOT/('art/hero/build_report%s.json'%SUF)).write_text(json.dumps({'triangles':triangles,'meshes':{o.name:len(o.data.vertices) for o in all_meshes},'bones':len(names),'max_influences':4},indent=2))
 # Shared garment-kit textures the game loads directly (not via the GLB).
 import shutil
 pore_normal()
