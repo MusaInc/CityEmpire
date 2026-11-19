@@ -10,7 +10,8 @@ extends Node3D
 ##   sky_top / sky_horizon (linear)  sun_dir  night (0..1)  wetness  rain
 ## and the city's lamps read `night` via CityWorld.set_night().
 ##
-## Weather: clear, cloudy, rain, storm, fog. "changing" drifts between them
+## Weather: clear, bright (hard summer sun), haze (heat haze), cloudy, rain,
+## storm, fog. "changing" drifts between them
 ## every few minutes; every parameter eases (no pops). Rain draws streaks
 ## round the camera (RainFx), wets streets/roofs/water (wetness rises while it
 ## rains and dries afterwards), storms add lightning (and a thunder signal).
@@ -26,15 +27,32 @@ const DEFAULT_HOUR := 16.0
 const DAY_MINUTES := 16.0
 ## Sun direction at DEFAULT_HOUR (kept for callers that want the fixed one).
 const SUN_ROT := Vector3(-38.0, -112.0, 0.0)
-const WEATHERS := ["clear", "cloudy", "rain", "storm", "fog"]
-## Per weather: cloud cover, rain, fog, storm (lightning), cloud darkness.
+const WEATHERS := ["clear", "bright", "haze", "cloudy", "rain", "storm", "fog"]
+## Per weather: cloud cover, rain, fog, storm (lightning), cloud darkness,
+## and the look on top: sun (sunlight ×), haze (extra distance haze that
+## fades far buildings into the sky, 0..1), warm (a warm, dusty haze colour),
+## punch (harder light: deeper shade, richer colour, more bloom on sunlit
+## glass), mist (a low fog lying in the streets and over the water, 0..1).
 const WEATHER_PARAMS := {
-	"clear": {"cloud": 0.38, "rain": 0.0, "fog": 0.0, "storm": 0.0, "dark": 0.0},
-	"cloudy": {"cloud": 0.72, "rain": 0.0, "fog": 0.12, "storm": 0.0, "dark": 0.25},
-	"rain": {"cloud": 0.92, "rain": 0.65, "fog": 0.35, "storm": 0.0, "dark": 0.7},
-	"storm": {"cloud": 1.0, "rain": 1.0, "fog": 0.45, "storm": 1.0, "dark": 1.0},
-	"fog": {"cloud": 0.6, "rain": 0.0, "fog": 1.0, "storm": 0.0, "dark": 0.2},
+	"clear": {"cloud": 0.38, "rain": 0.0, "fog": 0.0, "storm": 0.0, "dark": 0.0,
+		"sun": 1.0, "haze": 0.2, "warm": 0.0, "punch": 0.0, "mist": 0.0},
+	"bright": {"cloud": 0.14, "rain": 0.0, "fog": 0.0, "storm": 0.0, "dark": 0.0,
+		"sun": 1.2, "haze": 0.05, "warm": 0.15, "punch": 1.0, "mist": 0.0},
+	"haze": {"cloud": 0.22, "rain": 0.0, "fog": 0.1, "storm": 0.0, "dark": 0.0,
+		"sun": 1.1, "haze": 1.0, "warm": 1.0, "punch": 0.35, "mist": 0.0},
+	"cloudy": {"cloud": 0.72, "rain": 0.0, "fog": 0.12, "storm": 0.0, "dark": 0.25,
+		"sun": 1.0, "haze": 0.45, "warm": 0.0, "punch": 0.0, "mist": 0.0},
+	"rain": {"cloud": 0.92, "rain": 0.65, "fog": 0.35, "storm": 0.0, "dark": 0.7,
+		"sun": 1.0, "haze": 0.6, "warm": 0.0, "punch": 0.0, "mist": 0.25},
+	"storm": {"cloud": 1.0, "rain": 1.0, "fog": 0.45, "storm": 1.0, "dark": 1.0,
+		"sun": 1.0, "haze": 0.7, "warm": 0.0, "punch": 0.0, "mist": 0.3},
+	"fog": {"cloud": 0.6, "rain": 0.0, "fog": 1.0, "storm": 0.0, "dark": 0.2,
+		"sun": 1.0, "haze": 0.5, "warm": 0.0, "punch": 0.0, "mist": 1.0},
 }
+## Low fog: its top (world m; the streets are ~2–60 m, the sea −1.6) and
+## how fast it thickens below that.
+const MIST_TOP := 7.0
+const MIST_DENSITY := 0.09
 
 var env: Environment
 var sun: DirectionalLight3D
@@ -205,7 +223,7 @@ func _process(dt: float) -> void:
 ## odd storm or fog bank (fog favours the night and early morning).
 func _next_weather() -> String:
 	var foggy := 0.12 if hour < 9.0 or hour > 21.0 else 0.04
-	var opts := {"clear": 0.4, "cloudy": 0.28, "rain": 0.18, "storm": 0.08, "fog": foggy}
+	var opts := {"clear": 0.26, "bright": 0.14, "haze": 0.06, "cloudy": 0.24, "rain": 0.16, "storm": 0.06, "fog": foggy}
 	var total := 0.0
 	for k in opts:
 		total += opts[k] if k != weather else 0.0
@@ -267,7 +285,14 @@ func _apply(dt: float, instant: bool) -> void:
 		sky_mat.set_shader_parameter("disc_size", 0.99955)
 		sky_mat.set_shader_parameter("disc_k", 2.2)
 		sky_mat.set_shader_parameter("sun_tint", Color(0.8, 0.85, 1.0))
-	sun.light_energy *= 1.0 - 0.8 * overcast
+	var punch := float(w["punch"])
+	var hz := float(w["haze"])
+	var warm := float(w["warm"])
+	sun.light_energy *= (1.0 - 0.8 * overcast) * lerpf(1.0, float(w["sun"]), day_light)
+	# Dawn mist: on calm mornings a low fog lies in the streets and over the
+	# water and burns off by mid-morning (less if it's windy and wet).
+	var dawn := smoothstep(4.0, 6.0, hour) * (1.0 - smoothstep(8.0, 10.5, hour))
+	var mist := maxf(float(w["mist"]), dawn * 0.75 * (1.0 - float(w["rain"])) * (1.0 - 0.7 * punch))
 	sun.shadow_opacity = 1.0 - 0.7 * overcast
 
 	# --- sky colours by sun height, greyed by cloud.
@@ -283,6 +308,12 @@ func _apply(dt: float, instant: bool) -> void:
 	zen = zen.lerp(grey_c * 0.85, overcast * 0.8)
 	hor = hor.lerp(grey_c, overcast * 0.75)
 	haze = haze.lerp(grey_c, overcast * 0.85)
+	# Hard summer sun: a deeper blue overhead. Heat haze: a pale, milky sky,
+	# the horizon dusty gold-white.
+	zen = zen.lerp(Color(0.07, 0.25, 0.66), punch * 0.35 * day_light)
+	hor = hor.lerp(Color(0.9, 0.86, 0.78), hz * warm * 0.45 * day_light)
+	zen = zen.lerp(hor, hz * 0.22 * day_light)
+	haze = haze.lerp(Color(1.0, 0.86, 0.66), hz * warm * 0.4 * day_light)
 	zen = zen.lerp(Color(0.8, 0.85, 1.0), fl * 0.6)
 	hor = hor.lerp(Color(0.8, 0.85, 1.0), fl * 0.6)
 	# The sky shader is radiance-mapped: update it a few times a second, not
@@ -307,12 +338,12 @@ func _apply(dt: float, instant: bool) -> void:
 
 	# --- ambient, exposure, fog.
 	env.ambient_light_energy = _rampf(el, [[-15.0, 0.5], [-4.0, 0.5], [2.0, 0.5], [20.0, 0.56]]) \
-		* (1.0 + 0.25 * overcast) + fl * 2.0
+		* (1.0 + 0.25 * overcast) * (1.0 - 0.12 * punch * day_light) * (1.0 + 0.1 * hz * day_light) + fl * 2.0
 	# The non-sky share: light bounced off sunlit stone (warm-neutral by day,
 	# dusky at sunset, moonlit blue at night).
 	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
 		[15.0, Color(0.72, 0.73, 0.82)], [40.0, Color(0.72, 0.75, 0.85)]]).lerp(Color(0.74, 0.75, 0.78), overcast * 0.6)
-	env.tonemap_exposure = lerpf(1.0, 1.5, night) * lerpf(1.0, 1.12, overcast)
+	env.tonemap_exposure = lerpf(1.0, 1.5, night) * lerpf(1.0, 1.12, overcast) * (1.0 + 0.04 * hz * day_light)
 	# Depth fog only: a clear near field, subtle blue-grey middle distance,
 	# and skyline silhouettes merging with the horizon. Rooftop views get a
 	# modest visibility lift; no volume textures, raymarching or extra lights.
@@ -320,15 +351,36 @@ func _apply(dt: float, instant: bool) -> void:
 	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
 	# Blue aerial perspective: distance fades buildings gradually into the
 	# atmosphere (which also takes their contrast), near things stay crisp.
-	env.fog_depth_begin = lerpf(70.0, 12.0, fog) * (1.0 + 0.8 * alt * (1.0 - fog))
-	env.fog_depth_end = lerpf(1600.0, 520.0, fog) * (1.0 + 0.35 * alt * (1.0 - fog))
-	env.fog_density = lerpf(0.82, 0.97, fog) * (1.0 - 0.12 * alt * (1.0 - fog))
-	env.fog_light_color = hor.lerp(Color(0.52, 0.66, 0.86), 0.5 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
+	# Haze pulls the whole fade nearer: the skyline a kilometre off is a pale
+	# silhouette, the far shore a shape in the glare – background buildings
+	# read as far away instead of a flat cut-out against the sky.
+	var hk := lerpf(1.0, 0.55, hz)
+	env.fog_depth_begin = lerpf(70.0, 12.0, fog) * lerpf(1.0, 0.6, hz) * (1.0 + 0.8 * alt * (1.0 - fog))
+	env.fog_depth_end = lerpf(1350.0, 520.0, fog) * hk * (1.0 + 0.45 * alt * (1.0 - fog))
+	env.fog_density = lerpf(lerpf(0.84, 0.9, hz), 0.97, fog) * (1.0 - 0.12 * alt * (1.0 - fog))
+	env.fog_depth_curve = lerpf(1.35, 1.1, hz)
+	var fog_col := hor.lerp(Color(0.52, 0.66, 0.86), 0.5 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
+	# Heat haze is dusty gold-grey, not blue.
+	fog_col = fog_col.lerp(Color(0.86, 0.8, 0.7) * lerpf(0.35, 1.0, day_light), warm * 0.6)
+	env.fog_light_color = fog_col
 	env.fog_light_energy = lerpf(1.0, 0.55, night)
-	env.fog_sun_scatter = 0.3 * day_light * (1.0 - overcast)
-	# Soft bloom: by day only the brightest sunlit glass and sky blooms.
-	env.glow_intensity = lerpf(0.34, 0.42, night)
-	env.glow_hdr_threshold = lerpf(1.05, 1.0, night)
+	env.fog_sun_scatter = (0.3 + 0.25 * hz) * day_light * (1.0 - overcast)
+	env.fog_aerial_perspective = lerpf(0.8, 0.6, hz)
+	# A fog bank hides the sky too (it read as a clear blue day over a
+	# misty street), haze milks it a little.
+	env.fog_sky_affect = 0.15 + 0.6 * fog + 0.15 * hz
+	# Low fog: thick at the water and in the low streets, thinning with
+	# height (hilltops and towers stand clear of it). Fog weather keeps it
+	# all day; on calm mornings it is the dawn mist above.
+	env.fog_height = MIST_TOP + 4.0 * mist
+	env.fog_height_density = MIST_DENSITY * mist
+	# Soft bloom: by day only the brightest sunlit glass and sky blooms;
+	# hard summer sun blooms more (sunlit glass, white stone), haze softens it.
+	env.glow_intensity = lerpf(0.34 + 0.12 * punch + 0.08 * hz, 0.42, night)
+	env.glow_hdr_threshold = lerpf(1.05 - 0.12 * punch, 1.0, night)
+	# Hard sun: more contrast and colour; haze and fog wash both out.
+	env.adjustment_contrast = 1.14 + (0.06 * punch - 0.07 * hz) * day_light - 0.06 * fog
+	env.adjustment_saturation = 1.12 + (0.08 * punch - 0.1 * hz) * day_light - 0.12 * fog
 
 	# --- shared shader inputs.
 	var top_l := zen.srgb_to_linear()
@@ -339,6 +391,7 @@ func _apply(dt: float, instant: bool) -> void:
 	RenderingServer.global_shader_parameter_set("night", lamps)
 	RenderingServer.global_shader_parameter_set("wetness", wetness)
 	RenderingServer.global_shader_parameter_set("rain", w["rain"])
+	CarVisual.lamps = lamps   # (your cars' headlights, lamp glows and brake-light boost)
 	if _world and _world.has_method("set_night"):
 		_world.set_night(lamps)
 	rain_fx.set_rain(float(w["rain"]), hor_l, lamps)

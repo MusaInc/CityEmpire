@@ -1,5 +1,6 @@
 // Street-lamp light after dark, faked without real lights (mobile budget):
-// mode 0 = a soft pool on the ground under the lamp head (flat quad),
+// mode 0 = a soft pool on the ground under the lamp head (a grid draped over
+//          the real ground per chunk: CityWorld._pool_arrays),
 // mode 1 = a halo round the lamp head (camera-facing quad, bigger in rain/fog).
 shader_type spatial;
 render_mode unshaded, blend_add, depth_draw_never, cull_disabled, shadows_disabled;
@@ -33,6 +34,7 @@ void fragment() {
 		// edge) rather than a hot spot under the lantern.
 		a = (pow(clamp(1.0 - r, 0.0, 1.0), 1.5) * 0.3 + pow(clamp(1.0 - r, 0.0, 1.0), 4.0) * 0.18);
 		a *= 1.0 + 0.6 * wetness;  // wet streets throw more of it back
+		a *= COLOR.r;              // ground far below the lantern (CityWorld._pool_arrays)
 	} else {
 		a = pow(clamp(1.0 - r, 0.0, 1.0), 3.0) * (0.9 + 0.5 * rain);
 	}

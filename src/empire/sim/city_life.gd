@@ -59,7 +59,7 @@ static func new_day(e: Empire) -> void:
 	e.weather = e.forecast if e.forecast != "" else "cloudy"
 	e.forecast = _roll_weather(e)
 	var wd := weather_def(e.weather)
-	if e.weather in ["rain", "storm", "heatwave"]:
+	if e.weather in ["rain", "storm", "heatwave", "foggy"]:
 		_headline(e, "%s today. %s" % [wd.get("name", e.weather), _weather_tip(e.weather)], "info")
 	# A new event?
 	if e.rng.randf() < float(cfg().get("event_chance", 0.6)):
@@ -74,6 +74,8 @@ static func _weather_tip(w: String) -> String:
 			return "Fewer shoppers, but hot drinks fly out."
 		"heatwave":
 			return "Stock the fridges: cold drinks sell double."
+		"foggy":
+			return "A slow, misty day: hot drinks sell, cold ones don't."
 	return ""
 
 

@@ -5,7 +5,7 @@
       "name": "Sunny",
       "icon": "☀",
       "weight": 0.34,
-      "sky": "clear",
+      "sky": "bright",
       "footfall": 1.08,
       "mix": {
         "drinks": 1.35,
@@ -15,7 +15,7 @@
     "cloudy": {
       "name": "Cloudy",
       "icon": "☁",
-      "weight": 0.3,
+      "weight": 0.26,
       "sky": "cloudy",
       "footfall": 1.0,
       "mix": {}
@@ -48,12 +48,23 @@
       "name": "Heatwave",
       "icon": "🔥",
       "weight": 0.1,
-      "sky": "clear",
+      "sky": "haze",
       "footfall": 1.15,
       "mix": {
         "drinks": 1.9,
         "sweets": 1.2,
         "hot": 0.5
+      }
+    },
+    "foggy": {
+      "name": "Foggy",
+      "icon": "☁",
+      "weight": 0.06,
+      "sky": "fog",
+      "footfall": 0.93,
+      "mix": {
+        "hot": 1.3,
+        "drinks": 0.9
       }
     }
   },

@@ -86,6 +86,12 @@ var prop_density := 1.0
 var traffic_density := 1.0
 var traffic: Traffic
 var max_builds_per_frame := 2
+## Main-thread time a frame may spend putting finished chunks into the scene
+## (one is always allowed): at speed the next chunk waits a frame instead of
+## two big ones landing together as a hitch.
+var build_budget_ms := 4.0
+var _last_pos := Vector3.INF
+var _vel := Vector3.ZERO     # the viewer's smoothed velocity (m/s), for prefetching
 
 var building_mat: ShaderMaterial
 var ground_mat: ShaderMaterial
@@ -767,8 +773,10 @@ func _load_props() -> void:
 		gm.set_shader_parameter("mode", mode)
 		var q: PrimitiveMesh
 		if mode == 0:
-			q = PlaneMesh.new()  # (flat, facing up)
-			(q as PlaneMesh).size = Vector2(15.0, 15.0)
+			# (The pools are draped per chunk: _pool_arrays. This mesh only
+			# carries their material.)
+			q = PlaneMesh.new()
+			(q as PlaneMesh).size = Vector2(1.0, 1.0)
 		else:
 			q = QuadMesh.new()
 			(q as QuadMesh).size = Vector2(1.8, 1.8)
@@ -865,7 +873,8 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 						var smat := wm.surface_get_material(si)
 						var sn := String(smat.resource_name) if smat else ""
 						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si), 0, wxf)
-			return _commit_traffic(tools, looks, shader)   # (no road beam: the user asked for them gone, 2026-11-18)
+			# The full model only: mid/far LODs carry no beam.
+			return _commit_traffic(tools, looks, shader, src.get_aabb().position.z, float(d["W"]))
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -889,18 +898,33 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 const BEAM_SHADER := preload("res://src/world/shaders/traffic_beam.gdshader")
 
 
-## The headlight beam: a widening quad on the road ahead of the bumper,
-## UV.y 0 at the car .. 1 at the far end (traffic_beam.gdshader).
-static func _beam_quad(st: SurfaceTool, front_z: float, w: float) -> void:
-	var y := 0.04
-	var n0 := Vector3(-w * 0.45, y, front_z - 0.4)
-	var n1 := Vector3(w * 0.45, y, front_z - 0.4)
-	var f0 := Vector3(-w * 1.7, y, front_z - 17.0)
-	var f1 := Vector3(w * 1.7, y, front_z - 17.0)
-	for q in [[n0, Vector2(0, 0)], [n1, Vector2(1, 0)], [f1, Vector2(1, 1)], [n0, Vector2(0, 0)], [f1, Vector2(1, 1)], [f0, Vector2(0, 1)]]:
-		st.set_normal(Vector3.UP)
-		st.set_uv(q[1])
-		st.add_vertex(q[0])
+## The headlight beam ahead of a moving car: a grid on the road ahead of
+## the bumper (front along -Z), UV.y 0 at the car .. 1 at the far end, UV.x
+## across. traffic_path_beam.gdshader lays every row on the lane the car is
+## about to drive, so the beam follows crests, dips and bends. (The old beam
+## was one flat quad in the car's plane: over a crest or into a dip it
+## floated or vanished – the user asked for those gone on 2026-11-18. Parked
+## cars' beams collapse: traffic_beam.gdshader.)
+const BEAM_REACH := 24.0
+const BEAM_ROWS := 9
+const BEAM_COLS := 6
+
+static func _beam_grid(st: SurfaceTool, front_z: float, w: float) -> void:
+	var pts: Array = []
+	for j in BEAM_ROWS + 1:
+		var t := pow(float(j) / BEAM_ROWS, 1.3)   # (rows closer near the car)
+		var half := lerpf(w * 0.48, w * 1.9, t)
+		var row: Array = []
+		for i in BEAM_COLS + 1:
+			var u := float(i) / BEAM_COLS
+			row.append([Vector3((u - 0.5) * 2.0 * half, 0.05, front_z - 0.3 - t * BEAM_REACH), Vector2(u, t)])
+		pts.append(row)
+	for j in BEAM_ROWS:
+		for i in BEAM_COLS:
+			for q in [pts[j][i], pts[j][i + 1], pts[j + 1][i + 1], pts[j][i], pts[j + 1][i + 1], pts[j + 1][i]]:
+				st.set_normal(Vector3.UP)
+				st.set_uv(q[1])
+				st.add_vertex(q[0])
 
 
 func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front_z := 0.0, width := 0.0) -> ArrayMesh:
@@ -908,7 +932,7 @@ func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front
 	if width > 0.0:
 		var bst := SurfaceTool.new()
 		bst.begin(Mesh.PRIMITIVE_TRIANGLES)
-		_beam_quad(bst, front_z, width)
+		_beam_grid(bst, front_z, width)
 		bst.commit(out)
 		var bm := ShaderMaterial.new()
 		bm.shader = BEAM_SHADER
@@ -1590,10 +1614,16 @@ func _bake_street_maps() -> void:
 
 
 # ------------------------------------------------------------- streaming
-func _process(_dt: float) -> void:
+func _process(dt: float) -> void:
 	if viewer == null:
 		return
-	update_streaming(viewer.global_position)
+	var p := viewer.global_position
+	if _last_pos != Vector3.INF and dt > 0.0:
+		var v := (p - _last_pos) / dt
+		# (A teleport – entering a car, a respawn – isn't speed.)
+		_vel = _vel.lerp(v, 1.0 - exp(-3.0 * dt)) if v.length() < 120.0 else Vector3.ZERO
+	_last_pos = p
+	update_streaming(p)
 
 
 ## Request/instantiate/free chunks around `pos`. `budget` caps instantiations.
@@ -1605,16 +1635,29 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 	# Elevated homes need distant skyline chunks after the initial spawn load.
 	var elevation := maxf(0.0, pos.y - layout.ground_y(pos.x, pos.z))
 	var vista_range := view_distance + minf(elevation * 1.5, 550.0)
+	# Smart loading: where you'll be in ~4 s (driving, flying) is wanted too,
+	# and what's in front of the camera / ahead of travel loads before what's
+	# behind you.
+	var v2 := Vector2(_vel.x, _vel.z)
+	var ahead := here + v2.limit_length(60.0) * 4.0
+	var fwd := v2.normalized() if v2.length() > 4.0 else Vector2.ZERO
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if fwd == Vector2.ZERO and cam:
+		var cf := -cam.global_basis.z
+		fwd = Vector2(cf.x, cf.z).normalized()
 	for key in _all_keys:
 		var c := (Vector2(key) + Vector2(0.5, 0.5)) * CHUNK
 		var d := c.distance_to(here)
-		if d < vista_range + CHUNK * 0.75:
-			want[key] = d
+		if d < vista_range + CHUNK * 0.75 or c.distance_to(ahead) < vista_range * 0.9:
+			# Priority: distance, less for chunks ahead, more for those behind
+			# (the chunks round you always come first).
+			var facing := fwd.dot((c - here).normalized()) if d > CHUNK else 0.0
+			want[key] = d * (1.0 - 0.4 * maxf(facing, 0.0) + 0.5 * maxf(-facing, 0.0))
 		elif _loaded.has(key) and d > vista_range + CHUNK * 1.25:
 			_loaded[key].queue_free()
 			_loaded.erase(key)
 	_want = want
-	# Nearest first.
+	# Most wanted first.
 	var order := want.keys()
 	order.sort_custom(func(a, b): return want[a] < want[b])
 	var in_flight := _pending.size()
@@ -1629,6 +1672,12 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 		_request(key)
 		in_flight += 1
 	_collect(budget)
+
+
+## Finished chunks are put in the scene most-wanted first.
+func _ready_order(keys: Array) -> Array:
+	keys.sort_custom(func(a, b): return float(_want.get(a, INF)) < float(_want.get(b, INF)))
+	return keys
 
 
 func _request(key: Vector2i) -> void:
@@ -1664,7 +1713,90 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 		"features": null if feats.is_empty() else feats.arrays(),
 		"ground": _ground_cache.get(key),
 		"furniture": furn,
+		"pools": _pool_arrays(key),
 	}
+
+
+## Street-lamp pools for a chunk, draped over the real ground (worker
+## thread): each lamp's oval is a grid whose every vertex sits on
+## layout.ground_y, so the light follows a sloping street, steps up the kerb
+## and wraps a corner. (The old pool was one flat 15 m quad at the foot of the
+## post: on a hill it floated over the street downhill and sank into it uphill,
+## cut off in a hard straight edge.) UV 0..1 over the oval (lamp_glow.gdshader).
+const POOL_ALONG := 10.5   # m: half the oval along the road (the lamp's local X)
+const POOL_ACROSS := 7.0   # m: half across
+const POOL_NX := 10
+const POOL_NZ := 7
+const POOL_STEP := 1.2    # m: a cell rising more than this is a step, not a slope
+const POOL_PROBE := [Vector2(1.1, 0.0), Vector2(-1.1, 0.0), Vector2(0.0, 1.1), Vector2(0.0, -1.1)]
+
+func _pool_arrays(key: Vector2i) -> Variant:
+	var verts := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	for p in chunk_props(key):
+		if p[0] != "streetlight":
+			continue
+		var xf: Transform3D = p[1]
+		var head := xf * LAMP_HEAD
+		var yaw := Basis(Vector3.UP, xf.basis.get_euler().y)
+		var ax := yaw * Vector3.RIGHT
+		var az := yaw * Vector3.BACK
+		var base := verts.size()
+		# A lamp standing well above the ground under it is on a bridge deck
+		# or ramp (ground_y doesn't know decks): its pool lies on the deck's
+		# plane, the post's foot, instead of on the ground beneath.
+		var on_deck := xf.origin.y - layout.ground_y(xf.origin.x, xf.origin.z) > 0.5
+		for j in POOL_NZ + 1:
+			for i in POOL_NX + 1:
+				var u := float(i) / POOL_NX
+				var v := float(j) / POOL_NZ
+				var w := Vector3(head.x, 0.0, head.z) + ax * (u - 0.5) * 2.0 * POOL_ALONG + az * (v - 0.5) * 2.0 * POOL_ACROSS
+				# The highest ground within ~1 m (a vertex beside a kerb rides on
+				# the pavement rather than slicing under it), never above the
+				# lantern (a wall or set piece under the oval).
+				if on_deck:
+					w.y = xf.origin.y + 0.1
+					verts.append(w)
+					uvs.append(Vector2(u, v))
+					cols.append(Color.WHITE)
+					continue
+				var gy := layout.ground_y(w.x, w.z)
+				for o in POOL_PROBE:
+					gy = maxf(gy, layout.ground_y(w.x + o.x, w.z + o.y))
+				w.y = minf(gy, head.y - 1.0) + 0.1
+				verts.append(w)
+				uvs.append(Vector2(u, v))
+				# Ground well below the lantern (down a hill, under a
+				# terrace) gets less of it.
+				var drop := head.y - w.y
+				var k := clampf(1.0 - maxf(drop - LAMP_HEAD.y, 0.0) / 6.0, 0.0, 1.0)
+				cols.append(Color(k, k, k))
+		for j in POOL_NZ:
+			for i in POOL_NX:
+				var a := base + j * (POOL_NX + 1) + i
+				var q := [a, a + 1, a + POOL_NX + 2, a + POOL_NX + 1]
+				# A cell across a step (a terrace edge, a retaining wall) would
+				# be a sheet of light hanging in the air: leave it out, the
+				# pool ends at the edge.
+				var lo := INF
+				var hi := -INF
+				for qi in q:
+					lo = minf(lo, verts[qi].y)
+					hi = maxf(hi, verts[qi].y)
+				if hi - lo > POOL_STEP:
+					continue
+				idx.append_array([q[0], q[1], q[2], q[0], q[2], q[3]])
+	if idx.is_empty():
+		return null
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_COLOR] = cols
+	arrays[Mesh.ARRAY_INDEX] = idx
+	return arrays
 
 
 func _collect(budget: int) -> void:
@@ -1677,10 +1809,11 @@ func _collect(budget: int) -> void:
 		_pending.erase(key)
 	var built := 0
 	_mutex.lock()
-	var keys := _results.keys()
+	var keys := _ready_order(_results.keys())
 	_mutex.unlock()
+	var t0 := Time.get_ticks_usec()
 	for key in keys:
-		if built >= budget:
+		if built >= budget or (built > 0 and Time.get_ticks_usec() - t0 > build_budget_ms * 1000.0):
 			break
 		_mutex.lock()
 		var res: Dictionary = _results[key]
@@ -1781,7 +1914,7 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 		fi.visibility_range_end = FURNITURE_RANGE
 		fi.visibility_range_end_margin = 20.0
 		root.add_child(fi)
-	_add_props(root, key)
+	_add_props(root, key, res.get("pools"))
 	_add_traffic(root, key)
 	_add_walkers(root, key)
 	_add_occluder(root, key)
@@ -1835,7 +1968,7 @@ func chunk_furniture(key: Vector2i) -> Array:
 	return out
 
 
-func _add_props(root: Node3D, key: Vector2i) -> void:
+func _add_props(root: Node3D, key: Vector2i, pools: Variant = null) -> void:
 	var by_kind := {}
 	for p in chunk_props(key):
 		var kind: String = p[0]
@@ -1885,34 +2018,38 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mmi)
 		if kind == "streetlight" and not _glow_meshes.is_empty():
-			_add_lamp_glow(root, list)
+			_add_lamp_glow(root, list, pools)
 
 
-## Night light for a chunk's streetlights: a ground pool under each head and
-## a halo round it (two instanced draws per chunk, hidden by day).
-func _add_lamp_glow(root: Node3D, lamps: Array) -> void:
-	for mode in 2:
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.mesh = _glow_meshes[mode]
-		mm.instance_count = lamps.size()
-		for j in lamps.size():
-			var xf: Transform3D = lamps[j]
-			var head := xf * LAMP_HEAD
-			var at := Vector3(head.x, xf.origin.y + 0.03, head.z) if mode == 0 else head
-			# The pool is an oval along the road (the lamp's local X), wider
-			# than it is deep, like a real road lantern's throw.
-			var pb := Basis(Vector3.UP, xf.basis.get_euler().y).scaled(Vector3(1.9, 1.0, 1.25)) if mode == 0 else Basis()
-			mm.set_instance_transform(j, Transform3D(pb, at))
-		var mmi := MultiMeshInstance3D.new()
-		mmi.name = "LampPools" if mode == 0 else "LampHalos"
-		mmi.multimesh = mm
-		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mmi.visibility_range_end = 420.0 if mode == 0 else 700.0
-		mmi.extra_cull_margin = 4.0
-		mmi.visible = _glow_on
-		root.add_child(mmi)
-		_glow_nodes.append(mmi)
+## Night light for a chunk's streetlights: the draped ground pools (one mesh,
+## _pool_arrays) and a halo round each head (instanced), hidden by day.
+func _add_lamp_glow(root: Node3D, lamps: Array, pools: Variant) -> void:
+	var pm := _mesh_from(pools)
+	if pm:
+		var pi := MeshInstance3D.new()
+		pi.name = "LampPools"
+		pi.mesh = pm
+		pi.material_override = _glow_mats[0]
+		pi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		pi.visibility_range_end = 420.0
+		pi.visible = _glow_on
+		root.add_child(pi)
+		_glow_nodes.append(pi)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = _glow_meshes[1]
+	mm.instance_count = lamps.size()
+	for j in lamps.size():
+		mm.set_instance_transform(j, Transform3D(Basis(), (lamps[j] as Transform3D) * LAMP_HEAD))
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "LampHalos"
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.visibility_range_end = 700.0
+	mmi.extra_cull_margin = 4.0
+	mmi.visible = _glow_on
+	root.add_child(mmi)
+	_glow_nodes.append(mmi)
 
 
 func _add_traffic(root: Node3D, key: Vector2i) -> void:
