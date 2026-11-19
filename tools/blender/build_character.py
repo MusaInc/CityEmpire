@@ -90,6 +90,30 @@ for side,suf in [('r','.L'),('l','.R')]:
         trans[dst+'_'+side]=(origin,axis.normalized().rotation_difference(target.normalized()),scale)
     trans['foot_'+side]=(coord(source_joint('foot'+suf)),None,.1)
 
+# The torso's key heights (MakeHuman units) were measured on body A. For
+# another body they move with its own skeleton: each key keeps its offset
+# from the nearest of body A's spine / neck / head joints, read on this body
+# (the crown keeps its offset from the top of the head). Body A: unchanged.
+TORSO_KEYS=[-8.45,1.003,3.1,4.35,5.608,6.654,7.62,9.22]
+def _torso_keys():
+    if BODY=='a':return TORSO_KEYS
+    ba,_,_,_,_=obj_read(SRC/'base.obj')
+    for n,w in MACRO['a']:
+        for l in (SRC/n).read_text().splitlines():
+            a=l.split()
+            if not a or a[0].startswith('#'):continue
+            ba[int(a[0])]+=np.array(list(map(float,a[1:4])))*w
+    js=[b for b in sk['bones'] if b.startswith(('root','pelvis','spine','neck','head'))]
+    jy=lambda B,b:float(np.mean(B[sk['joints'][sk['bones'][b]['head']]],axis=0)[1])
+    out=[]
+    for k in TORSO_KEYS:
+        if k<0:out.append(k);continue
+        if k>9.0:out.append(float(base[:,1].max())-(float(ba[:,1].max())-k));continue
+        b=min(js,key=lambda b:abs(jy(ba,b)-k))
+        out.append(jy(base,b)+(k-jy(ba,b)))
+    print('TORSO KEYS',BODY,[round(x,3) for x in out])
+    return out
+TK=_torso_keys()
 def torso(v):
     x,y,z=v
     # The rig's torso (hip joint .94 -> shoulder joint 1.50) is 22% longer
@@ -98,9 +122,13 @@ def torso(v):
     # torso read as a mannequin). Width follows the anatomy: a slight taper
     # at the waist and only as much shoulder width as reaches the rig's
     # shoulder pivots (the old flat 5% widening inflated the whole chest).
-    h=np.interp(y,[-8.45,1.003,3.1,4.35,5.608,6.654,7.62,9.22],[0,.94,1.218,1.358,1.50,1.59,1.68,1.84])
-    kx=np.interp(y,[1.0,3.1,4.35,5.3,5.75,6.6],[1.0,.975,1.0,1.045,1.06,1.0])
-    kz=np.interp(y,[1.0,3.1,4.35,6.6],[1.02,1.0,1.03,1.0])
+    h=np.interp(y,TK,[0,.94,1.218,1.358,1.50,1.59,1.68,1.84])
+    if BODY=='a':
+        kx=np.interp(y,[1.0,3.1,4.35,5.3,5.75,6.6],[1.0,.975,1.0,1.045,1.06,1.0])
+        kz=np.interp(y,[1.0,3.1,4.35,6.6],[1.02,1.0,1.03,1.0])
+    else:
+        kx=np.interp(y,[TK[1],TK[2],TK[3],(TK[3]+TK[4])/2+.3,TK[4]+.14,TK[5]-.05],[1.0,.975,1.0,1.045,1.06,1.0])
+        kz=np.interp(y,[TK[1],TK[2],TK[3],TK[5]-.05],[1.02,1.0,1.03,1.0])
     return Vector((x*.1*kx,z*.1*kz,h))
 def retarget(v,w):
     result=Vector((0,0,0));p=coord(v)
