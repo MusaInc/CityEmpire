@@ -12,10 +12,15 @@ extends Control
 const MIN_ZOOM := 0.17   # px per metre (all three islands fit, Skyport to the south)
 const MAX_ZOOM := 3.2
 const S = preload("res://src/empire/ui/empire_style.gd")
-const FILTERS := [["all", "All"], ["yours", "Mine"], ["fashion", "Fashion"], ["food", "Food"], ["place", "Cars & Skyport"],
-	["landmark", "Landmarks"], ["to_let", "To let"], ["sale", "For sale"], ["wholesale", "Suppliers"], ["car", "Vehicles"]]
+const FILTERS := [["all", "All"], ["mine", "Mine"], ["property", "Property"], ["shops", "Shops"], ["fashion", "Fashion"],
+	["food", "Food"], ["vehicles", "Vehicles"], ["wholesale", "Suppliers"], ["landmark", "Landmarks"]]
+## Which marker kinds each filter shows.
+const FILTER_KINDS := {"mine": ["yours", "car", "home_own", "hq"], "property": ["to_let", "sale", "home", "home_own"],
+	"shops": ["firm", "rival", "yours"], "fashion": ["fashion"], "food": ["food"], "vehicles": ["dealer", "aviation", "marina", "car"],
+	"wholesale": ["wholesale"], "landmark": ["landmark", "airport", "marina"]}
 
 static var filter := "all"     # (kept while the phone is closed)
+static var legend := false
 static var _view := {}         # last centre/zoom (kept between openings)
 
 var game: EmpireGame
@@ -54,7 +59,7 @@ func _ready() -> void:
 	col.offset_top = 12
 	add_child(col)
 	for b in [["+", func(): _zoom_by(1.4, size * 0.5)], ["−", func(): _zoom_by(1.0 / 1.4, size * 0.5)],
-			["◎", center_on_player], ["⤢", _fit_route]]:
+			["◎", center_on_player], ["⤢", _fit_route], ["Key", func(): legend = not legend; queue_redraw()]]:
 		var btn := S.button(b[0], b[1], false, 54)
 		btn.custom_minimum_size = Vector2(54, 54)
 		btn.add_theme_font_size_override("font_size", 24)
@@ -154,11 +159,7 @@ func _fit_route() -> void:
 func _shown(kind: String) -> bool:
 	if filter == "all":
 		return true
-	if filter == "sale":
-		return kind in ["sale", "rival"]
-	if filter == "place":
-		return kind in ["place", "wholesale"]
-	return kind == filter
+	return kind in FILTER_KINDS.get(filter, [])
 
 
 func _draw() -> void:
@@ -180,6 +181,9 @@ func _draw() -> void:
 	_draw_areas(f)   # (under the markers)
 	var labels: Array = []
 	var sel_id := String(_selected.get("id", ""))
+	# Candidates on screen, most important first; anything that would sit on
+	# top of a more important badge is left out (zoom in to see it).
+	var cand: Array = []
 	for m in MapKit.markers(game):
 		var kind: String = m["kind"]
 		if m["world"] == Vector3.ZERO or not _shown(kind):
@@ -189,17 +193,38 @@ func _draw() -> void:
 		if s.x < -20 or s.y < -20 or s.x > size.x + 20 or s.y > size.y + 20:
 			continue
 		var pri := MapKit.priority(kind)
-		# Independents only when zoomed in or filtered for.
-		if pri == 2 and _zoom < 1.1 and filter == "all" and m["id"] != sel_id:
+		# Small shops only when zoomed in or filtered for.
+		if pri == 2 and _zoom < 0.95 and filter == "all" and m["id"] != sel_id:
 			continue
-		MapKit.draw_marker(self, s, kind, k, m["id"] == sel_id)
+		cand.append([0 if m["id"] == sel_id else pri + 1, s, m])
+	cand.sort_custom(func(a, b2): return int(a[0]) < int(b2[0]))
+	var placed: Array = []
+	for c in cand:
+		var s: Vector2 = c[1]
+		var m: Dictionary = c[2]
+		var r := MapKit.radius(m["kind"], k)
+		var clash := false
+		if int(c[0]) > 0:
+			for q: Array in placed:
+				if s.distance_to(q[0]) < r + float(q[1]) - 2.0:
+					clash = true
+					break
+		if clash:
+			continue
+		placed.append([s, r])
 		_drawn.append([s, m])
+	# Draw least important first so the important ones are on top.
+	for i in range(_drawn.size() - 1, -1, -1):
+		var s: Vector2 = _drawn[i][0]
+		var m: Dictionary = _drawn[i][1]
+		var pri := MapKit.priority(m["kind"])
+		MapKit.draw_marker(self, s, m["kind"], k, m["id"] == sel_id)
 		if pri == 0 or _zoom > 1.6 or m["id"] == sel_id:
 			labels.append([s, String(m["label"]), pri == 0 or m["id"] == sel_id])
 	for l in labels:
 		var fs := 15 if l[2] else 13
 		var tw := f.get_string_size(l[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var pos: Vector2 = l[0] + Vector2(11, 5)
+		var pos: Vector2 = l[0] + Vector2(14 * k, 5)
 		draw_rect(Rect2(pos + Vector2(-4, -fs), Vector2(tw + 8, fs + 6)), Color(S.INK, 0.75))
 		draw_string(f, pos, l[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.95))
 	if gps and gps.active():
@@ -207,6 +232,8 @@ func _draw() -> void:
 	if String(_selected.get("kind", "")) == "point":
 		var wp: Vector3 = _selected["world"]
 		draw_arc(_to_screen(Vector2(wp.x, wp.z)), 10.0, 0, TAU, 24, Color.WHITE, 2.5, true)
+	if legend:
+		_draw_legend(f)
 	# You (on foot: where you face; driving: the car's heading).
 	var me: Vector3 = gps._here() if gps else game.player.global_position
 	var yaw := game.chase.view_yaw() if game.driving != "" else game.camera.view_yaw()
@@ -393,6 +420,23 @@ func _action() -> Array:
 					return ["Head office", func(): ui.open_hq()]
 				"fashion", "food", "firm":
 					return ["Inspect", func(): ui.open_firm(u, true)]
+		"place":
+			var sid := String(ref.get("id", ""))
+			match sid:
+				"dealer_budget", "dealer_commercial", "dealer_luxury", "aviation", "marina":
+					return ["Showroom", func(): SkyportUI.showroom(ui, sid)]
+				"clothes_everyday", "clothes_premium":
+					return ["Browse", func(): SkyportUI.clothes(ui, sid)]
+				"cargo":
+					return ["Imports", func(): SkyportUI.imports(ui)]
+				"terminal":
+					return ["Airport", func(): SkyportUI.terminal(ui)]
+				"stadium":
+					return ["The club", func(): ui.open_phone("company")]
+		"home":
+			var hm: Dictionary = game.home_by_id(String(ref.get("id", "")))
+			if not hm.is_empty():
+				return ["Your home" if game.empire.owns_property(hm["id"]) else "Buy", func(): ui.open_home(hm)]
 		"vehicle":
 			return ["Vehicles", func(): ui.open_phone("vehicles")]
 	return []
@@ -450,3 +494,19 @@ func _draw_areas(f: Font) -> void:
 		var pos := s - Vector2(tw * 0.5, -fs * 0.35)
 		draw_string_outline(f, pos, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 6, Color(0.05, 0.08, 0.11, 0.85))
 		draw_string(f, pos, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.92) if lvl == 0 else Color(0.93, 0.89, 0.8, 0.85))
+
+
+## The key: every icon and what it means, in two columns (top left, under
+## the filters). "Key" in the button column shows/hides it.
+func _draw_legend(f: Font) -> void:
+	var ks: Array = MapKit.KINDS.keys().filter(func(x): return x != "place")
+	var rows := ceili(ks.size() / 2.0)
+	var box := Rect2(Vector2(10, 60), Vector2(400, rows * 26 + 18))
+	draw_rect(box, Color(S.INK, 0.92))
+	draw_rect(box, Color(1, 1, 1, 0.1), false, 1.0)
+	for i in ks.size():
+		var col := i / rows
+		var row := i % rows
+		var p := box.position + Vector2(22 + col * 196, 22 + row * 26)
+		MapKit.draw_marker(self, p, ks[i], 0.9)
+		draw_string(f, p + Vector2(16, 5), String(MapKit.KINDS[ks[i]]["name"]), HORIZONTAL_ALIGNMENT_LEFT, 168, 13, Color(1, 1, 1, 0.9))

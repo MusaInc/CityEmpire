@@ -519,6 +519,10 @@ func _after_start() -> void:
 		# Captures: the full map's centre and zoom, "x,z,zoom".
 		var mv := String(args["mapview"]).split(",")
 		EmpireMap._view = {"c": Vector2(float(mv[0]), float(mv[1])), "z": float(mv[2])}
+	if args.has("maplegend"):
+		EmpireMap.legend = true   # (captures: the map with its key showing)
+	if args.has("mapzoom"):
+		EmpireMap._view = {"c": Vector2(player.global_position.x, player.global_position.z), "z": float(args["mapzoom"])}
 	if args.has("panel"):
 		var pn := String(args["panel"])
 		if pn == "victory":

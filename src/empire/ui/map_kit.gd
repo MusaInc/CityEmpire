@@ -11,20 +11,27 @@ const S = preload("res://src/empire/ui/empire_style.gd")
 
 ## Marker kinds, most important first. pri: 0 always shown (even on the
 ## minimap), 1 shown on the minimap when near, 2 full map / zoomed in.
+## style: "own" solid badge + white ring (yours), "buy" dark badge with a
+## coloured ring and glyph (to rent / for sale), "place" solid badge.
 const KINDS := {
-	"yours": {"name": "Your shops", "col": Color(0.3, 0.86, 0.5), "shape": "circle", "pri": 0},
-	"car": {"name": "Your vehicles", "col": Color(1, 1, 1), "shape": "car", "pri": 0},
-	"wholesale": {"name": "Suppliers", "col": Color(0.36, 0.62, 1.0), "shape": "diamond", "pri": 0},
-	"hq": {"name": "Head office", "col": Color(0.98, 0.84, 0.38), "shape": "diamond", "pri": 1},
-	"sale": {"name": "For sale", "col": Color(0.3, 0.92, 0.78), "shape": "square", "pri": 1},
-	"rival": {"name": "QuikSave", "col": Color(0.85, 0.15, 0.18), "shape": "square", "pri": 1},
-	"to_let": {"name": "To let", "col": Color(0.98, 0.71, 0.2), "shape": "circle", "pri": 1},
-	"home": {"name": "Homes", "col": Color(0.85, 0.7, 1.0), "shape": "circle", "pri": 2},
-	"firm": {"name": "Shops", "col": Color(0.78, 0.8, 0.84), "shape": "dot", "pri": 2},
-	"fashion": {"name": "Fashion", "col": Color(0.94, 0.38, 0.57), "shape": "circle", "pri": 1},
-	"food": {"name": "Food & drink", "col": Color(1.0, 0.54, 0.4), "shape": "dot", "pri": 2},
-	"place": {"name": "Showrooms & Skyport", "col": Color(0.31, 0.64, 0.94), "shape": "diamond", "pri": 1},
-	"landmark": {"name": "Landmarks", "col": Color(0.91, 0.76, 0.48), "shape": "diamond", "pri": 1},
+	"yours": {"name": "Your businesses", "col": Color(0.24, 0.78, 0.47), "icon": "shop", "style": "own", "pri": 0},
+	"car": {"name": "Your vehicles", "col": Color(0.3, 0.55, 0.95), "icon": "car", "style": "own", "pri": 0},
+	"home_own": {"name": "Your homes", "col": Color(0.62, 0.48, 0.95), "icon": "house", "style": "own", "pri": 0},
+	"hq": {"name": "Head office", "col": Color(0.92, 0.74, 0.3), "icon": "tower", "style": "own", "pri": 0},
+	"wholesale": {"name": "Suppliers", "col": Color(0.33, 0.56, 0.95), "icon": "box", "style": "place", "pri": 0},
+	"airport": {"name": "Airport", "col": Color(0.28, 0.6, 0.9), "icon": "plane", "style": "place", "pri": 0},
+	"sale": {"name": "Business for sale", "col": Color(0.25, 0.85, 0.72), "icon": "tag", "style": "buy", "pri": 1},
+	"to_let": {"name": "Shop to let", "col": Color(0.98, 0.7, 0.22), "icon": "key", "style": "buy", "pri": 1},
+	"home": {"name": "Home for sale", "col": Color(0.72, 0.6, 1.0), "icon": "house", "style": "buy", "pri": 1},
+	"dealer": {"name": "Car dealers", "col": Color(0.3, 0.62, 0.98), "icon": "car", "style": "buy", "pri": 1},
+	"aviation": {"name": "Aircraft sales", "col": Color(0.3, 0.62, 0.98), "icon": "plane", "style": "buy", "pri": 1},
+	"marina": {"name": "Marina", "col": Color(0.25, 0.7, 0.85), "icon": "anchor", "style": "place", "pri": 1},
+	"fashion": {"name": "Clothing", "col": Color(0.92, 0.36, 0.56), "icon": "bag", "style": "place", "pri": 1},
+	"landmark": {"name": "Landmarks", "col": Color(0.88, 0.72, 0.38), "icon": "star", "style": "place", "pri": 1},
+	"rival": {"name": "QuikSave", "col": Color(0.84, 0.2, 0.22), "icon": "shop", "style": "place", "pri": 1},
+	"food": {"name": "Food & drink", "col": Color(0.96, 0.52, 0.32), "icon": "cup", "style": "place", "pri": 2},
+	"firm": {"name": "Other shops", "col": Color(0.55, 0.6, 0.66), "icon": "shop", "style": "place", "pri": 2},
+	"place": {"name": "Places", "col": Color(0.31, 0.64, 0.94), "icon": "star", "style": "place", "pri": 1},
 }
 
 static var _cache: Array = []
@@ -78,7 +85,7 @@ static func markers(g: EmpireGame) -> Array:
 		out.append({"id": String(u["id"]), "kind": kind, "world": dp, "label": label, "sub": sub,
 			"ref": {"kind": "unit", "id": String(u["id"])}})
 	for h in g.homes():
-		out.append({"id": String(h["id"]), "kind": "home", "world": g.home_lift(h),
+		out.append({"id": String(h["id"]), "kind": "home_own" if g.empire.owns_property(h["id"]) else "home", "world": g.home_lift(h),
 			"label": String(h["name"]), "sub": ("Your home" if g.empire.owns_property(h["id"]) else "Home for sale %s" % EmpireData.money(float(h["price"]))),
 			"ref": {"kind": "home", "id": String(h["id"])}})
 	# Places that aren't shop units: Skyport's showrooms, fashion houses,
@@ -88,7 +95,8 @@ static func markers(g: EmpireGame) -> Array:
 			var st := g.skyport_play.site(sid)
 			if st.is_empty():
 				continue
-			var pk := "fashion" if sid.begins_with("clothes") else ("landmark" if sid == "terminal" else "place")
+			var pk := "fashion" if sid.begins_with("clothes") else ({"terminal": "airport", "aviation": "aviation", "marina": "marina",
+				"cargo": "wholesale"}.get(sid, "dealer") as String)
 			out.append({"id": "site:" + sid, "kind": pk, "world": st["door"], "label": String(st["name"]),
 				"sub": {"dealer_budget": "Car dealer", "dealer_commercial": "Vans and trucks", "dealer_luxury": "Supercars",
 					"clothes_everyday": "Clothing store", "clothes_premium": "Fashion house", "aviation": "Aircraft sales",
@@ -139,32 +147,100 @@ static func priority(kind: String) -> int:
 	return int(KINDS.get(kind, KINDS["firm"])["pri"])
 
 
-## One marker, at screen point s (k scales it: the minimap draws smaller).
+## One marker, at screen point s (k scales it: the minimap draws smaller):
+## a round badge in the kind's colour with its glyph. Yours: solid with a
+## white ring; to rent / for sale: dark with a coloured ring and glyph;
+## other places: solid. Too small for a glyph (far minimap) → a dot.
+static func radius(kind: String, k := 1.0) -> float:
+	var pri := int(KINDS.get(kind, KINDS["firm"])["pri"])
+	return (9.5 if pri == 0 else (8.5 if pri == 1 else 7.0)) * k
+
+
 static func draw_marker(ci: CanvasItem, s: Vector2, kind: String, k := 1.0, selected := false) -> void:
 	var d: Dictionary = KINDS.get(kind, KINDS["firm"])
 	var col: Color = d["col"]
-	var r := (7.0 if int(d["pri"]) == 0 else (5.5 if int(d["pri"]) == 1 else 3.6)) * k
+	var r := radius(kind, k)
+	var st := String(d["style"])
 	if selected:
-		ci.draw_circle(s, r + 7.0 * k, Color(1, 1, 1, 0.28))
-	match String(d["shape"]):
-		"square":
-			ci.draw_rect(Rect2(s - Vector2(r + 1.5, r + 1.5), Vector2(r + 1.5, r + 1.5) * 2.0), Color(0, 0, 0, 0.6))
-			ci.draw_rect(Rect2(s - Vector2(r, r), Vector2(r, r) * 2.0), col)
-		"diamond":
-			var q := PackedVector2Array([s + Vector2(0, -r - 2.5), s + Vector2(r + 2.5, 0), s + Vector2(0, r + 2.5), s + Vector2(-r - 2.5, 0)])
-			ci.draw_colored_polygon(q, Color(0, 0, 0, 0.6))
-			var q2 := PackedVector2Array([s + Vector2(0, -r - 0.5), s + Vector2(r + 0.5, 0), s + Vector2(0, r + 0.5), s + Vector2(-r - 0.5, 0)])
-			ci.draw_colored_polygon(q2, col)
-		"car":
-			ci.draw_rect(Rect2(s - Vector2(r + 2.0, r * 0.75 + 2.0), Vector2(r + 2.0, r * 0.75 + 2.0) * 2.0), Color(0, 0, 0, 0.7))
-			ci.draw_rect(Rect2(s - Vector2(r, r * 0.75), Vector2(r, r * 0.75) * 2.0), col)
-			ci.draw_rect(Rect2(s - Vector2(r * 0.55, r * 0.2), Vector2(r * 1.1, r * 0.4)), Color(0.12, 0.14, 0.18))
-		"dot":
-			ci.draw_circle(s, r + 1.2, Color(0, 0, 0, 0.45))
-			ci.draw_circle(s, r, Color(col, 0.85))
-		_:
-			ci.draw_circle(s, r + 1.8, Color(0, 0, 0, 0.6))
+		ci.draw_circle(s, r + 7.0, Color(1, 1, 1, 0.3))
+	ci.draw_circle(s + Vector2(0, 1.2), r + 1.6, Color(0, 0, 0, 0.45))   # (shadow)
+	var gc := Color.WHITE
+	match st:
+		"own":
+			ci.draw_circle(s, r + 1.4, Color.WHITE)
+			ci.draw_circle(s, r - 0.6, col)
+		"buy":
 			ci.draw_circle(s, r, col)
+			ci.draw_circle(s, r - 2.0, Color(0.07, 0.1, 0.13))
+			gc = col.lightened(0.15)
+		_:
+			ci.draw_circle(s, r, col)
+	if r < 5.5:
+		return
+	glyph(ci, s, r * 0.58, String(d["icon"]), gc)
+
+
+## A small white line icon centred at c, half-size h.
+static func glyph(ci: CanvasItem, c: Vector2, h: float, icon: String, gc: Color) -> void:
+	var w := maxf(1.2, h * 0.24)
+	match icon:
+		"shop":
+			# Awning over a shopfront.
+			ci.draw_rect(Rect2(c + Vector2(-h, -h * 0.75), Vector2(h * 2.0, h * 0.55)), gc)
+			for i in 3:
+				ci.draw_circle(c + Vector2(-h + h * (0.33 + i * 0.67), -h * 0.2), h * 0.33, gc)
+			ci.draw_rect(Rect2(c + Vector2(-h * 0.8, h * 0.05), Vector2(h * 1.6, h * 0.8)), gc, false, w)
+		"bag":
+			ci.draw_rect(Rect2(c + Vector2(-h * 0.8, -h * 0.35), Vector2(h * 1.6, h * 1.25)), gc)
+			ci.draw_arc(c + Vector2(0, -h * 0.35), h * 0.45, PI, TAU, 10, gc, w)
+		"cup":
+			ci.draw_rect(Rect2(c + Vector2(-h * 0.75, -h * 0.45), Vector2(h * 1.2, h * 1.15)), gc)
+			ci.draw_arc(c + Vector2(h * 0.48, h * 0.1), h * 0.32, -PI * 0.5, PI * 0.5, 8, gc, w)
+			ci.draw_line(c + Vector2(-h * 0.9, h * 0.85), c + Vector2(h * 0.6, h * 0.85), gc, w)
+		"box":
+			ci.draw_rect(Rect2(c + Vector2(-h * 0.85, -h * 0.75), Vector2(h * 1.7, h * 1.5)), gc)
+			ci.draw_line(c + Vector2(0, -h * 0.75), c + Vector2(0, -h * 0.1), Color(0, 0, 0, 0.45), w)
+			ci.draw_line(c + Vector2(-h * 0.85, -h * 0.1), c + Vector2(h * 0.85, -h * 0.1), Color(0, 0, 0, 0.45), w * 0.8)
+		"car":
+			ci.draw_rect(Rect2(c + Vector2(-h, -h * 0.05), Vector2(h * 2.0, h * 0.6)), gc)
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-h * 0.6, -h * 0.05), c + Vector2(-h * 0.35, -h * 0.6),
+				c + Vector2(h * 0.4, -h * 0.6), c + Vector2(h * 0.7, -h * 0.05)]), gc)
+			ci.draw_circle(c + Vector2(-h * 0.55, h * 0.6), h * 0.26, gc)
+			ci.draw_circle(c + Vector2(h * 0.55, h * 0.6), h * 0.26, gc)
+		"house":
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-h, -h * 0.05), c + Vector2(0, -h * 0.95), c + Vector2(h, -h * 0.05)]), gc)
+			ci.draw_rect(Rect2(c + Vector2(-h * 0.7, -h * 0.1), Vector2(h * 1.4, h * 0.95)), gc)
+		"tower":
+			ci.draw_rect(Rect2(c + Vector2(-h * 0.45, -h), Vector2(h * 0.9, h * 1.95)), gc)
+			ci.draw_rect(Rect2(c + Vector2(h * 0.45, -h * 0.2), Vector2(h * 0.45, h * 1.15)), gc)
+		"key":
+			ci.draw_arc(c + Vector2(-h * 0.45, 0), h * 0.42, 0, TAU, 12, gc, w)
+			ci.draw_line(c + Vector2(-h * 0.05, 0), c + Vector2(h * 0.95, 0), gc, w)
+			ci.draw_line(c + Vector2(h * 0.75, 0), c + Vector2(h * 0.75, h * 0.4), gc, w)
+			ci.draw_line(c + Vector2(h * 0.45, 0), c + Vector2(h * 0.45, h * 0.3), gc, w)
+		"tag":
+			var f := S.font("black")
+			var fs := int(h * 2.0)
+			var tw := f.get_string_size("£", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			ci.draw_string(f, c + Vector2(-tw * 0.5, fs * 0.36), "£", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gc)
+		"star":
+			var pts := PackedVector2Array()
+			for i in 10:
+				var a := -PI * 0.5 + i * PI / 5.0
+				pts.append(c + Vector2(cos(a), sin(a)) * (h * 1.05 if i % 2 == 0 else h * 0.45))
+			ci.draw_colored_polygon(pts, gc)
+		"plane":
+			ci.draw_line(c + Vector2(0, -h), c + Vector2(0, h * 0.9), gc, w * 1.4)
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-h, h * 0.1), c + Vector2(0, -h * 0.35), c + Vector2(h, h * 0.1),
+				c + Vector2(0, h * 0.05)]), gc)
+			ci.draw_line(c + Vector2(-h * 0.4, h * 0.8), c + Vector2(h * 0.4, h * 0.8), gc, w)
+		"anchor":
+			ci.draw_line(c + Vector2(0, -h * 0.75), c + Vector2(0, h * 0.85), gc, w)
+			ci.draw_line(c + Vector2(-h * 0.45, -h * 0.4), c + Vector2(h * 0.45, -h * 0.4), gc, w)
+			ci.draw_arc(c + Vector2(0, h * 0.2), h * 0.7, 0.2, PI - 0.2, 10, gc, w)
+			ci.draw_circle(c + Vector2(0, -h * 0.85), h * 0.2, gc)
+		_:
+			ci.draw_circle(c, h * 0.45, gc)
 
 
 ## The GPS route through screen points: a dark casing under a bright purple line.

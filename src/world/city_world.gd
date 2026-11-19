@@ -944,6 +944,7 @@ func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front
 		sm.shader = shader
 		sm.set_shader_parameter("tint", look[1])
 		sm.set_shader_parameter("use_instance_color", g == "paint")
+		sm.set_shader_parameter("finish", {"paint": 1, "paint2": 1, "glass": 2, "chrome": 3}.get(g, 0))
 		sm.set_shader_parameter("emission", look[2])
 		sm.set_shader_parameter("roughness", look[3])
 		out.surface_set_material(out.get_surface_count() - 1, sm)
@@ -970,6 +971,7 @@ func _legacy_car_mesh(name: String, shader: Shader) -> Mesh:
 		if src is BaseMaterial3D:
 			sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
 		sm.set_shader_parameter("use_instance_color", n == "paint")
+		sm.set_shader_parameter("finish", 1 if n == "paint" else (2 if n == "car_glass" else 0))
 		sm.set_shader_parameter("emission", 2.0 if n.begins_with("lamp") else 0.0)
 		sm.set_shader_parameter("roughness", 0.25 if n == "car_glass" else 0.45)
 		cm.surface_set_material(i, sm)
