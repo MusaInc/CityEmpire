@@ -23,7 +23,8 @@ os.makedirs(OUT, exist_ok=True)
 DIMS = json.load(open(os.path.join(SRC, "bodies.json")))
 DEFAULT_PAINT = {"kestrel": "c9c6bd", "marlin": "1d3a6b", "scout": "d8661a", "brute": "8a1410", "vanta": "16181c",
                  "halcyon": "e9e9ec", "stiletto": "d8b020", "goliath": "3a4a3a", "warden": "2b2f33",
-                 "civ_van": "e8e8e4", "civ_box": "f0f0ea"}
+                 "civ_van": "e8e8e4", "civ_box": "f0f0ea", "police_patrol": "10141f", "police_interceptor": "0b0c0e",
+                 "police_heavy": "15181d", "mammoth": "c8a020", "ws_box": "f0f0ea", "ws_van": "e8e8e4", "civ_bus": "b0201a"}
 
 
 def hexcol(h):
@@ -62,7 +63,7 @@ def reset():
     bpy.context.object.data.materials.append(fl)
 
 
-CLEAR = {"glass_clear": 0.35, "lens": 0.05, "lens_red": 0.75}
+CLEAR = {"glass_clear": 0.35, "lens": 0.05, "lens_red": 0.38}
 
 
 def paint(ob, col):
@@ -75,14 +76,35 @@ def paint(ob, col):
             if b:
                 b.inputs["Alpha"].default_value = CLEAR[n]
                 b.inputs["Roughness"].default_value = 0.02
+                if n == "lens_red":     # (as the game: deep red, the lamp inside shows)
+                    b.inputs["Base Color"].default_value = (0.42, 0.006, 0.006, 1)
+    for s in ob.material_slots:
+        # Tyres as the game draws them (glTF's default specular made them pale grey).
+        if s.material and s.material.name.split(".")[0] in ("tyre", "tyre_wall", "rubber"):
+            b = s.material.node_tree.nodes.get("Principled BSDF")
+            if b:
+                b.inputs["Base Color"].default_value = (0.012, 0.012, 0.013, 1)
+                b.inputs["Specular IOR Level"].default_value = 0.15
+                b.inputs["Roughness"].default_value = 0.85
     for s in ob.material_slots:
         if s.material and s.material.name.split(".")[0] in ("paint",):
             m = s.material.copy()
             b = m.node_tree.nodes.get("Principled BSDF")
             if b:
+                # Metallic base coat with flakes under a glassy clear coat
+                # (the game's car_paint: flop + flake sparkle + coat glint).
                 b.inputs["Base Color"].default_value = (*col, 1)
-                b.inputs["Roughness"].default_value = 0.22
-                b.inputs["Coat Weight"].default_value = 0.6
+                b.inputs["Metallic"].default_value = 0.62
+                b.inputs["Roughness"].default_value = 0.34
+                b.inputs["Coat Weight"].default_value = 1.0
+                b.inputs["Coat Roughness"].default_value = 0.02
+                nt = m.node_tree
+                vor = nt.nodes.new("ShaderNodeTexVoronoi")
+                vor.inputs["Scale"].default_value = 2600.0
+                bump = nt.nodes.new("ShaderNodeBump")
+                bump.inputs["Strength"].default_value = 0.08
+                nt.links.new(vor.outputs["Distance"], bump.inputs["Height"])
+                nt.links.new(bump.outputs["Normal"], b.inputs["Normal"])
             s.material = m
 
 
@@ -100,6 +122,9 @@ def load(name, col):
     for x in (1, -1):
         for ay in d["axles"]:
             bpy.ops.import_scene.gltf(filepath=os.path.join(SRC, wheel + ".glb"))
+            for o in bpy.context.selected_objects:
+                if o.type == "MESH":
+                    paint(o, col)
             w = [o for o in bpy.context.selected_objects if o.parent is None][0]
             w.rotation_mode = "XYZ"
             w.scale = (d["tyre_w"] / 0.44, d["wheel_r"], d["wheel_r"])
@@ -138,7 +163,10 @@ for n in NAMES:
         "side_l": ((-r * 1.75, 0, 0.95), (0, 0, H * 0.45), 50),
         "tail": ((-L * 0.42, -L * 0.62 - 1.4, 1.05), (0, -L * 0.38, H * 0.45), 50),
     }
+    only = [v for v in os.environ.get("VIEWS", "").split(",") if v]
     for vn, (loc, tgt, lens) in views.items():
+        if only and vn not in only:
+            continue
         cam(loc, tgt, lens)
         bpy.context.scene.render.filepath = os.path.join(OUT, "%s_%s.png" % (n, vn))
         bpy.ops.render.render(write_still=True)

@@ -113,11 +113,18 @@ BOTTOM = [(YR, 0.33), (YR + 0.3, 0.2), (AX[1] - 0.45, RIDE + 0.015), (AX[0] + 0.
           (YF, 0.26)]
 
 
+FENDER = (0.0, 0.0)       # fender rise above the deck over the front / rear axle (m)
+FENDER_W = 0.6
+HAUNCH = (0.018, 0.018)   # plan bulge over the front / rear axle (m)
+HAUNCH_W = 0.55           # its length scale (m)
+
+
 def half_width(y):
-    """Plan: haunches over both axles, a slight waist at the doors."""
-    hw = W2 - 0.018
-    for ay in AX:
-        hw += 0.018 * math.exp(-((y - ay) / 0.55) ** 2)
+    """Plan: haunches over both axles, a slight waist at the doors
+    (supercars: big rear hips via HAUNCH)."""
+    hw = W2 - max(HAUNCH)
+    for ay, a in zip(AX, HAUNCH):
+        hw += a * math.exp(-((y - ay) / HAUNCH_W) ** 2)
     return hw
 
 
@@ -146,14 +153,19 @@ def superellipse_scale(d, R, p=3.2):
     return 0.46 + 0.54 * (1.0 - t ** p) ** (1.0 / p)
 
 
+RAKE_ZF, RAKE_KF = 0.62, 0.55   # nose leans back above this height, this much
+RAKE_ZR, RAKE_KR = 0.6, 0.12     # tail leans forward above this height
+RAKE_CHIN = 0.34                 # chin / valance tuck below this height
+
+
 def rake(y, z):
     """Side-view rake of the ends (y shift of a point): the nose leans back
     above the lamps and tucks in at the chin; the tailgate leans forward above
     the bumper, the bumper is the rearmost part, the valance tucks under."""
     wf = sstep(YF - 0.45, YF, y)
     wr = sstep(YR + 0.45, YR, y)
-    sf = -max(0.0, z - 0.62) * 0.55 - max(0.0, 0.34 - z) * 0.35
-    sr = min(max(0.0, z - 0.6), 0.45) * 0.12 + max(0.0, 0.36 - z) * 0.3
+    sf = -max(0.0, z - RAKE_ZF) * RAKE_KF - max(0.0, RAKE_CHIN - z) * 0.35
+    sr = min(max(0.0, z - RAKE_ZR), 0.45) * RAKE_KR + max(0.0, RAKE_CHIN + 0.02 - z) * 0.3
     return wf * sf + wr * sr
 
 
@@ -164,11 +176,19 @@ def ring(y):
     h = cabin_h(y)
     f = sstep(0.0, 0.1, h)               # 0 on the bonnet/tailgate .. 1 under the roof
     crown = 0.04 * (1 - f) + 0.012 * f
-    zc = min(smooth(CREASE, y), deck - 0.05)
+    # Fenders standing above the bonnet / engine cover over the axles.
+    fl = sum(a * math.exp(-((y - ay) / FENDER_W) ** 2) for ay, a in zip(AX, FENDER))
+    zc = min(smooth(CREASE, y), deck - 0.05) + fl * 0.9
     zs = min(smooth(SWELL, y), zc - 0.12)
     zl = min(smooth(SCULPT, y), zs - 0.1)
     zb = smooth(BOTTOM, y)
     zr = max(SILL_Z, zb + 0.06) if abs(y) < WB / 2 - 0.3 else max(zb + 0.08, zl - 0.12)
+    # Low noses (supercars) squeeze the side stack: keep bottom < rocker <
+    # sculpt < swell < crease, or the section crosses itself and the nose
+    # folds into an X of creases. Out of order -> spread evenly instead.
+    if not (zb + 0.01 < zr < zl - 0.01 and zl < zs - 0.01 and zs < zc - 0.01):
+        span = max(zc - zb, 0.08)
+        zr, zl, zs = zb + span * 0.22, zb + span * 0.46, zb + span * 0.72
     belt_x = hw - 0.055                          # shoulder ledge 3-4 cm, not a shelf
     # Greenhouse with tumblehome; on the bonnet the same points spread out.
     roof_x = belt_x - 0.09 - TUMBLE * sstep(0.0, 0.42, h)
@@ -178,9 +198,9 @@ def ring(y):
     pts = [
         V((0.0, zt)),
         V((xe * 0.5, zt - crown * 0.25)),
-        V((xe, zt - crown * (0.75 * (1 - f) + 1.6 * f))),
-        V((xg, deck + h * 0.48 - crown * (1 - f) * 1.1)),
-        V((belt_x, deck - 0.01 * (1 - f))),
+        V((xe, zt - crown * (0.75 * (1 - f) + 1.6 * f) + fl * 0.15 * (1 - f))),
+        V((xg, deck + h * 0.48 - crown * (1 - f) * 1.1 + fl * 0.55 * (1 - f))),
+        V((belt_x, deck - 0.01 * (1 - f) + fl)),
         V((hw - 0.012, zc)),                     # shoulder crease
         V((hw, zs)),                             # door swell
         V((hw - 0.016, zl)),                     # lower-door sculpt
@@ -277,6 +297,11 @@ def decimated(ob, ratio):
     return lo
 
 
+CAV_Z0, CAV_ZM = 0.4, 0.74     # cavity floor / top of its narrow lower part (between the wheel houses)
+CAV_Y0 = None                  # cavity from (default YR + 0.17) ..
+CAV_Y1 = None                  # .. to (default Y_COWL - 0.1)
+
+
 def cavity_solid():
     """The cabin and boot as an empty volume inside the shell (cut out of it):
     a trapezoid section per station, narrow below the wheel houses, inset
@@ -284,7 +309,9 @@ def cavity_solid():
     bulkhead behind the dashboard."""
     bm = bmesh.new()
     rings = []
-    ys = [YR + 0.17 + (Y_COWL - 0.1 - (YR + 0.17)) * i / 30 for i in range(31)]
+    c0 = YR + 0.17 if CAV_Y0 is None else CAV_Y0
+    c1 = Y_COWL - 0.1 if CAV_Y1 is None else CAV_Y1
+    ys = [c0 + (c1 - c0) * i / 30 for i in range(31)]
     for y in ys:
         dd = min(y - YR, YF - y)
         # Follow the shell's rounded, raked ends (it poked out of the rear
@@ -293,11 +320,11 @@ def cavity_solid():
         r = ring(y)
         h = cabin_h(y)
         ztop = max(smooth(DECK, y) + h - 0.06, smooth(DECK, y) - 0.04)
-        z0 = 0.4
-        x_low = 0.5
+        z0 = CAV_Z0
+        x_low = min(0.5, W2 - 0.39)
         x_mid = r[6].x - 0.07
         x_top = max(r[2].x - 0.05, 0.2) if h > 0.1 else r[4].x - 0.08
-        zm = 0.74
+        zm = CAV_ZM
         ztop = max(ztop, zm + 0.08)
         half = [(0.0, z0), (x_low, z0), (x_low, zm - 0.02), (x_mid, zm), (x_mid, smooth(DECK, y) - 0.03), (x_top, ztop), (0.0, ztop)]
         full = half + [(-x, z) for x, z in reversed(half[1:-1])]
@@ -772,10 +799,10 @@ def tail_lamp(surf, body, m, out, poly):
         out.append(mirror_copy(o))
 
 
-def opening(surf, body, m, out, poly, depth, insert, frame="trim", res=(20, 6)):
+def opening(surf, body, m, out, poly, depth, insert, frame="trim", res=(20, 6), view="front"):
     """An opening in the bumper (grille / intake) with its insert behind and
     a surround standing proud; the left/right symmetric ones are whole."""
-    g = patch(surf, "front", poly_fn(poly), *res)
+    g = patch(surf, view, poly_fn(poly), *res)
     cut(body, recess_cutter("opening", g, depth), m["liner"])
     if frame:
         ring_pts = [c for c in g[0]] + [g[j][-1] for j in range(len(g))] + list(reversed(g[-1])) + \
@@ -810,7 +837,7 @@ def opening(surf, body, m, out, poly, depth, insert, frame="trim", res=(20, 6)):
                     xa = bl.x + (tl.x - bl.x) * t + 0.01
                     xb = br.x + (tr.x - br.x) * t - 0.01
                     if xa <= x <= xb:
-                        h = surf.cast(*ray("front", x, z))
+                        h = surf.cast(*ray(view, x, z))
                         if h:
                             pts.append(h[0] - navg * depth * 0.55)
                 if len(pts) >= 2:
@@ -821,20 +848,46 @@ def opening(surf, body, m, out, poly, depth, insert, frame="trim", res=(20, 6)):
 
 
 # ------------------------------------------------------------------ cabin bits
-def mirrors(m, out):
-    y = Y_COWL - 0.16
+MIRROR_REACH = 0.125     # how far the housing's tip stands out past the body side (m)
+
+
+def mirrors(m, out, surf=None):
+    """Door mirrors fixed to the door shoulder just behind the A-pillar: a
+    base plate sunk into the door top, a short stalk, and a housing whose
+    outer tip stands MIRROR_REACH past the widest point of the body (real
+    cars: ~10-13 cm). `surf` (the uncut shell) finds the door; without it the
+    ring's belt point is used."""
+    y = Y_COWL - 0.17
     r = ring(y)
+    z_door = smooth(DECK, y) - 0.035
+    root, nrm = V((r[4].x, y + rake(y, r[4].y), r[4].y)), V((1, 0, 0))
+    if surf is not None:
+        h = surf.cast(V((3.0, y, z_door)), V((-1, 0, 0)))
+        if h:
+            root, nrm = V(h[0]), V(h[1])
+    w_body = max(half_width(yy) for yy in (y - 0.3, y, y + 0.3, AX[0]))
     for sx in (1, -1):
-        root = V((sx * (r[4].x + 0.005), y + rake(y, r[4].y), r[4].y + 0.04))
-        out.append(box("mirror_base", (0.05, 0.13, 0.06), root, m["trim"], bevel=0.018))
-        tip = root + V((sx * 0.11, -0.04, 0.06))
-        out.append(tube_path("mirror_arm", [root + V((sx * 0.015, -0.01, 0.0)), tip], 0.017, m["trim"], 8))
+        p = V((sx * root.x, root.y, root.z))
+        n = V((sx * nrm.x, nrm.y, nrm.z))
+        # Base plate: sunk 6 mm into the door so it is never floating.
+        base = box("mirror_base", (0.035, 0.12, 0.05), (0, 0, 0), m["trim"], bevel=0.012)
+        base.rotation_mode = "QUATERNION"
+        base.rotation_quaternion = n.to_track_quat("X", "Z")
+        base.location = p - n * 0.006 + V((0, 0, 0.012))
+        out.append(base)
+        # Housing: inner edge just off the base, outer tip at the reach.
+        tip_x = w_body + MIRROR_REACH
+        inner_x = abs(p.x) + 0.03
+        hw = max(0.06, (tip_x - inner_x) / 2)          # half width of the housing
+        cx = sx * (inner_x + hw)
+        c = V((cx, p.y - 0.03, p.z + 0.075))
+        out.append(tube_path("mirror_arm", [p + V((sx * 0.01, -0.01, 0.02)), V((sx * (inner_x + 0.02), p.y - 0.025, p.z + 0.06))],
+                             0.014, m["trim"], 8))
         bm = bmesh.new()
-        prof = [(0.08, 0.2), (0.07, 0.55), (0.05, 0.82), (0.02, 0.97), (-0.012, 1.0), (-0.03, 0.97)]
+        prof = [(0.06, 0.25), (0.05, 0.6), (0.032, 0.85), (0.012, 0.98), (-0.008, 1.0), (-0.022, 0.96)]
         rings = []
         for yy, sc in prof:
-            rings.append([bm.verts.new(tip + V((sx * (0.105 + math.cos(a) * 0.112 * sc), yy,
-                                                   math.sin(a) * 0.068 * sc + 0.012 + 0.012 * math.cos(a))))
+            rings.append([bm.verts.new(c + V((math.cos(a) * hw * sc, yy, math.sin(a) * 0.06 * sc + 0.006 * math.cos(a))))
                           for a in (i * 2 * math.pi / 18 for i in range(18))])
         for r0, r1 in zip(rings, rings[1:]):
             for i in range(18):
@@ -843,11 +896,11 @@ def mirrors(m, out):
         bm.faces.new(list(reversed(rings[-1])))
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
         hous = kit.new_obj("mirror", bm, m["paint"])
-        for p in hous.data.polygons:
-            p.use_smooth = True
+        for f in hous.data.polygons:
+            f.use_smooth = True
         out.append(hous)
-        out.append(box("mirror_glass", (0.2, 0.004, 0.115), tip + V((sx * 0.105, -0.031, 0.013)), m["reflector"]))
-        out.append(box("mirror_ind", (0.08, 0.035, 0.008), tip + V((sx * 0.17, 0.03, -0.048)), m["amber"], bevel=0.003))
+        out.append(box("mirror_glass", (hw * 1.75, 0.004, 0.1), c + V((0, -0.023, 0.002)), m["reflector"]))
+        out.append(box("mirror_ind", (hw * 0.7, 0.03, 0.007), c + V((sx * hw * 0.45, 0.02, -0.052)), m["amber"], bevel=0.003))
 
 
 def door_handles(surf, m, out):
@@ -942,7 +995,7 @@ def interior(m, out):
     out.append(tube_path("column", [c + V((0, 0.03, -0.02)), V((0.38, 0.62, 0.84))], 0.035, P, 10))
 
 
-def number_plate(out, m, at, normal, rear):
+def number_plate(out, m, at, normal, rear, text="KE57 RLY"):
     """A UK plate: white at the front, yellow at the back, 520 x 111 mm,
     black characters (a real text mesh), facing along `normal`."""
     pm = m["plate"] if not rear else kit.mat("plate_rear", (0.95, 0.78, 0.1), 0.5)
@@ -954,7 +1007,7 @@ def number_plate(out, m, at, normal, rear):
     out.append(pl)
     bpy.ops.object.text_add()
     t = bpy.context.object
-    t.data.body = "KE57 RLY"
+    t.data.body = text
     t.data.align_x = "CENTER"
     t.data.align_y = "CENTER"
     t.data.size = 0.085
@@ -1085,6 +1138,50 @@ def wheel_kestrel():
     ob = kit.join("wheel", parts)
     kit.export("wheel_kestrel.glb", [ob])
     print("WHEEL tris", sum(len(p.vertices) - 2 for p in ob.data.polygons))
+
+
+def glaze(body, clean, m, out, outline, axis, d0, d1, inset=0.008, seal="rubber", cut_body=True, glass=None):
+    """A window: the glass is the uncut shell inside the outline (outer skin,
+    set `inset` in), then the opening is cut through the body (its edges
+    get the `seal` material)."""
+    cutter = prism("glass_cut", outline, axis, d0, d1)
+    piece = prism("glass_piece", outline, axis, d0, d1)
+    gp = clean.copy()
+    gp.data = clean.data.copy()
+    bpy.context.scene.collection.objects.link(gp)
+    gp.hide_render = False
+    cut(gp, piece, None, "INTERSECT")
+    gp.data.materials.clear()
+    gp.data.materials.append(m["glass_clear"])
+    for p in gp.data.polygons:
+        p.material_index = 0
+        p.use_smooth = True
+    bm = bmesh.new()
+    bm.from_mesh(gp.data)
+    # keep only the outer skin (faces pointing out of the car)
+    for f in list(bm.faces):
+        nrm = f.normal
+        cen = f.calc_center_median()
+        if (axis == "x" and nrm.x * cen.x <= 0.05) or (axis == "z" and nrm.z <= 0.1) or (axis == "y" and nrm.y >= -0.1):
+            bm.faces.remove(f)
+    for v in bm.verts:
+        if v.link_faces:
+            nn = sum((f.normal for f in v.link_faces), V()).normalized()
+            v.co -= nn * inset
+    for v in [v for v in bm.verts if not v.link_faces]:
+        bm.verts.remove(v)
+    bm.to_mesh(gp.data)
+    bm.free()
+    dec = gp.modifiers.new("dec", "DECIMATE")
+    dec.ratio = 0.3
+    bpy.context.view_layer.objects.active = gp
+    bpy.ops.object.modifier_apply(modifier=dec.name)
+    out.append(gp)
+    if cut_body:
+        cut(body, cutter, m[seal])
+    else:
+        bpy.data.objects.remove(cutter, do_unlink=True)
+
 
 
 # ------------------------------------------------------------------ build
@@ -1224,7 +1321,10 @@ def build():
 
     # Rear: tail lamps across the D-pillar corner, plate recess, handle strip,
     # badge, reflectors, valance with diffuser, rear fog.
-    tail_lamp(surf, body, m, out, [(0.6, 0.82), (0.86, 0.84), (0.83, 1.02), (0.62, 1.0)])
+    # The layered WorldState tail lamp (tools/blender/ws_rear.py), as on every car.
+    import ws_rear as R
+    R.extra_mats(m)
+    R.cluster(body, m, out, [(0.6, 0.82), (0.88, 0.84), (0.85, 1.02), (0.62, 1.0)], sig="C")
     surf = Surface([body])
     g = patch(surf, "rear", poly_fn([(-0.28, 0.63), (0.28, 0.63), (0.28, 0.76), (-0.28, 0.76)]), 10, 4)
     cut(body, recess_cutter("plate_pocket", g, 0.03), m["plastic"])
@@ -1249,52 +1349,16 @@ def build():
 
     # Glazing: windscreen, side windows (with B/C pillars and the quarter
     # light behind the D... estate C-pillar), tailgate glass.
-    def glaze(outline, axis, d0, d1, inset=0.008):
-        cutter = prism("glass_cut", outline, axis, d0, d1)
-        piece = prism("glass_piece", outline, axis, d0, d1)
-        gp = clean.copy()
-        gp.data = clean.data.copy()
-        bpy.context.scene.collection.objects.link(gp)
-        gp.hide_render = False
-        cut(gp, piece, None, "INTERSECT")
-        gp.data.materials.clear()
-        gp.data.materials.append(m["glass_clear"])
-        for p in gp.data.polygons:
-            p.material_index = 0
-            p.use_smooth = True
-        bm = bmesh.new()
-        bm.from_mesh(gp.data)
-        # keep only the outer skin (faces pointing out of the car)
-        for f in list(bm.faces):
-            nrm = f.normal
-            cen = f.calc_center_median()
-            if (axis == "x" and nrm.x * cen.x <= 0.05) or (axis == "z" and nrm.z <= 0.1) or (axis == "y" and nrm.y >= -0.1):
-                bm.faces.remove(f)
-        for v in bm.verts:
-            if v.link_faces:
-                nn = sum((f.normal for f in v.link_faces), V()).normalized()
-                v.co -= nn * inset
-        for v in [v for v in bm.verts if not v.link_faces]:
-            bm.verts.remove(v)
-        bm.to_mesh(gp.data)
-        bm.free()
-        dec = gp.modifiers.new("dec", "DECIMATE")
-        dec.ratio = 0.3
-        bpy.context.view_layer.objects.active = gp
-        bpy.ops.object.modifier_apply(modifier=dec.name)
-        out.append(gp)
-        cut(body, cutter, m["rubber"])
-
     def zbelt(y):
         return smooth(DECK, y) + 0.004
 
     dlo = [(Y_COWL - 0.1, zbelt(Y_COWL - 0.1) + 0.01), (Y_WS + 0.02, ROOF - 0.09), (Y_RE + 0.14, ROOF - 0.11),
            (Y_TG + 0.17, zbelt(Y_TG + 0.17) + 0.14), (Y_TG + 0.17, zbelt(Y_TG + 0.17) + 0.01)]
     for sx in (1, -1):
-        glaze(dlo, "x", 0.3 * sx if sx > 0 else -2.0, 2.0 if sx > 0 else -0.3)
+        glaze(body, clean, m, out, dlo, "x", 0.3 * sx if sx > 0 else -2.0, 2.0 if sx > 0 else -0.3)
     yb, yt = Y_COWL - 0.05, Y_WS + 0.04
     wb_, wt_ = ring(yb)[2].x + 0.08, ring(yt)[2].x - 0.03
-    glaze([(-wb_, yb), (wb_, yb), (wt_, yt), (-wt_, yt)], "z", 0.7, ROOF + 0.3)
+    glaze(body, clean, m, out, [(-wb_, yb), (wb_, yb), (wt_, yt), (-wt_, yt)], "z", 0.7, ROOF + 0.3)
     # Tailgate glass: flush on the tailgate (as real estates), a black ceramic
     # frit border behind it - no boolean into the thin tailgate.
     rs = Surface([clean])
@@ -1345,7 +1409,7 @@ def build():
         g = patch(surf, "side", poly_fn([(AX[1] + ARCH + 0.04, RIDE + 0.07), (AX[0] - ARCH - 0.04, RIDE + 0.07),
                                          (AX[0] - ARCH - 0.04, SILL_Z - 0.04), (AX[1] + ARCH + 0.04, SILL_Z - 0.04)]), 22, 3, sx)
         out.append(sheet("sill", g, 0.001, m["plastic"], thick=0.01))
-    mirrors(m, out)
+    mirrors(m, out, Surface([clean]))
     door_handles(surf, m, out)
     roof_rails(m, out)
     interior(m, out)
