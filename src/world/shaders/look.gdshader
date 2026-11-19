@@ -3,6 +3,8 @@
 //   style 1 Comic   – ink outlines, 3-tone cel shading, halftone in shadows
 //   style 2 Toon    – softer lines, posterised colour, bright and saturated
 //   style 3 Painted – Kuwahara brush smoothing + light outlines
+//   style 4 Crisp   – light edge-preserving smoothing (blended, small radius),
+//                     thin shaded depth outlines, mild grade: cleaner, not cartoon
 // Outlines come from relative depth jumps (silhouettes at any distance) plus
 // colour edges (window grids, kerbs); both fade into the fog.
 shader_type spatial;
@@ -33,6 +35,9 @@ uniform float haze_amount = 0.4;
 uniform float vignette = 0.28;
 uniform float speed = 0.0;            // 0..1, drives the speed lines
 uniform float speed_lines = 1.0;
+uniform float smooth_amount = 1.0;   // Crisp: blend of the smoothed image over the original
+uniform float ink_amount = 1.0;      // outline opacity scale
+uniform float ink_shade = 0.0;       // 0 = flat ink colour, 1 = darkened scene colour
 
 void vertex() {
 	POSITION = vec4(VERTEX.xy, 1.0, 1.0);
@@ -96,6 +101,35 @@ vec3 kuwahara(sampler2D stex, vec2 uv, vec2 px) {
 	return best;
 }
 
+// Small Kuwahara (radius 2, 36 taps): irons out texture noise and shimmer
+// while keeping edges sharp. Cheap enough for phones at the 3D render scale.
+vec3 kuwahara_small(sampler2D stex, vec2 uv, vec2 px) {
+	vec3 m[4];
+	vec3 s[4];
+	for (int k = 0; k < 4; k++) { m[k] = vec3(0.0); s[k] = vec3(0.0); }
+	for (int j = -2; j <= 0; j++) {
+		for (int i = -2; i <= 0; i++) {
+			vec3 a = texture(stex, uv + vec2(float(i), float(j)) * px).rgb;
+			vec3 b = texture(stex, uv + vec2(float(-i), float(j)) * px).rgb;
+			vec3 c = texture(stex, uv + vec2(float(i), float(-j)) * px).rgb;
+			vec3 d = texture(stex, uv + vec2(float(-i), float(-j)) * px).rgb;
+			m[0] += a; s[0] += a * a;
+			m[1] += b; s[1] += b * b;
+			m[2] += c; s[2] += c * c;
+			m[3] += d; s[3] += d * d;
+		}
+	}
+	vec3 best = m[0] / 9.0;
+	float best_v = 1e9;
+	for (int k = 0; k < 4; k++) {
+		vec3 mu = m[k] / 9.0;
+		vec3 var = abs(s[k] / 9.0 - mu * mu);
+		float v = var.r + var.g + var.b;
+		if (v < best_v) { best_v = v; best = mu; }
+	}
+	return best;
+}
+
 void fragment() {
 	vec2 uv = SCREEN_UV;
 	vec2 res = VIEWPORT_SIZE;
@@ -103,6 +137,8 @@ void fragment() {
 	vec3 col = texture(screen_tex, uv).rgb;
 	if (style == 3) {
 		col = kuwahara(screen_tex, uv, px * max(res.y / 720.0, 1.0));
+	} else if (style == 4 && smooth_amount > 0.0) {
+		col = mix(col, kuwahara_small(screen_tex, uv, px), smooth_amount);
 	}
 
 	// ---- outlines
@@ -128,7 +164,7 @@ void fragment() {
 	float e_col = smoothstep(color_edge, color_edge * 1.8, g / max(sqrt(luma(col)) + 0.25, 0.25));
 
 	float fade = 1.0 - smoothstep(line_far * 0.35, line_far, near_d);
-	float colour_lines = style == 2 ? 0.45 : (style == 3 ? 0.3 : 0.75);
+	float colour_lines = style == 2 ? 0.45 : (style == 3 ? 0.3 : (style == 4 ? 0.2 : 0.75));
 	float edge = clamp(max(e_depth, e_col * colour_lines * (1.0 - smoothstep(30.0, line_far * 0.6, near_d))), 0.0, 1.0) * fade;
 
 	// ---- tone (the screen buffer is linear HDR before tonemapping: stylise in
@@ -151,7 +187,7 @@ void fragment() {
 		float dots = 1.0 - smoothstep(dot_r - 0.08, dot_r + 0.08, length(cell));
 		c = mix(c, c * 0.55 + ink * 0.2, dots * halftone * dark);
 	}
-	c = mix(c, ink, edge * (style == 2 ? 0.8 : 0.92));
+	c = mix(c, mix(ink, c * 0.3, ink_shade), edge * (style == 2 ? 0.8 : 0.92) * ink_amount);
 	// Layered distance haze toward a warm pastel (background reads as painted
 	// cards, the foreground pops). The sky itself is left alone.
 	float far_t = smoothstep(haze_near, haze_far, dc) * step(dc, 4000.0);
