@@ -490,7 +490,8 @@ for n in ['african','asian','caucasian']:
 FACES=[
     ('kai',{'african':0,'asian':0,'caucasian':0},{'cheek_l-cheek-bones-incr':.5,'cheek_r-cheek-bones-incr':.5,'chin_chin-prominent-incr':.35,'nose_nose-point-width-decr':.3,'eyebrows_eyebrows-angle-up':.3,'head_head-square':.25},'buzz'),
     ('ade',{'african':.6,'asian':-.3,'caucasian':-.3},{'head_head-square':.45,'chin_chin-width-incr':.35,'chin_chin-prominent-incr':.3,'mouth_mouth-lowerlip-volume-incr':.2,'nose_nose-nostrils-width-incr':.3,'forehead_forehead-scale-vert-decr':.3,
-        'cheek_l-cheek-bones-incr':.4,'cheek_r-cheek-bones-incr':.4,'eyebrows_eyebrows-angle-down':.25,'head_head-fat-decr':.3},'crop'),
+        'cheek_l-cheek-bones-incr':.4,'cheek_r-cheek-bones-incr':.4,'eyebrows_eyebrows-angle-down':.25,'head_head-fat-decr':.3,
+        'nose_nose-scale-depth-incr':.3,'mouth_mouth-upperlip-volume-incr':.15,'head_head-age-decr':.2},'crop'),
     ('ren',{'african':-.3,'asian':.6,'caucasian':-.3},{'head_head-round':.35,'cheek_l-cheek-inner-incr':.4,'cheek_r-cheek-inner-incr':.4,'nose_nose-scale-vert-decr':.3,'eyebrows_eyebrows-trans-down':.3,'chin_chin-height-decr':.25},'crop'),
     ('theo',{'african':-.3,'asian':-.3,'caucasian':.6},{'head_head-oval':.45,'nose_nose-hump-incr':.45,'nose_nose-scale-vert-incr':.3,'chin_chin-height-incr':.35,'chin_chin-prominent-incr':.3,'mouth_mouth-scale-horiz-decr':.2},'buzz'),
     ('malik',{'african':.25,'asian':-.15,'caucasian':-.1},{'head_head-diamond':.45,'cheek_l-cheek-bones-incr':.6,'cheek_r-cheek-bones-incr':.6,'nose_nose-curve-convex':.35,'forehead_forehead-temple-incr':.4,'mouth_mouth-upperlip-volume-incr':.3},'crop'),
@@ -498,7 +499,7 @@ FACES=[
 # Expression: each face carries a resting expression of its own, so the
 # character isn't a neutral mask: an asymmetric relaxed smile (mouth corners
 # up and back, cheeks lifted a touch), one brow a little raised. (MH units, dm.)
-EXPRESSION={'kai':(.45,.3,('r',.25)),'ade':(.55,.18,('l',.35)),'ren':(.35,.3,('r',.15)),'theo':(.18,.42,('l',.3)),'malik':(.38,.22,('r',.3))}
+EXPRESSION={'kai':(.45,.3,('r',.25)),'ade':(.3,.1,('l',.15)),'ren':(.35,.3,('r',.15)),'theo':(.18,.42,('l',.3)),'malik':(.38,.22,('r',.3))}
 def express(b,fid):
     tongue=np.array(sorted({j for i in GROUP_FACES['helper-tongue'] for j in bf[i]}))
     m=b[tongue].mean(0)
@@ -559,9 +560,9 @@ face_faces=head_faces+[i for i in body if i not in _hfs and all(RB[j].z>1.46 and
 face_meshes={}
 lipmat=material('hero_lips',(.46,.29,.23),.42)
 hairmat=material('hero_hair',(.05,.04,.035),.75)
-browmat=material('hero_brow',(.05,.04,.035),.8)
+browmat=material('hero_brow',(.1,.075,.06),.7)   # (near-black read as painted bars)
 lashmat=material('hero_lash',(.06,.045,.035),.8)
-sclmat=material('hero_sclera',(.86,.84,.8),.2)
+sclmat=material('hero_sclera',(.78,.75,.7),.25)
 irismat=material('hero_iris',(.25,.15,.08),.2)
 pupmat=material('hero_pupil',(.01,.01,.01),.1)
 HAIR_STYLES=['buzz','crop','fade','curls','pixie','bob','ponytail','bun']
@@ -606,10 +607,12 @@ def make_hair(fid,style,pos,ecz,ecy):
             # (crop/fade: a softly uneven front line - small peaks and dips, not a ruler edge)
             if style in ('crop','fade'):hl+=.0009*math.sin(q.x*150+1.9)+.0004*math.sin(q.x*330+.4)
         top=q.z-(ecz+hl)
-        k=.005   # rounding of the hairline's corners (temples, sideburns, nape)
+        k=.005 if style not in ('crop','fade') else .011   # rounding of the hairline's corners (temples, sideburns, nape)
         smin=lambda *a:-k*math.log(sum(math.exp(-x/k) for x in a))
         smax=lambda *a:k*math.log(sum(math.exp(x/k) for x in a))
-        back=smin(ecy-.085-q.y,q.z-(ecz-(.115 if long_ else .07)))
+        # (crop/fade: the back stops above the nape - the skin's stubble
+        # shading carries the fade below it; down to the nape it read as a cap)
+        back=smin(ecy-.085-q.y,q.z-(ecz-(.115 if long_ else (.035 if style in ('crop','fade') else .07))))
         if long_:
             temple=smin(abs(q.x)-.055,ecy-.035-q.y,q.z-(ecz-.09))
         else:
@@ -771,7 +774,13 @@ for fid,eth,tg,style in FACES:
     col=np.stack([mott,mott*.985+.01,mott*.975+.015],1)
     lm=np.clip(1-((X/.0265)**2+((Z-mc.z+.001)/.0105)**2),0,1)
     lm=np.clip(lm*2.6,0,1)**1.4*np.clip((Y-(mc.y+.006))/.006,0,1)
-    col=col*(1-lm[:,None])+col*np.array([.82,.63,.61])*lm[:,None]
+    col=col*(1-lm[:,None])+col*np.array([.9,.74,.72])*lm[:,None]
+    # the lips' parting: a thin soft dark line, not a dark mouth
+    pl=np.clip(1-np.abs(Z-(mc.z-.0007))/.0011,0,1)*np.clip(1-(X/.024)**2,0,1)*np.clip((Y-(mc.y+.006))/.004,0,1)
+    col*=(1-.38*pl)[:,None]
+    # a soft highlight along the upper lip's top (volume, a Cupid's bow)
+    hl_=np.clip(1-((X/.017)**2+((Z-(mc.z+.0055))/.0024)**2),0,1)*np.clip((Y-(mc.y+.008))/.004,0,1)
+    col*=(1+.07*hl_)[:,None]
     m_=np.maximum.reduce([Z-(_ez+.052),np.minimum(_ey-.085-Y,Z-(_ez-.07)),np.minimum.reduce([np.abs(X)-.055,_ey-.03-Y,Z-(_ez+.012)])])
     k_=np.clip((m_+.005)/.009,0,1)
     col*=(1-.45*k_)[:,None]
@@ -789,7 +798,10 @@ for fid,eth,tg,style in FACES:
         for (px,pz),w in zip(pts,ws):
             dd=np.hypot(X-px,Z-pz);m=dd<d;d[m]=dd[m];wn[m]=w
         bm_=np.clip(1-d/(wn*.62+.0008),0,1)**.7*(Y>_ec.y-.01)
-        col*=(1-.42*bm_)[:,None]
+        col*=(1-.2*bm_)[:,None]   # (.42 read as painted brows under the hairs)
+        # upper-lid crease: a faint shadow arc above the eye
+        cr_=np.clip(1-(((X-_ec.x)/.015)**2+((Z-(_ec.z+.0075))/.0028)**2),0,1)*(Y>_ec.y-.006)
+        col*=(1-.12*cr_)[:,None]
         sx_=-1 if _ec.x<0 else 1
         ck=np.clip(1-(((X-sx_*(_ex+.012))/.03)**2+((Z-(_ez-.03))/.022)**2),0,1)*np.clip((Y-_ey)/.02+.5,0,1)
         col*=(1+np.array([.035,-.01,-.015])*ck[:,None])
@@ -835,7 +847,7 @@ for fid,eth,tg,style in FACES:
             return (hit[0]+hit[1]*lift) if hit[0] is not None else Vector((x,ec.y+.012,z))
         brow_info[sx]=(brow_line,width)
         vs=[];fs=[]
-        for k in range(96):
+        for k in range(150):
             u=float(brng.random())**1.15
             v=float(brng.random())-.5
             bx,bz=brow_line(u);w=width(u)
@@ -843,7 +855,7 @@ for fid,eth,tg,style in FACES:
             ln=.0045+.0028*min(1.0,u/.4)
             d2=(sx*math.cos(ang),math.sin(ang))
             sx0,sz0=bx-d2[0]*ln*.45,bz+v*w-d2[1]*ln*.45
-            sw=.00145*(1-.35*u)
+            sw=.00105*(1-.35*u)
             b0=len(vs)
             for t_ in range(4):
                 tt=t_/3
