@@ -18,6 +18,9 @@ case "${1:-status}" in
       echo "another City Empire godot is running - not starting a second"; exit 1; fi
     systemctl --user start citydev && wait_up 240 && echo "up: $B (state: $(curl -s $B/state))" ;;
   down) systemctl --user stop citydev ;;
+  geo|full)   # geometry inspector (default) / full production materials (slow first frames)
+    if [ "$1" = full ]; then echo "CITYDEV_MODE=" > ~/.config/citydev.env; else rm -f ~/.config/citydev.env; fi
+    systemctl --user restart citydev && wait_up 600 && echo "up ($1)" ;;
   restart) curl -s -m 5 "$B/restart" >/dev/null || systemctl --user restart citydev; sleep 6; wait_up 240 && echo up ;;
   status) systemctl --user --no-pager status citydev | head -5; curl -s -m 3 "$B/state" && echo ;;
   log) journalctl --user -u citydev --no-pager -n ${2:-40} ;;

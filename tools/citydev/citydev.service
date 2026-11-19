@@ -6,8 +6,9 @@ StartLimitBurst=5
 [Service]
 WorkingDirectory=%h/workspace/projects/CityEmpire
 # llvmpipe (CPU Vulkan): leave cores for the other services.
-Environment=LP_NUM_THREADS=6
-ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 960x540x24 -nolisten tcp" /home/abdul/.local/bin/godot --rendering-method mobile --resolution 960x540 res://scenes/main.tscn -- --play --new --hour=13 --at=200,585 --geo --devserver=8190 --devshots=%h/workspace/projects/CityEmpire/screenshots/dev
+Environment=LP_NUM_THREADS=6 CITYDEV_MODE=--geo
+EnvironmentFile=-%h/.config/citydev.env
+ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 960x540x24 -nolisten tcp" /home/abdul/.local/bin/godot --rendering-method mobile --resolution 960x540 res://scenes/main.tscn -- --play --new --hour=13 --at=200,585 $CITYDEV_MODE --devserver=8190 --devshots=%h/workspace/projects/CityEmpire/screenshots/dev
 # Crash -> back up in 5 s; an idle quit (exit 0) stays down until `citydev up`.
 Restart=on-failure
 RestartSec=5

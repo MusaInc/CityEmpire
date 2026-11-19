@@ -78,6 +78,13 @@ func _process(dt: float) -> void:
 		print("DEVSERVER tick clients=", _clients.size(), " pending=", _server.is_connection_available())
 	if _freeze >= 0.0:
 		game.empire.minute = _freeze
+	if not geo:
+		# (full mode: the game camera runs first each frame; this wins)
+		var cam := get_viewport().get_camera_3d()
+		if cam:
+			cam.global_transform = _xf()
+			cam.fov = fov
+			cam.far = 6000.0
 	_idle += dt
 	if _idle > IDLE_QUIT and _clients.is_empty():
 		print("DEVSERVER idle %d s: quitting" % int(IDLE_QUIT))
@@ -228,7 +235,8 @@ func _frame() -> Image:
 		RenderingServer.force_draw(true, 0.0)
 		_draw_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	else:
-		await RenderingServer.frame_post_draw
+		for i in 3:
+			await RenderingServer.frame_post_draw
 	return get_viewport().get_texture().get_image()
 
 
