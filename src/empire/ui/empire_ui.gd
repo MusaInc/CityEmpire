@@ -2329,6 +2329,16 @@ func _settings_panel() -> void:
 			Settings.save()
 			_settings_panel(), Settings.quality == i))
 	v.add_child(q)
+	var lf := S.hbox(10)
+	lf.add_child(S.label("Image filter", 18, S.MUTED))
+	for pair in [["Crisp", "crisp"], ["Off", "clean"]]:
+		var id: String = pair[1]
+		lf.add_child(S.button(pair[0], func():
+			Settings.look = id
+			Settings.apply()
+			Settings.save()
+			_settings_panel(), Settings.look == id))
+	v.add_child(lf)
 	var s := S.hbox(10)
 	s.add_child(S.label("Look sensitivity", 18, S.MUTED))
 	for k: float in [0.6, 1.0, 1.5]:

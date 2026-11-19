@@ -17,6 +17,9 @@ func _ready() -> void:
 	cam.far = 9000.0
 	cam.fov = 68.0
 	add_child(cam)
+	var look := LookFilter.new()
+	look.name = "Look"
+	cam.add_child(look)
 	_ray.collision_mask = 1
 
 

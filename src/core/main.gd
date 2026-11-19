@@ -5,7 +5,7 @@ extends Node3D
 ## Command-line user args (after `--`), used by tools and automated captures:
 ##   --world=prototype|city   --mode=free|endurance|trial:<course>
 ##   --bot=expert|novice   --shot=<png> --shot-at=<s,s,...>   --quality=0|1|2
-##   --perf   --touch   --look=clean|comic|toon|painted   --cam=x,y,z,lx,ly,lz [--fov=deg]   --menu=<screen>
+##   --perf   --touch   --look=crisp|clean|comic|toon|painted   --cam=x,y,z,lx,ly,lz [--fov=deg]   --menu=<screen>
 ##   --save=<path> (scratch save file)   --menu=shop --shop_tab=<slot>
 ##   --time=<hour 0-24> (fixed time of day)   --weather=clear|cloudy|rain|storm|fog
 

@@ -74,6 +74,8 @@ func _ready() -> void:
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
+	if args.has("look"):
+		Settings.look = args["look"]   # captures: --look=crisp|clean|... (not saved)
 	if args.has("geo"):
 		# Geometry inspector (DevServer, tools/citydev): wireframes kept for
 		# its wire mode, and nothing drawn until a frame is asked for - no

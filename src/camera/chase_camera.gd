@@ -51,6 +51,9 @@ func _ready() -> void:
 	cam.far = 2400.0
 	add_child(cam)
 	cam.make_current()
+	var look := LookFilter.new()
+	look.name = "Look"
+	cam.add_child(look)
 	_noise.frequency = 0.9
 	_sphere.radius = 0.35
 	_query.shape = _sphere
