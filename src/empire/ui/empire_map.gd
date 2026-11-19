@@ -12,8 +12,8 @@ extends Control
 const MIN_ZOOM := 0.17   # px per metre (all three islands fit, Skyport to the south)
 const MAX_ZOOM := 3.2
 const S = preload("res://src/empire/ui/empire_style.gd")
-const FILTERS := [["all", "All"], ["yours", "Mine"], ["to_let", "To let"], ["sale", "For sale"],
-	["wholesale", "Suppliers"], ["car", "Vehicles"]]
+const FILTERS := [["all", "All"], ["yours", "Mine"], ["fashion", "Fashion"], ["food", "Food"], ["place", "Cars & Skyport"],
+	["landmark", "Landmarks"], ["to_let", "To let"], ["sale", "For sale"], ["wholesale", "Suppliers"], ["car", "Vehicles"]]
 
 static var filter := "all"     # (kept while the phone is closed)
 static var _view := {}         # last centre/zoom (kept between openings)
@@ -89,6 +89,8 @@ func _build_chips() -> void:
 			filter = f[0]
 			_build_chips()
 			queue_redraw())
+		b.custom_minimum_size = Vector2(0, 40)
+		b.add_theme_font_size_override("font_size", 14)
 		_chips.add_child(b)
 
 
@@ -154,6 +156,8 @@ func _shown(kind: String) -> bool:
 		return true
 	if filter == "sale":
 		return kind in ["sale", "rival"]
+	if filter == "place":
+		return kind in ["place", "wholesale"]
 	return kind == filter
 
 
@@ -173,6 +177,7 @@ func _draw() -> void:
 		MapKit.draw_route(self, sp, clampf(3.0 * _zoom + 2.0, 4.0, 9.0))
 	_drawn.clear()
 	var f := S.font("bold")
+	_draw_areas(f)   # (under the markers)
 	var labels: Array = []
 	var sel_id := String(_selected.get("id", ""))
 	for m in MapKit.markers(game):
@@ -386,6 +391,62 @@ func _action() -> Array:
 					return ["Inspect", func(): ui.open_rival(u, true)]
 				"hq":
 					return ["Head office", func(): ui.open_hq()]
+				"fashion", "food", "firm":
+					return ["Inspect", func(): ui.open_firm(u, true)]
 		"vehicle":
 			return ["Vehicles", func(): ui.open_phone("vehicles")]
 	return []
+
+
+# ------------------------------------------------------------ areas
+static var _areas: Array = []    # [world xz, name, level 0 island / 1 district]
+
+
+## Island names (zoomed out) and district names (mid zoom), placed at the
+## middle of each one's shop units; Skyport at its outline's middle.
+func _area_list() -> Array:
+	if not _areas.is_empty():
+		return _areas
+	var acc := {}
+	for u in game.units:
+		var dp := Premises.door_point(u)
+		for key in [String(u.get("island", "")), String(u.get("district", ""))]:
+			if key == "":
+				continue
+			if not acc.has(key):
+				acc[key] = [Vector2.ZERO, 0]
+			acc[key][0] += Vector2(dp.x, dp.z)
+			acc[key][1] += 1
+	for key in acc:
+		var c: Vector2 = acc[key][0] / float(acc[key][1])
+		if key in ["west", "east"]:
+			_areas.append([c, "WESTBANK" if key == "west" else "COMMERCIAL ISLAND", 0])
+		else:
+			var nm := String(EmpireData.district(key).get("name", ""))
+			if nm != "" and acc[key][1] >= 3:
+				_areas.append([c, nm, 1])
+	var o := SkyportIsland.outline()
+	if not o.is_empty():
+		var sc := Vector2.ZERO
+		for v in o:
+			sc += v
+		sc /= float(o.size())
+		var wv := SkyportIsland.w(Vector3(sc.x, 0.0, sc.y))
+		_areas.append([Vector2(wv.x, wv.z), "SKYPORT", 0])
+	return _areas
+
+
+func _draw_areas(f: Font) -> void:
+	for a in _area_list():
+		var lvl := int(a[2])
+		if lvl == 0 and _zoom > 0.9 or lvl == 1 and (_zoom < 0.6 or _zoom > 2.2):
+			continue
+		var s := _to_screen(a[0])
+		if s.x < -100 or s.y < -40 or s.x > size.x + 100 or s.y > size.y + 40:
+			continue
+		var fs := 22 if lvl == 0 else 14
+		var t: String = a[1] if lvl == 0 else String(a[1]).to_upper()
+		var tw := f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var pos := s - Vector2(tw * 0.5, -fs * 0.35)
+		draw_string_outline(f, pos, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 6, Color(0.05, 0.08, 0.11, 0.85))
+		draw_string(f, pos, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.92) if lvl == 0 else Color(0.93, 0.89, 0.8, 0.85))

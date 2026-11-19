@@ -20,7 +20,11 @@ const KINDS := {
 	"rival": {"name": "QuikSave", "col": Color(0.85, 0.15, 0.18), "shape": "square", "pri": 1},
 	"to_let": {"name": "To let", "col": Color(0.98, 0.71, 0.2), "shape": "circle", "pri": 1},
 	"home": {"name": "Homes", "col": Color(0.85, 0.7, 1.0), "shape": "circle", "pri": 2},
-	"firm": {"name": "Independent", "col": Color(0.78, 0.8, 0.84), "shape": "dot", "pri": 2},
+	"firm": {"name": "Shops", "col": Color(0.78, 0.8, 0.84), "shape": "dot", "pri": 2},
+	"fashion": {"name": "Fashion", "col": Color(0.94, 0.38, 0.57), "shape": "circle", "pri": 1},
+	"food": {"name": "Food & drink", "col": Color(1.0, 0.54, 0.4), "shape": "dot", "pri": 2},
+	"place": {"name": "Showrooms & Skyport", "col": Color(0.31, 0.64, 0.94), "shape": "diamond", "pri": 1},
+	"landmark": {"name": "Landmarks", "col": Color(0.91, 0.76, 0.48), "shape": "diamond", "pri": 1},
 }
 
 static var _cache: Array = []
@@ -61,7 +65,13 @@ static func markers(g: EmpireGame) -> Array:
 				if kind == "sale":
 					sub = "For sale %s · %s" % [EmpireData.money(CityLife.firm_price(fm)), sub]
 				else:
-					sub = "Independent · " + sub
+					var ft := String(fm.get("type", ""))
+					sub = "%s · %s" % [String(EmpireData.business_type(ft).get("name", "Independent")), sub]
+					# (Boutiques and food get their own markers: things to go to.)
+					if ft == "clothing":
+						kind = "fashion"
+					elif ft in ["cafe", "takeaway", "bakery"]:
+						kind = "food"
 			_:
 				label = "To let · %s/day" % EmpireData.money(float(u["rent"]))
 				sub = "%d m² · %s" % [int(u.get("size", 0)), sub]
@@ -71,6 +81,21 @@ static func markers(g: EmpireGame) -> Array:
 		out.append({"id": String(h["id"]), "kind": "home", "world": g.home_lift(h),
 			"label": String(h["name"]), "sub": ("Your home" if g.empire.owns_property(h["id"]) else "Home for sale %s" % EmpireData.money(float(h["price"]))),
 			"ref": {"kind": "home", "id": String(h["id"])}})
+	# Places that aren't shop units: Skyport's showrooms, fashion houses,
+	# marina, cargo and terminal; the stadium.
+	if g.skyport_play:
+		for sid in ["dealer_budget", "dealer_commercial", "dealer_luxury", "clothes_everyday", "clothes_premium", "aviation", "marina", "cargo", "terminal"]:
+			var st := g.skyport_play.site(sid)
+			if st.is_empty():
+				continue
+			var pk := "fashion" if sid.begins_with("clothes") else ("landmark" if sid == "terminal" else "place")
+			out.append({"id": "site:" + sid, "kind": pk, "world": st["door"], "label": String(st["name"]),
+				"sub": {"dealer_budget": "Car dealer", "dealer_commercial": "Vans and trucks", "dealer_luxury": "Supercars",
+					"clothes_everyday": "Clothing store", "clothes_premium": "Fashion house", "aviation": "Aircraft sales",
+					"marina": "Boats and berths", "cargo": "Imports", "terminal": "Airport"}.get(sid, "") + " · Skyport",
+				"ref": {"kind": "place", "id": sid}})
+	out.append({"id": "stadium", "kind": "landmark", "world": g.club_office_pos(), "label": "The Heights Ground",
+		"sub": "Football stadium", "ref": {"kind": "place", "id": "stadium"}})
 	for v in g.empire.vehicles:
 		out.append({"id": String(v["id"]), "kind": "car", "world": Vector3.ZERO, "label": EmpireData.vehicle_model(v["model"]).get("name", "Car"),
 			"sub": "Your vehicle", "ref": {"kind": "vehicle", "id": String(v["id"])}})
