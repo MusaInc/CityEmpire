@@ -17,6 +17,7 @@ const SHADERS := [
 	"res://src/world/shaders/ad_screen.gdshader",
 	"res://src/world/shaders/ad_glow.gdshader",
 	"res://src/world/shaders/lamp_glow.gdshader",
+	"res://src/world/shaders/traffic_path_beam.gdshader",
 	"res://src/world/shaders/birds.gdshader",
 	"res://src/world/shaders/pedestrian.gdshader",
 	"res://src/world/shaders/traffic.gdshader",

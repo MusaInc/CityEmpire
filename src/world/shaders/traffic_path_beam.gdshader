@@ -1,4 +1,6 @@
-// Headlight beam variant of traffic_path.gdshader (see traffic_beam.gdshader).
+// Headlight beam variant of traffic_path.gdshader: the light a moving car's
+// dipped beams throw on the road ahead (additive, no real light: mobile
+// budget), laid on the lane itself (see vertex()).
 // Moving traffic (Traffic): cars follow lane polylines stored in lane_tex
 // (texel = x, y, z every Traffic.STEP m; the texel before a lane's first is
 // its header: point count, loop flag). The instance "transform" carries the
@@ -31,6 +33,26 @@ vec4 lane_px(sampler2D tex, int i) {
 	return texelFetch(tex, ivec2(i % TEX_W, i / TEX_W), 0);
 }
 
+// The lane's point and direction at `s` m along it (Catmull-Rom-ish blend
+// of the polyline, as the cars drive it).
+void lane_at(int base, float n, bool loop, float s, out vec3 pos, out vec3 fw) {
+	float f = s / STEP;
+	f = loop ? mod(f, n - 1.0) : clamp(f, 0.0, n - 1.001);
+	int i = int(floor(f));
+	float k = f - float(i);
+	int last = int(n + 0.5) - 1;
+	// (Loops repeat their first point at the end: indices wrap over n - 1.)
+	int im = loop ? (i == 0 ? last - 1 : i - 1) : max(i - 1, 0);
+	int i2 = loop ? (i + 2 > last ? i + 2 - last : i + 2) : min(i + 2, last);
+	vec3 p0 = lane_px(lane_tex, base + im).xyz;
+	vec3 p1 = lane_px(lane_tex, base + i).xyz;
+	vec3 p2 = lane_px(lane_tex, base + i + 1).xyz;
+	vec3 p3 = lane_px(lane_tex, base + i2).xyz;
+	pos = mix(p1, p2, k);
+	fw = mix(p2 - p0, p3 - p1, k);
+	fw = length(fw) > 1e-4 ? normalize(fw) : vec3(0.0, 0.0, -1.0);
+}
+
 void vertex() {
 	float base_f = MODEL_MATRIX[0][0];
 	float s0 = MODEL_MATRIX[1][0];
@@ -54,34 +76,41 @@ void vertex() {
 	vec4 hd = lane_px(lane_tex, base - 1);
 	float n = hd.x;
 	bool loop = hd.y > 0.5;
-	float f = s / STEP;
-	f = loop ? mod(f, n - 1.0) : clamp(f, 0.0, n - 1.001);
-	int i = int(floor(f));
-	float k = f - float(i);
-	int last = int(n + 0.5) - 1;
-	// (Loops repeat their first point at the end: indices wrap over n - 1.)
-	int im = loop ? (i == 0 ? last - 1 : i - 1) : max(i - 1, 0);
-	int i2 = loop ? (i + 2 > last ? i + 2 - last : i + 2) : min(i + 2, last);
-	vec3 p0 = lane_px(lane_tex, base + im).xyz;
-	vec3 p1 = lane_px(lane_tex, base + i).xyz;
-	vec3 p2 = lane_px(lane_tex, base + i + 1).xyz;
-	vec3 p3 = lane_px(lane_tex, base + i2).xyz;
-	vec3 pos = mix(p1, p2, k);
-	vec3 fw = mix(p2 - p0, p3 - p1, k);
-	fw = length(fw) > 1e-4 ? normalize(fw) : vec3(0.0, 0.0, -1.0);
+	// The beam is laid on the road the car is about to drive: each vertex
+	// (a grid, CityWorld._beam_grid) sits on the lane `ahead` m further on,
+	// its own height and heading – over a crest, down a hill, round a bend
+	// – not on the plane of the car (that floated over dips and sank into
+	// rises, like the old lamp pools). Past a lane's end it stays level.
+	float ahead = -VERTEX.z;
+	vec3 pos;
+	vec3 fw;
+	lane_at(base, n, loop, s + ahead, pos, fw);
+	if (!loop && s + ahead > (n - 1.0) * STEP) {
+		vec3 pe;
+		vec3 fe;
+		lane_at(base, n, loop, (n - 1.0) * STEP - 0.01, pe, fe);
+		pos = pe + fe * (s + ahead - (n - 1.0) * STEP);
+		fw = fe;
+	}
 	vec3 zb = -fw;
 	vec3 xb = normalize(cross(vec3(0.0, 1.0, 0.0), zb));
-	vec3 yb = cross(zb, xb);
-	mat3 B = mat3(xb, yb, zb);
-	vec3 world = pos + B * VERTEX;
+	vec3 world = pos + xb * VERTEX.x + vec3(0.0, VERTEX.y, 0.0);
 	VERTEX = (VIEW_MATRIX * vec4(world, 1.0)).xyz;
-	NORMAL = normalize(mat3(VIEW_MATRIX) * (B * NORMAL));
+	NORMAL = mat3(VIEW_MATRIX) * vec3(0.0, 1.0, 0.0);
+	// No lamps by day: no fragments at all.
+	if (night < 0.2) {
+		VERTEX = vec3(0.0);
+	}
 }
 
 void fragment() {
-	// UV.y 0 at the bumper .. 1 at the far end, UV.x across.
-	float along = 1.0 - UV.y;
-	float across = 1.0 - abs(UV.x - 0.5) * 2.0;
-	float a = pow(along, 1.4) * pow(max(across, 0.0), 1.6) * (0.55 + 0.35 * wetness);
-	ALBEDO = vec3(1.0, 0.9, 0.72) * a * beam * smoothstep(0.25, 0.7, night) * moving;
+	// UV.y 0 at the bumper .. 1 at the far end, UV.x across. Two lamps whose
+	// throws merge a few metres out; bright from ~2 m to ~12 m, then a long
+	// fade (dipped beam), stronger on a wet road.
+	float t = UV.y;
+	float x = abs(UV.x - 0.5) * 2.0;
+	float lobes = exp(-pow((x - 0.25) / 0.45, 2.0));
+	float edge = smoothstep(1.0, 0.75, x);
+	float a = smoothstep(0.0, 0.1, t) * pow(1.0 - t, 1.5) * lobes * edge * (0.6 + 0.4 * wetness);
+	ALBEDO = vec3(1.0, 0.92, 0.78) * a * beam * smoothstep(0.25, 0.7, night) * moving;
 }
