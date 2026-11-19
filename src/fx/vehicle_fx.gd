@@ -115,10 +115,15 @@ var cars: Array = []           # Car list provided by the game each frame
 var smoke: Pool
 var sparks: Pool
 var fire: Pool
-var skid_mm: MultiMesh
+var skid_mesh: ArrayMesh
 var _skid_i := 0
 var _skid_n := 1400
-var _skid_last := {}           # car id * 4 + wheel -> last mark position
+var _skid_last := {}           # car id * 4 + wheel -> [last position, left edge, right edge]
+var _skid_pos := PackedVector3Array()
+var _skid_uv := PackedVector2Array()
+var _skid_idx := PackedInt32Array()
+var _skid_dirty := false
+var _skid_upload := 0.0
 var debris_budget := 48
 var _debris: Array = []        # [RigidBody3D, age]
 var _debris_mesh: BoxMesh
@@ -139,21 +144,35 @@ func _ready() -> void:
 	fire = Pool.new(60, _mat(true, 1.0), self)
 	fire.drag = 2.0
 	fire.gravity = -3.0
-	# Skid marks: flat quads on the road.
-	skid_mm = MultiMesh.new()
-	skid_mm.transform_format = MultiMesh.TRANSFORM_3D
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(0.24, 0.6)
-	skid_mm.mesh = pm
-	skid_mm.instance_count = _skid_n
+	# Skid marks: continuous ribbons (one ArrayMesh, a ring buffer of quads;
+	# each quad starts on the previous one's end edge, so a trail has no gaps
+	# at bends and no darker overlaps), feathered at the sides.
+	_skid_pos.resize(_skid_n * 4)
+	_skid_uv.resize(_skid_n * 4)
+	_skid_idx.resize(_skid_n * 6)
 	for i in _skid_n:
-		skid_mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ZERO), Vector3(0, -9999, 0)))
-	var sk := MultiMeshInstance3D.new()
-	sk.multimesh = skid_mm
+		for k in 4:
+			_skid_pos[i * 4 + k] = Vector3(0, -9999, 0)
+			_skid_uv[i * 4 + k] = Vector2(float(k % 2), 0.0)
+		for k in 6:
+			_skid_idx[i * 6 + k] = i * 4 + [0, 2, 1, 1, 2, 3][k]
+	skid_mesh = ArrayMesh.new()
+	var sk := MeshInstance3D.new()
+	sk.mesh = skid_mesh
 	var skm := StandardMaterial3D.new()
-	skm.albedo_color = Color(0.02, 0.02, 0.02, 0.55)
+	var grad := Gradient.new()
+	grad.set_color(0, Color(0.02, 0.02, 0.02, 0.0))
+	grad.set_color(1, Color(0.02, 0.02, 0.02, 0.0))
+	grad.add_point(0.22, Color(0.02, 0.02, 0.02, 0.6))
+	grad.add_point(0.78, Color(0.02, 0.02, 0.02, 0.6))
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.width = 32
+	gt.height = 1
+	skm.albedo_texture = gt
 	skm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	skm.roughness = 0.9
+	skm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	skm.render_priority = -1
 	sk.material_override = skm
 	sk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -174,6 +193,7 @@ func _mat(additive: bool, alpha: float) -> ShaderMaterial:
 
 func _process(dt: float) -> void:
 	_t += dt
+	_skid_flush(dt)
 	var cam := get_viewport().get_camera_3d()
 	var cp := cam.global_position if cam else Vector3.ZERO
 	for o in cars:
@@ -245,22 +265,49 @@ func _car_fx(c: Car, dt: float) -> void:
 
 
 func _skid(key: int, p: Vector3, v: Vector3, slip: float) -> void:
-	var last: Vector3 = _skid_last.get(key, Vector3.INF)
-	if last != Vector3.INF and last.distance_to(p) < 0.5:
+	var last: Array = _skid_last.get(key, [])
+	var hw := 0.12 * clampf(0.6 + slip, 0.6, 1.3)
+	if not last.is_empty() and (last[0] as Vector3).distance_to(p) < 0.45:
 		return
-	if last == Vector3.INF or last.distance_to(p) > 3.0:
-		_skid_last[key] = p
+	if last.is_empty() or (last[0] as Vector3).distance_to(p) > 3.0:
+		# A new trail: its first edge, square to the way the car is going.
+		var f0 := Vector3(v.x, 0.0, v.z).normalized() if Vector3(v.x, 0.0, v.z).length() > 0.5 else Vector3.FORWARD
+		var r0 := f0.cross(Vector3.UP).normalized()
+		_skid_last[key] = [p, p - r0 * hw + Vector3.UP * 0.03, p + r0 * hw + Vector3.UP * 0.03]
 		return
-	var mid := (last + p) * 0.5 + Vector3.UP * 0.03
-	var d := p - last
-	var len := d.length()
-	var fwd := d / len
+	var d := p - (last[0] as Vector3)
+	var fwd := Vector3(d.x, 0.0, d.z).normalized()
 	var right := fwd.cross(Vector3.UP).normalized()
-	var b := Basis(right, Vector3.UP, -fwd)
-	b = b.scaled(Vector3(clampf(0.6 + slip, 0.6, 1.3), 1.0, len / 0.6))
-	skid_mm.set_instance_transform(_skid_i, Transform3D(b, mid))
+	var l1 := p - right * hw + Vector3.UP * 0.03
+	var r1 := p + right * hw + Vector3.UP * 0.03
+	var j := _skid_i * 4
+	_skid_pos[j] = last[1]
+	_skid_pos[j + 1] = last[2]
+	_skid_pos[j + 2] = l1
+	_skid_pos[j + 3] = r1
 	_skid_i = (_skid_i + 1) % _skid_n
-	_skid_last[key] = p
+	_skid_last[key] = [p, l1, r1]
+	_skid_dirty = true
+
+
+## Uploads the skid ribbons when they changed (at most 12 times a second).
+func _skid_flush(dt: float) -> void:
+	_skid_upload -= dt
+	if not _skid_dirty or _skid_upload > 0.0:
+		return
+	_skid_upload = 0.08
+	_skid_dirty = false
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = _skid_pos
+	arr[Mesh.ARRAY_TEX_UV] = _skid_uv
+	var nrm := PackedVector3Array()
+	nrm.resize(_skid_pos.size())
+	nrm.fill(Vector3.UP)
+	arr[Mesh.ARRAY_NORMAL] = nrm
+	arr[Mesh.ARRAY_INDEX] = _skid_idx
+	skid_mesh.clear_surfaces()
+	skid_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 
 
 ## A hit: sparks, a puff of dust/debris, chunks off the car for big ones.

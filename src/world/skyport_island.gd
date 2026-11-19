@@ -2936,6 +2936,16 @@ func _build_quayside(body: StaticBody3D) -> void:
 		var wq := w2(q)
 		if under_bridge(wq.x, wq.y) or over_bridge_shore(wq.x, wq.y):
 			return true
+		# Never across a road: the bridges' landings run over the quay to
+		# Bridge Road (the railing and a lamp stood across the carriageway).
+		if road_clearance(plan_data, q) < 1.0:
+			return true
+		for B: Dictionary in plan_data["bridges"]:
+			var bp: PackedVector3Array = B["pts"]
+			for j in bp.size() - 1:
+				var cp := Geometry2D.get_closest_point_to_segment(wq, Vector2(bp[j].x, bp[j].z), Vector2(bp[j + 1].x, bp[j + 1].z))
+				if cp.distance_to(wq) < BRIDGE_W * 0.5 + 2.0:
+					return true
 		return rail_clearance(plan_data, q) < 3.0
 	for i in n:
 		var i2 := (i + 1) % n

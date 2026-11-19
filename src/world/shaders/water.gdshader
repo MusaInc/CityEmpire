@@ -107,8 +107,10 @@ void fragment() {
 		vec2 suv = (p0 - seabed_rect.xy) / seabed_rect.zw;
 		if (suv.x > 0.0 && suv.y > 0.0 && suv.x < 1.0 && suv.y < 1.0) {
 			vec4 sb = texture(seabed, suv);
-			depth = max(sb.r * seabed_max, 0.25);
-			rocky = sb.a;
+			// (Fade to open sea over the bake's last 3%: no rectangle edge.)
+			float edge = smoothstep(0.0, 0.03, min(min(suv.x, 1.0 - suv.x), min(suv.y, 1.0 - suv.y)));
+			depth = mix(seabed_max, max(sb.r * seabed_max, 0.25), edge);
+			rocky = mix(1.0, sb.a, edge);
 		}
 	}
 	// Shallow water: the swell shortens and calms (and it can't be taller
@@ -210,7 +212,16 @@ void fragment() {
 	float broad = gnoise(p0 * 0.0023 + 5.3) * 0.5 + gnoise(p0 * 0.0071 - 2.9) * 0.3 + gnoise(p0 * 0.019 + 8.1) * 0.2;
 	float tintk = mix(crest, 0.42 + 0.3 * broad, max(farw, 1.0 - near));
 	float through = clamp(dot(normalize(vec3(sun_dir.x, 0.0, sun_dir.z)), -view_w) * 0.5 + 0.5, 0.0, 1.0);
-	vec3 body = mix(deep, shallow, tintk * mix(0.45 + 0.55 * through, 0.5, farw) * (1.0 - night * 0.8));
+	// Water colour by depth - sandy shallows, muted turquoise, blue-green,
+	// deep blue - one continuous ramp. The depth it reads is varied at low
+	// frequency (so the shallow band's width wanders with the coast instead
+	// of drawing an even outline) and rock shores fall away faster (a narrow,
+	// darker fringe; sand shelves a wider, paler one).
+	float dvar = depth * (1.0 + 0.32 * gnoise(p0 * 0.0045 + 1.7) + 0.12 * gnoise(p0 * 0.017 - 4.2)) * mix(1.0, 1.75, rocky);
+	vec3 ramp = mix(vec3(0.2, 0.32, 0.29), vec3(0.08, 0.25, 0.27), smoothstep(0.4, 3.0, dvar));
+	ramp = mix(ramp, vec3(0.045, 0.17, 0.205), smoothstep(2.5, 8.0, dvar));
+	ramp = mix(ramp, deep, smoothstep(6.0, 18.0, dvar));
+	vec3 body = mix(ramp, mix(deep, shallow, 0.55), tintk * mix(0.3 + 0.35 * through, 0.3, farw) * 0.5 * (1.0 - night * 0.8));
 	body *= mix(1.0, 0.25, night);
 	body *= mix(vec3(1.0), vec3(0.75, 0.82, 0.85), blow);  // grey under a storm sky
 
@@ -242,13 +253,16 @@ void fragment() {
 
 	// The seabed seen through the water. Absorption per metre (red first),
 	// over a path that lengthens at grazing angles; a storm stirs it up.
-	vec3 kd = vec3(0.42, 0.13, 0.105) * (1.0 + 1.6 * blow);
+	// (Absorption: red first but not so hard that a metre of water over pale
+	// sand glows cyan.)
+	vec3 kd = vec3(0.34, 0.16, 0.14) * (1.0 + 1.6 * blow);
 	float path = depth * (1.0 + 1.0 / max(ndv, 0.25));
 	vec3 tr = exp(-kd * path);
 	// (Parallax: the bottom sits below the surface, offset along the view.)
 	vec2 bp = p0 - view_w.xz / max(view_w.y, 0.25) * depth * 0.55;
 	float ripple = sin(dot(bp, vec2(0.83, 0.55)) * 2.6 + vnoise(bp * 0.35) * 4.0) * 0.5 + 0.5;
-	vec3 sand_c = vec3(0.8, 0.76, 0.62) * (0.86 + 0.14 * ripple) * (0.9 + 0.2 * vnoise(bp * 0.05));
+	vec3 sand_c = mix(vec3(0.74, 0.7, 0.57), vec3(0.5, 0.52, 0.44), smoothstep(0.5, 5.0, depth))
+		* (0.86 + 0.14 * ripple) * (0.9 + 0.2 * vnoise(bp * 0.05));
 	float stones = vnoise(bp * 0.45) * 0.6 + vnoise(bp * 1.7) * 0.4;
 	vec3 rock_c = mix(vec3(0.16, 0.17, 0.14), vec3(0.34, 0.33, 0.27), stones) * (0.8 + 0.4 * vnoise(bp * 0.06 + 3.0));
 	vec3 floor_c = mix(sand_c, rock_c, smoothstep(0.25, 0.75, rocky));
@@ -274,7 +288,8 @@ void fragment() {
                 : 0.0;
 	see *= (1.0 - fres) * (1.0 - foam) * (1.0 - clamp(glint * day, 0.0, 1.0));
 	see *= (1.0 - 0.75 * blow) * (1.0 - 0.6 * night) * (1.0 - smoothstep(900.0, 1800.0, dist));
-	vec3 tint = mix(shallow * vec3(1.0, 1.8, 1.62), water_c, smoothstep(1.5, 7.0, depth));
+	// (Muted: the old shallow x (1, 1.8, 1.62) glowed cyan round every island.)
+	vec3 tint = mix(vec3(0.17, 0.33, 0.31), water_c, smoothstep(1.0, 7.0, depth));
 	body = mix(body, tint, see);
 	ALPHA = 1.0 - see * shallow_visibility;
 

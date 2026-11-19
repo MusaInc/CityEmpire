@@ -102,10 +102,19 @@ static func build(img: Image, rect: Rect2, max_depth: float) -> MeshInstance3D:
 		var z := rect.position.y + j * CELL
 		# (Land nodes: just under the surface – the shore geometry covers them.)
 		var d := dep[id] if dep[id] > 0.05 else 0.5
+		# Low-frequency undulation (bars, hollows, gentle ridges): none at
+		# the waterline, up to ~15% of the depth out on the shelf, so the
+		# floor isn't a perfectly smooth ramp. Deterministic.
+		if d > 1.2:
+			var un := sin(x * 0.0123 + z * 0.0071) * 0.55 + sin(x * -0.0051 + z * 0.0167 + 1.3) * 0.45
+			d += un * minf(0.15 * d, 1.6) * smoothstep(1.2, 4.0, d)
 		# (Rock matches the armour it continues: Skyport's lighter granite,
 		# the cities' darker boulders.)
 		var rc := rock if SkyportIsland.distance_to(Vector3(x, 0.0, z)) < 140.0 else Color(0.23, 0.225, 0.225)
-		var c := sand.lerp(rc, smoothstep(0.3, 0.8, rk[id]))
+		# (Sand darkens and greys with depth: it was beach-bright all the way
+		# down, a pale band round every island seen through the water.)
+		var sd := sand.lerp(Color(0.56, 0.55, 0.46), smoothstep(0.8, 6.0, d))
+		var c := sd.lerp(rc, smoothstep(0.3, 0.8, rk[id]))
 		c.a = 0.5 / 8.0
 		st.set_color(c)
 		st.set_uv(Vector2(x, z))

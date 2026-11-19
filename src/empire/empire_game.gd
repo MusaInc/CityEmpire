@@ -74,6 +74,12 @@ func _ready() -> void:
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
+	if args.has("geo"):
+		# Geometry inspector (DevServer, tools/citydev): wireframes kept for
+		# its wire mode, and nothing drawn until a frame is asked for - no
+		# production shader is ever compiled on the VPS's CPU renderer.
+		RenderingServer.set_debug_generate_wireframes(true)
+		RenderingServer.render_loop_enabled = false
 	Settings.time_of_day = "empire"   # the Empire's clock drives the sun
 	Settings.weather = "empire"       # and its daily weather the sky (CityLife)
 	Settings.apply()
@@ -355,7 +361,14 @@ func _after_start() -> void:
 		# Debug: which visual instances sit around the hero's feet?
 		await get_tree().create_timer(3.0).timeout
 		var p := player.global_position
-		var hits := RenderingServer.instances_cull_ray(p + Vector3.UP * 3.0, p + Vector3.DOWN * 3.0, get_world_3d().scenario)
+		var r0 := p + Vector3.UP * 3.0
+		var r1 := p + Vector3.DOWN * 3.0
+		if String(args["probe"]).begins_with("line:"):
+			# --probe=line:x,y,z,x2,y2,z2 (world): what lies along that line.
+			var lv := String(args["probe"]).trim_prefix("line:").split_floats(",")
+			r0 = Vector3(lv[0], lv[1], lv[2])
+			r1 = Vector3(lv[3], lv[4], lv[5])
+		var hits := RenderingServer.instances_cull_ray(r0, r1, get_world_3d().scenario)
 		for id in hits:
 			var o := instance_from_id(id)
 			if o is Node:
@@ -400,6 +413,13 @@ func _after_start() -> void:
 			return [Transform3D(Basis.looking_at(to - from, Vector3.UP if absf((to - from).normalized().y) < 0.99 else Vector3.FORWARD), from), 62.0]
 	if args.has("nohud"):
 		ui.visible = false   # (captures: the world only)
+	if args.has("devserver"):
+		# Persistent visual-dev session (tools/citydev): free camera and
+		# instant screenshots over HTTP on 127.0.0.1.
+		var ds := DevServer.new()
+		ds.name = "DevServer"
+		add_child(ds)
+		ds.start(self, int(args["devserver"]), String(args.get("devshots", "")), args.has("geo"))
 	if args.has("fleet"):
 		# Captures: one of each traffic kind parked in a row ahead of the hero
 		# (the real traffic meshes, shader and instancing, parked encoding),
