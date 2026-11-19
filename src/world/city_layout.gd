@@ -32,7 +32,7 @@ const BRIDGE_Z := -17.0
 ## outermost streets an esplanade runs to the sea wall (cliffs on the east,
 ## where the land is high).
 const ESPLANADE := 18.0
-const SEA_REACH := 4000.0
+const SEA_REACH := 9000.0   # (4 km: the sea's straight edge showed from the air)
 const BRIDGE_DECK := 24.0
 const BRIDGE_TOWERS := [-80.0, -340.0]
 const BRIDGE_TOWER_TOP := 132.0
@@ -324,7 +324,10 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 func _sea() -> void:
 	# The strait (west, the old river) and the open sea everywhere else; the
 	# island's land is cut out of it by is_water().
-	water.append(Rect2(FAR_SHORE, -2500, RIVER_EDGE - FAR_SHORE, 5000))
+	# (The strait runs the sea's full length: it stopped at ±2.5 km while the
+	# sea either side ran on to SEA_REACH - two dark 470 m holes in the water
+	# on the horizon north and south.)
+	water.append(Rect2(FAR_SHORE, -SEA_REACH, RIVER_EDGE - FAR_SHORE, SEA_REACH * 2.0))
 	sea = [Rect2(RIVER_EDGE, -SEA_REACH, SEA_REACH, SEA_REACH * 2.0),
 		Rect2(-SEA_REACH, -SEA_REACH, SEA_REACH + FAR_SHORE, SEA_REACH * 2.0)]  # (round the mainland too)
 	water.append_array(sea)

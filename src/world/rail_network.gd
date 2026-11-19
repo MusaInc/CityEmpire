@@ -233,6 +233,14 @@ func _clear_corridor(pts: PackedVector3Array) -> void:
 	if gone.is_empty():
 		return
 	L.buildings = L.buildings.filter(func(b): return not gone.has(b))
+	# Shops / offices already placed in those buildings go with them (their
+	# interiors were built standing on their own: a bare grey room in the
+	# plaza at the Harbour Bridge's city end).
+	if L.premises != null:
+		var before: int = L.premises.units.size()
+		L.premises.units = L.premises.units.filter(func(u): return not gone.has(u["b"]))
+		if L.premises.units.size() != before:
+			print("City Loop: %d premises went with their buildings" % (before - L.premises.units.size()))
 	L.props = L.props.filter(func(pr):
 		var o: Vector3 = (pr[1] as Transform3D).origin
 		for b in gone:

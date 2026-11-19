@@ -58,7 +58,8 @@ func setup(p_game: EmpireGame) -> void:
 	# Skyport Island: a pavement each side of every road (walked along one
 	# side and back along the other, so nobody reaches an end and vanishes).
 	if SkyportIsland.enabled and game.skyport:
-		for rd in game.skyport.wplan.get("roads", []):
+		var all_roads: Array = game.skyport.wplan.get("roads", [])
+		for rd in all_roads:
 			if rd[3]:
 				continue  # (not on the bridge deck)
 			var rp: PackedVector3Array = (rd[1] as PackedVector3Array).duplicate()
@@ -80,6 +81,11 @@ func setup(p_game: EmpireGame) -> void:
 					var d := Vector2(b.x - a.x, b.z - a.z).normalized()
 					var n := Vector2(-d.y, d.x) * off * side
 					ring.append(Vector2(rp[i].x, rp[i].z) + n)
+			# Where roads merge (the two bridge approaches meet in a Y) one
+			# road's pavement runs inside the other's lanes: people walked
+			# along the carriageway. A loop that does that is left out.
+			if _loop_on_carriageway(ring, all_roads, rd):
+				continue
 			_add_loop(ring, 1)
 	for u in game.units:
 		if u["kind"] == "shop":
@@ -121,6 +127,35 @@ func setup(p_game: EmpireGame) -> void:
 	_blobs.multimesh = bmm
 	_blobs.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_blobs)
+
+
+## True when a pavement loop (sampled every 4 m along each side, its
+## crossings at the ends left out) runs over another road's carriageway for
+## more than 30 m - longer than any side road's mouth it crosses.
+static func _loop_on_carriageway(ring: PackedVector2Array, roads: Array, own: Array) -> bool:
+	var half := ring.size() / 2
+	var on := 0
+	for side in 2:
+		var i0 := side * half
+		for i in range(i0, i0 + half - 1):
+			var a := ring[i]
+			var b := ring[i + 1]
+			var n := maxi(1, int(a.distance_to(b) / 4.0))
+			for k in n + 1:
+				var q := a.lerp(b, float(k) / n)
+				for rd in roads:
+					if rd == own:
+						continue
+					var rp: PackedVector3Array = rd[1]
+					var hw := float(rd[2]) * 0.5 + 0.3
+					for j in rp.size() - 1:
+						var cp := Geometry2D.get_closest_point_to_segment(q, Vector2(rp[j].x, rp[j].z), Vector2(rp[j + 1].x, rp[j + 1].z))
+						if cp.distance_to(q) < hw:
+							on += 1
+							if on * 4 > 30:
+								return true
+							break
+	return false
 
 
 func _add_loop(pts: PackedVector2Array, dir: int) -> void:

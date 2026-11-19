@@ -355,7 +355,14 @@ func _after_start() -> void:
 		# Debug: which visual instances sit around the hero's feet?
 		await get_tree().create_timer(3.0).timeout
 		var p := player.global_position
-		var hits := RenderingServer.instances_cull_ray(p + Vector3.UP * 3.0, p + Vector3.DOWN * 3.0, get_world_3d().scenario)
+		var r0 := p + Vector3.UP * 3.0
+		var r1 := p + Vector3.DOWN * 3.0
+		if String(args["probe"]).begins_with("line:"):
+			# --probe=line:x,y,z,x2,y2,z2 (world): what lies along that line.
+			var lv := String(args["probe"]).trim_prefix("line:").split_floats(",")
+			r0 = Vector3(lv[0], lv[1], lv[2])
+			r1 = Vector3(lv[3], lv[4], lv[5])
+		var hits := RenderingServer.instances_cull_ray(r0, r1, get_world_3d().scenario)
 		for id in hits:
 			var o := instance_from_id(id)
 			if o is Node:
