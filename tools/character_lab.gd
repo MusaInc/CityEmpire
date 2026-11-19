@@ -27,6 +27,8 @@ const OUTFITS := {
 		"pants_col": "#1a1c20", "shoes": "shoes_blackout", "head": "head_bare", "eyewear": "face_shades"},
 	"hoodie": {"face": "hero_ren", "hair": "hair_curls", "top": "top_hoodie", "top_col": "#5d1f2a",
 		"pants_col": "#3b3f46", "shoes": "shoes_volt", "head": "head_bare", "eyewear": "face_none"},
+	"ade_bare": {"face": "hero_ade", "hair": "hair_natural", "top": "top_jumper", "top_col": "#e8e2d8",
+		"pants_col": "#2a2c30", "shoes": "shoes_classic", "head": "head_bare", "eyewear": "face_none"},
 	"jumper": {"face": "hero_ade", "hair": "hair_natural", "top": "top_jumper", "top_col": "#2f4a33",
 		"pants_col": "#8a7a5a", "shoes": "shoes_classic", "head": "head_beanie", "eyewear": "face_none"},
 }
@@ -42,6 +44,7 @@ const FULL := {
 const CLOSE := {
 	"face": [Vector3(0.18, 0.04, 0.95), "face", 24.0],
 	"face_side": [Vector3(0.95, 0.04, 0.12), "face", 24.0],
+	"face_34": [Vector3(0.62, 0.06, 0.72), "face", 24.0],
 	"collar": [Vector3(0.12, 0.1, 0.9), "collar", 30.0],
 	"chest": [Vector3(0.0, 0.0, 1.25), "chest_mid", 32.0],
 	"shoulder": [Vector3(0.75, 0.15, 0.55), "sh_r", 32.0],
@@ -58,6 +61,7 @@ const POSE_VIEWS := {
 	"idle": ["front", "three_quarter", "side", "rear", "face", "face_side", "collar", "chest", "shoulder", "cuff", "back_collar", "hem_back", "hem_front"],
 	"collar": ["collar", "collar_34", "collar_side", "back_collar", "chest", "shoulder"],
 	"head": ["brows", "brows_34", "face", "face_side"],
+	"portrait": ["face", "face_side", "face_34"],
 	"walk": ["three_quarter", "side"],
 	"run": ["three_quarter", "side"],
 	"drive": ["three_quarter", "side", "shoulder"],
@@ -89,7 +93,7 @@ func _go() -> void:
 	var args := OS.get_cmdline_user_args()
 	out = args[0] if args.size() > 0 else "art/character_review/scratch"
 	var outfits: Array = Array(args[1].split(",")) if args.size() > 1 and args[1] != "all" else OUTFITS.keys()
-	var poses: Array = Array(args[2].split(",")) if args.size() > 2 and args[2] != "all" else POSE_VIEWS.keys().filter(func(k): return k != "collar" and k != "head")
+	var poses: Array = Array(args[2].split(",")) if args.size() > 2 and args[2] != "all" else POSE_VIEWS.keys().filter(func(k): return k != "collar" and k != "head" and k != "portrait")
 	neutral = args.size() > 3 and args[3] == "neutral"
 	DirAccess.make_dir_recursive_absolute(out)
 	if neutral:

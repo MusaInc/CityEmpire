@@ -603,6 +603,8 @@ def make_hair(fid,style,pos,ecz,ecy):
         if short_:
             # a natural hairline: slight recession at the temples, small irregularity
             hl+=.008*min(1.0,max(0.0,abs(q.x)-.022)/.035)**2+.0009*math.sin(q.x*95+.7)
+            # (crop/fade: a softly uneven front line - small peaks and dips, not a ruler edge)
+            if style in ('crop','fade'):hl+=.0009*math.sin(q.x*150+1.9)+.0004*math.sin(q.x*330+.4)
         top=q.z-(ecz+hl)
         k=.005   # rounding of the hairline's corners (temples, sideburns, nape)
         smin=lambda *a:-k*math.log(sum(math.exp(-x/k) for x in a))
@@ -643,11 +645,15 @@ def make_hair(fid,style,pos,ecz,ecy):
             d=Vector((q.x,q.y-hc.y,0));k=int((math.atan2(d.x,d.y)/math.tau+.5)*48)%48
             ring_r[k]=max(ring_r[k],d.length)
     for v in bm.verts:
-        fadein=max(0.0,min(1.0,margin(v.co)/.01))
+        # (crop/fade: the thickness grows over 3 cm in from the edge - over
+        # 1 cm the front edge stood off the forehead like a visor)
+        fadein=max(0.0,min(1.0,margin(v.co)/(.03 if style in ('crop','fade') else .01)))
         fadein=fadein*fadein*(3-2*fadein)
         up=max(0.0,min(1.0,(v.co.z-(top-.08))/.06))   # 0 round the sides, 1 on top
         up_f=max(0.0,min(1.0,(v.co.z-(top-.055))/.03))   # the fade's top block starts higher, sharper
-        lift={'buzz':.0024,'crop':.004+.015*up,'fade':.0017+.03*up_f**1.3,'curls':.009+.022*up,
+        # Sides and back hug the scalp (short, faded); the volume is on top.
+        side=max(0.0,min(1.0,(v.co.z-(ecz+.035))/.045))
+        lift={'buzz':.0024,'crop':.0012+.0016*side+.0105*up,'fade':.0008+.03*up_f**1.3,'curls':.009+.022*up,
               'pixie':.006+.012*up,'bob':.008+.008*up,'ponytail':.0035,'bun':.0035}[style]
         if style=='curls':
             p_=v.co*170.0
@@ -657,8 +663,15 @@ def make_hair(fid,style,pos,ecz,ecy):
         if style in ('crop','fade','pixie','buzz'):
             # sculpted clumps radiating from the crown (break the helmet surface and silhouette)
             cr=v.co-Vector((0,ecy-.095,top-.01));phi=math.atan2(cr.x,cr.y);dd=cr.length
-            amp={'crop':.0024*up+.0006,'fade':.0028*up_f+.0003,'pixie':.002,'buzz':.0004}[style]
+            amp={'crop':.0042*up+.0005,'fade':.0032*up_f+.0003,'pixie':.002,'buzz':.0004}[style]
             lift+=amp*(.55+.45*math.sin(phi*23+math.sin(dd*45)*1.6)*math.sin(dd*80+phi*4))
+            if style in ('crop','fade'):
+                # forward-swept clumps (longer along the sweep, offset row to
+                # row) and a finer break-up: a textured top, a ragged outline
+                fw=v.co.y-(ecy-.095)
+                edge_=max(0.0,min(1.0,(margin(v.co)-.006)/.015))
+                lift+=(.0026*up+.0004)*edge_*max(0.0,math.sin(v.co.x*260+math.sin(fw*60)*2.2)*math.sin(fw*95+v.co.x*40))
+                lift+=.0007*up*math.sin(v.co.x*610+fw*330)*math.sin(fw*540-v.co.x*200)
         v.co+=v.normal*(.0006+lift*fadein)
         if long_ and v.co.z<ecz+.03:
             # Below the temples the bob hangs straight down from the head's
@@ -762,6 +775,12 @@ for fid,eth,tg,style in FACES:
     m_=np.maximum.reduce([Z-(_ez+.052),np.minimum(_ey-.085-Y,Z-(_ez-.07)),np.minimum.reduce([np.abs(X)-.055,_ey-.03-Y,Z-(_ez+.012)])])
     k_=np.clip((m_+.005)/.009,0,1)
     col*=(1-.45*k_)[:,None]
+    # The fade: short stubble under the hair edge on the sides and back,
+    # thinning out over ~2.5 cm (not on the forehead or face).
+    sides_=np.clip(((_ez+.035)-Z)/.02,0,1)+np.clip(((_ey-.06)-Y)/.02,0,1)
+    st_=np.clip(1+m_/.026,0,1)*(m_<0)*np.clip(sides_,0,1)*np.clip((Z-(_ez-.075))/.02,0,1)
+    st_*=.85+.15*np.sin(X*1900)*np.sin(Z*2100+Y*700)   # (stubble grain)
+    col*=(1-.4*st_**1.3)[:,None]
     for side_ in ('l','r'):
         _e=[pos[j] for i in GROUP_FACES['helper-%s-eye'%side_] for j in bf[i]];_ec=sum(_e,Vector())/len(_e)
         _,bl,bw=brow_curve(_ec)
