@@ -33,6 +33,7 @@ from mathutils import Vector as V
 
 sys.path.insert(0, os.path.dirname(__file__))
 import kestrel as K  # noqa: E402  (its build() only runs as a script)
+import ws_rear as R  # noqa: E402
 import build_kit as kit  # noqa: E402
 from build_kit import box, cyl  # noqa: E402
 
@@ -94,6 +95,10 @@ DESIGNS = {
 }
 
 
+REGS = {"civ_compact": "CP19 KLM", "civ_sedan": "SD68 WRT", "civ_taxi": "TX21 CAB", "civ_suv": "SV70 HNR",
+        "civ_van": "VN62 DLV", "civ_police": "PL17 CEW", "civ_ambulance": "AM20 NHS"}
+
+
 def use(name):
     d = DESIGNS[name]
     for k, v in d.items():
@@ -103,7 +108,7 @@ def use(name):
 
 
 # ------------------------------------------------------------------ build
-def glass_sheet(surf, m, out, view, poly, side=1, lift=0.006, frit=0.025, res=(7, 3)):
+def glass_sheet(surf, m, out, view, poly, side=1, lift=0.011, frit=0.025, res=(7, 3)):
     """Sealed glass laid over the shell (tinted, no cut), on a black border."""
     fn = K.poly_fn(poly)
     if frit:
@@ -111,7 +116,9 @@ def glass_sheet(surf, m, out, view, poly, side=1, lift=0.006, frit=0.025, res=(7
         cen = sum(c, V((0, 0))) / 4
         big = [tuple(cen + (p - cen) * (1 + frit / max((p - cen).length, 1e-3))) for p in c]
         gf = K.patch(surf, view, K.poly_fn(big), res[0], res[1], side)
-        out.append(K.sheet("frit", gf, lift - 0.002, m["trim"]))
+        # (well under the glass: 2 mm apart they z-fought in the game at
+        # distance - black blotches on the glass)
+        out.append(K.sheet("frit", gf, min(0.003, lift - 0.004), m["trim"]))
     g = K.patch(surf, view, fn, res[0], res[1], side)
     out.append(K.sheet("glass", g, lift, m["glass"]))
 
@@ -168,7 +175,7 @@ def build_traffic(name):
     out = []
     clean = K.build_shell(m["paint"])
     clean.hide_render = True
-    body = K.decimated(clean, 0.06 if kind != "van" else 0.05)
+    body = K.decimated(clean, {"van": 0.07, "suv": 0.11}.get(kind, 0.085))   # (0.06 dented the nose round the lamp pockets)
     W2, AX, WR, ARCH, RIDE, YF, YR = K.W2, K.AX, K.WR, K.ARCH, K.RIDE, K.YF, K.YR
     belt, nose, boot = d["_belt"], d["_nose"], d["_boot"]
     # Arches + dark wells.
@@ -205,16 +212,10 @@ def build_traffic(name):
         if YF - 0.2 > K.Y_COWL + 0.1:
             gap_decal(gs, m, out, bon, "top")
     if kind == "saloon":
+        xi = W2 * 0.5 - 0.018          # (lines up with the boot's rear shut line)
         for sx in (1, -1):
-            gap_decal(gs, m, out, [(sx * (W2 - 0.16), K.Y_TG + 0.03), (sx * (W2 - 0.2), YR + 0.15)], "top")
-        gap_decal(gs, m, out, [(-W2 + 0.18, K.Y_TG + 0.03), (W2 - 0.18, K.Y_TG + 0.03)], "top")
-    else:
-        hx = W2 * (0.68 if kind != "van" else 0.97)
-        ztop = belt + (0.3 if kind != "van" else 0.7)
-        if kind == "van":
-            gap_decal(gs, m, out, [(0.0, RIDE + 0.25), (0.0, K.ROOF - 0.08)], "rear")
-        else:
-            gap_decal(gs, m, out, [(-hx, ztop), (-hx, RIDE + 0.45), (hx, RIDE + 0.45), (hx, ztop)], "rear")
+            gap_decal(gs, m, out, [(sx * xi, K.Y_TG + 0.03), (sx * xi, YR + 0.1)], "top")
+        gap_decal(gs, m, out, [(-xi, K.Y_TG + 0.03), (xi, K.Y_TG + 0.03)], "top")
     surf = K.Surface([body])
     # Nose: lamps right under the bonnet edge, grille, lower intake, plate.
     ztop = 0.0
@@ -235,29 +236,25 @@ def build_traffic(name):
     surf = K.Surface([body])
     h = surf.cast(*K.ray("front", 0.0, RIDE + 0.34))
     if h:
-        pl = box("plate_f", (0.52, 0.111, 0.01), (0, 0, 0), m["plate"])
-        pl.rotation_mode = "QUATERNION"
-        pl.rotation_quaternion = V((0, 1, 0.1)).normalized().to_track_quat("Z", "Y")
-        pl.location = h[0] + V((0, 0.012, 0))
-        out.append(pl)
-    # Tail lamps by body style.
-    if kind == "van":
-        tl = [(W2 * 0.86, RIDE + 0.45), (W2 * 0.985, RIDE + 0.45), (W2 * 0.985, RIDE + 0.95), (W2 * 0.86, RIDE + 0.95)]
-    elif kind == "saloon":
-        tl = [(W2 * 0.6, boot - 0.17), (W2 * 0.95, boot - 0.15), (W2 * 0.93, boot - 0.02), (W2 * 0.62, boot - 0.03)]
-    else:
-        tl = [(W2 * 0.66, belt - 0.16), (W2 * 0.95, belt - 0.14), (W2 * 0.93, belt + 0.02), (W2 * 0.68, belt + 0.01)]
-    K.tail_lamp(surf, body, m, out, tl)
-    surf = K.Surface([body])
-    h = surf.cast(*K.ray("rear", 0.0, RIDE + (0.5 if kind != "saloon" else 0.62)))
-    if h:
-        pl = box("plate_r", (0.52, 0.111, 0.01), (0, 0, 0), kit.mat("plate_rear", (0.95, 0.78, 0.1), 0.5))
-        pl.rotation_mode = "QUATERNION"
-        pl.rotation_quaternion = h[1].to_track_quat("Z", "Y")
-        pl.location = h[0] + h[1] * 0.006
-        out.append(pl)
+        nf = V((0, 1, 0.1)).normalized()
+        K.number_plate(out, m, h[0] + nf * 0.012, nf, rear=False, text=REGS.get(name, "WS24 TRF"))
+    # Rear (tools/blender/ws_rear.py, sealed variant) and front details.
+    R.rear_end(body, clean, m, out, kind, set(), belt=belt, rear=boot, reg=REGS.get(name, "WS24 TRF"), sealed=True,
+               pipes=[(W2 * 0.62, RIDE + 0.12, 0.03, "round")] if kind != "van" else [(W2 * 0.7, RIDE + 0.1, 0.032, "round")])
+    R.front_end(body, clean, m, out, kind, zl=zl, lamp_poly=[(W2 * 0.38, zl - lh), (W2 * 0.89, zl - lh * 0.75), (W2 * 0.91, zl),
+                                                            (W2 * 0.41, zl - 0.012)])
     # Glass: sealed, tinted, on black borders.
-    rs = K.Surface([clean])
+    rs = K.Surface([body])
+
+    def glass_sheet(_surf, m_, out_, view, poly, sd=1):
+        # The smooth shell itself inside the outline (no holes or torn edges,
+        # as the rays at the decimated shell gave), 14 mm proud of it, a
+        # black seal round it.
+        axis, d0, d1 = {"side": ("x", 0.3 if sd > 0 else -2.0, 2.0 if sd > 0 else -0.3),
+                        "top": ("z", 0.5, K.ROOF + 0.3), "rear": ("y", YR - 0.5, YR + 0.7)}[view]
+        K.glaze(body, clean, m_, out_, poly, axis, d0, d1, inset=-0.014, cut_body=False, glass=m_["glass"])
+        R.outline_trim(gs, m_, out_, poly, view, sd, mat="trim", r=0.0065, lift=0.01, step=0.08)
+
     zb = lambda y: K.smooth(K.DECK, y) + 0.02
     if kind == "van":
         yf0, yr0 = K.Y_COWL - 0.12, K.Y_WS - 0.1
@@ -285,10 +282,10 @@ def build_traffic(name):
     if kind != "van":
         ymid = (arc_f[0][0] + arc_r[0][0]) / 2 + 0.08
         for sd in (1, -1):
-            g = K.patch(rs, "side", K.poly_fn([(ymid - 0.05, zb(ymid)), (ymid + 0.05, zb(ymid)), (ymid + 0.05, K.ROOF - 0.1),
-                                               (ymid - 0.05, K.ROOF - 0.1)]), 2, 4, sd)
-            out.append(K.sheet("b_pillar", g, 0.009, m["trim"]))
-    K.mirrors(m, out)
+            g = K.patch(gs, "side", K.poly_fn([(ymid - 0.05, zb(ymid) - 0.02), (ymid + 0.05, zb(ymid) - 0.02),
+                                               (ymid + 0.05, K.ROOF - 0.08), (ymid - 0.05, K.ROOF - 0.08)]), 2, 4, sd)
+            out.append(K.sheet("b_pillar", g, 0.0175, m["trim"]))
+    K.mirrors(m, out, gs)
     # Black sills, roof extras per role.
     surf = K.Surface([body])
     for sd in (1, -1):

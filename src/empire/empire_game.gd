@@ -440,7 +440,7 @@ func _after_start() -> void:
 	if args.has("carcam") and not empire.vehicles.is_empty():
 		# Captures: a fixed camera on your first car - front34, rear34, side,
 		# side_l, front, rear, nose, tail - for checking the car in the game.
-		var cc: Car = cars.get(String(empire.vehicles[0]["id"]))
+		var cc: Car = cars.get(String(empire.vehicles[-1]["id"]))   # (the last: --own=<model> frames that one)
 		var views := {"front34": [Vector3(3.4, 1.3, -4.2), 0.55], "rear34": [Vector3(-3.4, 1.5, 4.4), 0.6],
 			"side": [Vector3(6.2, 1.0, 0.0), 0.6], "side_l": [Vector3(-6.2, 1.0, 0.0), 0.6], "front": [Vector3(0.0, 1.0, -6.5), 0.55],
 			"rear": [Vector3(0.0, 1.1, 6.5), 0.6], "nose": [Vector3(1.6, 1.0, -3.6), 0.5], "tail": [Vector3(-1.6, 1.15, 3.7), 0.6]}
@@ -1598,6 +1598,21 @@ func _update_carry_visual() -> void:
 # -------------------------------------------------------------- vehicles
 func _car_spec(model: String) -> Dictionary:
 	var m := EmpireData.vehicle_model(model)
+	if m.is_empty() and BodyDims.DIMS.has(model):
+		# Captures (--own=<body>): any WorldState body on the Kestrel's
+		# handling - police units in their livery, the bus, the Mammoth.
+		m = {"base": "hatch", "art": model}
+		var cs := CarCatalog.spec("kestrel")
+		cs["body"] = model
+		CarCatalog._fit_body(cs)
+		var pk := model.trim_prefix("police_")
+		if CarCatalog.POLICE.has(pk):
+			cs["paint"] = (CarCatalog.POLICE[pk]["livery"] as Array)[0]
+			cs["paint2"] = (CarCatalog.POLICE[pk]["livery"] as Array)[1]
+			cs["wheel"] = CarCatalog.POLICE[pk]["wheel"]
+		elif BodyDims.DIMS[model].has("wheel"):
+			cs["wheel"] = BodyDims.DIMS[model]["wheel"]
+		return cs
 	var s: Dictionary
 	if String(m.get("base", "civ")) == "civ":
 		var rng := RandomNumberGenerator.new()

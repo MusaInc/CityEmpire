@@ -53,6 +53,7 @@ const TRAFFIC_MATS := {
 	"livery_yellow": ["livery_yellow", Color(0.98, 0.85, 0.05), 0.0, 0.4],
 	"livery_green": ["livery_green", Color(0.1, 0.55, 0.22), 0.0, 0.4],
 	"beacon_blue": ["beacon_blue", Color(0.1, 0.3, 1.0), 1.4, 0.3],
+	"reflex": ["reflex", Color(0.32, 0.012, 0.014), 0.0, 0.25],   # red reflex lenses / unlit tail lenses
 }
 const TRAFFIC_DARK := ["dark", Color(0.035, 0.035, 0.04), 0.0, 0.6]  # trim, liner, grille, seam, cladding, housings
 const TAXI_YELLOW := Color(0.98, 0.76, 0.12)
