@@ -81,6 +81,14 @@ func _physics_process(dt: float) -> void:
 					cand.append([d2, 1, c])
 		cand.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
 		_near = cand.slice(0, POOL).map(func(x): return [x[1], x[2]])
+		# City traffic brakes for your vehicle in its lane (and queues).
+		if tr:
+			var vn := game.vehicle_node()
+			var ids: Array = []
+			for x in cand:
+				if int(x[1]) == 0 and float(x[0]) < 40.0 * 40.0:
+					ids.append(int(x[2]))
+			tr.yield_to(vn.global_position if vn else game.player.global_position, ids)   # (people crossing too)
 	for i in POOL:
 		var b: AnimatableBody3D = _bodies[i]
 		if i >= _near.size():

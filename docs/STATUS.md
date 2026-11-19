@@ -1,4 +1,22 @@
-# Status (2026-11-17, aerial realism pass; last TestFlight 0.6.5)
+# Status (2026-11-19, WORLDSTATE final overhaul; branch final-overhaul → 0.8.0)
+
+## Final overhaul (2026-11-19)
+- Renamed WORLDSTATE (project name, title, boot; bundle id and App Store record unchanged; save path changes on desktop only).
+- City500: 500 seeded companies (12 sectors), valuations a pure function of the day (trend, sector cycles, own cycles, fortnightly shocks) – no save cost; your empire valued on the same terms (book net assets + 3.2 years of last-7-day operating profit × reputation; transfers/recycling add nothing). Phone tab: rank card, progress to the next company, value breakdown, market headlines, searchable/filterable table in pages of 25, company profile with 30-day chart, side-by-side comparison and "why it's ahead". Daily rank notices + City500 headlines in the news; history in flags.c500.
+- Phone navigation: Explore | Empire | City500 | Character | Map | More (Businesses, Garage, Property, Finances… under More). Empire home gains a City500 card.
+- Explore: every real destination (Skyport sites, cash & carry, independents by kind, QuikSave, your shops, units to let, stadium, homes), nearest first, categories, NEW/discovered (pass within 45 m), Go · GPS, Details, Map.
+- Clothing: independent clothing shops in both cities are now boutiques you can shop in (mid-range edit); Character tab lists clothes shops. Build B body hidden (HeroLook.BODY_B_ENABLED) until its garment fit is validated.
+- Title screen: WORLDSTATE, continue card (day, net worth, City500 rank), Character shortcut. Tester money only in 0.x builds.
+- World: traffic collisions (kinematic bodies on the nearest 14 cars; city and island traffic brake and queue for your car and for you on the road); traffic-light heads now face the drivers; real shadowless lamp spot lights near the camera (the draped pools fade inside 70 m; none on bridge decks – they floated); pedestrians no longer shrink or pop in view (crowd hand-over at 92 m, despawn off camera, path-end fades only off screen or far); lens effects in the Crisp filter (anamorphic streaks, starburst, glare halo, ghost, faint directional double image); engine/gear/tyre/wind/crash audio for your car (Never Stop's).
+- Merged world-lighting (lamp pools, traffic beams, player headlights, skies, streaming).
+
+## Skyport scale – investigated, not yet changed
+- Island 1.05 km² (after the 2026-11-16 −41% shrink); runway 1,000 m × 45 m, terminal roof 328 × 104 m, airliners 34 m long. Jet airliners need ~1.8–2.5 km of runway, so the airport reads about half the size of its traffic. Root cause = island/runway length, not cameras or building scale.
+- Fix plan: lengthen the runway island south/east to ~2.2 km (coast_points + plan in local coords), runway 2,000 m, rebake seabed (tools/bake_seabed.gd), keep both bridge landings and the town untouched, re-run XA/XV/XS + test_coastlines_triangulate.
+
+## Not done this pass
+- Airport car park / trees / vegetation pass, map presentation redesign, traffic body-model upgrade (behaviour improved; models unchanged), on-device perf of the lens pass + 8 spot lights.
+
 
 ## Working (verified headless / in renders on the VPS)
 - Lighting, weather and streaming pass (2026-11-19, branch world-lighting; local, not on TestFlight). Tests 83/83, autoplay 48/48.

@@ -240,11 +240,11 @@ static func home(ui: EmpireUI, v: VBoxContainer) -> void:
 	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	big.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pic.add_child(big)
-	var cap := S.label("CITY500 RANK" if rk > 0 else "%s TO ENTER" % EmpireData.money(float(yr["gap_500"])).to_upper(), 13, S.MUTED, "black")
+	var cap := S.label("CITY500 RANK" if rk > 0 else "%s TO ENTER" % City500.money(float(yr["gap_500"])).to_upper(), 13, S.MUTED, "black")
 	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pic.add_child(cap)
-	grid.add_child(card("City500", "Empire value %s" % EmpireData.money(float(yr["value"])), pic, func(): ui.open_phone("city500"), S.AMBER))
+	grid.add_child(card("City500", "Empire value %s" % City500.money(float(yr["value"])), pic, func(): ui.open_phone("city500"), S.AMBER))
 	grid.add_child(card("Explore", "Shops, fashion, showrooms, Skyport – %d places" % ExploreUI.places(g).filter(func(p): return not p.get("vacant", false)).size(), Thumbs.place(SkyportIsland.w(Vector3(1720, 3, -40)), 300.0),
 		func(): ui.open_phone("explore")))
 	var spark := EmpireWidgets.Spark.new(e.day_reports.map(func(r): return float(r.get("profit", 0.0))).slice(maxi(e.day_reports.size() - 14, 0)), Vector2(270, 150))

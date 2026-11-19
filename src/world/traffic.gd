@@ -1023,3 +1023,47 @@ func _dirty(id: int) -> void:
 	if mm == null or c_slot[id] >= mm.instance_count:
 		return
 	mm.set_instance_transform(c_slot[id], _motion(id))
+
+
+# ------------------------------------------------------------ yielding
+## Cars braking for something that isn't traffic (the player's car):
+## car id -> true. Cars behind them queue as usual.
+var _held := {}
+
+
+## Called a few times a second with the player's vehicle (or INF): cars
+## among `ids` with it in their lane ahead stop short of it and queue; once
+## it's gone they pull away (as behind a car that moved off).
+func yield_to(p: Vector3, ids: Array) -> void:
+	var still := {}
+	if p.x < INF:
+		for id: int in ids:
+			if id < 0 or id >= c_lane.size():
+				continue
+			var s := car_s(id, now)
+			var pos := lane_point(c_lane[id], s)
+			var dir := lane_dir(c_lane[id], s)
+			dir.y = 0.0
+			if dir.length_squared() < 0.0001:
+				continue
+			dir = dir.normalized()
+			var to := Vector3(p.x - pos.x, 0.0, p.z - pos.z)
+			var ahead := to.dot(dir)
+			if ahead < 1.0 or ahead > 26.0 or (to - dir * ahead).length() > 2.4 or absf(p.y - pos.y) > 3.0:
+				continue
+			still[id] = true
+			var stop := s + ahead - 6.5
+			if not _held.has(id) or c_stop[id] > stop + 0.5:
+				_rebase(id, _at_rest(id), stop)
+				c_ek[id] = EV_FOLLOW
+				c_ev[id] = INF
+				var f := _follower(id)
+				if f >= 0:
+					_queue_behind(f, id)
+	for id in _held.keys():
+		if not still.has(id):
+			_held.erase(id)
+			if id < c_lane.size():
+				_follow(id)
+	for id in still:
+		_held[id] = true

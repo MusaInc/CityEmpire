@@ -32,7 +32,7 @@ static func tab(ui: EmpireUI, v: VBoxContainer) -> void:
 	var big := S.label("#%d" % rk if rk > 0 else "Unranked", 54 if rk > 0 else 40, S.PAPER, "black")
 	cv.add_child(big)
 	var mv := City500.you_move(e)
-	var sub := "of the City500" if rk > 0 else "%s to enter at #500" % EmpireData.money(float(yr["gap_500"]))
+	var sub := "of the City500" if rk > 0 else "%s to enter at #500" % City500.money(float(yr["gap_500"]))
 	if rk > 0 and mv != 0:
 		sub += "  ·  %s %d this week" % ["▲" if mv > 0 else "▼", absi(mv)]
 	cv.add_child(S.label(sub, 15, S.MUTED))
@@ -41,7 +41,7 @@ static func tab(ui: EmpireUI, v: VBoxContainer) -> void:
 	if rk == 1:
 		cv.add_child(S.label("The most valuable company in the city.", 15, S.GREEN, "bold"))
 	elif not ah.is_empty():
-		var nxt := S.label("Next: #%d %s · %s ahead" % [int(ah["rank"]), ah["c"]["name"], EmpireData.money(float(ah["value"]) - float(yr["value"]))], 15, S.PAPER, "bold")
+		var nxt := S.label("Next: #%d %s · %s ahead" % [int(ah["rank"]), ah["c"]["name"], City500.money(float(ah["value"]) - float(yr["value"]))], 15, S.PAPER, "bold")
 		nxt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		cv.add_child(nxt)
 	left.add_child(card)
@@ -49,11 +49,11 @@ static func tab(ui: EmpireUI, v: VBoxContainer) -> void:
 	g.columns = 2
 	g.add_theme_constant_override("h_separation", 22)
 	g.add_theme_constant_override("v_separation", 6)
-	g.add_child(ui._stat("Empire value", EmpireData.money(float(me["value"])), S.GREEN))
-	g.add_child(ui._stat("Profit / year", EmpireData.money(float(me["profit_year"])), S.GREEN if float(me["profit_year"]) >= 0.0 else S.RED))
-	g.add_child(ui._stat("Revenue / year", EmpireData.money(float(me["revenue_year"]))))
-	g.add_child(ui._stat("Assets", EmpireData.money(float(me["assets"]))))
-	g.add_child(ui._stat("Debt", EmpireData.money(float(me["debt"])), S.RED if float(me["debt"]) > 0.0 else S.PAPER))
+	g.add_child(ui._stat("Empire value", City500.money(float(me["value"])), S.GREEN))
+	g.add_child(ui._stat("Profit / year", City500.money(float(me["profit_year"])), S.GREEN if float(me["profit_year"]) >= 0.0 else S.RED))
+	g.add_child(ui._stat("Revenue / year", City500.money(float(me["revenue_year"]))))
+	g.add_child(ui._stat("Assets", City500.money(float(me["assets"]))))
+	g.add_child(ui._stat("Debt", City500.money(float(me["debt"])), S.RED if float(me["debt"]) > 0.0 else S.PAPER))
 	g.add_child(ui._stat("Reputation", "★ %d" % int(me["reputation"]), S.AMBER))
 	left.add_child(g)
 	var how := S.label("Valued like every company here: what you own at book value, less debt, plus %.1f years of your trading profit (last 7 days). Moving cash around adds nothing – profit does." % City500.EARN_MULTIPLE, 13, S.MUTED)
@@ -172,7 +172,7 @@ static func _row(ui: EmpireUI, r: Dictionary) -> Control:
 		h.add_child(_cell(String(c["name"]), 0, 17, S.PAPER, "bold", true))
 		var sc := _cell(City500.sector_name(c["sector"]), 150, 13, City500.sector_colour(c["sector"]), "bold")
 		h.add_child(sc)
-	h.add_child(_cell(EmpireData.money(float(r["value"])), 140, 16, S.PAPER, "bold"))
+	h.add_child(_cell(City500.money(float(r["value"])), 140, 16, S.PAPER, "bold"))
 	b.pressed.connect(func():
 		if Time.get_ticks_msec() < S.tap_block_until:
 			return
@@ -272,8 +272,8 @@ static func profile(ui: EmpireUI, c: Dictionary) -> void:
 	for kv in [["Value", "value", "value"], ["Revenue / yr", "revenue", "revenue_year"], ["Profit / yr", "profit", "profit_year"],
 			["Assets", "assets", "assets"], ["Debt", "debt", "debt"]]:
 		t.add_child(S.label(String(kv[0]), 15, S.MUTED))
-		t.add_child(S.label(EmpireData.money(float(p[kv[1]])), 16, S.PAPER, "bold"))
-		t.add_child(S.label(EmpireData.money(float(me[kv[2]])), 16, S.AMBER, "bold"))
+		t.add_child(S.label(City500.money(float(p[kv[1]])), 16, S.PAPER, "bold"))
+		t.add_child(S.label(City500.money(float(me[kv[2]])), 16, S.AMBER, "bold"))
 	t.add_child(S.label("Staff", 15, S.MUTED))
 	t.add_child(S.label(_n(int(p["staff"])), 16, S.PAPER, "bold"))
 	t.add_child(S.label(_n(int(me["staff"])), 16, S.AMBER, "bold"))
@@ -284,7 +284,7 @@ static func profile(ui: EmpireUI, c: Dictionary) -> void:
 	v.add_child(h)
 	var ahead := float(p["value"]) > float(me["value"])
 	var why := S.label(("Why it's ahead: " + City500.why_ahead(e, c)) if ahead else
-		"You're worth %s more than %s." % [EmpireData.money(float(me["value"]) - float(p["value"])), c["name"]], 16, S.PAPER if ahead else S.GREEN, "bold")
+		"You're worth %s more than %s." % [City500.money(float(me["value"]) - float(p["value"])), c["name"]], 16, S.PAPER if ahead else S.GREEN, "bold")
 	why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	why.custom_minimum_size.x = 840
 	v.add_child(why)
@@ -292,7 +292,7 @@ static func profile(ui: EmpireUI, c: Dictionary) -> void:
 		var gap := float(p["value"]) - float(me["value"])
 		var days := gap / maxf(float(me["profit_day"]) * 365.0 * City500.EARN_MULTIPLE / 30.0 + float(me["profit_day"]), 1.0)
 		var tip := S.label("To pass it: every extra £1 of daily profit adds about %s to your value. %s" % [
-			EmpireData.money(365.0 * City500.EARN_MULTIPLE), ("At today's pace that's roughly %d days of growth." % int(days)) if float(me["profit_day"]) > 0.0 and days < 3650 else "Get a shop trading at a profit first."], 14, S.MUTED)
+			City500.money(365.0 * City500.EARN_MULTIPLE), ("At today's pace that's roughly %d days of growth." % int(days)) if float(me["profit_day"]) > 0.0 and days < 3650 else "Get a shop trading at a profit first."], 14, S.MUTED)
 		tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		tip.custom_minimum_size.x = 840
 		v.add_child(tip)

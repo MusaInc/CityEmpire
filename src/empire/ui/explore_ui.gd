@@ -151,7 +151,7 @@ static func tab(ui: EmpireUI, v: VBoxContainer) -> void:
 	var gps_ref: Dictionary = e.flags.get("gps_ref", {})
 	for p in list:
 		col.add_child(_row(ui, p, here, seen.has(p["key"]), gps_ref == p["ref"]))
-	v.add_child(ui._scroll(col, 400))
+	v.add_child(ui._scroll(col, 370))
 
 
 static func _row(ui: EmpireUI, p: Dictionary, here: Vector3, known: bool, routed: bool) -> Control:
@@ -179,6 +179,8 @@ static func _row(ui: EmpireUI, p: Dictionary, here: Vector3, known: bool, routed
 	var nm := S.label(String(p["name"]), 18, S.PAPER, "bold")
 	nm.clip_text = true
 	nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nm.custom_minimum_size.x = 200
 	nh.add_child(nm)
 	if not known and not p.get("vacant", false) and p["cat"] != "yours":
 		nh.add_child(S.chip("NEW", S.AMBER))

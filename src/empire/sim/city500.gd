@@ -421,6 +421,19 @@ static func why_ahead(e: Empire, c: Dictionary) -> String:
 	return "It has " + ", ".join(parts.slice(0, 3)) + "."
 
 
+## Big money, compact: £3.36bn, £412m, £239k.
+static func money(x: float) -> String:
+	var a := absf(x)
+	var sg := "-" if x < 0.0 else ""
+	if a >= 1.0e9:
+		return "%s£%.2fbn" % [sg, a / 1.0e9]
+	if a >= 1.0e6:
+		return "%s£%.1fm" % [sg, a / 1.0e6]
+	if a >= 1.0e4:
+		return "%s£%dk" % [sg, int(a / 1000.0)]
+	return EmpireData.money(x)
+
+
 static func _x(a: float, b: float) -> String:
 	var r := a / b
 	if r >= 1000.0:
