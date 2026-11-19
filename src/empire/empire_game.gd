@@ -43,6 +43,7 @@ var empire: Empire
 var ui: EmpireUI
 var gps: Gps
 var traffic_bodies: TrafficBodies
+var car_audio: CarAudio
 var units: Array = []
 var unit_by_id := {}
 var interiors := {}      # unit id -> ShopInterior
@@ -193,6 +194,16 @@ func _ready() -> void:
 	add_child(gps)
 	gps.setup(self)
 	safe = SafeGround.new(layout, world, func(): return gps.net if gps.ready_net() else null)
+	# Real lamp light near the camera (the draped pools carry the far streets).
+	var ll := LampLights.new()
+	ll.name = "LampLights"
+	add_child(ll)
+	ll.setup([world, world.mainland], func() -> Vector3:
+		var c := get_viewport().get_camera_3d()
+		return c.global_position if c else player.global_position)
+	car_audio = CarAudio.new()
+	car_audio.name = "CarAudio"
+	add_child(car_audio)
 	# Solid traffic near you (the drawn cars have no bodies of their own).
 	traffic_bodies = TrafficBodies.new()
 	traffic_bodies.name = "TrafficBodies"
@@ -1343,6 +1354,8 @@ func spot_prompt() -> Array:
 			if not rv.is_empty():
 				return ["%s · BUY OUT %s" % [String(CityLife.rival_cfg().get("name", "QuikSave")).to_upper(), EmpireData.money(CityLife.rival_price(rv))], true]
 			var fm := CityLife.firm_at(empire, u["id"])
+			if not fm.is_empty() and String(fm.get("type", "")) == "clothing":
+				return ["%s · SHOP CLOTHES" % String(fm["name"]).to_upper(), true]
 			if not fm.is_empty():
 				return ["%s · %s %s" % [String(fm["name"]).to_upper(), "FOR SALE" if fm.get("for_sale", false) else "MAKE AN OFFER",
 					EmpireData.money(CityLife.firm_price(fm))], true]
@@ -1748,6 +1761,7 @@ func enter_vehicle(vid: String) -> void:
 	if c.visual:
 		c.visual.enable_headlights(false)
 	Sfx.play("click", -6.0)
+	car_audio.set_car(c, EmpireData.vehicle_model(String(empire.vehicle(vid).get("model", ""))))
 
 
 func exit_vehicle() -> void:
@@ -1770,6 +1784,7 @@ func exit_vehicle() -> void:
 	c.handbrake = true
 	c.occupied = false
 	driving = ""
+	car_audio.set_car(null)
 	player.process_mode = Node.PROCESS_MODE_INHERIT
 	player.visible = true
 	player.collision_layer = 1 << 2

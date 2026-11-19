@@ -1748,6 +1748,11 @@ func _pool_arrays(key: Vector2i) -> Variant:
 		# or ramp (ground_y doesn't know decks): its pool lies on the deck's
 		# plane, the post's foot, instead of on the ground beneath.
 		var on_deck := xf.origin.y - layout.ground_y(xf.origin.x, xf.origin.z) > 0.5
+		if on_deck:
+			# A flat sheet at the post's foot overhangs the deck's edges and
+			# slopes (light floating over the water). Bridge and ramp lamps are
+			# lit by real lights near you (LampLights) and their halo beyond.
+			continue
 		for j in POOL_NZ + 1:
 			for i in POOL_NX + 1:
 				var u := float(i) / POOL_NX

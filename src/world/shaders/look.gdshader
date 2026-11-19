@@ -12,6 +12,9 @@ render_mode unshaded, cull_disabled, depth_test_disabled, depth_draw_never, skip
 
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear, repeat_disable;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest, repeat_disable;
+// (Mipmapped copy for the lens effects: broad glare in one lookup.)
+uniform sampler2D screen_mip : hint_screen_texture, filter_linear_mipmap, repeat_disable;
+global uniform float night;
 
 uniform int style = 1;
 uniform vec3 ink : source_color = vec3(0.07, 0.06, 0.12);
@@ -38,6 +41,11 @@ uniform float speed_lines = 1.0;
 uniform float smooth_amount = 1.0;   // Crisp: blend of the smoothed image over the original
 uniform float ink_amount = 1.0;      // outline opacity scale
 uniform float ink_shade = 0.0;       // 0 = flat ink colour, 1 = darkened scene colour
+// Lens: anamorphic streaks, starburst spikes, glare halo and a faint
+// directional ghost, from bright pixels only (lamps, headlights, glints).
+uniform float lens = 0.0;
+uniform float lens_threshold = 1.15;  // linear HDR: what counts as a light
+uniform vec3 streak_tint : source_color = vec3(0.55, 0.72, 1.0);
 
 void vertex() {
 	POSITION = vec4(VERTEX.xy, 1.0, 1.0);
@@ -57,6 +65,40 @@ float lin_depth(sampler2D dtex, vec2 uv, mat4 inv_proj) {
 }
 
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+vec3 bright(vec3 c, float th) {
+	float l = dot(c, vec3(0.299, 0.587, 0.114));
+	return c * (max(l - th, 0.0) / max(l, 0.001));
+}
+
+// Light added by the lens around uv (linear HDR in, linear out).
+vec3 lens_light(sampler2D stex, vec2 uv, vec2 px, float th, vec3 tint, float t_night) {
+	vec3 acc = vec3(0.0);
+	float aspect = px.y / px.x;
+	// Anamorphic streak: a long horizontal smear of the lights (lod 2 taps).
+	for (int i = 1; i <= 6; i++) {
+		float d = float(i) * float(i) * 0.0045;
+		float w = exp(-float(i) * 0.55);
+		acc += (bright(textureLod(stex, uv + vec2(d, 0.0), 2.0).rgb, th)
+			+ bright(textureLod(stex, uv - vec2(d, 0.0), 2.0).rgb, th)) * w * tint * 0.34;
+	}
+	// Starburst: six thin spikes (aperture blades), short.
+	for (int k = 0; k < 3; k++) {
+		float a = float(k) * 1.0472 + 0.35;
+		vec2 dir = vec2(cos(a), sin(a) * aspect) * 0.006;
+		for (int i = 1; i <= 3; i++) {
+			float w = 0.16 / float(i * i);
+			acc += (bright(textureLod(stex, uv + dir * float(i), 0.0).rgb, th)
+				+ bright(textureLod(stex, uv - dir * float(i), 0.0).rgb, th)) * w;
+		}
+	}
+	// Glare: a soft halo (one blurred lookup) and a ghost on the far side
+	// of the frame centre (the classic flare reflection), faint.
+	acc += bright(textureLod(stex, uv, 5.0).rgb, th * 0.7) * 0.9;
+	vec2 ghost = vec2(1.0) - uv;
+	acc += bright(textureLod(stex, mix(uv, ghost, 0.6), 4.0).rgb, th) * vec3(0.5, 0.8, 1.0) * 0.12 * t_night;
+	return acc;
+}
 
 vec3 saturate_col(vec3 c, float s) {
 	float l = luma(c);
@@ -139,6 +181,14 @@ void fragment() {
 		col = kuwahara(screen_tex, uv, px * max(res.y / 720.0, 1.0));
 	} else if (style == 4 && smooth_amount > 0.0) {
 		col = mix(col, kuwahara_small(screen_tex, uv, px), smooth_amount);
+	}
+	if (lens > 0.0) {
+		// Brighter-than-paper light blooms through the lens; at night lamps
+		// and headlights do, by day only real glints (higher threshold).
+		float th = mix(lens_threshold * 2.2, lens_threshold, night);
+		col += lens_light(screen_mip, uv, px, th, streak_tint, night) * lens * mix(0.5, 1.0, night);
+		// Directional blur: the faintest astigmatic double image of lights.
+		col += bright(textureLod(screen_mip, uv + vec2(0.0035, 0.0018), 1.0).rgb, th) * 0.18 * lens;
 	}
 
 	// ---- outlines

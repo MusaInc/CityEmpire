@@ -617,11 +617,11 @@ func show_title(has_save: bool) -> void:
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_title_root.add_child(shade)
 	var v := S.vbox(12)
-	v.position = Vector2(84, 128)
+	v.position = Vector2(84, 96)
 	_title_root.add_child(v)
-	var mark := S.label("M U S A   S T U D I O S   P R E S E N T S", 14, S.GOLD, "bold")
+	var mark := S.label("M U S A   S T U D I O S", 14, S.GOLD, "bold")
 	v.add_child(mark)
-	var t := S.label("CITY EMPIRE", 92, S.PAPER, "black")
+	var t := S.label("WORLDSTATE", 96, S.PAPER, "black")
 	t.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.45))
 	t.add_theme_constant_override("shadow_offset_y", 4)
 	t.add_theme_constant_override("shadow_offset_x", 0)
@@ -631,22 +631,49 @@ func show_title(has_save: bool) -> void:
 	rule.color = S.GOLD
 	rule.custom_minimum_size = Vector2(120, 3)
 	v.add_child(rule)
-	v.add_child(S.label("Start as the worker. Become the owner. Build the empire.", 22, Color(S.PAPER, 0.82)))
+	v.add_child(S.label("Start with nothing. Build a business empire. Climb the City500.", 22, Color(S.PAPER, 0.85)))
 	var foot := S.label("v%s  ·  a Musa Studios game" % String(ProjectSettings.get_setting("application/config/version", "")), 14, Color(S.MUTED, 0.8))
 	_anchor(foot, 0.0, 1.0, Vector2(84, -48), Vector2(500, 24))
 	_title_root.add_child(foot)
 	var gap := Control.new()
-	gap.custom_minimum_size.y = 24
+	gap.custom_minimum_size.y = 18
 	v.add_child(gap)
-	if has_save:
-		var b := S.button("CONTINUE", func(): game.continue_game(), true, 360)
-		v.add_child(b)
+	var e := game.empire
+	if has_save and e:
+		# What you're continuing: day, money and your City500 standing.
+		var yr := City500.your_rank(e)
+		var cc := PanelContainer.new()
+		var csb := StyleBoxFlat.new()
+		csb.bg_color = Color(0.02, 0.04, 0.06, 0.55)
+		csb.border_color = Color(S.GOLD, 0.35)
+		csb.set_border_width_all(1)
+		csb.set_corner_radius_all(14)
+		for m in ["left", "right", "top", "bottom"]:
+			csb.set("content_margin_" + m, 14)
+		cc.add_theme_stylebox_override("panel", csb)
+		cc.custom_minimum_size.x = 380
+		var cv := S.vbox(2)
+		cc.add_child(cv)
+		var nm := String(e.brand.get("name", ""))
+		cv.add_child(S.label((nm if nm != "" else "Your empire").to_upper() + "  ·  DAY %d" % e.day, 13, S.GOLD, "black"))
+		cv.add_child(S.label("%s net worth  ·  %s" % [EmpireData.money(e.net_worth()),
+			("City500 #%d" % int(yr["rank"])) if int(yr["rank"]) > 0 else "outside the City500"], 17, S.PAPER, "bold"))
+		cv.add_child(S.label("%d business%s · %d vehicle%s" % [e.businesses.size(), "" if e.businesses.size() == 1 else "es",
+			e.vehicles.size(), "" if e.vehicles.size() == 1 else "s"], 14, S.MUTED))
+		v.add_child(cc)
+		v.add_child(S.button("CONTINUE", func(): game.continue_game(), true, 380))
 	v.add_child(S.button("NEW GAME", func():
 		if has_save:
 			_confirm_new()
 		else:
-			game.start_new(), not has_save, 360))
-	v.add_child(S.button("SETTINGS", func(): _settings_panel(), false, 360))
+			game.start_new(), not has_save, 380))
+	var row := S.hbox(10)
+	if has_save:
+		row.add_child(S.button("CHARACTER", func():
+			game.continue_game()
+			open_style(), false, 185))
+	row.add_child(S.button("SETTINGS", func(): _settings_panel(), false, 185 if has_save else 380))
+	v.add_child(row)
 
 
 func _confirm_new() -> void:
@@ -1439,13 +1466,18 @@ func _m_reports(v: VBoxContainer, b: Business) -> void:
 
 
 # ---------------------------------------------------------------- phone
-const PHONE_TABS := [["home", "Home"], ["map", "Map"], ["businesses", "Businesses"], ["vehicles", "Garage"], ["more", "More"]]
+const PHONE_TABS := [["explore", "Explore"], ["home", "Empire"], ["city500", "City500"], ["you", "Character"], ["map", "Map"], ["more", "More"]]
 ## Under More (the nav highlights More; a back button returns to it).
-const MORE_TABS := [["property", "Property", "Shops to let, businesses for sale, buildings to invest in"],
+const MORE_TABS := [["businesses", "Businesses", "Every shop, office and the club: stock, staff and money"],
+	["vehicles", "Garage", "Cars, aircraft and boats you own"],
+	["property", "Property", "Shops to let, businesses for sale, buildings to invest in"],
 	["bank", "Finances", "Accounts, profit, loans and the ledger"], ["company", "Corporate", "Brand, head office, offices, the club"],
 	["style", "Wardrobe", "Your character and the clothes you own"], ["city", "City", "Weather, rivals, news and the market"],
 	["goals", "Goals", "Your career, chapter by chapter"], ["game", "Game", "Save, speed, sleep and settings"]]
 const PHONE_SUB := {"home": "Your empire at a glance: what needs you, and where to go next",
+	"explore": "Places in the city, nearest first · tap Go to set your route",
+	"city500": "The 500 most valuable companies in the city – and where you stand",
+	"you": "Your look, your wardrobe and where to shop",
 	"businesses": "Every shop, office and the club: status, stock, staff and money",
 	"company": "Brand, head office, office companies, the football club and marketing",
 	"city": "Weather, rivals and the news", "map": "Tap a place for its card · tap a street for a waypoint",
@@ -1628,6 +1660,12 @@ func open_phone(tab := "home", focus := {}) -> void:
 	match tab:
 		"home":
 			Dashboard.home(self, v)
+		"explore":
+			ExploreUI.tab(self, v)
+		"city500":
+			City500UI.tab(self, v)
+		"you":
+			_you_tab(v)
 		"businesses":
 			_portfolio_tab(v)
 		"more":
@@ -1733,13 +1771,14 @@ func open_phone(tab := "home", focus := {}) -> void:
 				game.sleep_until(7.0), false, 200))
 			v.add_child(h3)
 			v.add_child(S.button("Settings", func(): _settings_panel(), false, 200))
-			# TestFlight builds: money to try things out with (remove for release).
-			v.add_child(S.button("TESTER · add £1,000,000", func():
-				e.personal_cash += 1000000.0
-				e._book("personal", 1000000.0, "other", "Tester money")
-				e.changed.emit()
-				toast("£1,000,000 added to your personal account", "good")
-				open_phone("game"), false, 340))
+			# TestFlight builds only (pre-1.0): money to try things out with.
+			if String(ProjectSettings.get_setting("application/config/version", "1")).begins_with("0."):
+				v.add_child(S.button("Beta tester · add £1,000,000", func():
+					e.personal_cash += 1000000.0
+					e._book("personal", 1000000.0, "other", "Tester money")
+					e.changed.emit()
+					toast("£1,000,000 added to your personal account", "good")
+					open_phone("game"), false, 340))
 			v.add_child(S.button("Save & quit to title", func():
 				game.save_game()
 				close_panel(true)
@@ -2051,7 +2090,7 @@ func open_style(first := false) -> void:
 	_panel.add_child(v)
 	var head := S.hbox(10)
 	var shop := style_shop
-	head.add_child(S.label("Make your character" if first else (String(Wardrobe.STORES[shop]["name"]) if shop != "" else "Your wardrobe"), 28, S.PAPER, "black"))
+	head.add_child(S.label("Make your character" if first else ((Wardrobe.boutique_name if shop == "clothes_boutique" else String(Wardrobe.STORES[shop]["name"])) if shop != "" else "Your wardrobe"), 28, S.PAPER, "black"))
 	head.add_child(S.spacer())
 	if not first:
 		head.add_child(S.button("✕", _close_style, false, 52))
@@ -2072,7 +2111,8 @@ func open_style(first := false) -> void:
 	var body := S.vbox(10)
 	match _style_tab:
 		"you":
-			_style_choices(body, "BODY", HeroLook.BODIES, l, "body", 2)
+			if HeroLook.BODY_B_ENABLED:
+				_style_choices(body, "BODY", HeroLook.BODIES, l, "body", 2)
 			_style_choices(body, "FACE", HeroLook.faces_for(String(l.get("body", "a"))), l, "face", 3)
 			var fc := HeroLook.face_colors(l["face"])
 			_style_colours(body, "SKIN", HeroLook.SKIN, l, "skin", fc["skin"])
@@ -2111,7 +2151,7 @@ func open_style(first := false) -> void:
 		var rng := RandomNumberGenerator.new()
 		rng.randomize()
 		var r := {}
-		r["body"] = String(HeroLook.BODIES[rng.randi() % HeroLook.BODIES.size()][0])
+		r["body"] = String(HeroLook.BODIES[rng.randi() % HeroLook.BODIES.size()][0]) if HeroLook.BODY_B_ENABLED else "a"
 		for pair in [["face", HeroLook.faces_for(r["body"])], ["hair", HeroLook.HAIRS], ["top", HeroLook.TOPS], ["shoes", HeroLook.SHOES]]:
 			var lst: Array = pair[1]
 			r[pair[0]] = lst[rng.randi() % lst.size()][0]
@@ -2548,6 +2588,11 @@ func open_firm(u: Dictionary, remote := false) -> void:
 	v.add_child(S.label("Price %s%s  ·  you have %s + company %s" % [EmpireData.money(price), (" + %s broker" % EmpireData.money(fee)) if remote else "",
 		EmpireData.money(e.personal_cash), EmpireData.money(e.company_cash)], 18, S.AMBER, "bold"))
 	var h := S.hbox(12)
+	if String(f.get("type", "")) == "clothing" and not remote:
+		h.add_child(S.button("SHOP CLOTHES", func():
+			Wardrobe.boutique_name = String(f["name"])
+			close_panel(false)
+			open_store("clothes_boutique"), true, 220))
 	var buy := S.button("BUY THE BUSINESS · %s" % EmpireData.money(price + fee), func():
 		var err := game.buy_firm(u, fee)
 		if err != "":
@@ -3191,3 +3236,55 @@ func open_ref(ref: Dictionary) -> void:
 			find_vehicle(String(ref.get("id", "")))
 		"tab":
 			open_phone(String(ref.get("id", "home")))
+
+
+# ------------------------------------------------------------ character
+## Character: your look and wardrobe, and the clothes shops to buy more in
+## (nearest first, one tap for the route).
+func _you_tab(v: VBoxContainer) -> void:
+	var e := game.empire
+	var g := game
+	var h := S.hbox(18)
+	h.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(h)
+	var left := S.vbox(10)
+	left.custom_minimum_size.x = 380
+	h.add_child(left)
+	var c := _card(380)
+	var cv: VBoxContainer = c[1]
+	var look := HeroLook.current(e.flags)
+	var owned := Wardrobe.owned(e.flags)
+	cv.add_child(S.label("YOUR LOOK", 13, S.AMBER, "black"))
+	var parts: Array = []
+	for k in ["top", "shoes", "head", "eyewear"]:
+		var it := String(look.get(k, ""))
+		if it != "" and not it in Wardrobe.FREE:
+			parts.append(it.get_slice("_", 1).capitalize())
+	var wl := S.label(" · ".join(parts) if not parts.is_empty() else "Everyday clothes", 20, S.PAPER, "bold")
+	wl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	wl.custom_minimum_size.x = 340
+	cv.add_child(wl)
+	var paid := 0
+	for it in owned:
+		paid += Wardrobe.price(String(it))
+	cv.add_child(S.label("%d items in your wardrobe · %s of clothes · %d saved outfit%s" % [owned.size(), EmpireData.money(float(paid)),
+		(e.flags.get("outfits", []) as Array).size(), "" if (e.flags.get("outfits", []) as Array).size() == 1 else "s"], 14, S.MUTED))
+	cv.add_child(S.button("Wardrobe · change outfit", func(): open_style(), true, 340))
+	left.add_child(c[0])
+	var tip := S.label("Clothes are bought in shops: walk in, try anything on and pay for what you keep. Your wardrobe keeps everything you own.", 14, S.MUTED)
+	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip.custom_minimum_size.x = 370
+	left.add_child(tip)
+	var right := S.vbox(8)
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(right)
+	right.add_child(S.label("CLOTHES SHOPS", 13, S.AMBER, "black"))
+	var here := g.vehicle_node().global_position if g.vehicle_node() else g.player.global_position
+	var shops: Array = ExploreUI.places(g).filter(func(p): return p["cat"] == "fashion")
+	shops.sort_custom(func(a, b): return here.distance_squared_to(a["pos"]) < here.distance_squared_to(b["pos"]))
+	var seen: Dictionary = e.flags.get("seen", {})
+	var gr: Dictionary = e.flags.get("gps_ref", {})
+	var col := S.vbox(6)
+	for p in shops.slice(0, 12):
+		col.add_child(ExploreUI._row(self, p, here, seen.has(p["key"]), gr == p["ref"]))
+	right.add_child(_scroll(col, 400))

@@ -83,10 +83,17 @@ void vertex() {
 		v.x -= (rel.x >= 0.0 ? 1.0 : -1.0) * k * 1.1 * walking;
 	}
 	// Fade in/out at the segment ends so the wrap isn't a pop.
-	float s = walking > 0.5 ? smoothstep(0.0, 1.5, d) * smoothstep(len, len - 1.5, d) : 1.0;
+	// Only far off (a few pixels) or off screen: near and in view a walker
+	// shrinking away was plainly visible.
+	vec4 clip = PROJECTION_MATRIX * VIEW_MATRIX * vec4(wp + vec3(0.0, 1.0, 0.0), 1.0);
+	float onscreen = (clip.w > 0.0 && abs(clip.x / clip.w) < 1.2 && abs(clip.y / clip.w) < 1.2) ? 1.0 : 0.0;
+	float far_k = smoothstep(110.0, 140.0, length(CAMERA_POSITION_WORLD - wp));
+	float endk = smoothstep(0.0, 1.5, d) * smoothstep(len, len - 1.5, d);
+	float s = walking > 0.5 ? mix(1.0, endk, max(1.0 - onscreen, far_k)) : 1.0;
 	// Near the hero the CPU crowd (City Empire's Crowd) takes over the
 	// pavements: these walkers only carry the streets beyond it.
-	s *= smoothstep(crowd_radius - 6.0, crowd_radius + 4.0, length((player_pos - wp).xz));
+	// (A hard cut, out where people are specks: no shrinking.)
+	s *= step(crowd_radius, length((player_pos - wp).xz));
 	v *= s;
 	v.z -= d;
 	v.y += (gy + INSTANCE_CUSTOM.w * d) / length(MODEL_MATRIX[1].xyz);  // (instances are scaled)

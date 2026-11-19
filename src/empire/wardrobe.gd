@@ -20,7 +20,13 @@ const STORES := {
 		"shoes_classic", "shoes_blackout", "shoes_gum", "head_cap", "head_beanie"]},
 	"clothes_premium": {"name": "Maison Arden", "items": ["top_shirt", "top_blazer", "shoes_royal", "shoes_volt", "shoes_gold",
 		"head_phones", "face_shades"]},
+	# The city's independent boutiques (CityLife firms of type "clothing"):
+	# a mid-range edit of both; the name is the boutique's (boutique_name).
+	"clothes_boutique": {"name": "Boutique", "items": ["top_tee", "top_polo", "top_jumper", "top_long", "top_shirt",
+		"shoes_classic", "shoes_gum", "shoes_royal", "head_cap", "head_beanie", "face_shades"]},
 }
+## The boutique you're in (its name on receipts and the store screen).
+static var boutique_name := "Boutique"
 ## What everyone owns: the defaults, and "nothing" for hats / eyewear.
 const FREE := ["head_bare", "face_none"]
 
@@ -57,7 +63,7 @@ static func buy(e: Empire, items: Array, store: String) -> String:
 		total += price(String(it))
 	if total <= 0:
 		return ""
-	if not e.pay(float(total), "clothes", "%s: %d item%s" % [String(STORES.get(store, {}).get("name", "Clothes")), items.size(), "" if items.size() == 1 else "s"]):
+	if not e.pay(float(total), "clothes", "%s: %d item%s" % [boutique_name if store == "clothes_boutique" else String(STORES.get(store, {}).get("name", "Clothes")), items.size(), "" if items.size() == 1 else "s"]):
 		return "Not enough money (%s)" % EmpireData.money(float(total))
 	var o := owned(e.flags)
 	for it in items:

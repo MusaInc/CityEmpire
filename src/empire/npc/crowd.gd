@@ -16,9 +16,10 @@ extends Node3D
 ##    shop door (anyone else's shop) and go in.
 ## One MultiMesh per body type, rebuilt each frame from the people's state.
 
-const NEAR := 62.0
-const KEEP := 74.0
-const SPACING := 16.0         # one person per this many metres of pavement
+const NEAR := 92.0           # (was 62: the hand-over to the GPU walkers happened in plain view)
+const KEEP := 104.0
+const DROP := 150.0           # past this anyone goes, seen or not (a few pixels tall)
+const SPACING := 18.0         # one person per this many metres of pavement
 const LANES := [1.7, 3.0]     # m in from the block edge (as CityWorld)
 const MODEL := "res://assets/models/crowd.glb"
 const TOPS := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.12, 0.12), Color(0.16, 0.28, 0.5),
@@ -252,7 +253,7 @@ func _populate(focus: Vector3) -> void:
 		var s2: float = float(w[1]) + _rng.randf_range(-4.0, 4.0)
 		var sp2: Array = _sample(_loops[w[0]], s2)
 		var p := Vector3(sp2[0].x, focus.y, sp2[0].y)
-		if not _first and not _unseen(p, 48.0):
+		if not _first and not _unseen(p, 70.0):
 			continue
 		var clear := true
 		for q in _people:
@@ -282,7 +283,9 @@ func _process(dt: float) -> void:
 		var p: Vector3 = pr["pos"]
 		if pr["state"] == "gone":
 			continue
-		if Vector2(p.x, p.z).distance_to(Vector2(focus.x, focus.z)) > KEEP:
+		# Out of range: they leave only off camera (or once they're specks).
+		var dd := Vector2(p.x, p.z).distance_to(Vector2(focus.x, focus.z))
+		if dd > DROP or dd > KEEP and _unseen(p, 70.0):
 			continue
 		keep.append(pr)
 	_people = keep

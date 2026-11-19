@@ -15,7 +15,7 @@ extends RefCounted
 ## real: a single loss-making day is "watch", three in a row is a problem.
 
 const S = preload("res://src/empire/ui/empire_style.gd")
-const NAV := [["home", "Home"], ["map", "Map"], ["businesses", "Businesses"], ["vehicles", "Garage"], ["more", "More"]]
+const NAV := EmpireUI.PHONE_TABS
 
 
 # ---------------------------------------------------------------- nav
@@ -29,7 +29,7 @@ static func nav(ui: EmpireUI, tab: String, in_more: bool) -> HBoxContainer:
 				return
 			Sfx.play("click", -12.0)
 			ui.open_phone(key))
-		b.custom_minimum_size = Vector2(120, 44)
+		b.custom_minimum_size = Vector2(112, 46)
 		b.add_theme_font_size_override("font_size", 17)
 		h.add_child(b)
 	return h
@@ -134,7 +134,7 @@ static var card_w := 290.0
 static func card(title: String, sub: String, pic: Control, cb: Callable, accent := S.AMBER) -> Button:
 	var b := Button.new()
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(card_w, 236)
+	b.custom_minimum_size = Vector2(card_w, 206)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(1, 1, 1, 0.05)
 	sb.set_corner_radius_all(18)
@@ -161,9 +161,9 @@ static func card(title: String, sub: String, pic: Control, cb: Callable, accent 
 	fsb.set_corner_radius_all(12)
 	frame.add_theme_stylebox_override("panel", fsb)
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	frame.custom_minimum_size = Vector2(card_w - 20.0, 150)
+	frame.custom_minimum_size = Vector2(card_w - 20.0, 124)
 	if pic:
-		pic.custom_minimum_size = Vector2(card_w - 20.0, 150)
+		pic.custom_minimum_size = Vector2(card_w - 20.0, 124)
 		frame.add_child(pic)
 	v.add_child(frame)
 	var t := S.label(title, 19, S.PAPER, "black")
@@ -229,17 +229,27 @@ static func home(ui: EmpireUI, v: VBoxContainer) -> void:
 	var es: Dictionary = e.flags.get("estates", {})
 	grid.add_child(card("Property", ("%d building%s you own" % [es.size(), "" if es.size() == 1 else "s"]) if not es.is_empty() else "Flats, offices, a hotel – invest",
 		Thumbs.place(SkyportIsland.w(Vector3(1700, 3, -220)), 260.0), func(): ui.open_phone("property")))
-	var air := g.skyport_play.site("aviation") if g.skyport_play else {}
-	grid.add_child(card("Skyport Airport", "Aircraft, imports, the marina", Thumbs.place(SkyportIsland.w(Vector3(1940, 3, 330)), 420.0),
-		func():
-			if not air.is_empty():
-				g.set_gps(air["door"], "Skyport Aviation", {"kind": "place", "id": "aviation"})
-			ui.open_phone("map"), S.BLUE))
-	grid.add_child(card("Explore", "Showrooms, fashion, the marina, the airport", Thumbs.place(SkyportIsland.w(Vector3(1720, 3, -40)), 300.0),
-		func(): _explore(ui)))
+	# City500: where you stand.
+	var yr := City500.your_rank(e)
+	var rk := int(yr["rank"])
+	var pic := VBoxContainer.new()
+	pic.alignment = BoxContainer.ALIGNMENT_CENTER
+	pic.custom_minimum_size = Vector2(card_w - 20, 120)
+	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var big := S.label("#%d" % rk if rk > 0 else "—", 58, S.AMBER, "black")
+	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	big.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pic.add_child(big)
+	var cap := S.label("CITY500 RANK" if rk > 0 else "%s TO ENTER" % EmpireData.money(float(yr["gap_500"])).to_upper(), 13, S.MUTED, "black")
+	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pic.add_child(cap)
+	grid.add_child(card("City500", "Empire value %s" % EmpireData.money(float(yr["value"])), pic, func(): ui.open_phone("city500"), S.AMBER))
+	grid.add_child(card("Explore", "Shops, fashion, showrooms, Skyport – %d places" % ExploreUI.places(g).filter(func(p): return not p.get("vacant", false)).size(), Thumbs.place(SkyportIsland.w(Vector3(1720, 3, -40)), 300.0),
+		func(): ui.open_phone("explore")))
 	var spark := EmpireWidgets.Spark.new(e.day_reports.map(func(r): return float(r.get("profit", 0.0))).slice(maxi(e.day_reports.size() - 14, 0)), Vector2(270, 150))
 	grid.add_child(card("Your empire", "Net worth %s" % EmpireData.money(e.net_worth()), spark, func(): ui.open_phone("bank"), S.GREEN))
-	v.add_child(ui._scroll(grid, 520))
+	v.add_child(ui._scroll(grid, 430))
 
 
 ## Places you might want to go: one tap sets the route.
