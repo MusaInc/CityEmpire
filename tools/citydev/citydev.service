@@ -1,0 +1,21 @@
+[Unit]
+Description=City Empire visual-dev session (one Godot; free camera + screenshots over HTTP on 127.0.0.1:8190)
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+WorkingDirectory=%h/workspace/projects/CityEmpire
+# llvmpipe (CPU Vulkan): leave cores for the other services.
+Environment=LP_NUM_THREADS=6
+ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 960x540x24 -nolisten tcp" /home/abdul/.local/bin/godot --rendering-method mobile --resolution 960x540 res://scenes/main.tscn -- --play --new --hour=13 --at=200,585 --geo --devserver=8190 --devshots=%h/workspace/projects/CityEmpire/screenshots/dev
+# Crash -> back up in 5 s; an idle quit (exit 0) stays down until `citydev up`.
+Restart=on-failure
+RestartSec=5
+Nice=5
+CPUWeight=60
+MemoryMax=5G
+KillMode=control-group
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,40 @@
+#!/bin/bash
+# citydev - the persistent City Empire visual-dev session (systemd --user citydev.service).
+#   citydev up | down | restart | status | log
+#   citydev shot <name> [query]      e.g. citydev shot bridge "look&v=-162,4,980,-125,2,935"
+#   citydev cam  <query>             e.g. citydev cam "x=200&z=585&agl=40&pitch=-30"
+#   citydev look x,y,z,lx,ly,lz      (world m; y above the ground)
+#   citydev goto x z [agl]
+#   citydev state | url | bench
+# Only ever one Godot game: `up` refuses while another capture godot runs.
+set -uo pipefail
+PORT=8190
+B="http://127.0.0.1:$PORT"
+OUT=${CITYDEV_SHOTS:-$HOME/workspace/projects/CityEmpire/screenshots/dev}
+wait_up() { for i in $(seq 1 ${1:-180}); do curl -sf -m 2 "$B/state" >/dev/null && return 0; sleep 1; done; return 1; }
+case "${1:-status}" in
+  up)
+    if ! systemctl --user is-active -q citydev && pgrep -f "[g]odot .*scenes/main.tscn" >/dev/null; then
+      echo "another City Empire godot is running - not starting a second"; exit 1; fi
+    systemctl --user start citydev && wait_up 240 && echo "up: $B (state: $(curl -s $B/state))" ;;
+  down) systemctl --user stop citydev ;;
+  restart) curl -s -m 5 "$B/restart" >/dev/null || systemctl --user restart citydev; sleep 6; wait_up 240 && echo up ;;
+  status) systemctl --user --no-pager status citydev | head -5; curl -s -m 3 "$B/state" && echo ;;
+  log) journalctl --user -u citydev --no-pager -n ${2:-40} ;;
+  state) curl -s "$B/state"; echo ;;
+  url) echo "$B/  (proxied: https://musastudios.co.uk/citydev/)" ;;
+  cam) curl -s "$B/cam?${2:-}"; echo ;;
+  look) curl -s "$B/look?v=$2&${3:-}"; echo ;;
+  goto) curl -s "$B/goto?x=$2&z=$3&agl=${4:-3}"; echo ;;
+  shot) mkdir -p "$OUT"; q=${3:-}; ep=shot.png
+        if [[ "$q" == look\&* ]]; then curl -s "$B/look?${q#look&}" >/dev/null; q=""; fi
+        curl -s -o "$OUT/$2.png" "$B/$ep?$q" && echo "$OUT/$2.png" ;;
+  bench)
+    t() { python3 -c 'import time,subprocess,sys;s=time.time();subprocess.run(sys.argv[2:]);print("%-34s %.2f s"%(sys.argv[1],time.time()-s))' "$@"; }
+    t "jump 1 km + screenshot:" curl -s -o /tmp/citydev_b1.png "$B/shot.png?x=${2:--160}&z=${3:-980}&agl=6&yaw=30&pitch=-8"
+    t "move 15 m + screenshot:" curl -s -o /tmp/citydev_b2.png "$B/shot.png?f=15&dyaw=15"
+    t "live frame (jpeg 960):" curl -s -o /tmp/citydev_b3.jpg "$B/frame.jpg"
+    t "wireframe screenshot:" curl -s -o /tmp/citydev_b4.png "$B/shot.png?mode=wire"
+    curl -s "$B/cam?mode=flat" >/dev/null ;;
+  *) sed -n 2,9p "$0"; exit 1 ;;
+esac

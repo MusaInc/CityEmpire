@@ -74,6 +74,12 @@ func _ready() -> void:
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
+	if args.has("geo"):
+		# Geometry inspector (DevServer, tools/citydev): wireframes kept for
+		# its wire mode, and nothing drawn until a frame is asked for - no
+		# production shader is ever compiled on the VPS's CPU renderer.
+		RenderingServer.set_debug_generate_wireframes(true)
+		RenderingServer.render_loop_enabled = false
 	Settings.time_of_day = "empire"   # the Empire's clock drives the sun
 	Settings.weather = "empire"       # and its daily weather the sky (CityLife)
 	Settings.apply()
@@ -407,6 +413,13 @@ func _after_start() -> void:
 			return [Transform3D(Basis.looking_at(to - from, Vector3.UP if absf((to - from).normalized().y) < 0.99 else Vector3.FORWARD), from), 62.0]
 	if args.has("nohud"):
 		ui.visible = false   # (captures: the world only)
+	if args.has("devserver"):
+		# Persistent visual-dev session (tools/citydev): free camera and
+		# instant screenshots over HTTP on 127.0.0.1.
+		var ds := DevServer.new()
+		ds.name = "DevServer"
+		add_child(ds)
+		ds.start(self, int(args["devserver"]), String(args.get("devshots", "")), args.has("geo"))
 	if args.has("fleet"):
 		# Captures: one of each traffic kind parked in a row ahead of the hero
 		# (the real traffic meshes, shader and instancing, parked encoding),
