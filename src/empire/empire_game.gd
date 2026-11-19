@@ -715,7 +715,7 @@ func occupier(unit_id: String) -> Dictionary:
 
 ## Today's sky follows the Empire's weather.
 func _sync_weather() -> void:
-	if args.has("weather"):
+	if args.has("weather") or state == "title":
 		return
 	var sky := String(CityLife.weather_def(empire.weather).get("sky", "clear"))
 	if atmosphere.weather != sky:
@@ -771,18 +771,43 @@ func apply_hero_look(preview := {}) -> void:
 	rig.apply_look(HeroLook.build(l))
 
 
+var _title_focus: Node3D
+const TITLE_HOUR := 19.2   # blue hour: lit windows, lamps and headlights against a deep sky
+
+
 func _title(_has_save: bool) -> void:
 	state = "title"
 	player.input_enabled = false
 	ui.show_title(FileAccess.file_exists(SAVE_PATH))
-	# A slow orbit over the starter street.
-	var u := starter_unit()
-	var c := Premises.door_point(u)
-	var t := [0.0]
+	# A slow, high orbit round the financial district's towers at blue hour
+	# (it used to circle the starter street from 22 m). The city streams
+	# round the camera itself, so the skyline is the full-detail city.
+	var acc := Vector3.ZERO
+	var n := 0
+	for u in units:
+		if String(u.get("district", "")) == "east:cbd":
+			acc += Premises.door_point(u)
+			n += 1
+	var c := acc / float(n) if n > 0 else Premises.door_point(starter_unit())
+	atmosphere.hour = TITLE_HOUR
+	atmosphere.set_weather("haze", true)
+	# (Streamed round the skyline's centre: the towers in full detail even
+	# from the camera's distance.)
+	if _title_focus == null:
+		_title_focus = Node3D.new()
+		_title_focus.name = "TitleFocus"
+		add_child(_title_focus)
+	_title_focus.global_position = c
+	world.set_viewer(_title_focus)
+	world.build_all_near(c, 300.0)
+	var t := [2.35]
 	camera.cine = func(dt: float) -> Array:
-		t[0] += dt * 0.05
-		var p := c + Vector3(cos(t[0]) * 38.0, 22.0, sin(t[0]) * 38.0)
-		return [Transform3D(Basis.looking_at(c + Vector3.UP * 4.0 - p, Vector3.UP), p), 55.0]
+		t[0] += dt * 0.011
+		var a: float = t[0]
+		var rad := 720.0 + 50.0 * sin(a * 1.7)
+		var p := c + Vector3(cos(a) * rad, 240.0 + 25.0 * sin(a * 2.3), sin(a) * rad)
+		var look := c + Vector3(0.0, 15.0, 0.0)
+		return [Transform3D(Basis.looking_at(look - p, Vector3.UP), p), 40.0]
 
 
 func start_new() -> void:
@@ -799,6 +824,7 @@ func continue_game() -> void:
 func _play() -> void:
 	state = "play"
 	camera.cine = Callable()
+	world.set_viewer(chase if driving != "" else camera)   # (the title streamed round its own camera)
 	camera.snap()
 	player.input_enabled = driving == ""
 	ui.show_hud()
@@ -846,7 +872,7 @@ func _process(dt: float) -> void:
 		var t0 := Time.get_ticks_usec()
 		empire.advance(dt * minutes_per_second * k)
 		_perf_sim += Time.get_ticks_usec() - t0
-	atmosphere.hour = empire.hour()
+	atmosphere.hour = empire.hour() if state != "title" else TITLE_HOUR
 	_stream_t -= dt
 	if _stream_t <= 0.0:
 		_stream_t = 0.4
