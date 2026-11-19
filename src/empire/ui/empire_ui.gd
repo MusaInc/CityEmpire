@@ -2376,7 +2376,7 @@ func _settings_panel() -> void:
 		close_panel(true)
 		toast("Back on the street", "info"), false, 240))
 	v.add_child(us)
-	v.add_child(S.label("City Empire saves on this device only. No accounts, no ads, no tracking.", 15, S.MUTED))
+	v.add_child(S.label("WORLDSTATE saves on this device only. No accounts, no ads, no tracking.", 15, S.MUTED))
 
 
 # ---------------------------------------------------------- day report

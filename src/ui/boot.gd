@@ -34,7 +34,7 @@ func _build_view() -> void:
 	surface.add_child(bg)
 	# City Empire wordmark (type only: no CitySwing art).
 	var mark := Label.new()
-	mark.text = "CITY EMPIRE"
+	mark.text = "WORLDSTATE"
 	mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	mark.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	mark.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

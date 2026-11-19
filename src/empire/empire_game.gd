@@ -42,6 +42,7 @@ var sfx: Sfx
 var empire: Empire
 var ui: EmpireUI
 var gps: Gps
+var traffic_bodies: TrafficBodies
 var units: Array = []
 var unit_by_id := {}
 var interiors := {}      # unit id -> ShopInterior
@@ -192,6 +193,11 @@ func _ready() -> void:
 	add_child(gps)
 	gps.setup(self)
 	safe = SafeGround.new(layout, world, func(): return gps.net if gps.ready_net() else null)
+	# Solid traffic near you (the drawn cars have no bodies of their own).
+	traffic_bodies = TrafficBodies.new()
+	traffic_bodies.name = "TrafficBodies"
+	add_child(traffic_bodies)
+	traffic_bodies.setup(self)
 
 	var has_save := FileAccess.file_exists(SAVE_PATH) or FileAccess.file_exists(SAVE_PATH + ".bak")
 	if args.has("save"):
@@ -726,6 +732,13 @@ func _connect_empire() -> void:
 	_sync_brand()
 	empire.notified.connect(func(t, k): ui.toast(t, k, empire.last_ref))
 	empire.day_ended.connect(func(r):
+		# City500: your position, and the market's day in the news.
+		for n in City500.day_ended(empire):
+			empire._note(String(n[0]), String(n[1]), {"kind": "tab", "id": "city500"})
+		var hl := City500.headlines(empire.day)
+		if not hl.is_empty():
+			var pick: Array = hl[empire.day % hl.size()]
+			empire.news.append({"day": empire.day, "text": "City500 · " + String(pick[0]), "kind": String(pick[1])})
 		ui.day_report(r)
 		save_game())
 	empire.sold.connect(func(_b, amt): pass)
@@ -830,6 +843,7 @@ func _process(dt: float) -> void:
 		if state == "play":
 			_objective_gps()
 			_update_stadium()
+			ExploreUI.discover(self)
 	if state != "play":
 		return
 	_update_spot()

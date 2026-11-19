@@ -422,7 +422,7 @@ func _reply(cl: Dictionary, code: int, ctype: String, body: PackedByteArray) -> 
 # are fetched one after another (no stream): on a CPU-rendered VPS a frame
 # costs ~0.3-1 s, so this is the honest frame rate with no buffering lag.
 const PAGE := """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>City Empire dev view</title>
+<title>WORLDSTATE dev view</title>
 <style>
 :root{color-scheme:dark}body{margin:0;background:#111;color:#ddd;font:14px system-ui,sans-serif}
 #v{display:block;width:100%;max-width:1280px;margin:0 auto;cursor:grab;user-select:none}

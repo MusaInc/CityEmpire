@@ -19,10 +19,13 @@ var cars: Array = []       # {lane, s, v, kind, col, wait}
 var _mm: Array = []        # MultiMesh per car kind
 var _rng := RandomNumberGenerator.new()
 var world: Node
+## Your vehicle (TrafficBodies sets it): cars brake for it in their lane.
+var blocker := Vector3(INF, 0, INF)
 
 
 func setup(layout: CityLayout, p_world: Node) -> void:
 	world = p_world
+	add_to_group("island_traffic")
 	# (The lanes are world space – the island's roads and both bridges – so
 	# this node ignores the island's own transform.)
 	top_level = true
@@ -109,6 +112,13 @@ func _process(dt: float) -> void:
 			if i + 1 < lst.size():
 				var gap := float(lst[i + 1]["s"]) - float(c["s"]) - LEN
 				want = minf(want, maxf((gap - GAP * 0.5) * 0.8, 0.0))
+			if blocker.x < INF:
+				# Your vehicle in the lane ahead: stop short of it.
+				var sp0 := _sample(L, float(c["s"]))
+				var to: Vector3 = blocker - (sp0[0] as Vector3)
+				var ahead := to.dot(sp0[1] as Vector3)
+				if ahead > 0.0 and ahead < 30.0 and (to - (sp0[1] as Vector3) * ahead).length() < 2.6:
+					want = minf(want, maxf((ahead - LEN - 2.5) * 0.8, 0.0))
 			var rem := float(L["len"]) - float(c["s"])
 			if rem < 25.0 and not L["city_end"]:
 				want = minf(want, maxf(rem * 0.5, 4.0))   # (slow into the junction)
@@ -147,6 +157,16 @@ func _next_lane(c: Dictionary, L: Dictionary) -> void:
 			return
 	c["lane"] = li2
 	c["s"] = 0.0
+
+
+## Where a car is (its body's transform: on the road, facing its way).
+func car_xf(c: Dictionary) -> Transform3D:
+	var sp := _sample(lanes[c["lane"]], float(c["s"]))
+	var d: Vector3 = sp[1]
+	var hd := Vector3(d.x, 0.0, d.z)
+	if hd.length_squared() < 0.0001:
+		hd = Vector3.FORWARD
+	return Transform3D(Basis.looking_at(hd.normalized(), Vector3.UP), (sp[0] as Vector3) - Vector3.UP * 0.38)
 
 
 func _draw() -> void:

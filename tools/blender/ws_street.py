@@ -161,9 +161,12 @@ def traffic_light():
             out.append(hood)
         return out
 
+    # The road heads face +Y (Blender) = -Z in Godot: back down the street
+    # at the drivers approaching (the placement's +Z is the travel
+    # direction). They used to face -Y – away from the traffic they control.
     for x in (2.6, 4.9):
-        p += signal(x, 0.0, 5.3)
-    p += signal(0.0, -0.32, 3.0)
+        p += signal(x, 0.0, 5.3, face=1)
+    p += signal(0.0, 0.32, 3.0, face=1)
     p.append(box("button", (0.16, 0.12, 0.3), (0.16, -0.12, 1.15), mat("button_yellow", (0.95, 0.75, 0.1), 0.5), bevel=0.02))
     export("traffic_light", p)
 
