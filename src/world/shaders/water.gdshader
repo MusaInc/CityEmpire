@@ -228,7 +228,10 @@ void fragment() {
 	// Sun: a tight highlight and a wider glitter path on the facets.
 	float sd = max(dot(r, sun_dir), 0.0);
 	float day = clamp(sun_dir.y * 4.0, 0.0, 1.0) * (1.0 - night) * (1.0 - 0.85 * blow);
-	float glint = pow(sd, 900.0) * 30.0 + pow(sd, 90.0) * 1.6 * (0.4 + 0.6 * clamp(gnoise(p * 1.7 + TIME * 0.8) * 0.5 + 0.5, 0.0, 1.0)) * near;
+	float glint = pow(sd, 900.0) * 30.0 * (1.0 - 0.95 * alt) + pow(sd, 90.0) * 1.6 * (0.4 + 0.6 * clamp(gnoise(p * 1.7 + TIME * 0.8) * 0.5 + 0.5, 0.0, 1.0)) * near;
+	// From the air the tight facet highlight broke into hard white blobs
+	// (read as foam slabs): there it's a soft glitter path instead.
+	glint += pow(sd, 24.0) * 0.35 * alt;
 	vec3 sun_col = mix(vec3(1.0, 0.72, 0.45), vec3(1.0, 0.96, 0.88), clamp(sun_dir.y * 2.5, 0.0, 1.0));
 
 	// Whitecaps on the steepest crests when it blows (and a few on a calm day).

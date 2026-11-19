@@ -53,7 +53,9 @@ const BRIDGES := [
 const TRUSS_HALF := 112.0  # m: the Westbank Bridge's truss span, each side of mid-span
 const BRIDGE_CREST := 16.0             # deck height at mid-span (boats pass under)
 const BRIDGE_W := 22.0
-const RUNWAY := {"from": Vector3(1430.0, LAND_Y, 470.0), "to": Vector3(2430.0, LAND_Y, 470.0), "w": 45.0}
+## 1.8 km (was 1 km: too short for the jets that use it; the island grew a
+## runway peninsula to the south for it – see coast_points).
+const RUNWAY := {"from": Vector3(1430.0, LAND_Y, 470.0), "to": Vector3(3230.0, LAND_Y, 470.0), "w": 45.0}
 const COL_PAVE := Color(0.56, 0.56, 0.55)
 const COL_GRASS := Color(0.33, 0.47, 0.26)
 const COL_ROAD := Color(0.3, 0.3, 0.31)
@@ -331,9 +333,26 @@ static func coast_points() -> Array:
 	[l2(Vector2(-320, 2030)), "beach"],
 	[l2(Vector2(-420, 2018)), "beach"],
 	[l2(Vector2(-520, 2032)), "rock"],
-	[l2(Vector2(-600, 2058)), "rock"],
-	[l2(Vector2(-684, 2046)), "rock"],
-	[l2(Vector2(-760, 2010)), "rock"],
+	# The runway peninsula (2026-11-19): the runway was 1 km – half what the
+	# airliners using it need – on a squat island. It now runs 1.8 km down a
+	# narrow reclaimed strip to the south, Malé style: rock armour both sides,
+	# one sheltered beach in the inner corner, the threshold 60 m from the tip.
+	[l2(Vector2(-566, 2090)), "beach"],
+	[l2(Vector2(-584, 2180)), "rock"],
+	[l2(Vector2(-578, 2300)), "rock"],
+	[l2(Vector2(-588, 2420)), "rock"],
+	[l2(Vector2(-584, 2540)), "rock"],
+	[l2(Vector2(-592, 2660)), "rock"],
+	[l2(Vector2(-610, 2770)), "rock"],
+	[l2(Vector2(-660, 2830)), "rock"],
+	[l2(Vector2(-730, 2844)), "rock"],
+	[l2(Vector2(-790, 2810)), "rock"],
+	[l2(Vector2(-806, 2700)), "rock"],
+	[l2(Vector2(-800, 2560)), "rock"],
+	[l2(Vector2(-806, 2420)), "rock"],
+	[l2(Vector2(-798, 2280)), "rock"],
+	[l2(Vector2(-802, 2140)), "rock"],
+	[l2(Vector2(-796, 2040)), "rock"],
 	[l2(Vector2(-792, 1940)), "rock"],
 	[l2(Vector2(-788, 1830)), "rock"],   # (rock armour along the runway)
 	[l2(Vector2(-802, 1724)), "rock"],
@@ -686,12 +705,12 @@ static func plan(layout: CityLayout) -> Dictionary:
 	# Airport strips: [kind, from, to, half width].
 	var strips: Array = [
 		[3, RUNWAY["from"], RUNWAY["to"], RUNWAY["w"] * 0.5],
-		[4, Vector3(1470, LAND_Y, 395), Vector3(2410, LAND_Y, 395), 11.5],
+		[4, Vector3(1470, LAND_Y, 395), Vector3(3210, LAND_Y, 395), 11.5],
 	]
-	for cx: float in [1480.0, 1700.0, 1940.0, 2160.0, 2400.0]:
+	for cx: float in [1480.0, 1700.0, 1940.0, 2160.0, 2400.0, 2660.0, 2930.0, 3200.0]:
 		strips.append([4, Vector3(cx, LAND_Y, 384), Vector3(cx, LAND_Y, 470), 11.5])
 	# Rapid exits: arrivals land westbound and turn off at a shallow angle.
-	for rx: float in [2290.0, 1860.0]:
+	for rx: float in [2780.0, 2290.0, 1860.0]:
 		strips.append([4, Vector3(rx, LAND_Y, 466), Vector3(rx - 120.0, LAND_Y, 398), 11.5])
 	# Fire station apron out to the taxiway.
 	strips.append([4, Vector3(1520, LAND_Y, 334), Vector3(1520, LAND_Y, 384), 9.0])
@@ -3234,18 +3253,27 @@ func _build_trees() -> void:
 	var crng := RandomNumberGenerator.new()
 	crng.seed = 9187
 	var extra: Array = []
-	for k in 70:
-		var c := Vector2(crng.randf_range(lb.position.x, lb.end.x), crng.randf_range(lb.position.y, minf(lb.end.y, 175.0)))
-		var n := crng.randi_range(4, 13)
-		var rad := crng.randf_range(9.0, 24.0)
-		for j in n:
-			var a := crng.randf() * TAU
-			var r := sqrt(crng.randf()) * rad
-			extra.append(Transform3D(Basis(Vector3.UP, a).scaled(Vector3.ONE * crng.randf_range(0.8, 1.35)),
-				Vector3(c.x + cos(a) * r, LAND_Y, c.y + sin(a) * r)))
-	for k in 90:
-		extra.append(Transform3D(Basis(Vector3.UP, crng.randf() * TAU).scaled(Vector3.ONE * crng.randf_range(0.9, 1.4)),
-			Vector3(crng.randf_range(lb.position.x, lb.end.x), LAND_Y, crng.randf_range(lb.position.y, minf(lb.end.y, 175.0)))))
+	# An even jittered grid over the landside (random centres left whole
+	# lawns bare): a copse, a lone tree or open grass in every 34 m cell.
+	var gx := lb.position.x
+	while gx < lb.end.x:
+		var gz := lb.position.y
+		while gz < minf(lb.end.y, 175.0):
+			var c := Vector2(gx + crng.randf_range(4.0, 30.0), gz + crng.randf_range(4.0, 30.0))
+			var roll := crng.randf()
+			if roll < 0.55:
+				var n := crng.randi_range(3, 9)
+				var rad := crng.randf_range(6.0, 15.0)
+				for j in n:
+					var a := crng.randf() * TAU
+					var r := sqrt(crng.randf()) * rad
+					extra.append(Transform3D(Basis(Vector3.UP, a).scaled(Vector3.ONE * crng.randf_range(0.8, 1.35)),
+						Vector3(c.x + cos(a) * r, LAND_Y, c.y + sin(a) * r)))
+			elif roll < 0.88:
+				extra.append(Transform3D(Basis(Vector3.UP, crng.randf() * TAU).scaled(Vector3.ONE * crng.randf_range(0.9, 1.4)),
+					Vector3(c.x, LAND_Y, c.y)))
+			gz += 34.0
+		gx += 34.0
 	for xf: Transform3D in extra:
 		var q := Vector2(xf.origin.x, xf.origin.z)
 		if q.y > 175.0 or road_clearance(plan_data, q) < 7.0:
@@ -3287,6 +3315,9 @@ func _build_trees() -> void:
 			continue
 		xf.origin.y = LAND_Y + knoll_h(q.x, q.y)
 		kept.append(xf)
+	# The terminal car park's planters (on paving: added after the filter).
+	for tq: Vector2 in SkyportAirport.park_trees():
+		kept.append(Transform3D(Basis(Vector3.UP, tq.x * 0.31).scaled(Vector3.ONE * 0.95), Vector3(tq.x, LAND_Y, tq.y)))
 	xfs = kept
 	# TreeKit species (avenues mostly one kind, parks mixed), one MultiMesh
 	# per species.

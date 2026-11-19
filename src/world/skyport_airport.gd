@@ -571,6 +571,20 @@ static func build_car_park(target: Node3D, body: StaticBody3D, isl: SkyportIslan
 ##    with cart trains, ground power units, pushback tractors, a few spare
 ##    belt loaders;
 ##  * cars in the terminal's surface car park (bays painted by the ground).
+## Tree planters in the terminal's surface car park (local x, z): on the
+## line between back-to-back bay rows, every 12 bays (SkyportIsland adds
+## the trees; the cars leave those bays empty).
+static func park_trees() -> Array:
+	var out: Array = []
+	for zt: float in [76.0, 93.0, 110.0]:
+		var x := 1965.0 + 16.0
+		while x < 2255.0 - 8.0:
+			if not CAR_PARK.grow(6.0).has_point(Vector2(x, zt)):
+				out.append(Vector2(x, zt))
+			x += 31.2
+	return out
+
+
 static func build_apron_kit(P: Dictionary, target: Node3D, isl: SkyportIsland) -> void:
 	var Y := SkyportIsland.LAND_Y + 0.03
 	var m := BuildingMesher.new()
@@ -642,6 +656,24 @@ static func build_apron_kit(P: Dictionary, target: Node3D, isl: SkyportIsland) -
 		Color(0.6, 0.62, 0.64), Color(0.32, 0.34, 0.3)]
 	var lot := Rect2(1965, 58, 290, 74)
 	var cp := CAR_PARK.grow(4.0)
+	var trees: Array = park_trees()
+	for tq: Vector2 in trees:
+		# Kerbed planter (two bays' width) with its lamp column.
+		m.solid(tq.x - 1.25, tq.y - 4.2, tq.x + 1.25, tq.y + 4.2, Y, Y + 0.16, Color(0.72, 0.71, 0.68))
+		m.solid(tq.x - 1.05, tq.y - 4.0, tq.x + 1.05, tq.y + 4.0, Y + 0.16, Y + 0.2, Color(0.3, 0.42, 0.2))
+		m.beam(Vector3(tq.x, Y, tq.y + 3.2), Vector3(tq.x, Y + 7.5, tq.y + 3.2), 0.16, 0.16, Color(0.45, 0.46, 0.48))
+		m.solid(tq.x - 0.35, tq.y + 2.9, tq.x + 0.35, tq.y + 3.5, Y + 7.3, Y + 7.6, Color(0.95, 0.93, 0.85))
+	# Real car models (the city's traffic bodies, parked pose): the mid LOD
+	# within 200 m, the 24-triangle stand-ins beyond; the lot in three
+	# sections so the far ones really drop. (They were two boxes each.)
+	var wr = isl.world_ref
+	var mids: Array = wr.get("car_mid_meshes") if wr else []
+	var fars: Array = wr.get("car_far_meshes") if wr else []
+	var kinds: Array = []
+	for k in mini(mids.size(), 3):
+		if mids[k] != null and k < fars.size() and fars[k] != null:
+			kinds.append(k)
+	var groups := {}   # Vector2i(section, kind) -> [[xf, custom, colour]]
 	var zm := 59.0
 	while zm < lot.end.y - 5.0:
 		for row: float in [zm + 2.5, zm + 14.5]:
@@ -650,12 +682,47 @@ static func build_apron_kit(P: Dictionary, target: Node3D, isl: SkyportIsland) -
 			var bx := lot.position.x + 1.3
 			while bx < lot.end.x - 1.5:
 				var c := Vector2(bx, row)
-				if not cp.has_point(c) and rng.randf() < 0.62:
-					var cc: Color = cols[rng.randi() % cols.size()]
-					m.solid(c.x - 0.9, c.y - 2.2, c.x + 0.9, c.y + 2.2, Y, Y + 0.85, cc)
-					m.solid(c.x - 0.78, c.y - 1.1, c.x + 0.78, c.y + 1.0, Y + 0.85, Y + 1.4, cc.darkened(0.4))
+				var planted := false
+				for tq: Vector2 in trees:
+					if absf(tq.x - c.x) < 2.2 and absf(tq.y - c.y) < 4.0:
+						planted = true
+				if not cp.has_point(c) and not planted and rng.randf() < 0.6:
+					var yaw := PI if row < zm + 8.0 else 0.0   # (nose to the aisle)
+					if kinds.is_empty():
+						var cc: Color = cols[rng.randi() % cols.size()]
+						m.solid(c.x - 0.9, c.y - 2.2, c.x + 0.9, c.y + 2.2, Y, Y + 0.85, cc)
+						m.solid(c.x - 0.78, c.y - 1.1, c.x + 0.78, c.y + 1.0, Y + 0.85, Y + 1.4, cc.darkened(0.4))
+					else:
+						var k: int = kinds[rng.randi() % kinds.size()]
+						var bs := Basis(Vector3.UP, yaw)
+						var sec := clampi(int((c.x - lot.position.x) / (lot.size.x / 3.0)), 0, 2)
+						var key := Vector2i(sec, k)
+						if not groups.has(key):
+							groups[key] = []
+						(groups[key] as Array).append([Transform3D(bs, Vector3(c.x, Y - 0.03, c.y) + bs.z * 5.0), Color(0.0, 5.0, 10.0, 0.0),
+							CityWorld.kind_colour(k, CityWorld.CAR_COLORS[rng.randi() % CityWorld.CAR_COLORS.size()])])
 				bx += 2.6
 		zm += 17.0
+	for key: Vector2i in groups:
+		var list: Array = groups[key]
+		for band in 2:
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_colors = true
+			mm.use_custom_data = true
+			mm.mesh = (mids if band == 0 else fars)[key.y]
+			mm.instance_count = list.size()
+			mm.buffer = CityWorld._instance_buffer(list)
+			var mi := MultiMeshInstance3D.new()
+			mi.name = "ParkedCars_%d_%d_%d" % [key.x, key.y, band]
+			mi.multimesh = mm
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if band == 1 else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			if band == 0:
+				mi.visibility_range_end = 200.0
+			else:
+				mi.visibility_range_begin = 200.0
+				mi.visibility_range_end = 1400.0
+			target.add_child(mi)
 	isl._mesh_into(m, "ApronKit", target, 0.0, 1400.0)
 
 
