@@ -217,6 +217,10 @@ func _frame() -> Image:
 			cam.global_transform = _xf()
 			cam.fov = fov
 			cam.far = 6000.0
+		# (the camera's new transform and freshly streamed chunks only reach
+		# the renderer at the next main-loop iteration: drawing now showed the
+		# previous view)
+		await get_tree().process_frame
 		var t0 := Time.get_ticks_usec()
 		# (twice: the viewport texture read back holds the frame drawn before
 		# the last swap - one draw alone returned the previous camera)
@@ -276,6 +280,16 @@ func _mat(c: Color) -> StandardMaterial3D:
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED   # (show open / inverted faces instead of hiding them)
 		_mats[c] = m
 	return _mats[c]
+
+
+## Skyport's ground: one mesh, roads / paving / grass as vertex colours
+## (flat island colour hid every road on the island).
+func _vc_mat() -> StandardMaterial3D:
+	if not _mats.has("vc"):
+		var m := _mat(Color.WHITE).duplicate() as StandardMaterial3D
+		m.vertex_color_use_as_albedo = true
+		_mats["vc"] = m
+	return _mats["vc"]
 
 
 func _cat_of(n: Node, mat: Material) -> String:
@@ -346,7 +360,8 @@ func _geo_scan(root: Node) -> void:
 		var src: Material = gi.material_override
 		if src == null and mesh and mesh.get_surface_count() > 0:
 			src = mesh.surface_get_material(0)
-		gi.material_override = _mat(COL[_cat_of(n, src)])
+		var cat := _cat_of(n, src)
+		gi.material_override = _mat(COL[cat]) if cat != "island" else _vc_mat()
 
 
 ## What lies under a screen point (u, v in 0..1): every instance whose
