@@ -52,7 +52,10 @@ P={'hips':None,'spine':'hips','chest':'spine','neck':'chest','head':'neck'}
 for side,sx in [('l',-1),('r',1)]:
     a=Vector((sx*math.sin(math.radians(42)),0,-math.cos(math.radians(42))))
     l=Vector((sx*math.sin(math.radians(5)),0,-math.cos(math.radians(5))))
-    J['upper_arm_'+side]=Vector((sx*.2,0,1.50))
+    # (build B's shoulders are narrower: its arms pushed out to the 20 cm
+    # pivots stretched the deltoids into pads. The game binds each bone to its
+    # pivot (CharacterRig._bind_skeleton), so a joint a little inboard is fine.)
+    J['upper_arm_'+side]=Vector((sx*(.2 if BODY=='a' else .186),0,1.50))
     J['forearm_'+side]=J['upper_arm_'+side]+a*.29
     J['hand_'+side]=J['forearm_'+side]+a*.26
     J['thigh_'+side]=Vector((sx*.1,0,.94))
@@ -153,10 +156,17 @@ def _shoulder_weights():
         for j in range(len(base)):
             if weights[j,ua]<1e-4:continue
             p=retarget(base[j],weights[j])
-            if (p.x<0)!=(side=='l') or abs(p.x)<.08 or p.z<1.25:continue
+            if (p.x<0)!=(side=='l') or abs(p.x)<.08 or p.z<(1.25 if BODY=='a' else 1.18):continue
             t=(p-a).dot(ax)
-            if t>=.08:continue
-            k=max(0.0,min(1.0,(t+.02)/.10));k=k*k*(3-2*k)
+            # (build B: the bust's side and the armpit sit further along the
+            # arm - on the arm bone they swung out as a pad when the arm hung)
+            reach=.08 if BODY=='a' else .13
+            if t>=reach:continue
+            k=max(0.0,min(1.0,(t+.02)/(reach+.02)));k=k*k*(3-2*k)
+            if BODY!='a':
+                # under the arm (toward the body's side): stays with the chest longer
+                side_k=max(0.0,min(1.0,(abs(p.x)-(abs(a.x)-.06))/.06))
+                k*=.35+.65*side_k
             want=(weights[j,ua]+weights[j,ch])*k
             if weights[j,ua]>want:
                 weights[j,ch]+=weights[j,ua]-want;weights[j,ua]=want

@@ -162,6 +162,14 @@ class ArmFrame:
             h = _hull_radius(sl, self.NA) if len(sl) >= 6 else None
             self.hull[ti] = h if h is not None else (self.hull[ti - 1] if ti else .05)
         self.hull = _smooth(_smooth(self.hull, 3, 0), 2, 1, wrap=True)
+        # The arm's section right at the shoulder takes in chest / underarm
+        # tissue weighted to the arm (build B most): a sleeve hung from it
+        # ballooned into a pad. Cap the top 12% at the upper arm just below.
+        ref = int(np.searchsorted(self.ts, .14))
+        cap = self.hull[ref] * 1.05
+        for ti, t in enumerate(self.ts):
+            if t < .14:
+                self.hull[ti] = np.minimum(self.hull[ti], cap)
 
     def _local(self, co):
         r = co - self.a
@@ -356,7 +364,7 @@ def clear_layer(ob, under, gap, zmax=9.0):
         if p is None:
             continue
         out = (v.co - p).dot(n)
-        if out < gap and d < .06:
+        if out < gap and d < .12:   # (.06 left some hem vertices unpushed beside pushed ones: a torn edge)
             push[v.index] = n * (gap - out)
     # spread the push to neighbours so the hem moves as cloth, not spikes
     nbr = [[] for _ in me.vertices]

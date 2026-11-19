@@ -1167,7 +1167,9 @@ def everyday_top(name, matname, layer, lim, sleeve_end, neck, ease, hem=TEE_HEM,
     shirttail(ob, hem, tail, tail, rows=3, flare=.004)
     weights_below(ob, hem)
     clear_layer(ob, pants, .007, zmax=PANTS_TOP + .03)
-    follow_layer(ob, pants, PANTS_TOP + .01, .06, k_max=.6)
+    # (the hem moves with the trousers under it: at .6 the hips pushed the
+    # waistband and belt loops through the tee's hem in motion)
+    follow_layer(ob, pants, PANTS_TOP + .03, .055, k_max=1.0)
     pack_uvs(ob)
     nrm, alb = bake_detail(ob, name.lower(), 1024, seams_fn(lambda a: hem - tail, sleeve_end if cuff is None else None), plain_albedo)
     mat = material(matname, base_rgb, rough, alb, nrm)
@@ -1450,7 +1452,7 @@ def waistband():
     for a0 in (.5, -.5, 1.45, -1.45, 2.35, -2.35, math.pi):
         k = int(round((a0 % math.tau) / math.tau * nA)) % nA
         LP, LU = [], []
-        for j, dz in enumerate((.005, -.034)):
+        for j, dz in enumerate((-.002, -.034)):   # (top at the band's edge, as real loops)
             row = []
             for da in (-.035, .035):
                 a = a0 + da
@@ -1478,8 +1480,15 @@ def waistband():
 
 band_mat = material('hero_waistband', (.16, .17, .19), .85, TRIM_A, TRIM_N)
 band_mat.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = 1.0
-add(waistband(), False)
+_wbo = waistband()
+add(_wbo, False)
 
-for o_ in [o for o in loose_tops if o.name in ('Top_Hoodie', 'Top_Blazer')]:
-    clear_layer(o_, pants, .007, zmax=PANTS_TOP + .03)
+# Every top worn over the trousers clears the waistband and its belt loops
+# too (built after the tops: the loops poked through the tee's hem and tore
+# its edge, most on build B's fuller hips).
+for o_ in [o for o in loose_tops if o.name != 'Top_Shirt']:   # (the shirt is tucked in)
+    # (1.2 cm over the trousers: the band, its loops (~7 mm proud) and the
+    # fly button sit under the hem, as under a real tee)
+    clear_layer(o_, pants, .012, zmax=PANTS_TOP + .03)
+    clear_layer(o_, _wbo, .006, zmax=PANTS_TOP + .03)
 print('WARDROBE', [o.name for o in wardrobe], flush=True)
