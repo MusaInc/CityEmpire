@@ -363,7 +363,7 @@
     "cityswing",
     "neverstop"
    ],
-   "note": "Crisp default + MSAA\u2192FXAA swap"
+   "note": "Crisp default + MSAA→FXAA swap"
   },
   {
    "path": "src/world/shaders/grass.gdshaderinc",
@@ -404,6 +404,15 @@
     "cityswing",
     "neverstop"
    ]
+  },
+  {
+   "path": "src/core/safe_save.gd",
+   "mode": "copy",
+   "to": [
+    "cityswing",
+    "neverstop"
+   ],
+   "note": "persistence envelope: checked atomic write, validated read, field repair, app-folder migration (SH-03)"
   }
  ]
 }

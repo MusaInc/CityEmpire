@@ -18,6 +18,8 @@ extends Node3D
 signal spot_changed(spot: Dictionary)
 
 const SAVE_PATH := "user://cityempire_save.json"
+## Where this session saves: SAVE_PATH, or --save=<path> (tests/captures).
+var save_path := SAVE_PATH
 const STREAM_IN := 150.0
 const STREAM_OUT := 210.0
 const REACH := 1.6
@@ -220,9 +222,13 @@ func _ready() -> void:
 	add_child(traffic_bodies)
 	traffic_bodies.setup(self)
 
-	var has_save := FileAccess.file_exists(SAVE_PATH) or FileAccess.file_exists(SAVE_PATH + ".bak")
 	if args.has("save"):
-		pass
+		save_path = String(args["save"])
+	else:
+		# The WORLDSTATE rename moved the desktop app-data folder: bring a
+		# City Empire save over (copied; the old folder is left alone). WS-07
+		SafeSave.migrate_dir(["City Empire", "CityEmpire"], ["cityempire_save.json", "cityempire_save.json.bak"])
+	var has_save := FileAccess.file_exists(save_path) or FileAccess.file_exists(save_path + ".bak")
 	if args.has("new") or (args.has("play") and not has_save):
 		new_game()
 		_play()
@@ -835,7 +841,7 @@ const TITLE_HOUR := 19.2   # blue hour: lit windows, lamps and headlights agains
 func _title(_has_save: bool) -> void:
 	state = "title"
 	player.input_enabled = false
-	ui.show_title(FileAccess.file_exists(SAVE_PATH))
+	ui.show_title(FileAccess.file_exists(save_path) or FileAccess.file_exists(save_path + ".bak"))
 	# A slow, high orbit round the financial district's towers at blue hour
 	# (it used to circle the starter street from 22 m). The city streams
 	# round the camera itself, so the skyline is the full-detail city.
@@ -2585,30 +2591,58 @@ func save_game() -> void:
 		if cr2:
 			var side2 := skyport_play.saved_pilot_point(cr2)
 			d["player"] = [side2.x, side2.y + 1.0, side2.z, camera.view_yaw()]
-	var tmp := SAVE_PATH + ".tmp"
-	var f := FileAccess.open(tmp, FileAccess.WRITE)
-	if f == null:
-		push_warning("City Empire: cannot write the save")
-		return
-	f.store_string(JSON.stringify(d))
-	f.close()
-	if FileAccess.file_exists(SAVE_PATH):
-		DirAccess.rename_absolute(ProjectSettings.globalize_path(SAVE_PATH), ProjectSettings.globalize_path(SAVE_PATH + ".bak"))
-	DirAccess.rename_absolute(ProjectSettings.globalize_path(tmp), ProjectSettings.globalize_path(SAVE_PATH))
+	var err := SafeSave.write(save_path, d)
+	if err != "":
+		push_warning("WORLDSTATE: save failed – " + err)
+		if ui and not _save_warned:
+			_save_warned = true   # (once a session: autosave would repeat it)
+			ui.toast("Couldn't save your game (%s). Free some space; your last save is kept." % err, "bad")
+	else:
+		_save_warned = false
+
+
+var _save_warned := false
+
+
+## Schema check before a save is trusted (SafeSave.read): the economy's core
+## fields with the right types; anything else falls back to defaults/migrate.
+static func save_problem(d: Dictionary) -> String:
+	if not (d.get("empire") is Dictionary):
+		return "no economy"
+	var e: Dictionary = d["empire"]
+	var why := SafeSave.has_types(e, {"day": TYPE_FLOAT, "minute": TYPE_FLOAT, "personal_cash": TYPE_FLOAT,
+		"company_cash": TYPE_FLOAT, "businesses": TYPE_ARRAY, "vehicles": TYPE_ARRAY, "flags": TYPE_DICTIONARY,
+		"properties": TYPE_ARRAY, "loans": TYPE_ARRAY}, ["day"])
+	if why != "":
+		return why
+	for b in e.get("businesses", []):
+		if not (b is Dictionary):
+			return "a business record is broken"
+	for v in e.get("vehicles", []):
+		if not (v is Dictionary) or not (v as Dictionary).has("id"):
+			return "a vehicle record is broken"
+	if d.has("player") and not (d["player"] is Array):
+		return "player position is broken"
+	if float(e["day"]) < 1.0:
+		return "day out of range"
+	return ""
 
 
 func load_game() -> bool:
-	var d = null
-	for p in [SAVE_PATH, SAVE_PATH + ".bak"]:
-		if FileAccess.file_exists(p):
-			var f := FileAccess.open(p, FileAccess.READ)
-			d = JSON.parse_string(f.get_as_text()) if f else null
-			if d is Dictionary and (d as Dictionary).has("empire"):
-				break
-			d = null
+	var d = SafeSave.read(save_path, save_problem)
 	if d == null:
+		if SafeSave.last_error != "":
+			# Unreadable save and backup: keep the files for recovery (the next
+			# autosave writes a fresh one; the broken one is set aside first).
+			for p in [save_path, save_path + ".bak"]:
+				if FileAccess.file_exists(p):
+					DirAccess.copy_absolute(ProjectSettings.globalize_path(p), ProjectSettings.globalize_path(p + ".broken"))
 		new_game()
+		if SafeSave.last_error != "" and ui:
+			ui.toast.call_deferred("Your save couldn't be read, so a new game started. The old file is kept.", "bad")
 		return false
+	if SafeSave.last_source == "backup" and ui:
+		ui.toast.call_deferred("Your last save was damaged – loaded the one before it.", "bad")
 	empire = Empire.from_dict(d["empire"])
 	empire.market = _market()
 	if not empire.flags.has("start_unit"):
