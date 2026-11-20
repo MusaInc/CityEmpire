@@ -445,6 +445,13 @@ func draw_from_company(amount: float) -> bool:
 	return true
 
 
+## A one-off payment to you (a citizen's arrest, a find): personal account.
+func reward(amount: float, memo: String) -> void:
+	personal_cash += amount
+	_book("personal", amount, "reward", memo)
+	changed.emit()
+
+
 func _book(acct: String, amount: float, cat: String, memo: String, biz := "") -> void:
 	ledger.append({"day": day, "min": int(minute), "acct": acct, "amount": snappedf(amount, 0.01), "cat": cat,
 		"memo": memo, "biz": biz})

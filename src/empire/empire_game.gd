@@ -42,6 +42,9 @@ var sfx: Sfx
 var empire: Empire
 var ui: EmpireUI
 var gps: Gps
+var pursuit: StreetPursuit
+var speed_fx: SpeedFx
+const PURSUIT_REWARD := 2500.0
 var traffic_bodies: TrafficBodies
 var car_audio: CarAudio
 var units: Array = []
@@ -176,6 +179,13 @@ func _ready() -> void:
 	carry_node.name = "Carry"
 	add_child(carry_node)
 
+	# NEVER STOP's speed streaks at the screen edges when you're flying along.
+	var fx_layer := CanvasLayer.new()
+	fx_layer.name = "SpeedFxLayer"
+	fx_layer.layer = 1
+	add_child(fx_layer)
+	speed_fx = SpeedFx.new()
+	fx_layer.add_child(speed_fx)
 	ui = EmpireUI.new()
 	ui.game = self
 	add_child(ui)
@@ -925,6 +935,7 @@ func _process(dt: float) -> void:
 		if state == "play":
 			_objective_gps()
 			_update_stadium()
+			_update_pursuit()
 			ExploreUI.discover(self)
 	if state != "play":
 		return
@@ -1715,6 +1726,44 @@ func _update_carry_visual() -> void:
 		carry_node.global_rotation = Vector3(0.0, yaw, 0.0)
 
 
+# -------------------------------------------------------------- pursuits
+## Emergent police chases (StreetPursuit, shared with CitySwing): start once
+## the road graph exists; only while you're out in the city.
+func _update_pursuit() -> void:
+	if pursuit == null:
+		if not gps.ready_net() or args.has("no-pursuit"):
+			return
+		pursuit = StreetPursuit.new()
+		pursuit.name = "StreetPursuit"
+		add_child(pursuit)
+		pursuit.setup(gps.net, _pursuit_focus, func(): return get_viewport().get_camera_3d())
+		pursuit.started.connect(func(_at: Vector3):
+			ui.toast("Police pursuit nearby", "info"))
+		pursuit.ended.connect(_on_pursuit_ended)
+		pursuit.can_takedown = func(): return driving != ""
+		if args.has("pursuit"):
+			pursuit.debug_log = true
+			pursuit.debug_cam = args.has("pursuit-cam")
+			pursuit.force_start()
+	pursuit.enabled = not player.indoors and floor_unit == "" \
+		and not (skyport_play != null and skyport_play.piloting != "")
+
+
+func _pursuit_focus() -> Vector3:
+	var v := vehicle_node()
+	return v.global_position if v else player.global_position
+
+
+func _on_pursuit_ended(why: String, _at: Vector3) -> void:
+	match why:
+		"takedown":
+			empire.reward(PURSUIT_REWARD, "Citizen's arrest")
+			ui.toast("Citizen's arrest! The police thank you: +%s" % EmpireData.money(PURSUIT_REWARD), "good")
+			Sfx.play("cash", -4.0)
+		"busted":
+			ui.toast("The police caught the getaway car", "info")
+
+
 # -------------------------------------------------------------- vehicles
 func _car_spec(model: String) -> Dictionary:
 	var m := EmpireData.vehicle_model(model)
@@ -1825,6 +1874,7 @@ func enter_vehicle(vid: String) -> void:
 	player.collision_layer = 0
 	drive_input.car = c
 	drive_input.enabled = true
+	speed_fx.player = c
 	chase.set_target(c, true)
 	chase.cam.make_current()
 	world.set_viewer(chase)
@@ -1850,6 +1900,7 @@ func exit_vehicle() -> void:
 	var side := xf * Vector3(-c.spec["size"].x * 0.5 - 0.9, 0.0, -0.2)
 	drive_input.enabled = false
 	drive_input.car = null
+	speed_fx.player = null
 	c.throttle = 0.0
 	c.brake = 1.0
 	c.handbrake = true
