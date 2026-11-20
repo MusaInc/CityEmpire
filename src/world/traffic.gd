@@ -775,6 +775,8 @@ func _queue_behind(id: int, lead: int) -> void:
 
 ## The car ahead moved off: once at rest, pull away (keeping behind it).
 func _follow(id: int) -> void:
+	if knocked.has(id):
+		return   # (held where it was hit until Wrecks releases it)
 	var lead := _leader(id)
 	var lead_slow := lead >= 0 and (c_stop[lead] < NO_STOP or c_v[lead] < 0.0)
 	if c_stop[id] < NO_STOP and not _at_rest(id) and lead_slow:
@@ -969,7 +971,7 @@ func _cull() -> void:
 		var g := -1
 		if d2 < fr2:
 			var dist := sqrt(d2)
-			if dist < 35.0 or d.dot(fw) > dist * cos_lim:
+			if (dist < 35.0 or d.dot(fw) > dist * cos_lim) and not knocked.has(id):
 				g = c_kind[id] * 3 + (0 if d2 < nr2 else (1 if d2 < mr2 else 2))
 		if g >= 0:
 			c_grp[id] = g
@@ -1029,14 +1031,37 @@ func _dirty(id: int) -> void:
 ## Cars braking for something that isn't traffic (the player's car):
 ## car id -> true. Cars behind them queue as usual.
 var _held := {}
+## Cars replaced by a real, physical car after you hit them (Wrecks): id ->
+## true. Not drawn, no body; the slot holds its lane (cars behind queue)
+## until release(). `obstacles`: where wrecks lie – cars brake for them too.
+var knocked := {}
+var obstacles: Array = []
+
+
+func knock(id: int) -> void:
+	if id < 0 or id >= c_lane.size() or knocked.has(id):
+		return
+	knocked[id] = true
+	_rebase(id, _at_rest(id), car_s(id, now) + 0.5)
+	c_ek[id] = EV_FOLLOW
+	c_ev[id] = INF
+	var f := _follower(id)
+	if f >= 0:
+		_queue_behind(f, id)
+
+
+func release(id: int) -> void:
+	if knocked.erase(id) and id < c_lane.size():
+		_follow(id)
 
 
 ## Called a few times a second with the player's vehicle (or INF): cars
 ## among `ids` with it in their lane ahead stop short of it and queue; once
 ## it's gone they pull away (as behind a car that moved off).
-func yield_to(p: Vector3, ids: Array) -> void:
+func yield_to(p0: Vector3, ids: Array) -> void:
 	var still := {}
-	if p.x < INF:
+	var pts: Array = ([p0] if p0.x < INF else []) + obstacles
+	for p: Vector3 in pts:
 		for id: int in ids:
 			if id < 0 or id >= c_lane.size():
 				continue
@@ -1050,6 +1075,8 @@ func yield_to(p: Vector3, ids: Array) -> void:
 			var to := Vector3(p.x - pos.x, 0.0, p.z - pos.z)
 			var ahead := to.dot(dir)
 			if ahead < 1.0 or ahead > 26.0 or (to - dir * ahead).length() > 2.4 or absf(p.y - pos.y) > 3.0:
+				continue
+			if knocked.has(id) or still.has(id):
 				continue
 			still[id] = true
 			var stop := s + ahead - 6.5

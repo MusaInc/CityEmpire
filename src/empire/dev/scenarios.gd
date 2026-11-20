@@ -1245,6 +1245,8 @@ func _run() -> void:
 	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XF", "XG", "XH", "XI", "XS", "XW"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())
+	if _which.split(",").has("K"):
+		await scenario_k()
 	if _which.split(",").has("UI"):
 		await scenario_ui()
 	if _which.split(",").has("U"):
@@ -1998,3 +2000,150 @@ func scenario_ui() -> void:
 	check(ui.phone != null and not ui.phone.has_sheet(), "the sheet closed, the phone stayed")
 	ui.close_panel(true)
 
+
+
+# ------------------------------------- K: hitting things (NEVER STOP's rules)
+## Clear straight approach to `to` from `from` (nothing solid to a car between).
+func _clear_line(from: Vector3, to: Vector3) -> bool:
+	var q := PhysicsRayQueryParameters3D.create(from + Vector3.UP * 0.8, to + Vector3.UP * 0.8, 1 | (1 << 7))
+	return game.get_world_3d().direct_space_state.intersect_ray(q).is_empty()
+
+
+## Drives `car` from `start` along `dir` at `v` for `secs`; returns the lowest speed seen.
+func _ram(car: Car, start: Vector3, dir: Vector3, v: float, secs: float, coast_after_hit := false) -> float:
+	var y := maxf(start.y, game.layout.ground_y(start.x, start.z)) if game.layout else start.y  # (lanes on viaducts)
+	car.place(Transform3D(Basis.looking_at(dir, Vector3.UP), Vector3(start.x, y + 0.5, start.z)), dir * v)
+	var low := INF
+	_wreck_n0 = game.wrecks.wrecks.size()
+	var end := Time.get_ticks_msec() + int(secs * 1000.0)
+	var t := 0.0
+	while t < secs and Time.get_ticks_msec() < end + 20000:
+		var hit_any: bool = coast_after_hit and game.wrecks.wrecks.size() > _wreck_n0
+		car.throttle = 0.0 if hit_any else 0.35
+		car.brake = 0.0
+		car.steer = 0.0
+		car.handbrake = false   # (left on when you got out)
+		await get_tree().physics_frame
+		var t_was := t
+		t += get_physics_process_delta_time()
+		if t > 0.3:
+			low = minf(low, car.speed)
+		if game.args.has("sc-film"):
+			for at in [0.9, 1.4, 2.0]:
+				if t_was < at and t >= at:
+					await RenderingServer.frame_post_draw
+					_film_n += 1
+					get_viewport().get_texture().get_image().save_png("%s/k_%02d.png" % [String(game.args["sc-film"]), _film_n])
+	return low
+
+
+var _film_n := 0
+var _wreck_n0 := 0
+
+
+func scenario_k() -> void:
+	print("--- K: hitting things – furniture flies, other cars are cars")
+	var vid := String(game.empire.vehicles[0]["id"])
+	game.enter_vehicle(vid)
+	var car: Car = game.cars[vid]
+	game.drive_input.enabled = false
+	var here := car.global_position
+	# 1 – a street light.
+	var lamp: Array = []
+	var dir := Vector3.ZERO
+	var cells: Array = game.props._grid.keys()
+	cells.sort_custom(func(a, b): return Vector2(a).distance_to(Vector2(here.x, here.z) / Destructibles.CELL) < Vector2(b).distance_to(Vector2(here.x, here.z) / Destructibles.CELL))
+	for c in cells.slice(0, 60):
+		for it in game.props._grid[c]:
+			if String(it[0]) != "streetlight":
+				continue
+			var o: Vector3 = (it[1] as Transform3D).origin
+			for d: Vector3 in [Vector3.RIGHT, Vector3.LEFT, Vector3.FORWARD, Vector3.BACK]:
+				if _clear_line(o - d * 14.0, o - d * 1.0):
+					lamp = it
+					dir = d
+					break
+			if not lamp.is_empty():
+				break
+		if not lamp.is_empty():
+			break
+	check(not lamp.is_empty(), "found a street light with a clear run-up")
+	if not lamp.is_empty():
+		var o: Vector3 = (lamp[1] as Transform3D).origin
+		var pieces0: int = game.props._pieces.size()
+		var low := await _ram(car, o - dir * 14.0, dir, 12.0, 2.2)
+		var cw: CityWorld = lamp[3]
+		check(cw.broken.has(CityWorld.item_key(o)), "the street light is knocked down (gone from the street)")
+		check(game.props._pieces.size() > pieces0, "…and flies off as a physical piece")
+		check(low > 7.0, "the car carries on (lowest %.1f m/s from 12: it isn't a wall)" % low)
+	# 2 – a parked car, from behind.
+	var cw2: CityWorld = game.world
+	var target: Array = []
+	for wc in [game.world, game.world.mainland]:
+		if wc and (wc as CityWorld)._loaded.has(Vector2i(floori(here.x / CityWorld.CHUNK), floori(here.z / CityWorld.CHUNK))):
+			cw2 = wc
+	var c0 := Vector2i(floori(here.x / CityWorld.CHUNK), floori(here.z / CityWorld.CHUNK))
+	for r in 3:
+		for dx in range(-r, r + 1):
+			for dz in range(-r, r + 1):
+				var key := c0 + Vector2i(dx, dz)
+				if not target.is_empty() or not cw2._loaded.has(key):
+					continue
+				for pc in cw2.parked_cars(key):
+					var xf: Transform3D = pc[0]
+					for sd: float in [1.0, -1.0]:
+						if target.is_empty() and _clear_line(xf.origin + xf.basis.x * sd * 9.0, xf.origin + xf.basis.x * sd * 2.5):
+							target = [pc[0], pc[1], sd]
+					if not target.is_empty():
+						break
+	check(not target.is_empty(), "found a parked car with a clear run-up from the road")
+	if not target.is_empty():
+		var xf: Transform3D = target[0]
+		var n0: int = game.wrecks.wrecks.size()
+		var p0 := xf.origin
+		var sd: float = target[2]
+		await _ram(car, xf.origin + xf.basis.x * sd * 9.0, -xf.basis.x * sd, 10.0, 2.0)
+		var w: Array = game.wrecks.wrecks.slice(n0)
+		check(not w.is_empty(), "hitting the parked car turns it into a real car")
+		if not w.is_empty():
+			var wc: Car = w[0]["car"]
+			check(wc.global_position.distance_to(p0) > 0.8, "…which is shunted (%.1f m)" % wc.global_position.distance_to(p0))
+			check(cw2.broken.has(CityWorld.item_key(p0)), "…and has left the kerb (not drawn twice)")
+	# 3 – a moving traffic car, from behind in its lane.
+	var tr: Traffic = game.world.traffic
+	var hit_id := -1
+	var start := Vector3.ZERO
+	var fwd := Vector3.ZERO
+	for attempt in 6:
+		await stand(here + Vector3(attempt * 37.0, 0, attempt * -23.0))
+		await wait(0.6)
+		for it in game.traffic_bodies.city_cars():
+			var xf: Transform3D = it[1]
+			if tr.car_speed(int(it[0])) < 3.0:
+				continue
+			if _clear_line(xf.origin + xf.basis.z * 14.0, xf.origin + xf.basis.z * 3.0):
+				hit_id = int(it[0])
+				start = xf.origin + xf.basis.z * 14.0
+				fwd = -xf.basis.z
+				break
+		if hit_id >= 0:
+			break
+	check(hit_id >= 0, "found a moving traffic car with clear lane behind it")
+	if hit_id >= 0:
+		game.enter_vehicle(vid)
+		game.drive_input.enabled = false   # (enter_vehicle hands the car back to the player's input)
+		var n1: int = game.wrecks.wrecks.size()
+		var tf := func():
+			var wl: Array = game.wrecks.wrecks
+			var wd := ""
+			if wl.size() > n1:
+				var wc: Car = wl[-1]["car"]
+				wd = "wreck at %s v=%s (me %s)" % [wc.global_position.snapped(Vector3.ONE * 0.1), wc.linear_velocity.snapped(Vector3.ONE * 0.1), car.global_position.snapped(Vector3.ONE * 0.1)]
+			print("  trace: speed %.1f  wrecks %d %s" % [car.speed, wl.size(), wd])
+		await _ram(car, start, fwd, tr.car_speed(hit_id) + 9.0, 2.6, true)
+		tf.call()
+		check(tr.knocked.has(hit_id), "the traffic car is knocked out of the traffic")
+		var w2: Array = game.wrecks.wrecks.slice(n1)
+		check(not w2.is_empty() and (w2[0]["car"] as Car).speed > 1.0 or not w2.is_empty() and (w2[0]["car"] as Car).global_position.distance_to(start) > 16.0,
+			"…and becomes a real car that the hit pushes along")
+	game.drive_input.enabled = true

@@ -44,6 +44,41 @@ func setup(g: EmpireGame) -> void:
 		_bodies.append(b)
 
 
+## City traffic cars that currently have a body: [[id, Transform3D]] (Wrecks).
+func city_cars() -> Array:
+	var out: Array = []
+	var tr: Traffic = game.world.traffic if game and game.world else null
+	if tr == null:
+		return out
+	for src in _near:
+		if int(src[0]) == 0 and not tr.knocked.has(int(src[1])):
+			out.append([int(src[1]), traffic_xf(tr, int(src[1]))])
+	return out
+
+
+static func traffic_xf(tr: Traffic, id: int) -> Transform3D:
+	var s := tr.car_s(id, tr.now)
+	var p := tr.lane_point(tr.c_lane[id], s)
+	var dir := tr.lane_dir(tr.c_lane[id], s)
+	dir.y = 0.0
+	if dir.length_squared() < 0.0001:
+		dir = Vector3.FORWARD
+	return Transform3D(Basis.looking_at(dir.normalized(), Vector3.UP), p)
+
+
+## A car Wrecks is replacing with a real one: its kinematic body leaves at
+## once (a rigid car spawned inside it would be flung out).
+func drop(id: int) -> void:
+	for i in _near.size():
+		var src: Array = _near[i]
+		if int(src[0]) == 0 and int(src[1]) == id:
+			_near[i] = [-1, 0]   # (body i stays parked until the next listing)
+			var b: AnimatableBody3D = _bodies[i]
+			b.global_position = Vector3(0, -500, 0)
+			b.process_mode = Node.PROCESS_MODE_DISABLED
+			break
+
+
 func _here() -> Vector3:
 	var vn := game.vehicle_node()
 	return vn.global_position if vn else game.player.global_position
@@ -68,6 +103,8 @@ func _physics_process(dt: float) -> void:
 		var cand: Array = []
 		if tr:
 			for id in tr.car_count():
+				if tr.knocked.has(id):
+					continue
 				var d := tr.car_position(id).distance_squared_to(here)
 				if d < RANGE * RANGE:
 					cand.append([d, 0, id])
@@ -97,18 +134,13 @@ func _physics_process(dt: float) -> void:
 				b.process_mode = Node.PROCESS_MODE_DISABLED
 			continue
 		var src: Array = _near[i]
+		if int(src[0]) < 0:
+			continue
 		var xf := Transform3D()
 		if int(src[0]) == 0:
 			if tr == null:
 				continue
-			var id := int(src[1])
-			var s := tr.car_s(id, tr.now)
-			var p := tr.lane_point(tr.c_lane[id], s)
-			var dir := tr.lane_dir(tr.c_lane[id], s)
-			dir.y = 0.0
-			if dir.length_squared() < 0.0001:
-				dir = Vector3.FORWARD
-			xf = Transform3D(Basis.looking_at(dir.normalized(), Vector3.UP), p)
+			xf = traffic_xf(tr, int(src[1]))
 		else:
 			if it == null:
 				continue

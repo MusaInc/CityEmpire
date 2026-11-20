@@ -48,6 +48,8 @@ var pursuit: StreetPursuit
 var speed_fx: SpeedFx
 const PURSUIT_REWARD := 2500.0
 var traffic_bodies: TrafficBodies
+var wrecks: Wrecks
+var props: Destructibles
 var car_audio: CarAudio
 var units: Array = []
 var unit_by_id := {}
@@ -221,6 +223,26 @@ func _ready() -> void:
 	traffic_bodies.name = "TrafficBodies"
 	add_child(traffic_bodies)
 	traffic_bodies.setup(self)
+	# Hitting things like NEVER STOP: street furniture flies, cars are cars.
+	wrecks = Wrecks.new()
+	wrecks.name = "Wrecks"
+	add_child(wrecks)
+	wrecks.setup(self)
+	props = Destructibles.new()
+	props.name = "Destructibles"
+	add_child(props)
+	props.setup(world as CityWorld)
+	props.cars_fn = func() -> Array:
+		var out: Array = wrecks.cars()
+		var me := vehicle_node() as Car
+		if me:
+			out.append(me)
+		if pursuit and pursuit.state == "chase":
+			if is_instance_valid(pursuit.suspect):
+				out.append(pursuit.suspect)
+			out.append_array(pursuit.police.filter(func(c): return is_instance_valid(c)))
+		return out
+	props.broke.connect(_on_prop_broke)
 
 	if args.has("save"):
 		save_path = String(args["save"])
@@ -1848,6 +1870,22 @@ func in_vehicle() -> bool:
 
 
 ## The vehicle you're in (Car or Craft), or null.
+## Knocked something over: a thump you feel, not a crash (no damage).
+func _on_prop_broke(kind: String, at: Vector3, by: Car) -> void:
+	if by != vehicle_node():
+		return
+	var tree := kind.begins_with("tree")
+	if car_audio:
+		car_audio.play("crash_heavy_%d" % (randi() % 3) if tree else "crash_light_%d" % (randi() % 2),
+			-8.0 if tree else -12.0, randf_range(0.95, 1.1) if tree else randf_range(1.15, 1.35))
+	if chase:
+		chase.shake(0.28 if tree else (0.08 if kind in ["bin", "bollard", "sign_post", "crates"] else 0.16))
+		if tree:
+			chase.punch(-2.5)
+	if Engine.has_singleton("Haptics") or OS.has_feature("mobile"):
+		Input.vibrate_handheld(35 if tree else 15)
+
+
 func vehicle_node() -> Node3D:
 	if driving != "":
 		return cars.get(driving)

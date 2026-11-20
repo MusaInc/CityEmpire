@@ -14,6 +14,11 @@ const CHUNK := CityLayout.CHUNK
 ## Street furniture, lamp posts, trunks, roof units and parked cars: solid to
 ## the body (and ragdoll), but not web targets and not in the way of webs.
 const PROPS_LAYER := 1 << 4
+## Solid to vehicles too (Car.BODY_MASK bit 7): bus shelters, planters and
+## parked cars. Everything else on PROPS_LAYER is breakable (Destructibles)
+## and cars knock it flying instead of stopping dead (NEVER STOP's rule).
+const SOLID_LAYER := 1 << 7
+const SOLID_PROPS := ["bus_shelter", "planter"]
 ## Solid for people only (Player sets mask bit 6 for humans): trains,
 ## balconies, rooftop plant – detail bots and recorded courses ignore.
 const HUMAN_LAYER := 1 << 5
@@ -123,6 +128,10 @@ var _lamp_base := 1.0
 var _glow_mats: Array[ShaderMaterial] = []  # [pool, halo]
 var _glow_meshes: Array[Mesh] = []  # [pool (PlaneMesh), halo (QuadMesh)]
 var _glow_nodes: Array = []
+## Knocked down / driven off this session (Destructibles, Wrecks): item key ->
+## true. Filtered out of what chunks draw and collide with.
+var broken := {}
+var _shape_by_key := {}   # item key -> CollisionShape3D (props, furniture, parked cars)
 var _glow_on := false
 ## Lamp head (the LED panel) in the streetlight model's frame (ws_street.py).
 const LAMP_HEAD := Vector3(0.0, 6.85, -1.45)
@@ -1363,28 +1372,38 @@ func _build_prop_collision() -> void:
 		soft.name = "PropsHuman_%d_%d" % [key.x, key.y]
 		soft.collision_layer = HUMAN_LAYER
 		soft.collision_mask = 0
+		var solid := StaticBody3D.new()
+		solid.name = "PropsSolid_%d_%d" % [key.x, key.y]
+		solid.collision_layer = PROPS_LAYER | SOLID_LAYER
+		solid.collision_mask = 0
 		var items: Array = chunk_props(key) + chunk_furniture(key)
 		for it in items:
 			var kind: String = it[0]
 			if not cache.has(kind):
 				cache[kind] = _prop_boxes(kind)
+			var target := soft if kind in HUMAN_ONLY_PROPS else (solid if kind in SOLID_PROPS else body)
 			for bx in cache[kind]:
-				_add_oriented_box(soft if kind in HUMAN_ONLY_PROPS else body, it[1], bx[0], bx[1])
+				var sh := _add_oriented_box(target, it[1], bx[0], bx[1])
+				if target == body:
+					_shape_by_key[item_key((it[1] as Transform3D).origin)] = sh
 		if soft.get_child_count() > 0:
 			add_child(soft)
 		else:
 			soft.free()
+		# Parked cars: solid to vehicles (you used to drive through them);
+		# Wrecks turns one into a real car when you hit it.
 		for pc in parked_cars(key):
 			var bx: Array = car_boxes[int(pc[1])]
-			_add_oriented_box(body, pc[0], bx[0], bx[1])
-		if body.get_child_count() > 0:
-			add_child(body)
-		else:
-			body.free()
+			_shape_by_key[item_key((pc[0] as Transform3D).origin)] = _add_oriented_box(solid, pc[0], bx[0], bx[1])
+		for b2 in [body, solid]:
+			if b2.get_child_count() > 0:
+				add_child(b2)
+			else:
+				b2.free()
 
 
 ## A box of `size` at `centre` in the frame `xf` (uniform scale baked into the size).
-static func _add_oriented_box(body: StaticBody3D, xf: Transform3D, size: Vector3, centre: Vector3) -> void:
+static func _add_oriented_box(body: StaticBody3D, xf: Transform3D, size: Vector3, centre: Vector3) -> CollisionShape3D:
 	var sc := xf.basis.get_scale()
 	var shape := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
@@ -1392,6 +1411,53 @@ static func _add_oriented_box(body: StaticBody3D, xf: Transform3D, size: Vector3
 	shape.shape = bs
 	shape.transform = Transform3D(xf.basis.orthonormalized(), xf * centre)
 	body.add_child(shape)
+	return shape
+
+
+static func item_key(p: Vector3) -> Vector3i:
+	return Vector3i(roundi(p.x * 10.0), roundi(p.y * 10.0), roundi(p.z * 10.0))
+
+
+## Something knocked down or driven off: gone from drawing and collision.
+func break_item(p: Vector3) -> void:
+	var k := item_key(p)
+	broken[k] = true
+	var sh: CollisionShape3D = _shape_by_key.get(k)
+	if sh and is_instance_valid(sh):
+		sh.set_deferred("disabled", true)
+
+
+## Rebuilds a loaded chunk's props and furniture (after something broke).
+func refresh_props(key: Vector2i) -> void:
+	var root: Node3D = _loaded.get(key)
+	if root == null:
+		return
+	for ch in root.get_children():
+		if ch.name.begins_with("Props_") or ch.name == "Furniture" or ch.name == "LampHalos":
+			root.remove_child(ch)
+			ch.queue_free()
+	_add_props(root, key, null)   # (the ground pools stay: only the halos are rebuilt)
+	var furn := _mesh_from(_furniture_arrays(key))
+	if furn:
+		var fi := MeshInstance3D.new()
+		fi.name = "Furniture"
+		fi.mesh = furn
+		fi.material_override = furniture_mat
+		fi.visibility_range_end = FURNITURE_RANGE
+		fi.visibility_range_end_margin = 20.0
+		root.add_child(fi)
+
+
+## Rebuilds a loaded chunk's parked cars (one was driven off as a wreck).
+func refresh_parked(key: Vector2i) -> void:
+	var root: Node3D = _loaded.get(key)
+	if root == null:
+		return
+	for ch in root.get_children():
+		if ch.name.begins_with("Traffic_"):
+			root.remove_child(ch)
+			ch.queue_free()
+	_add_traffic(root, key)
 
 
 static func _add_faces(body: StaticBody3D, m: BuildingMesher) -> void:
@@ -1953,6 +2019,8 @@ func chunk_props(key: Vector2i) -> Array:
 			var sc := xf.basis.get_scale().y
 			kind = "tree_" + TreeKit.pick(xf.origin)
 			xf.basis = TreeKit.shape(xf.origin, sc)
+		if not broken.is_empty() and broken.has(item_key(xf.origin)):
+			continue
 		out.append([kind, xf])
 	return out
 
@@ -1968,6 +2036,8 @@ func chunk_furniture(key: Vector2i) -> Array:
 			if pp[0] == "streetlight":
 				lamps[Vector2i(int((pp[1] as Transform3D).origin.x * 10.0), int((pp[1] as Transform3D).origin.z * 10.0))] = true
 	for it in _furniture_by_chunk.get(key, []):
+		if not broken.is_empty() and broken.has(item_key((it[1] as Transform3D).origin)):
+			continue
 		if String(it[0]).begins_with("banner_"):
 			var bo: Vector3 = (it[1] as Transform3D).origin
 			if prop_density >= 1.0 or lamps.has(Vector2i(int(bo.x * 10.0), int(bo.z * 10.0))):
@@ -2312,8 +2382,11 @@ func parked_cars(key: Vector2i) -> Array:
 		if rng.randf() > PARKED_KEEP:
 			continue
 		# The shader shifts a parked car 5 m back along its segment (see below).
-		out.append([Transform3D((t as Transform3D).basis, (t as Transform3D).origin - (t as Transform3D).basis.z * 5.0),
-			_car_kind(rng.randf(), layout.is_mainland)])
+		var at := (t as Transform3D).origin - (t as Transform3D).basis.z * 5.0
+		var kind := _car_kind(rng.randf(), layout.is_mainland)   # (drawn first: the others keep theirs)
+		if not broken.is_empty() and broken.has(item_key(at)):
+			continue
+		out.append([Transform3D((t as Transform3D).basis, at), kind])
 	return out
 
 
