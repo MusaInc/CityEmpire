@@ -941,6 +941,8 @@ static func city500(ph: Phone, body: VBoxContainer) -> void:
 	(hdr[1] as VBoxContainer).add_child(G.para(("#%d of 500" % int(yr["rank"])) + (" · %s to pass %s" % [City500.money(float(ahead["value"]) - float(yr["value"])), ahead["c"]["name"]] if not ahead.is_empty() else "")
 		if int(yr["rank"]) > 0 else "%s more to enter the City500" % City500.money(float(yr["gap_500"])), "subhead"))
 	v.add_child(hdr[0])
+	if sector == "" and q == "":
+		v.add_child(_c500_next(ph))
 	v.add_child(G.group(rows))
 	if shown > limit:
 		v.add_child(G.button("Show more (%d)" % (shown - limit), func():
@@ -959,6 +961,43 @@ static func city500(ph: Phone, body: VBoxContainer) -> void:
 		if sel >= 0:
 			var iv := scroller(insp, 14)
 			_company_body(ph, iv, sel)
+
+
+## "Your next step": a reachable milestone instead of the billion-pound top.
+static func _c500_next(ph: Phone) -> Control:
+	var n := City500.next_step(ph.game.empire)
+	var card := G.card(20, 10)
+	var cv: VBoxContainer = card[1]
+	cv.add_child(G.line("YOUR NEXT STEP", "caption", G.ACCENT_TEXT, "semibold"))
+	cv.add_child(G.line(String(n["label"]), "title3", null, "semibold"))
+	var pb := ProgressBar.new()
+	pb.show_percentage = false
+	pb.custom_minimum_size = Vector2(0, 10)
+	pb.max_value = 1.0
+	var span := maxf(float(n["target"]) - float(n["from"]), 1.0)
+	pb.value = clampf((float(n["value"]) - float(n["from"])) / span, 0.0, 1.0)
+	pb.add_theme_stylebox_override("background", G.box(G.FILL, 5, 0))
+	pb.add_theme_stylebox_override("fill", G.box(G.ACCENT, 5, 0))
+	cv.add_child(pb)
+	var when := ""
+	if int(n["days"]) > 0:
+		when = " · about %d day%s at today's profit" % [int(n["days"]), "" if int(n["days"]) == 1 else "s"]
+	elif float(n["profit_day"]) <= 0.0:
+		when = " · needs a profit first"
+	cv.add_child(G.para("%s to go%s" % [City500.money(float(n["gap"])), when], "subhead"))
+	cv.add_child(G.para("Every extra £10 a day of profit adds about %s to your value." % City500.money(float(n["per10"])), "footnote", G.LABEL2))
+	cv.add_child(G.para(String(n["tip"]), "footnote"))
+	if not (n["near"] as Array).is_empty():
+		cv.add_child(G.line("JUST AHEAD OF YOU" if n["ranked"] else "THE CITY500'S BOTTOM RUNG", "caption", G.LABEL2, "semibold"))
+		for r in n["near"]:
+			var c: Dictionary = r["c"]
+			var h := G.hbox(10)
+			var nm := G.line("#%d  %s" % [int(r["rank"]), String(c["name"])], "subhead")
+			nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			h.add_child(nm)
+			h.add_child(G.line(City500.money(float(r["value"])), "subhead", G.LABEL2))
+			cv.add_child(h)
+	return card[0]
 
 
 static func _c500_row(ph: Phone, r: Dictionary, day: int, wide: bool) -> Control:

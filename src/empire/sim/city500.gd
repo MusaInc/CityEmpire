@@ -403,6 +403,71 @@ static func rivals(e: Empire, n := 5) -> Array:
 	return out
 
 
+## The next achievable step on the way into (and up) the City500, for a
+## player who starts with a few hundred pounds next to billion-pound leaders
+## (WS-05): a near milestone, how far, roughly how long at today's profit, what
+## an extra £10 a day of profit is worth, and the one lever that moves it most.
+const MILESTONES := [2500.0, 5000.0, 10000.0, 25000.0, 50000.0, 100000.0, 200000.0]
+
+
+static func next_step(e: Empire) -> Dictionary:
+	var ev := empire_value(e)
+	var yr := your_rank(e)
+	var mine := float(ev["value"])
+	var target := 0.0
+	var label := ""
+	if int(yr["rank"]) > 0:
+		var ah: Dictionary = yr["ahead"]
+		if not ah.is_empty():
+			target = float(ah["value"])
+			label = "Pass %s (#%d)" % [ah["c"]["name"], int(ah["rank"])]
+	else:
+		for m in MILESTONES:
+			if m > mine and m < float(yr["floor"]):
+				target = m
+				label = "Reach a %s business" % money(m)
+				break
+		if target == 0.0:
+			target = float(yr["floor"])
+			label = "Enter the City500 (#500)"
+	var start := 0.0
+	for m in MILESTONES:
+		if m <= mine:
+			start = m
+	var rep_k := lerpf(0.8, 1.2, clampf(float(ev["reputation"]) / 100.0, 0.0, 1.0))
+	var per10 := 10.0 * 365.0 * EARN_MULTIPLE * rep_k
+	var daily := float(ev["profit_day"])
+	var days := -1
+	if daily > 0.0 and target > mine:
+		# Profit banks as cash every day (assets), the earnings value holds.
+		days = int(ceil((target - mine) / daily))
+	var tip := ""
+	if e.businesses.is_empty():
+		tip = "Rent your first shop: a business that makes money is worth years of its profit."
+	elif daily <= 0.0:
+		tip = "Get a shop into profit: stocked shelves and a cashier, then check its prices."
+	elif e.businesses.size() == 1:
+		tip = "A second shop roughly doubles the profit investors value you on."
+	elif float(ev["reputation"]) < 60.0:
+		tip = "Better reputation (clean, stocked, staffed shops) raises what your profit is worth (×%.2f now)." % rep_k
+	else:
+		tip = "More profitable sites, or property that pays rent, move you up fastest."
+	# The companies just above you (or the bottom of the table) – not the leaders.
+	var near: Array = []
+	var rk := ranking(e)
+	var you_i := -1
+	for i in rk.size():
+		if rk[i].get("you", false):
+			you_i = i
+			break
+	var top := you_i if you_i >= 0 else rk.size()
+	for i in range(maxi(0, top - 3), top):
+		if not rk[i].get("you", false):
+			near.append(rk[i])
+	return {"label": label, "target": target, "value": mine, "from": start, "gap": maxf(0.0, target - mine),
+		"days": days, "per10": per10, "profit_day": daily, "tip": tip, "near": near, "ranked": int(yr["rank"]) > 0}
+
+
 ## Why a company is ahead of you, in one sentence.
 static func why_ahead(e: Empire, c: Dictionary) -> String:
 	var p := profile(c, e.day)

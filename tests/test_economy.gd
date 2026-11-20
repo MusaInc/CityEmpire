@@ -617,3 +617,13 @@ func test_selling_a_vehicle(t) -> void:
 		if String(x["cat"]) == "fees" and int(x["day"]) == e.day - 1:
 			fees += float(x["amount"])
 	t.check(fees == 0.0, "no hangar fees once the helicopter is sold")
+
+
+func test_city500_next_step_is_reachable(t) -> void:
+	# WS-05: a new player sees a near milestone, not the billion-pound top.
+	var e := _game(1)
+	var n := City500.next_step(e)
+	t.check(float(n["target"]) > float(n["value"]) and float(n["target"]) <= 5000.0, "first target is near (%s)" % n["label"])
+	t.check(String(n["tip"]).contains("first shop"), "points at the first shop")
+	t.check(not n["ranked"] and (n["near"] as Array).size() == 3 and int(n["near"][-1]["rank"]) == 500, "shows the bottom rung, not the leaders")
+	t.check(float(n["per10"]) > 9000.0, "£10/day of profit is worth ~£11k (%.0f)" % float(n["per10"]))
