@@ -438,6 +438,10 @@ func update_hud() -> void:
 
 ## A notification. With a ref it's tappable ("›"): it opens what it's about.
 func toast(text: String, kind := "info", ref := {}) -> void:
+	# (The same news twice in a row adds nothing: keep the one on screen.)
+	for c in _toasts.get_children():
+		if c.has_meta("text") and String(c.get_meta("text")) == text and not c.is_queued_for_deletion():
+			return
 	var col: Color = {"good": S.GREEN, "warn": S.AMBER, "bad": S.RED}.get(kind, S.BLUE)
 	var p := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
@@ -462,8 +466,11 @@ func toast(text: String, kind := "info", ref := {}) -> void:
 			if tap and game.state == "play":
 				p.accept_event()
 				open_ref(ref))
+	p.set_meta("text", text)
 	_toasts.add_child(p)
-	while _toasts.get_child_count() > 4:
+	# Two at a time (the audit's shop floor had four stacked over the view):
+	# a newer notice pushes the oldest out; everything stays in the phone's news.
+	while _toasts.get_child_count() > 2:
 		_toasts.get_child(0).queue_free()
 		_toasts.remove_child(_toasts.get_child(0))
 	var tw := create_tween()
