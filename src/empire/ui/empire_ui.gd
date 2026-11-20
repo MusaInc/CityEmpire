@@ -571,6 +571,12 @@ func deal_done() -> void:
 
 
 func close_panel(resume := true) -> void:
+	# The phone (light or dark) puts the street palette back in its
+	# _exit_tree, but queue_free runs that a frame later – after the next
+	# window is already built in the phone's palette (black labels on the
+	# street's dark controls: the wardrobe opened from the phone). Switch now.
+	if phone != null and not Glass.dark:
+		Glass.set_dark(true)
 	for c in _panel_root.get_children():
 		c.queue_free()
 	_panel = null
@@ -2123,11 +2129,15 @@ func open_style(first := false) -> void:
 	catcher.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	catcher.mouse_filter = Control.MOUSE_FILTER_STOP
 	_panel_root.add_child(catcher)
-	var W := 600.0
-	var H := 680.0
+	# Fit the visible area (iPad 4:3, wide phones, safe area), hero on the left.
+	var vp := _panel_root.get_viewport_rect().size
+	var ins := _safe_insets()
+	var W := clampf(vp.x * 0.47, 440.0, 600.0)
+	var H := minf(860.0, vp.y - ins[1] - ins[3] - 48.0)
+	_style_inner = W - 60.0
 	_panel = PanelContainer.new()
 	_panel.custom_minimum_size = Vector2(W, H)
-	_anchor(_panel, 1.0, 0.5, Vector2(-W - 24.0, -H * 0.5), Vector2(W, H))
+	_anchor(_panel, 1.0, 0.5, Vector2(-W - 24.0 - ins[2], -H * 0.5 + (ins[1] - ins[3]) * 0.5), Vector2(W, H))
 	_panel_root.add_child(_panel)
 	var v := S.vbox(12)
 	_panel.add_child(v)
@@ -2138,7 +2148,9 @@ func open_style(first := false) -> void:
 	if not first:
 		head.add_child(S.button("✕", _close_style, false, 52))
 	v.add_child(head)
-	var tabs := S.hbox(8)
+	var tabs := HFlowContainer.new()  # (wraps on narrow panels instead of running off screen)
+	tabs.add_theme_constant_override("h_separation", 8)
+	tabs.add_theme_constant_override("v_separation", 8)
 	var tab_list := [["you", "Face & hair"], ["clothes", "Clothes"], ["extras", "Shoes & hats"]]
 	if shop != "":
 		tab_list = [["clothes", "Clothes"], ["extras", "Shoes & more"]]
@@ -2149,7 +2161,7 @@ func open_style(first := false) -> void:
 	for tb in tab_list:
 		tabs.add_child(S.button(tb[1], func():
 			_style_tab = tb[0]
-			open_style(_style_first), _style_tab == tb[0], 170))
+			open_style(_style_first), _style_tab == tb[0], 0.0))
 	v.add_child(tabs)
 	var body := S.vbox(10)
 	match _style_tab:
@@ -2182,7 +2194,7 @@ func open_style(first := false) -> void:
 			body.add_child(S.button("Save what I'm wearing", func():
 				Wardrobe.save_outfit(e.flags, HeroLook.current(e.flags))
 				open_style(false), false, 300))
-	v.add_child(_scroll(body, H - 250.0))
+	v.add_child(_scroll(body, 120.0))  # (fills what the header/footer leave)
 	var foot := S.hbox(10)
 	foot.add_child(S.button("⟲", func():
 		_style_orbit -= 0.6
@@ -2205,8 +2217,12 @@ func open_style(first := false) -> void:
 		r["head"] = "head_bare"
 		r["eyewear"] = "face_none"
 		_style_set(r), false, 130))
-	foot.add_child(S.spacer())
 	var unpaid := Wardrobe.unpaid(e.flags, l) if (shop != "" and not first) else []
+	if not unpaid.is_empty():
+		# Second row for Buy + Leave (one row would run off a narrow panel).
+		v.add_child(foot)
+		foot = S.hbox(10)
+	foot.add_child(S.spacer())
 	if not unpaid.is_empty():
 		var tot := 0
 		for it in unpaid:
@@ -2227,6 +2243,17 @@ func open_style(first := false) -> void:
 ## your wardrobe. Look on entering a store (put back if you leave unpaid).
 var style_shop := ""
 var _style_entry := {}
+var _style_inner := 540.0  # usable width inside the Style panel
+
+
+## Safe-area insets (left, top, right, bottom) in canvas px; zero in a window.
+func _safe_insets() -> Array:
+	var sa := DisplayServer.get_display_safe_area()
+	var win := DisplayServer.window_get_size()
+	if sa.size.x <= 0 or win.x <= 0 or DisplayServer.screen_get_size() != win:
+		return [0.0, 0.0, 0.0, 0.0]
+	var k := _panel_root.get_viewport_rect().size / Vector2(win)
+	return [sa.position.x * k.x, sa.position.y * k.y, (win.x - sa.end.x) * k.x, (win.y - sa.end.y) * k.y]
 
 
 ## The choices for a list: the store's stock (priced) in a store, what you
@@ -2271,7 +2298,7 @@ func _style_choices(v: VBoxContainer, title: String, list: Array, l: Dictionary,
 	g.columns = cols
 	g.add_theme_constant_override("h_separation", 8)
 	g.add_theme_constant_override("v_separation", 8)
-	var w := (540.0 - 8.0 * (cols - 1)) / cols
+	var w := (_style_inner - 8.0 * (cols - 1)) / cols
 	for it in list:
 		g.add_child(S.button(String(it[1]), func(): _style_set({key: it[0]}), String(l.get(key, "")) == it[0], w))
 	v.add_child(g)
@@ -2282,7 +2309,7 @@ func _style_choices(v: VBoxContainer, title: String, list: Array, l: Dictionary,
 func _style_colours(v: VBoxContainer, title: String, list: Array, l: Dictionary, key: String, own = null) -> void:
 	v.add_child(S.label(title, 14, S.AMBER, "black"))
 	var g := GridContainer.new()
-	g.columns = 8
+	g.columns = maxi(4, int((_style_inner + 8.0) / 76.0))  # 68 px swatches
 	g.add_theme_constant_override("h_separation", 8)
 	g.add_theme_constant_override("v_separation", 8)
 	var cur := String(l.get(key, ""))
@@ -2316,11 +2343,13 @@ func _style_frame() -> void:
 	var cam: Camera3D = game.camera.cam
 	cam.global_transform = Transform3D(Basis.looking_at(look_at - eye, Vector3.UP), eye)
 	cam.fov = 50.0
+	game.studio_light(true)
 
 
 func _close_style() -> void:
 	var first := _style_first
 	_style_pose(false)
+	game.studio_light(false)
 	_style_first = false
 	var e := game.empire
 	if first:

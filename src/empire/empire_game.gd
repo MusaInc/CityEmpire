@@ -544,6 +544,12 @@ func _after_start() -> void:
 		elif pn == "firm" and not empire.firms.is_empty():
 			var fs2 := CityLife.firms_for_sale(empire)
 			ui.open_firm(unit_by_id[(fs2[0] if not fs2.is_empty() else empire.firms[0])["unit"]])
+		elif pn == "phonestyle":
+			# (captures: the real path – light phone → Edit appearance)
+			Glass.mode = "light"
+			ui.open_phone("character")
+			await get_tree().process_frame
+			ui.open_style()
 		elif pn.begins_with("style"):
 			ui._style_tab = pn.get_slice(":", 1) if ":" in pn else "you"
 			ui.open_style()
@@ -1201,6 +1207,24 @@ func _hero_fill(on: bool) -> void:
 		var to_c := Vector3(c.x - h.x, 0.0, c.z - h.z).normalized()
 		_fill.global_position = h + to_c * 1.6 + to_c.cross(Vector3.UP) * 0.6 + Vector3.UP * 1.0
 		_fill.light_energy = 1.1 * _fill_e
+
+
+## The wardrobe's preview light (the game is paused, so _hero_fill doesn't
+## run): the same hero-only fill, brighter, from the camera's side, so deep
+## skin tones and dark clothes read instead of a silhouette.
+func studio_light(on: bool) -> void:
+	_hero_fill(false)
+	_fill_e = 0.0
+	_fill.visible = on
+	if on:
+		var h := player.global_position + Vector3.UP * 0.5
+		var c := camera.cam.global_position
+		var to_c := Vector3(c.x - h.x, 0.0, c.z - h.z).normalized()
+		_fill.global_position = h + to_c * 2.0 - to_c.cross(Vector3.UP) * 0.9 + Vector3.UP * 1.1
+		_fill.omni_range = 6.0
+		_fill.light_energy = 1.8
+	else:
+		_fill.omni_range = 5.0
 
 
 func _end_floor() -> void:
