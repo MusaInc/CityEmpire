@@ -195,13 +195,19 @@ func test_road_field_matches_the_roads(t) -> void:
 		var i := pts.size() / 2
 		var d := (pts[i + 1] - pts[i]).normalized()
 		var n := Vector2(-d.y, d.x)
+		# A roundabout's ring carries +0.25 m on its half width (the one-way
+		# flag, CityRoads._bake_field); boulevards stop at the ring, so a
+		# probe inside a roundabout reads the ring's texel by design.
+		var hw := float(r["w"]) * 0.5 + (0.25 if r.get("ring", false) else 0.0)
 		for off: float in [0.0, float(r["w"]) * 0.25]:
 			var p := pts[i] + n * off
 			var f := R.field_at(p)
 			if f.w < 2.0:
 				continue  # (a junction: another road owns the texel)
+			if not r.get("ring", false) and R.roundabouts.any(func(rb): return p.distance_to(rb["c"]) < float(rb["r"]) + float(rb["w"]) * 0.5 + R.field_cell):
+				continue  # (inside a roundabout: the ring owns the texel)
 			probes += 1
-			if absf(absf(f.x) - off) > R.field_cell or absf(absf(f.y) - float(r["w"]) * 0.5) > 0.01:
+			if absf(absf(f.x) - off) > R.field_cell or absf(absf(f.y) - hw) > 0.01:
 				bad += 1
 	t.note("%d road-field probes" % probes)
 	t.check(probes > 60, "probed most roads")
