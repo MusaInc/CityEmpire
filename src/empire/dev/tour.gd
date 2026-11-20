@@ -66,12 +66,65 @@ func _run() -> void:
 			to.y += gy
 		var cam: Node = game.get("camera")
 		cam.set("cine", func(_dt: float) -> Array:
-			return [Transform3D(Basis.looking_at(to - from, Vector3.UP), from), 62.0])
+			return [Transform3D(Basis.looking_at(to - from, Vector3.UP), from), float(args.get("tour-fov", "62"))])
+		if args.has("tour-nohero"):
+			(game.get("player") as Node3D).visible = false
 		await get_tree().create_timer(wait).timeout
+		if args.has("tour-clear"):
+			# (tools/photos: a view whose camera sits inside or behind a
+			# building swings round the target / climbs until the line
+			# of sight is clear; --tour-clear=redo shoots only those.)
+			var fixed := await _clear_view(from, to)
+			if fixed.is_empty():
+				if String(args["tour-clear"]) == "redo":
+					print("TOUR_CLEAR ", nm)
+					continue
+			else:
+				var f2: Vector3 = fixed[0]
+				print("TOUR_MOVED ", nm, " ", f2)
+				# (lambdas capture by value: a new one for the new spot)
+				var fov := float(args.get("tour-fov", "62"))
+				cam.set("cine", func(_dt: float) -> Array:
+					return [Transform3D(Basis.looking_at(to - f2, Vector3.UP), f2), fov])
+				await get_tree().create_timer(2.0).timeout
 		await RenderingServer.frame_post_draw
 		var img := get_viewport().get_texture().get_image()
-		img.save_png(dir.path_join(nm + ".png"))
+		if args.has("tour-jpg"):
+			# (tools/photos: property photos, w px wide, JPEG.)
+			var jw := int(args["tour-jpg"])
+			img.resize(jw, int(img.get_height() * float(jw) / img.get_width()), Image.INTERPOLATE_BILINEAR)
+			img.save_jpg(dir.path_join(nm + ".jpg"), 0.82)
+		else:
+			img.save_png(dir.path_join(nm + ".png"))
 		var ri := func(k): return RenderingServer.get_rendering_info(k)
 		print("TOUR_SHOT ", nm, " ", JSON.stringify({"draws": ri.call(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
 			"prims": ri.call(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)}))
 	get_tree().quit()
+
+
+## [] when the camera at `from` sees `to` (nothing solid between them, the
+## last 4 m at the target ignored: the shopfront itself); else [new_from]:
+## the nearest clear spot found by turning round the target in 30° steps
+## and climbing, keeping the distance. [] also when nothing is clear.
+func _clear_view(from: Vector3, to: Vector3) -> Array:
+	await get_tree().physics_frame
+	var space := get_viewport().world_3d.direct_space_state
+	var blocked := func(p: Vector3) -> bool:
+		var d := (p - to)
+		var q := PhysicsRayQueryParameters3D.create(to + d.normalized() * 4.0, p + d.normalized() * 1.5)
+		return not space.intersect_ray(q).is_empty()
+	if not blocked.call(from):
+		return []
+	var off := from - to
+	var flat := Vector2(off.x, off.z)
+	var r := flat.length()
+	for lift in [0.0, 15.0, 35.0, 60.0]:
+		for k in [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6]:
+			if lift == 0.0 and k == 0:
+				continue
+			var a := flat.angle() + deg_to_rad(30.0 * k)
+			var p := to + Vector3(cos(a) * r, off.y + lift, sin(a) * r)
+			if not blocked.call(p):
+				return [p]
+	print("TOUR_BLOCKED ", from)
+	return []

@@ -3055,9 +3055,13 @@ func _property_tab(v: VBoxContainer) -> void:
 	ds.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	ds.add_child(dh)
 	v.add_child(ds)
-	var note := S.label("Inspect anything from here. Sign at the door for free, or through an agent from your phone for a fee.", 15, S.MUTED)
+	var note := S.label("Tap a photo for the gallery. Sign at the door for free, or through an agent from your phone for a fee.", 15, S.MUTED)
 	v.add_child(note)
-	var list := S.vbox(6)
+	var list := GridContainer.new()
+	list.columns = 3
+	list.add_theme_constant_override("h_separation", 14)
+	list.add_theme_constant_override("v_separation", 14)
+	Dashboard.fit(self)
 	var here := game.player.global_position
 	var rows: Array = []
 	if _pr_kind == "home":
@@ -3078,9 +3082,137 @@ func _property_tab(v: VBoxContainer) -> void:
 	rows.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
 	if rows.is_empty():
 		list.add_child(S.label("Nothing here right now – try another district.", 17, S.MUTED))
-	for r in rows.slice(0, 40):
-		list.add_child(_property_row(r[1], float(r[0])))
-	v.add_child(_scroll(list, 360))
+	for r in rows.slice(0, 30):
+		list.add_child(_property_card(r[1], float(r[0])))
+	v.add_child(_scroll(list, 330))
+
+
+## A listing as a picture card: the place's photo with its status on it,
+## name, where, price and what it earns, Details (the gallery) and GPS.
+func _property_card(x: Dictionary, dist: float) -> Control:
+	var info := _listing(x, dist)
+	var w := Dashboard.card_w
+	var card := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(1, 1, 1, 0.045)
+	sb.set_corner_radius_all(18)
+	sb.border_color = Color(info["col"], 0.35)
+	sb.set_border_width_all(1)
+	for m in ["left", "right", "top", "bottom"]:
+		sb.set("content_margin_" + m, 10)
+	card.add_theme_stylebox_override("panel", sb)
+	card.custom_minimum_size.x = w
+	var v := S.vbox(6)
+	card.add_child(v)
+	var pic := Button.new()
+	pic.focus_mode = Control.FOCUS_NONE
+	pic.custom_minimum_size = Vector2(w - 20, 150)
+	var clear := StyleBoxEmpty.new()
+	for stn in ["normal", "hover", "pressed", "focus"]:
+		pic.add_theme_stylebox_override(stn, clear)
+	var fr := PhotoBook.frame(String(info["id"]), "front", Vector2(w - 20, 150), info["world"])
+	fr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	pic.add_child(fr)
+	var tag := S.chip(String(info["status"]), info["col"])
+	tag.position = Vector2(10, 10)
+	tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pic.add_child(tag)
+	pic.pressed.connect(info["open"])
+	v.add_child(pic)
+	var nm := S.label(String(info["title"]), 18, S.PAPER, "black")
+	nm.clip_text = true
+	nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	nm.custom_minimum_size.x = w - 24
+	v.add_child(nm)
+	v.add_child(S.label(String(info["sub"]), 13, S.MUTED))
+	v.add_child(S.label(String(info["price"]), 17, info["col"], "black"))
+	var inc := S.label(String(info["income"]), 13, S.PAPER)
+	inc.clip_text = true
+	inc.custom_minimum_size.x = w - 24
+	v.add_child(inc)
+	var acts := S.hbox(8)
+	var det := S.button(String(info["verb"]), info["open"], true, 0)
+	det.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	acts.add_child(det)
+	acts.add_child(S.button("GPS", info["gps"], false, 80))
+	v.add_child(acts)
+	return card
+
+
+## Everything a listing shows, for a shop unit or a home.
+func _listing(x: Dictionary, dist: float) -> Dictionary:
+	var e := game.empire
+	if x.get("kind", "") == "home":
+		var owned := e.owns_property(x["id"])
+		var hw := game.home_lift(x)
+		var let_inc := float(x["price"]) * 0.0045
+		var d := {"id": String(x["id"]), "title": String(x["name"]), "world": hw,
+			"sub": "%s · %d m up · %s" % [EmpireData.district(x["district"]).get("name", ""), int(x["floor"]), _dist_text(dist)],
+			"price": "Yours" if owned else EmpireData.money(float(x["price"])), "col": S.GREEN if owned else Color(0.72, 0.6, 1.0),
+			"status": "YOURS" if owned else "FOR SALE", "income": "Lets for ~%s a day" % EmpireData.money(let_inc),
+			"verb": "Details", "gps": func():
+				game.set_gps(hw, String(x["name"]), {"kind": "home", "id": String(x["id"])})
+				close_panel(true)}
+		d["open"] = func(): PhotoBook.gallery(self, d["id"], d["title"], d["sub"],
+			[["Price", d["price"], d["col"]], ["Height", "%d m up" % int(x["floor"])], ["If you let it", "~%s a day" % EmpireData.money(let_inc)]],
+			[["Open listing", func(): open_home(x), true], ["GPS", d["gps"]]], hw)
+		return d
+	var u := x
+	var kind := MapKit.unit_kind(game, u)
+	var dname := String(EmpireData.district(u["district"]).get("name", ""))
+	var door := Premises.door_point(u)
+	var d2 := {"id": String(u["id"]), "world": door, "sub": "%s · %d m² · %s" % [dname, int(u.get("size", 0)), _dist_text(dist)]}
+	var facts: Array = [["Size", "%d m²" % int(u.get("size", 0))], ["District", dname]]
+	var act: Array = []
+	match kind:
+		"to_let":
+			d2["title"] = String(u.get("shop_name", "%s shop unit" % dname))
+			d2["price"] = "%s a day · or buy %s" % [EmpireData.money(float(u["rent"])), EmpireData.money(float(u["price"]))]
+			d2["income"] = "Empty: open your own shop here"
+			d2["status"] = "TO LET"
+			d2["col"] = S.AMBER
+			d2["verb"] = "Details"
+			facts.push_front(["Rent", "%s a day" % EmpireData.money(float(u["rent"])), S.AMBER])
+			facts.insert(1, ["Freehold", EmpireData.money(float(u["price"]))])
+			act = [["Rent or buy…", func(): open_property(u, true), true]]
+		"sale":
+			var f := CityLife.firm_at(e, u["id"])
+			d2["title"] = String(f.get("name", "Shop"))
+			d2["price"] = EmpireData.money(CityLife.firm_price(f))
+			d2["income"] = "Trading · makes ~%s a day" % EmpireData.money(CityLife.firm_profit(f))
+			d2["status"] = "FOR SALE"
+			d2["col"] = Color(0.25, 0.85, 0.72)
+			d2["verb"] = "Details"
+			facts.push_front(["Asking", d2["price"], d2["col"]])
+			facts.insert(1, ["Profit", "~%s a day" % EmpireData.money(CityLife.firm_profit(f)), S.GREEN])
+			act = [["Make the deal…", func(): open_firm(u, true), true]]
+		"rival":
+			var r := CityLife.rival_at(e, u["id"])
+			d2["title"] = String(r.get("name", "QuikSave"))
+			d2["price"] = "Buy out %s" % EmpireData.money(CityLife.rival_price(r))
+			d2["income"] = "A rival store taking your customers"
+			d2["status"] = "RIVAL"
+			d2["col"] = S.RED
+			d2["verb"] = "Details"
+			act = [["Buy it out…", func(): open_rival(u, true), true]]
+		_:
+			var b: Business = e.business_at(u["id"])
+			d2["title"] = b.name if b else "Shop"
+			d2["price"] = ("Freehold" if b.owned else "Rented · %s a day" % EmpireData.money(b.rent_per_day())) if b else ""
+			d2["income"] = ("Yesterday %s" % EmpireData.money(float(b.last_day().get("profit", 0.0)), true)) if b else ""
+			d2["status"] = "YOURS"
+			d2["col"] = S.GREEN
+			d2["verb"] = "Manage"
+			act = [["Manage", func(): open_manage(b), true]]
+	var title: String = d2["title"]
+	d2["gps"] = func():
+		game.set_gps(door, title, {"kind": "unit", "id": String(u["id"])})
+		close_panel(true)
+	act.append(["GPS", d2["gps"]])
+	d2["open"] = func(): PhotoBook.gallery(self, d2["id"], title, d2["sub"], facts, act, door)
+	if kind == "yours":
+		d2["open"] = act[0][1]
+	return d2
 
 
 func _property_row(x: Dictionary, dist: float) -> PanelContainer:

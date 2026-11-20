@@ -519,6 +519,8 @@ func _after_start() -> void:
 		# Captures: the full map's centre and zoom, "x,z,zoom".
 		var mv := String(args["mapview"]).split(",")
 		EmpireMap._view = {"c": Vector2(float(mv[0]), float(mv[1])), "z": float(mv[2])}
+	if args.has("photo-targets"):
+		_write_photo_targets(String(args["photo-targets"]))
 	if args.has("maplegend"):
 		EmpireMap.legend = true   # (captures: the map with its key showing)
 	if args.has("mapzoom"):
@@ -2588,3 +2590,38 @@ func _selftest() -> void:
 	ok = ok and player != null and cars.size() >= 1
 	print("SELFTEST units=%d cars=%d %s" % [units.size(), cars.size(), "OK" if ok else "FAIL"])
 	get_tree().quit(0 if ok else 1)
+
+
+## Dev (tools/photos/shoot.sh): every purchasable place and its estate-agent
+## camera views, as JSON lines {id, view, from, to} (world m; y absolute).
+## Shops: square-ish across the street at a little above eye height, and a
+## high three-quarter "location" view. Homes: the tower from outside, and
+## the room from inside towards its windows. Skyport estates: two aerial
+## three-quarter views.
+func _write_photo_targets(path: String) -> void:
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	var put := func(id: String, view: String, from: Vector3, to: Vector3) -> void:
+		f.store_line(JSON.stringify({"id": id, "view": view, "from": [from.x, from.y, from.z], "to": [to.x, to.y, to.z]}))
+	for u in units:
+		if not String(u["kind"]) in ["shop", "hq", "office"]:
+			continue
+		var d := Premises.door_point(u)
+		var o := Premises.outward(u)
+		var al := Premises.along_dir(u)
+		put.call(String(u["id"]), "front", d + o * 15.0 + al * 4.5 + Vector3.UP * 3.0, d + Vector3.UP * 4.2 - al * 0.8)
+		put.call(String(u["id"]), "area", d + o * 42.0 - al * 22.0 + Vector3.UP * 30.0, d + Vector3.UP * 6.0)
+	for hm in homes():
+		var h: Dictionary = hm["h"]
+		var wc := Apartments.window_center(h)
+		var o2 := Apartments.outward(h)
+		var side := o2.cross(Vector3.UP).normalized()
+		put.call(String(hm["id"]), "front", wc + o2 * 70.0 + side * 25.0 - Vector3.UP * 12.0, wc + Vector3.UP * 6.0)
+		var sp := Apartments.spawn_point(h)
+		put.call(String(hm["id"]), "inside", sp + Vector3.UP * 1.5 - o2 * 1.0, wc + o2 * 4.0 - Vector3.UP * 1.0)
+	for ed in Ventures.ESTATES:
+		var at := Ventures.estate_at(ed)
+		put.call(String(ed["id"]), "front", at + Vector3(-70, 40, 60), at + Vector3.UP * 12.0)
+		put.call(String(ed["id"]), "area", at + Vector3(80, 70, -60), at + Vector3.UP * 8.0)
+	f.close()
+	print("PHOTO_TARGETS ", path)
+	get_tree().quit()

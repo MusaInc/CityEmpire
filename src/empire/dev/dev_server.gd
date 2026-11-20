@@ -120,7 +120,7 @@ func _handle(cl: Dictionary, line: String) -> void:
 		for kv in target.get_slice("?", 1).split("&"):
 			q[kv.get_slice("=", 0).uri_decode()] = kv.get_slice("=", 1).uri_decode() if kv.contains("=") else "1"
 	var moved := _apply(path, q)
-	if moved:
+	if moved and not q.has("hero"):
 		_follow()
 		if not geo:
 			for i in int(q.get("settle", "2")):
@@ -163,8 +163,10 @@ func _apply(path: String, q: Dictionary) -> bool:
 		moved = true
 	elif path == "look" and q.has("v"):
 		var v := String(q["v"]).split_floats(",")
-		var from := Vector3(v[0], v[1] + float(gy.call(v[0], v[2])), v[2])
-		var to := Vector3(v[3], v[4] + float(gy.call(v[3], v[5])), v[5])
+		# (abs=1: heights are absolute, e.g. tools/photos' tower views.)
+		var ab: bool = String(q.get("abs", "0")) == "1"
+		var from := Vector3(v[0], v[1] + (0.0 if ab else float(gy.call(v[0], v[2]))), v[2])
+		var to := Vector3(v[3], v[4] + (0.0 if ab else float(gy.call(v[3], v[5]))), v[5])
 		pos = from
 		var d := (to - from).normalized()
 		yaw = rad_to_deg(atan2(-d.x, -d.z))
@@ -177,6 +179,13 @@ func _apply(path: String, q: Dictionary) -> bool:
 				moved = true
 		if q.has("agl"):
 			pos.y = float(gy.call(pos.x, pos.z)) + float(q["agl"])
+			moved = true
+	if q.has("hero"):
+		# (hero=x,z: put the hidden hero there – interiors and the near
+		# crowd stream round him; tools/photos puts him at the door.)
+		var hv := String(q["hero"]).split_floats(",")
+		if hv.size() >= 2:
+			game._teleport(Vector3(hv[0], game.layout.ground_y(hv[0], hv[1]) + 1.0, hv[1]), 0.0)
 			moved = true
 	for k in ["yaw", "pitch", "fov"]:
 		if q.has(k):

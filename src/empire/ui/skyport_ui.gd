@@ -230,6 +230,27 @@ static func estates(ui: EmpireUI, v: VBoxContainer) -> void:
 		var owned := Ventures.owns_estate(e, id)
 		var cv := ui._card()
 		var c: VBoxContainer = cv[1]
+		# The building's photo beside its details (tap: the gallery).
+		var row := S.hbox(16)
+		var pic := Button.new()
+		pic.focus_mode = Control.FOCUS_NONE
+		pic.custom_minimum_size = Vector2(250, 140)
+		for stn in ["normal", "hover", "pressed", "focus"]:
+			pic.add_theme_stylebox_override(stn, StyleBoxEmpty.new())
+		var fr := PhotoBook.frame(id, "front", Vector2(250, 140), Ventures.estate_at(d))
+		fr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		pic.add_child(fr)
+		var dd: Dictionary = d
+		pic.pressed.connect(func(): PhotoBook.gallery(ui, id, String(dd["name"]), String(dd["desc"]),
+			[["Price", EmpireData.money(float(dd["price"])), S.AMBER], ["Kind", String(dd["kind"]).capitalize()],
+			["Income", ("Up to %s a day" % EmpireData.money(float(dd["rent"]) * float(dd["units"]))) if int(dd["units"]) > 0 else "Saves fees"]],
+			[["Back to Property", func(): ui.open_phone("property"), true]], Ventures.estate_at(dd)))
+		row.add_child(pic)
+		var col := S.vbox(8)
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(col)
+		c.add_child(row)
+		c = col
 		var top := S.hbox(10)
 		top.add_child(S.label(String(d["name"]), 20, S.PAPER, "black"))
 		top.add_child(S.chip(String(d["kind"]).capitalize(), S.BLUE))
