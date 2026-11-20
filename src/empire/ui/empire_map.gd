@@ -20,6 +20,7 @@ const FILTER_KINDS := {"mine": ["yours", "car", "home_own", "hq"], "property": [
 	"wholesale": ["wholesale"], "landmark": ["landmark", "airport", "marina"]}
 
 static var filter := "all"     # (kept while the phone is closed)
+var chips_top := 10.0           # (the phone's floating search sits above the chips)
 static var legend := false
 static var _view := {}         # last centre/zoom (kept between openings)
 
@@ -50,27 +51,33 @@ func _ready() -> void:
 	elif game.gps and game.gps.active():
 		var t: Vector3 = game.gps.dest
 		_center = (_center + Vector2(t.x, t.z)) * 0.5
-	# Zoom, centre on you, whole route.
+	# Floating glass controls down the right (Apple Maps): zoom, you, route, key.
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 8)
+	col.add_theme_constant_override("separation", 10)
 	col.anchor_left = 1.0
 	col.anchor_right = 1.0
-	col.offset_left = -66
-	col.offset_top = 12
+	col.offset_left = -72
+	col.offset_top = 16
 	add_child(col)
-	for b in [["+", func(): _zoom_by(1.4, size * 0.5)], ["−", func(): _zoom_by(1.0 / 1.4, size * 0.5)],
-			["◎", center_on_player], ["⤢", _fit_route], ["Key", func(): legend = not legend; queue_redraw()]]:
-		var btn := S.button(b[0], b[1], false, 54)
-		btn.custom_minimum_size = Vector2(54, 54)
-		btn.add_theme_font_size_override("font_size", 24)
-		col.add_child(btn)
-	# Filter chips (top left).
+	for b in [["plus", func(): _zoom_by(1.4, size * 0.5)], ["minus", func(): _zoom_by(1.0 / 1.4, size * 0.5)],
+			["location", center_on_player], ["gps", _fit_route], ["layers", func(): legend = not legend; queue_redraw()]]:
+		col.add_child(Glass.icon_button(String(b[0]), b[1], true, 56))
+	# Filter pills under the search bar (top left).
 	_chips = HBoxContainer.new()
-	_chips.add_theme_constant_override("separation", 6)
-	_chips.position = Vector2(10, 10)
-	add_child(_chips)
+	_chips.add_theme_constant_override("separation", 8)
+	var csc := ScrollContainer.new()
+	csc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	csc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	csc.position = Vector2(16, chips_top)
+	csc.custom_minimum_size.y = 50
+	add_child(csc)
+	csc.add_child(_chips)
+	# (clear of the round controls down the right)
+	var fit_chips := func(): csc.size = Vector2(maxf(size.x - 104.0, 120.0), 50)
+	resized.connect(fit_chips)
+	fit_chips.call_deferred()
 	_build_chips()
-	_card = PanelContainer.new()
+	_card = Glass.surface(30.0, 0.0)
 	_card.visible = false
 	add_child(_card)
 	# Re-select the destination so its card shows Cancel route.
@@ -90,12 +97,17 @@ func _build_chips() -> void:
 		c.queue_free()
 	for f in FILTERS:
 		var on: bool = filter == f[0]
-		var b := S.chip_button(f[1], on, func():
+		var b := Glass.pill(f[1], on, func():
 			filter = f[0]
 			_build_chips()
 			queue_redraw())
-		b.custom_minimum_size = Vector2(0, 40)
-		b.add_theme_font_size_override("font_size", 14)
+		if not on:
+			# (on the map: glass-backed so they read over streets and sea)
+			var gs := Glass.box(Color(Glass.CARD, 0.86), 22, 0)
+			gs.content_margin_left = 18
+			gs.content_margin_right = 18
+			for st in ["normal", "focus", "hover", "pressed"]:
+				b.add_theme_stylebox_override(st, gs)
 		_chips.add_child(b)
 
 
@@ -342,61 +354,61 @@ func _show_card() -> void:
 		_card.visible = false
 		return
 	_card.visible = true
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(S.INK, 0.94)
-	sb.set_corner_radius_all(18)
-	sb.border_color = Color(1, 1, 1, 0.1)
-	sb.set_border_width_all(1)
-	sb.content_margin_left = 18
-	sb.content_margin_right = 14
-	sb.content_margin_top = 12
-	sb.content_margin_bottom = 12
-	_card.add_theme_stylebox_override("panel", sb)
-	var h := S.hbox(14)
-	_card.add_child(h)
-	var v := S.vbox(2)
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	h.add_child(v)
+	# A place card (Apple Maps): name, what and how far, then Directions
+	# (or the route's state) and the place's own action, side by side.
+	var v := Glass.vbox(10)
+	_card.add_child(Glass.margin(v, 24, 18, 18, 20))
+	var top := Glass.hbox(12)
+	v.add_child(top)
+	var tv := Glass.vbox(0)
+	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(tv)
 	var kind := String(_selected.get("kind", "point"))
-	var name_l := S.label(String(_selected.get("label", "")), 20, S.PAPER, "black")
-	name_l.clip_text = true
-	v.add_child(name_l)
+	tv.add_child(Glass.line(String(_selected.get("label", "")), "title2"))
 	var w: Vector3 = _selected["world"]
 	var here: Vector3 = game.gps._here() if game.gps else game.player.global_position
 	var dist := Vector2(here.x - w.x, here.z - w.z).length()
 	var dtxt := "%.1f km" % (dist / 1000.0) if dist >= 1000.0 else "%d m" % int(dist)
-	v.add_child(S.label("%s · %s away" % [String(_selected.get("sub", "")), dtxt], 15, S.MUTED))
-	var is_dest: bool = game.gps != null and game.gps.active() and (game.gps.ref == _selected.get("ref", {}) and kind != "point" \
-		or (kind == "point" and game.gps.dest.distance_to(w) < 1.0))
-	if is_dest:
-		var st := game.gps.message if game.gps.message != "" else "Route: %s" % game.gps.distance_text()
-		v.add_child(S.label(st, 15, Gps.COLOUR.lightened(0.3), "bold"))
-		h.add_child(S.button("Cancel route", func():
-			game.clear_gps()
-			_show_card()
-			queue_redraw(), false, 52))
-	else:
-		h.add_child(S.button("Set GPS", func():
-			game.set_gps(w, String(_selected.get("label", "")), _selected.get("ref", {}))
-			_show_card()
-			queue_redraw(), true, 52))
-	var act := _action()
-	if not act.is_empty():
-		h.add_child(S.button(act[0], act[1], false, 52))
-	var x := S.button("✕", func():
+	tv.add_child(Glass.line("%s · %s away" % [String(_selected.get("sub", "")), dtxt], "subhead", Glass.LABEL2))
+	top.add_child(Glass.icon_button("close", func():
 		_selected = {}
 		_show_card()
-		queue_redraw(), false, 52)
-	x.custom_minimum_size = Vector2(52, 52)
-	h.add_child(x)
-	_card.anchor_left = 0.0
-	_card.anchor_right = 1.0
+		queue_redraw(), false, 46))
+	var is_dest: bool = game.gps != null and game.gps.active() and (game.gps.ref == _selected.get("ref", {}) and kind != "point" \
+		or (kind == "point" and game.gps.dest.distance_to(w) < 1.0))
+	var acts := Glass.hbox(10)
+	v.add_child(acts)
+	if is_dest:
+		var st := game.gps.message if game.gps.message != "" else "Route: %s" % game.gps.distance_text()
+		tv.add_child(Glass.line(st, "subhead", Gps.COLOUR.lightened(0.3), "semibold"))
+		var cb := Glass.button("End route", func():
+			game.clear_gps()
+			_show_card()
+			queue_redraw(), "tinted", "regular", Glass.RED)
+		cb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		acts.add_child(cb)
+	else:
+		var gb := Glass.button("Directions", func():
+			game.set_gps(w, String(_selected.get("label", "")), _selected.get("ref", {}))
+			_show_card()
+			queue_redraw(), "filled", "regular", Glass.BLUE, "gps")
+		gb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		acts.add_child(gb)
+	var act := _action()
+	if not act.is_empty():
+		var ab := Glass.button(act[0], act[1], "gray", "regular")
+		ab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		acts.add_child(ab)
+	var wide := size.x > 900.0
 	_card.anchor_top = 1.0
 	_card.anchor_bottom = 1.0
-	_card.offset_left = 10
-	_card.offset_right = -84
-	_card.offset_top = -92
-	_card.offset_bottom = -10
+	_card.anchor_left = 0.0
+	_card.anchor_right = 0.0 if wide else 1.0
+	_card.offset_left = 16
+	_card.offset_right = 16 + 460 if wide else -16
+	_card.offset_top = -190
+	_card.offset_bottom = -16
+	_card.grow_vertical = Control.GROW_DIRECTION_BEGIN
 
 
 ## The selected place's own action: [label, callable] or [].

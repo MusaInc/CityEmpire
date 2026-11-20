@@ -199,7 +199,7 @@ static func home(ui: EmpireUI, v: VBoxContainer) -> void:
 		ar.add_child(S.button("▸ " + String(ob[0]), ui.objective_action, true, 0))
 	for a in al.slice(0, 4):
 		var ad: Dictionary = a
-		var chip := S.chip_button(String(ad["title"]), false, func(): open_group(ui, ad), EmpireUI.TONES[ad["tone"]])
+		var chip := S.chip_button(String(ad["title"]), false, func(): open_group(ui, ad), EmpireUI.tones()[ad["tone"]])
 		ar.add_child(chip)
 	if al.is_empty() and String(ob[0]) == "":
 		ar.add_child(S.label("All quiet: every shop is stocked, staffed and trading.", 16, S.MUTED))

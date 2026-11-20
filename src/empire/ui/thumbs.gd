@@ -8,7 +8,7 @@ extends Node
 ##    round a world point, with a pin – no extra rendering at all.
 ## No live 3D in the dashboard: images only, made on demand, one at a time.
 
-const VW := Vector2i(260, 150)
+const VW := Vector2i(640, 368)   # (big enough for the Garage and Marketplace hero shots)
 
 static var _cache := {}       # model -> ImageTexture
 var _queue: Array = []        # [model, TextureRect]

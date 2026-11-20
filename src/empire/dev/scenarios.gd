@@ -1245,6 +1245,8 @@ func _run() -> void:
 	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XF", "XG", "XH", "XI", "XS", "XW"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())
+	if _which.split(",").has("UI"):
+		await scenario_ui()
 	if _which.split(",").has("U"):
 		await scenario_u()
 	if _which.split(",").has("L"):
@@ -1809,6 +1811,9 @@ func scenario_v() -> void:
 	var dir := String(game.args.get("sc-film", "user://film"))
 	var p := game.player
 	var u: Dictionary = game.starter_unit()
+	if game.args.has("sc-flat"):
+		await _film_flat(dir, u)
+		return
 	if game.args.has("sc-only"):
 		u = game.unit_by_id[String(game.args["sc-only"])]
 	var dp := Premises.door_point(u)
@@ -1845,3 +1850,151 @@ func scenario_v() -> void:
 				await get_tree().physics_frame
 	p.bot = null
 	print("FILM %d frames in %s" % [n, dir])
+
+
+## `--scenarios=V --sc-flat[=pace] --sc-film=<dir>`: the hero walks 14 m
+## along the pavement in front of the starter shop, filmed square-on from
+## the side at 20 frames a second (judging the legs).
+func _film_flat(dir: String, u: Dictionary) -> void:
+	var p := game.player
+	var along := Premises.along_dir(u)
+	var out := Premises.outward(u)
+	var a := Premises.door_point(u) + out * 4.6 - along * 7.0
+	a.y = float(game.layout.ground_y(a.x, a.z))
+	await stand(a)
+	p.rotation.y = atan2(-along.x, -along.z)
+	game.camera.snap()
+	await wait(1.0)
+	var w := _Walk.new()
+	w.amount = float(game.args.get("sc-flat", "1.0")) if String(game.args.get("sc-flat", "")) not in ["", "true"] else 1.0
+	w.target = a + along * 14.0
+	p.bot = w
+	var n := 0
+	var t := 0.0
+	while t < 5.0:
+		await get_tree().physics_frame
+		t += 1.0 / 60.0
+		var c := p.global_position + Vector3.UP * 0.05
+		var eye := c - out * 4.5 + Vector3.UP * 0.1
+		game.camera.cine = func(_dt: float) -> Array:
+			return [Transform3D(Basis.looking_at(c - eye, Vector3.UP), eye), 42.0]
+		if Engine.get_physics_frames() % 3 == 0 and t > 0.8:
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png("%s/s%03d.png" % [dir, n])
+			n += 1
+	p.bot = null
+	game.camera.cine = Callable()
+	print("FILM %d frames in %s (walked %.1f m)" % [n, dir, p.global_position.distance_to(a)])
+
+
+# ------------------------------------------- UI: the phone keeps its place
+## `--scenarios=UI`: lists stay where you scrolled them through actions,
+## sheets, detail pages and section switches; filters and selections
+## survive closing the phone; buying a car from the Marketplace works.
+func _page_scroll() -> ScrollContainer:
+	var ph := game.ui.phone
+	if ph == null:
+		return null
+	for sc in ph._scrolls(ph._page):
+		if sc is TouchScroll:
+			return sc
+	return null
+
+
+func _settle() -> void:
+	for k in 6:
+		await get_tree().process_frame
+
+
+func scenario_ui() -> void:
+	print("--- UI: phone navigation keeps its place")
+	var ui := game.ui
+	var e := game.empire
+	e.personal_cash = 400000.0
+	ui.open_phone("property")
+	await _settle()
+	var sc := _page_scroll()
+	check(sc != null, "Property has a scrolling list")
+	if sc == null:
+		return
+	sc.scroll_vertical = 640
+	await _settle()
+	var at := sc.scroll_vertical
+	check(at > 300, "the list scrolled (%d px)" % at)
+	# 1. Any action refreshes the page: the list must not jump to the top.
+	ui.phone.refresh()
+	await _settle()
+	check(absi(_page_scroll().scroll_vertical - at) <= 2, "after an action the list is still at %d px (was %d)" % [_page_scroll().scroll_vertical, at])
+	# 2. A sheet over the list, then closed.
+	var u: Dictionary = {}
+	for x in game.units:
+		if x["kind"] == "shop" and MapKit.unit_kind(game, x) == "to_let":
+			u = x
+			break
+	ui.open_property(u, true)
+	await _settle()
+	check(ui.phone != null and ui.phone.has_sheet(), "a detail opens as a sheet over the phone (the phone stays)")
+	ui.phone.dismiss_sheet()
+	await _settle()
+	check(absi(_page_scroll().scroll_vertical - at) <= 2, "closing the sheet: still at %d px" % _page_scroll().scroll_vertical)
+	# 3. Into a listing and back.
+	ui.phone.push("listing", {"id": String(u["id"]), "home": false}, "Listing")
+	await _settle()
+	check(Phone.stacks["property"].size() == 2, "the listing is a page on Property's stack")
+	ui.phone.back()
+	await _settle()
+	check(absi(_page_scroll().scroll_vertical - at) <= 2, "back from the listing: still at %d px" % _page_scroll().scroll_vertical)
+	# 4. Another section and back.
+	ui.open_phone("city500")
+	await _settle()
+	Phone.st("city500")["sector"] = "retail"
+	ui.phone.refresh()
+	await _settle()
+	ui.open_phone("property")
+	await _settle()
+	check(absi(_page_scroll().scroll_vertical - at) <= 2, "back on Property from City500: still at %d px" % _page_scroll().scroll_vertical)
+	# 5. Close the phone and open it again: City500 keeps its filter.
+	ui.close_panel(true)
+	await _settle()
+	ui.open_phone("city500")
+	await _settle()
+	check(String(Phone.st("city500").get("sector", "")) == "retail", "City500 remembers its sector filter after closing the phone")
+	# 6. Buy a car from the Marketplace (two taps, no extra screen).
+	var n0 := e.vehicles.size()
+	var cash0 := e.personal_cash + e.company_cash
+	ui.open_phone("market")
+	await _settle()
+	ui.phone.push("vehicle", {"model": "saloon", "site": "dealer_budget"}, "Saloon")
+	await _settle()
+	var buy: Button = null
+	for b in ui.phone._page.find_children("*", "Button", true, false):
+		if (b as Button).text.begins_with("Buy ·"):
+			buy = b
+	check(buy != null, "the car's page has a Buy button")
+	if buy:
+		buy.pressed.emit()
+		check(e.vehicles.size() == n0 and buy.text.begins_with("Tap again"), "the first tap asks to confirm in place")
+		buy.pressed.emit()
+		await _settle()
+	var price := float(EmpireData.vehicle_model("saloon").get("price", 0))
+	check(e.vehicles.size() == n0 + 1, "the second tap buys it (%d → %d vehicles)" % [n0, e.vehicles.size()])
+	check(absf((cash0 - (e.personal_cash + e.company_cash)) - price) < 1.0, "paid %s" % EmpireData.money(price))
+	check(ui.phone != null, "the phone stays open after buying")
+	# 7. Rent a shop from a listing's sheet: the sheet closes, the phone stays.
+	var nb := e.businesses.size()
+	ui.open_phone("property")
+	await _settle()
+	ui.open_property(u, true)
+	await _settle()
+	var rent: Button = null
+	for b2 in ui.phone._sheet.find_children("*", "Button", true, false):
+		if (b2 as Button).text.begins_with("RENT"):
+			rent = b2
+	check(rent != null and not rent.disabled, "the shop's sheet offers RENT")
+	if rent:
+		rent.pressed.emit()
+		await _settle()
+	check(e.businesses.size() == nb + 1, "rented it from the phone (%d → %d businesses)" % [nb, e.businesses.size()])
+	check(ui.phone != null and not ui.phone.has_sheet(), "the sheet closed, the phone stayed")
+	ui.close_panel(true)
+

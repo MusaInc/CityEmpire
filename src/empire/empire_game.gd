@@ -153,7 +153,7 @@ func _ready() -> void:
 	camera.name = "CameraRig"
 	add_child(camera)
 	camera.set_target(player)
-	camera.distance_scale = 0.76   # closer than the swing camera: street level (0.62 felt cramped)
+	camera.distance_scale = 0.86   # street level (0.62 felt cramped; 0.76 still too close – user, 2026-11-20)
 	world.set_viewer(camera)
 	chase = ChaseCamera.new()
 	chase.name = "ChaseCamera"
@@ -554,6 +554,10 @@ func _after_start() -> void:
 			ui.open_manage(empire.businesses[0], pn)
 		else:
 			ui.open_phone(pn)
+	if args.has("phone-shots"):
+		# (captures: --phone-shots=<dir> [--phone-sections=a,b]: the phone
+		# open on each section in turn, one PNG each)
+		_phone_shots.call_deferred(String(args["phone-shots"]), String(args.get("phone-sections", "home,map,market,city500,vehicles,property,you,more,bank,businesses")))
 	if args.has("shot"):
 		_capture(String(args["shot"]), float(args.get("shot-at", "4")))
 	if args.has("selftest"):
@@ -570,6 +574,36 @@ func _after_start() -> void:
 		var ap: Node = load("res://src/empire/dev/autoplay.gd").new()
 		ap.set("game", self)
 		add_child(ap)
+
+
+func _phone_shots(dir: String, secs: String) -> void:
+	await get_tree().create_timer(5.0, true, false, true).timeout
+	DirAccess.make_dir_recursive_absolute(dir)
+	for sec in secs.split(",", false):
+		var parts := sec.split(":")
+		ui.open_phone(parts[0])
+		if parts.size() > 1 and ui.phone:
+			# name:page:arg  (e.g. city500:company:3, market:vehicle:stiletto)
+			match parts[1]:
+				"company":
+					ui.phone.push("company", {"idx": int(parts[2])}, "Company")
+				"vehicle":
+					ui.phone.push("vehicle", {"model": parts[2], "site": "dealer_luxury"}, EmpireData.vehicle_model(parts[2]).get("name", ""))
+				"cat":
+					Phone.st(parts[0])["cat"] = parts[2]
+					ui.phone.refresh()
+				"listing":
+					var fs := CityLife.firms_for_sale(empire)
+					if not fs.is_empty():
+						ui.phone.push("listing", {"id": String(fs[0]["unit"]), "home": false}, String(fs[0]["name"]))
+				"sheet":
+					if not empire.businesses.is_empty():
+						ui.open_manage(empire.businesses[0])
+		await get_tree().create_timer(float(args.get("phone-wait", "4")), true, false, true).timeout
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png("%s/%s.png" % [dir, sec.replace(":", "_")])
+		print("PHONE_SHOT ", sec)
+	get_tree().quit()
 
 
 # ---------------------------------------------------------------- game

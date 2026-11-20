@@ -33,7 +33,8 @@ var _drive: Label
 var _toasts: VBoxContainer
 var _floats: Control
 var _panel_root: Control
-var _panel: PanelContainer
+var _panel: Control
+var phone: Phone = null
 var _title_root: Control
 var _tab := ""
 var _manage_biz: Business
@@ -43,6 +44,7 @@ var _cart_unit := {}
 
 func _ready() -> void:
 	layer = 10
+	Glass.mode = String(get_node("/root/Settings").get("appearance")) if get_node_or_null("/root/Settings") else "auto"
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var root := Control.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -75,14 +77,16 @@ func _ready() -> void:
 	_floats.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_floats.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(_floats)
-	_panel_root = Control.new()
-	_panel_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_panel_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(_panel_root)
+	# (The title menu sits UNDER the panel layer: "Start again?" and
+	# Settings opened from it used to draw behind the menu.)
 	_title_root = Control.new()
 	_title_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_title_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(_title_root)
+	_panel_root = Control.new()
+	_panel_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_panel_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(_panel_root)
 	# Keep everything clear of the notch / Dynamic Island / home indicator
 	# (in landscape the island sat on top of the minimap).
 	_safe_root = root
@@ -301,20 +305,20 @@ static func _anchor(c: Control, ax: float, ay: float, off: Vector2, size: Vector
 func _hud_panel(pos: Vector2, size: Vector2, accent := Color(0, 0, 0, 0)) -> PanelContainer:
 	var p := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
-	# Translucent (no blur: it costs a full-screen pass on a phone).
-	sb.bg_color = Color(S.INK, HUD_ALPHA)
-	sb.set_corner_radius_all(14)
-	sb.border_color = Color(1, 1, 1, 0.07)
-	sb.border_width_top = 1
-	if accent.a > 0.0:
-		# A coloured edge on the left (money green, objective amber).
-		sb.border_color = accent
-		sb.border_width_left = 4
-		sb.border_width_top = 0
-	sb.content_margin_left = 14
-	sb.content_margin_right = 14
-	sb.content_margin_top = 6
-	sb.content_margin_bottom = 6
+	# Smoked glass over the city (2026-11-20 redesign): translucent with a
+	# hairline rim, rounded like the phone's chrome. No real blur here –
+	# the HUD is on screen every frame and a blur costs a full-screen pass
+	# on a phone. (`accent` is no longer drawn as a coloured edge.)
+	sb.bg_color = Color(0.07, 0.07, 0.09, 0.5)
+	sb.set_corner_radius_all(20)
+	sb.corner_detail = 8
+	sb.anti_aliasing = true
+	sb.border_color = Color(1, 1, 1, 0.14)
+	sb.set_border_width_all(1)
+	sb.content_margin_left = 16
+	sb.content_margin_right = 16
+	sb.content_margin_top = 7
+	sb.content_margin_bottom = 7
 	p.add_theme_stylebox_override("panel", sb)
 	p.position = pos
 	p.custom_minimum_size = size
@@ -526,6 +530,10 @@ class _TurnIcon extends Control:
 
 # --------------------------------------------------------------- panels
 func _open(title: String, width := 860.0, height := 560.0) -> VBoxContainer:
+	if phone and is_instance_valid(phone):
+		var sv := phone.present_sheet(title, width, height)
+		_panel = phone
+		return sv
 	close_panel(false)
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -534,25 +542,39 @@ func _open(title: String, width := 860.0, height := 560.0) -> VBoxContainer:
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	_panel_root.add_child(dim)
+	var vs := get_viewport().get_visible_rect().size
+	width = minf(width * 1.08, vs.x - 48.0)
+	height = minf(height * 1.08, vs.y - 32.0)
 	_panel = PanelContainer.new()
+	_panel.add_theme_stylebox_override("panel", Glass.box(Glass.CARD, 34, 26))
 	_panel.custom_minimum_size = Vector2(width, height)
 	_anchor(_panel, 0.5, 0.5, -Vector2(width, height) * 0.5, Vector2(width, height))
 	_panel_root.add_child(_panel)
 	var v := S.vbox(14)
 	_panel.add_child(v)
 	var head := S.hbox(10)
-	var t := S.label(title, 28, S.PAPER, "black")
-	head.add_child(t)
-	head.add_child(S.spacer())
-	head.add_child(S.button("✕", close_panel.bind(true), false, 52))
+	head.add_child(Glass.line(title, "title2"))
+	head.add_child(Glass.icon_button("close", close_panel.bind(true), false, 48))
 	v.add_child(head)
 	return v
+
+
+## A deal went through in a window: over the phone only that sheet closes
+## (the listing underneath refreshes and says YOURS, scrolled where it
+## was); in the street the window closes and play resumes.
+func deal_done() -> void:
+	Sfx.play("cash", -4.0)
+	if phone and is_instance_valid(phone) and phone.has_sheet():
+		phone.dismiss_sheet()
+	else:
+		close_panel(true)
 
 
 func close_panel(resume := true) -> void:
 	for c in _panel_root.get_children():
 		c.queue_free()
 	_panel = null
+	phone = null
 	if resume:
 		get_tree().paused = false
 		if game and game.state == "play" and not touch.visible and not game.args.has("shot"):
@@ -976,7 +998,7 @@ func open_property(u: Dictionary, remote := false) -> void:
 		if err != "":
 			toast(err, "bad")
 		else:
-			close_panel(true), true, 300)
+			deal_done(), true, 300)
 	rent.disabled = not game.empire.can_afford(float(u["rent"]) * 3.0 + fee_r)
 	h.add_child(rent)
 	var buy := S.button("BUY · %s%s" % [EmpireData.money(float(u["price"])), " + fee" if remote else ""], func():
@@ -984,7 +1006,7 @@ func open_property(u: Dictionary, remote := false) -> void:
 		if err != "":
 			toast(err, "bad")
 		else:
-			close_panel(true), false, 240)
+			deal_done(), false, 240)
 	buy.disabled = not game.empire.can_afford(float(u["price"]) + fee_b)
 	h.add_child(buy)
 	if remote:
@@ -1028,7 +1050,7 @@ func open_home(hm: Dictionary) -> void:
 		rec.erase("h")
 		if game.empire.buy_property(rec):
 			toast("The keys are yours", "good")
-			close_panel(true)
+			deal_done()
 		else:
 			toast("Not enough money", "bad"), true, 260))
 
@@ -1656,7 +1678,28 @@ func open_phone(tab := "home", focus := {}) -> void:
 	if tab == "style":
 		open_style()
 		return
-	var v := _phone_shell(tab)
+	# (Older names for sections.)
+	tab = {"finances": "bank", "garage": "vehicles", "character": "you", "marketplace": "market", "empire": "home"}.get(tab, tab)
+	if phone and is_instance_valid(phone):
+		phone.go(tab, focus)
+		return
+	close_panel(false)
+	get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	Phone.section = tab
+	if not focus.is_empty():
+		Phone.st(tab)["focus"] = focus
+	phone = Phone.new()
+	phone.ui = self
+	phone.game = game
+	_panel_root.add_child(phone)
+	_panel = phone
+
+
+## The older sections' content (Businesses, Finances, Corporate, City,
+## Goals, Game, Explore), built into the phone's page body.
+func legacy_tab(tab: String, v: VBoxContainer, focus := {}) -> void:
+	var e := game.empire
 	match tab:
 		"home":
 			Dashboard.home(self, v)
@@ -2299,6 +2342,11 @@ func _close_style() -> void:
 	style_shop = ""
 	game.save_game()
 	close_panel(true)
+	# (The editor framed the hero by moving the Camera3D itself: its local
+	# offset stayed after closing – the camera hung off to one side, too
+	# close, at the editor's lens – until the rig was rebuilt.)
+	game.camera.cam.transform = Transform3D.IDENTITY
+	game.camera.cam.fov = game.camera.base_fov
 	game.camera.snap()
 
 
@@ -2379,6 +2427,17 @@ func _settings_panel() -> void:
 			Settings.save()
 			_settings_panel(), Settings.look == id))
 	v.add_child(lf)
+	var ap := S.hbox(10)
+	ap.add_child(S.label("Phone appearance", 18, S.MUTED))
+	ap.add_child(Glass.segmented([["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]], Settings.appearance, func(k):
+		Settings.appearance = k
+		Glass.mode = k
+		Settings.save()
+		if phone and is_instance_valid(phone):
+			phone._build()
+		else:
+			_settings_panel()))
+	v.add_child(ap)
 	var s := S.hbox(10)
 	s.add_child(S.label("Look sensitivity", 18, S.MUTED))
 	for k: float in [0.6, 1.0, 1.5]:
@@ -2544,7 +2603,7 @@ func open_rival(u: Dictionary, remote := false) -> void:
 		if err != "":
 			toast(err, "bad")
 		else:
-			close_panel(true), true, 320)
+			deal_done(), true, 320)
 	buy.disabled = not e.can_afford(price + fee)
 	h.add_child(buy)
 	h.add_child(S.button("Not now", close_panel.bind(true), false, 160))
@@ -2598,7 +2657,7 @@ func open_firm(u: Dictionary, remote := false) -> void:
 		if err != "":
 			toast(err, "bad")
 		else:
-			close_panel(true), true, 360)
+			deal_done(), true, 360)
 	buy.disabled = not e.can_afford(price + fee)
 	h.add_child(buy)
 	h.add_child(S.button("Not now", close_panel.bind(true), false, 160))
@@ -2677,7 +2736,8 @@ class _NetChart extends Control:
 # button here goes somewhere real (a manage tab, the map with a place
 # selected, a route) – nothing needs typing.
 
-const TONES := {"good": S.GREEN, "warn": S.AMBER, "bad": S.RED, "muted": S.MUTED, "info": S.BLUE}
+static func tones() -> Dictionary:
+	return {"good": S.GREEN, "warn": S.AMBER, "bad": S.RED, "muted": S.MUTED, "info": S.BLUE}
 
 static var _pf_district := "all"
 static var _pf_sort := "attention"
@@ -2866,7 +2926,7 @@ func _home_tab(v: VBoxContainer) -> void:
 	for a in al.slice(0, 12):
 		var row := PanelContainer.new()
 		var sb := S.row_bg()
-		sb.border_color = TONES[a["tone"]]
+		sb.border_color = tones()[a["tone"]]
 		sb.border_width_left = 4
 		row.add_theme_stylebox_override("panel", sb)
 		var h := S.hbox(12)
@@ -2958,7 +3018,7 @@ func _biz_card(b: Business) -> PanelContainer:
 	var issues := biz_issues(b)
 	if issues.any(func(i): return i[1] in ["bad", "warn"]):
 		top.add_child(Widgets.Icon.new("alert", S.AMBER, 22))
-	top.add_child(S.chip(String(st[1]), TONES[st[2]]))
+	top.add_child(S.chip(String(st[1]), tones()[st[2]]))
 	c.add_child(top)
 	var ld := b.last_day()
 	var prof := float(ld.get("profit", 0.0))
@@ -2981,7 +3041,7 @@ func _biz_card(b: Business) -> PanelContainer:
 	stats.add_child(_stat("Premises", "Freehold" if b.owned else "%s/day" % EmpireData.money(b.rent_per_day())))
 	c.add_child(stats)
 	if not issues.is_empty() and issues[0][1] != "muted":
-		c.add_child(S.label("⚠ " + String(issues[0][0]), 15, TONES[issues[0][1]], "bold"))
+		c.add_child(S.label("⚠ " + String(issues[0][0]), 15, tones()[issues[0][1]], "bold"))
 	var acts := S.hbox(8)
 	acts.add_child(S.button("Manage", func(): open_manage(b), true, 120))
 	for t in [["Stock", "stock"], ["Staff", "staff"], ["Finances", "reports"], ["Upgrades", "upgrades"]]:

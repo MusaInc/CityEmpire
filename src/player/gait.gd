@@ -70,6 +70,7 @@ var phase := 0.0          # 0..1 gait clock (left touchdown at 0)
 var freq := 0.0           # cycles per second
 var duty := 0.6           # stance fraction of the cycle
 var run := 0.0            # 0 walk … 1 run (gait style)
+var step_k := 1.0         # cadence multiplier (everyday hero: quicker, shorter steps)
 const FOLD_MIN := 0.36    # m: closest an ankle comes to its hip (calf against hamstring)
 var sprint := 0.0         # 0..1 above a jog
 var moving := false       # stepping (false = standing)
@@ -232,7 +233,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 		return
 
 	# --- clock -----------------------------------------------------------
-	var steps := cadence(maxf(speed, 0.8))
+	var steps := cadence(maxf(speed, 0.8)) * step_k
 	freq = steps * 0.5
 	var want_duty := lerpf(0.62, 0.38, run) - 0.1 * sprint
 	# Ground covered while a foot is down must fit the legs' reach.

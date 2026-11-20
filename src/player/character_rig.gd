@@ -560,6 +560,9 @@ func _connect_player() -> void:
 	if player.trick.is_connected(_on_trick):
 		return
 	player.trick.connect(_on_trick)
+	# Everyday (City Empire) strides: quicker, shorter steps – the swing
+	# hero's athletic 1.6 m step read as lunging at a 6 m/s jog.
+	_gait.step_k = 1.16 if player.everyday else 1.0
 	player.released.connect(_on_released)
 	player.stun_started.connect(_on_stun)
 	player.stun_ended.connect(_on_stun_ended)
