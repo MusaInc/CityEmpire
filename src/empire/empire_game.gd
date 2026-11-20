@@ -545,6 +545,11 @@ func _after_start() -> void:
 			empire.advance(1440.0 - empire.minute + 1.0)
 		elif pn == "wholesale":
 			ui.open_wholesale(wholesaler("west"))
+		elif pn == "gallery":
+			# (captures: the photo gallery of the first firm for sale)
+			var fs3 := CityLife.firms_for_sale(empire)
+			if not fs3.is_empty():
+				ui._listing(unit_by_id[fs3[0]["unit"]], 0.0)["open"].call()
 		elif pn in ["stock", "staff"] and not empire.businesses.is_empty():
 			ui.open_manage(empire.businesses[0], pn)
 		else:

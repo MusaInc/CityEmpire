@@ -3114,6 +3114,12 @@ func _property_card(x: Dictionary, dist: float) -> Control:
 	fr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	pic.add_child(fr)
 	var tag := S.chip(String(info["status"]), info["col"])
+	# (on a photo: a dark backing so the status reads on bright skies)
+	var tsb: StyleBoxFlat = tag.get_theme_stylebox("panel").duplicate()
+	tsb.bg_color = Color(0.05, 0.07, 0.09, 0.82)
+	tsb.border_color = Color(info["col"], 0.7)
+	tsb.set_border_width_all(1)
+	tag.add_theme_stylebox_override("panel", tsb)
 	tag.position = Vector2(10, 10)
 	tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pic.add_child(tag)

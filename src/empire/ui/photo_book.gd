@@ -117,13 +117,20 @@ static func gallery(ui: EmpireUI, id: String, title: String, sub: String, facts:
 			var fr := frame(id, vw, Vector2(150, 84), world, 10)
 			fr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 			b.add_child(fr)
-			var sbn := StyleBoxFlat.new()
-			sbn.bg_color = Color(0, 0, 0, 0)
-			sbn.set_corner_radius_all(10)
-			sbn.set_border_width_all(3 if vw == view else 0)
-			sbn.border_color = S.AMBER
 			for stn in ["normal", "hover", "pressed", "focus"]:
-				b.add_theme_stylebox_override(stn, sbn)
+				b.add_theme_stylebox_override(stn, StyleBoxEmpty.new())
+			if vw == view:
+				# (the ring is drawn over the photo: the frame covers the button)
+				var ring := Panel.new()
+				ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+				ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				var sbn := StyleBoxFlat.new()
+				sbn.draw_center = false
+				sbn.set_corner_radius_all(10)
+				sbn.set_border_width_all(3)
+				sbn.border_color = S.AMBER
+				ring.add_theme_stylebox_override("panel", sbn)
+				b.add_child(ring)
 			var cap := S.label(String(VIEW_NAMES.get(vw, vw)), 12, S.PAPER, "black")
 			cap.position = Vector2(8, 60)
 			cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
