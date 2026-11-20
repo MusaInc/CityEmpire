@@ -376,8 +376,9 @@ func _apply(dt: float, instant: bool) -> void:
 	env.fog_height_density = MIST_DENSITY * mist
 	# Soft bloom: by day only the brightest sunlit glass and sky blooms;
 	# hard summer sun blooms more (sunlit glass, white stone), haze softens it.
-	env.glow_intensity = lerpf(0.34 + 0.12 * punch + 0.08 * hz, 0.42, night)
-	env.glow_hdr_threshold = lerpf(1.05 - 0.12 * punch, 1.0, night)
+	# (2026-11-20: a touch less by day – car glints and white stone bloomed.)
+	env.glow_intensity = lerpf(0.26 + 0.08 * punch + 0.06 * hz, 0.42, night)
+	env.glow_hdr_threshold = lerpf(1.2 - 0.1 * punch, 1.0, night)
 	# Hard sun: more contrast and colour; haze and fog wash both out.
 	env.adjustment_contrast = 1.14 + (0.06 * punch - 0.07 * hz) * day_light - 0.06 * fog
 	env.adjustment_saturation = 1.12 + (0.08 * punch - 0.1 * hz) * day_light - 0.12 * fog

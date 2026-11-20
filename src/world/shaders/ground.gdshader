@@ -372,11 +372,34 @@ void fragment() {
 				vec2 b = p * vec2(4.0, 8.0);
 				b.x += step(1.0, mod(floor(b.y), 2.0)) * 0.5;
 				vec2 bf = fract(b);
-				float mortar = max(step(bf.x, 0.08), step(bf.y, 0.12)) * near;
-				vec3 bricks = brick * (0.9 + 0.12 * hash12(floor(b))) * (1.0 - 0.18 * mortar);
-				vec2 sf = fract(p / 3.0);
-				float seam = max(band(sf.x, 0.02, aa / 3.0), band(sf.y, 0.02, aa / 3.0));
-				vec3 slabs = c * 0.9 * (0.94 + 0.1 * hash12(floor(p / 3.0))) * (1.0 - 0.12 * seam * near);
+				// Mortar anti-aliased and faded out once a brick is only a few
+				// pixels across (a hard step shimmered into blotchy moire
+				// across big dock aprons); each brick's own tone fades the same way.
+				float bfine = 1.0 - smoothstep(0.012, 0.035, aa);
+				float mortar = max(band(min(bf.x, 1.0 - bf.x), 0.04, aa * 4.0), band(min(bf.y, 1.0 - bf.y), 0.06, aa * 8.0)) * bfine;
+				vec3 bricks = brick * (1.0 + (0.12 * hash12(floor(b)) - 0.06) * bfine) * (0.95 - 0.16 * mortar);
+				// Soldier courses: a darker band of bricks on a 9.6 m grid.
+				vec2 sb = abs(fract(p / 9.6 + 0.5) - 0.5) * 9.6;
+				bricks *= 1.0 - 0.16 * (1.0 - smoothstep(0.22, 0.22 + aa * 2.0, min(sb.x, sb.y)));
+				bricks *= 0.94 + 0.1 * vnoise(p / 11.0);
+				// Big squares and promenades (2026-11-20): staggered 1.5 x 0.75 m
+				// flags, each its own tone, framed by darker granite bands on a
+				// 9.6 m grid and worn by foot traffic (a plain 3 m slab grid
+				// read as one flat sheet of beige across a whole square).
+				vec2 fq = p / vec2(1.5, 0.75);
+				fq.x += 0.5 * mod(floor(fq.y), 2.0);
+				vec2 ff = fract(fq);
+				float fj = max(band(min(ff.x, 1.0 - ff.x), 0.012, aa / 1.5), band(min(ff.y, 1.0 - ff.y), 0.02, aa / 0.75));
+				float ftone = hash12(floor(fq) + 41.0);
+				float ffine = 1.0 - smoothstep(0.05, 0.16, aa);  // (no per-flag speckle far off)
+				vec3 slabs = c * 0.84 * mix(0.98, 0.9 + 0.16 * ftone, ffine) * (1.0 - 0.16 * fj * ffine);
+				vec2 gb = abs(fract(p / 9.6 + 0.5) - 0.5) * 9.6;           // m from a band line
+				float gband = 1.0 - smoothstep(0.32, 0.32 + aa * 2.0, min(gb.x, gb.y));
+				vec3 granite = vec3(0.4, 0.4, 0.42) * (0.88 + 0.14 * hash12(floor(p / 0.6) + 3.0));
+				slabs = mix(slabs, granite, gband * 0.85);
+				float wear = vnoise(p / 14.0) * 0.6 + vnoise(p / 3.7) * 0.4;
+				slabs *= 0.93 + 0.12 * wear;
+				slabs *= 1.0 - 0.1 * smoothstep(0.72, 0.9, vnoise(p * 0.35 + 7.0)) * near;  // stains
 				albedo = mix(slabs, bricks, smoothstep(0.6, 0.68, zone));
 			}
 		} else if (grass) {
@@ -409,17 +432,21 @@ void fragment() {
 		albedo *= 1.0 - streak;
 		rough = 0.88;
 	}
+	float pud = 0.0;
 	if (wetness > 0.001 && flat_top) {
 		// Wet streets: everything darkens and gets a sheen; puddles collect in
 		// the dips of a low-frequency noise (and fill as the rain goes on),
 		// mirror-smooth and – while it's raining – rippled.
-		float pud = smoothstep(0.62 - 0.22 * wetness, 0.7 - 0.22 * wetness, vnoise(p * 0.11) * 0.7 + vnoise(p * 0.43) * 0.3);
-		pud *= wetness * (asphalt ? 1.0 : 0.6);
-		albedo *= 1.0 - 0.3 * wetness - 0.25 * pud;
-		rough = mix(rough, 0.3, wetness * 0.8);
+		pud = smoothstep(0.62 - 0.22 * wetness, 0.7 - 0.22 * wetness, vnoise(p * 0.11) * 0.7 + vnoise(p * 0.43) * 0.3);
+		pud *= wetness * (asphalt ? 1.0 : 0.75);
+		albedo *= 1.0 - 0.36 * wetness - 0.25 * pud;
+		rough = mix(rough, 0.22, wetness * 0.85);
 		rough = mix(rough, 0.03 + 0.12 * rain * vnoise(p * 6.0 + TIME * 3.0), pud);
 	}
 	ALBEDO = albedo;
 	ROUGHNESS = rough;
-	SPECULAR = 0.25 + 0.55 * wetness;  // (dry tarmac and stone barely mirror the sky)
+	// (Dry tarmac and stone barely mirror the sky. Wet: a sheen, and only the
+	// puddles mirror it fully – a whole wet square at 0.8 turned milky white
+	// under an overcast sky, 2026-11-20.)
+	SPECULAR = 0.25 + 0.25 * wetness + 0.4 * pud;
 }

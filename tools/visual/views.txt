@@ -1,0 +1,11 @@
+# Visual-pass views (tour.gd format, heights relative to the ground at the hero spot)
+docks_plaza:200,450:200,2.2,450,262,5,385:rel
+docks:150,520:150,40,520,260,0,380:rel
+cbd_street:470,-195:455,12,-170,560,20,-260:rel
+cbd_air:330,-60:330,140,-60,520,20,-260:rel
+westbank_street:-800,0:-800,3,0,-760,8,-60:rel
+west_quay:60,110:85,24,140,60,4,-60:rel
+harbour_ramp:236,545:262,30,515,175,3,611:rel
+harbour_city_end:200,585:250,10,520,140,8,660:rel
+harbour_bridge:100,800:330,45,880,40,12,740:rel
+strait:-200,-20:-260,70,-330,-200,10,60:rel

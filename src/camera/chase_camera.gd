@@ -48,7 +48,7 @@ func _ready() -> void:
 	cam.name = "Camera"
 	cam.fov = base_fov
 	cam.near = 0.15
-	cam.far = 2400.0
+	cam.far = 6500.0  # (same as on foot: the mountains round the bay are 2-5 km out; at 2400 they were clipped in and out while driving)
 	add_child(cam)
 	cam.make_current()
 	var look := LookFilter.new()

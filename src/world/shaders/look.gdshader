@@ -94,9 +94,16 @@ vec3 lens_light(sampler2D stex, vec2 uv, vec2 px, float th, vec3 tint, float t_n
 	}
 	// Glare: a soft halo (one blurred lookup) and a ghost on the far side
 	// of the frame centre (the classic flare reflection), faint.
-	acc += bright(textureLod(stex, uv, 5.0).rgb, th * 0.7) * 0.9;
+	// (Eight lod-3 taps on a ring, not one lod-5 lookup: on device a deep
+	// mip came back as big hard-edged squares round every wet glint.)
+	vec3 halo = vec3(0.0);
+	for (int k = 0; k < 8; k++) {
+		float a = float(k) * 0.7854 + 0.39;
+		halo += bright(textureLod(stex, uv + vec2(cos(a), sin(a) * aspect) * 0.018, 3.0).rgb, th * 0.8);
+	}
+	acc += halo * (0.6 / 8.0);
 	vec2 ghost = vec2(1.0) - uv;
-	acc += bright(textureLod(stex, mix(uv, ghost, 0.6), 4.0).rgb, th) * vec3(0.5, 0.8, 1.0) * 0.12 * t_night;
+	acc += bright(textureLod(stex, mix(uv, ghost, 0.6), 3.0).rgb, th) * vec3(0.5, 0.8, 1.0) * 0.1 * t_night;
 	return acc;
 }
 

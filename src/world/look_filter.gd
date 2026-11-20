@@ -18,10 +18,12 @@ const TUNING := {
 	# small Kuwahara irons out texture noise/shimmer, thin depth outlines in a
 	# darkened scene colour separate shapes, gentle grade. No bands, halftone,
 	# haze, speed lines or vignette (the game draws its own fog and vignette).
-	"crisp": {"smooth_amount": 0.55, "line_px": 0.75, "depth_edge": 0.07, "color_edge": 0.5,
-		"line_far": 260.0, "ink_amount": 0.55, "ink_shade": 1.0, "saturation": 1.08,
-		"exposure": 1.0, "lift": 0.0, "split_tone": 0.1, "haze_amount": 0.0, "vignette": 0.0,
-		"speed_lines": 0.0, "lens": 1.0},
+	# 2026-11-20 visual pass: ~65% weaker (smoothing 0.55→0.18 flattened
+	# paving and Blender detail into posterised patches; ink 0.55→0.3).
+	"crisp": {"smooth_amount": 0.18, "line_px": 0.65, "depth_edge": 0.08, "color_edge": 0.6,
+		"line_far": 220.0, "ink_amount": 0.3, "ink_shade": 1.0, "saturation": 1.05,
+		"exposure": 1.0, "lift": 0.0, "split_tone": 0.06, "haze_amount": 0.0, "vignette": 0.0,
+		"speed_lines": 0.0, "lens": 0.6},
 	# Clean comic: crisp ink and flat cel tones, no halftone grain, gentle grade.
 	"comic": {"line_px": 1.15, "bands": 3.0, "band_soft": 0.1, "saturation": 1.3, "halftone": 0.0,
 		"color_edge": 0.38, "exposure": 1.06, "lift": 0.015, "split_tone": 0.22, "vignette": 0.12,

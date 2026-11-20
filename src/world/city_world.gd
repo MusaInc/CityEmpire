@@ -135,6 +135,7 @@ const CLOTHES := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 
 
 var _by_chunk := {}
 var _props_by_chunk := {}
+var _planter_spots := {}  # (trees in planters are never thinned out: a bare planter reads as an empty box)
 var _all_keys: Array[Vector2i] = []
 var _loaded := {}      # key -> Node3D
 ## Far versions of every chunk (FarCity), shown while a chunk isn't loaded.
@@ -187,6 +188,8 @@ func _ready() -> void:
 				print("COAST_PLACE %s %.1f %.1f %.1f %.3f %.3f" % [pl[0], pl[1].x, pl[1].y, pl[1].z, pl[2].x, pl[2].y])
 	_by_chunk = layout.buildings_by_chunk()
 	_props_by_chunk = layout.props_by_chunk()
+	for g: Vector3 in layout.public_gardens:
+		_planter_spots[Vector2i(roundi(g.x * 4.0), roundi(g.z * 4.0))] = true
 	var settings := get_node_or_null("/root/Settings")
 	if settings:
 		var p: Dictionary = settings.preset()
@@ -1939,7 +1942,9 @@ func chunk_props(key: Vector2i) -> Array:
 		i += 1
 		if prop_density < 1.0 and p[0] in ["streetlight", "tree", "ac_unit", "traffic_light"] \
 				and fmod(i * 0.618, 1.0) > prop_density:
-			continue
+			var o: Vector3 = (p[1] as Transform3D).origin
+			if not (p[0] == "tree" and _planter_spots.has(Vector2i(roundi(o.x * 4.0), roundi(o.z * 4.0)))):
+				continue
 		var kind: String = p[0]
 		var xf: Transform3D = p[1]
 		if kind == "tree" or kind == "tree_tall":

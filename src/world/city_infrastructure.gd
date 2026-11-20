@@ -101,6 +101,23 @@ static func public_spaces(l: CityLayout) -> void:
 			furniture(l, "bench", p + Vector3(0, 0, -5.5), PI * 0.5)
 			furniture(l, "bin", p + Vector3(0, 0, 5.5), 0)
 			l.props.append(["streetlight", Transform3D(Basis(Vector3.UP, PI * 0.5), p + Vector3(0, 0, 11))])
+			# Half way to the next bay a lawn bed with two trees and a bench
+			# (2026-11-20: 56 m of bare paving between bays read as empty).
+			var mz := z + 28.0
+			var mp := Vector3(39.6, l.ground_y(39.6, mz), mz)
+			if absf(mz - CityLayout.BRIDGE_Z) < 55 or absf(mz - SetPieces.LIGHTHOUSE_AT.y) < 26 or mz > 520.0:
+				continue
+			if l.is_water(mp + Vector3(2.2, 0, -5.0)) or l.is_water(mp + Vector3(2.2, 0, 5.0)) \
+					or absf(mp.y - p.y) > 0.3:
+				continue
+			var road_near := false
+			for dz: float in [-7.0, 0.0, 7.0]:
+				if l.roads.on_road(Vector2(mp.x, mz + dz)) or l.roads.on_road(Vector2(mp.x - 3.0, mz + dz)):
+					road_near = true
+			if road_near:
+				continue
+			lawn(l, mp, PI * 0.5, Vector2(9.0, 3.4))
+			furniture(l, "bench", Vector3(37.0, mp.y, mz), PI * 0.5)
 	# Turn genuinely empty block interiors into courtyard gardens. Test the
 	# whole envelope against buildings, roads and existing props; no random
 	# filling of streets, station platforms, landmarks or apartment entrances.
@@ -153,6 +170,31 @@ static func garden(l: CityLayout, p: Vector3, size: Vector2, tree: bool) -> void
 	else:
 		for dz: float in [-2.0, 2.0]:
 			l.props.append(["tree", Transform3D(Basis().scaled(Vector3.ONE * 0.48), p + Vector3(0, 0.39, dz))])
+
+## A lawn bed in a big square (2026-11-20 visual pass: squares were acres of
+## bare paving): a low stone kerb round a grass rectangle turned to the
+## square's frame, two young trees along it.
+static func lawn(l: CityLayout, p: Vector3, ang: float, size: Vector2) -> void:
+	var name := "gardens_%d_%d" % [floori(p.x / CityLayout.CHUNK), floori(p.z / CityLayout.CHUNK)]
+	var k: Dictionary = {}
+	for structure in l.structures:
+		if structure.get("name", "") == name:
+			k = structure
+			break
+	if k.is_empty():
+		k = l._kit(name)
+	var ax := Vector2(cos(ang), sin(ang))
+	var az := Vector2(-ax.y, ax.x)
+	var c := Vector2(p.x, p.z)
+	var rect := func(hx: float, hz: float) -> PackedVector2Array:
+		return PackedVector2Array([c - ax * hx - az * hz, c + ax * hx - az * hz, c + ax * hx + az * hz, c - ax * hx + az * hz])
+	l._kprism(k, rect.call(size.x * 0.5, size.y * 0.5), p.y - 0.1, p.y + 0.3, Color(0.42, 0.42, 0.4))
+	k["prisms"].append([rect.call(size.x * 0.5 - 0.22, size.y * 0.5 - 0.22), p.y + 0.3, p.y + 0.34, Color(0.25, 0.36, 0.18)])
+	for e: float in [-0.27, 0.27]:
+		var t := Vector3(p.x + ax.x * size.x * e, p.y + 0.34, p.z + ax.y * size.x * e)
+		l.public_gardens.append(t)
+		l.props.append(["tree", Transform3D(Basis().scaled(Vector3.ONE * 0.62), t)])
+
 
 static func furniture(l: CityLayout, kind: String, p: Vector3, yaw: float) -> void:
 	l.public_furniture.append([kind, Transform3D(Basis(Vector3.UP, yaw), p)])
@@ -464,6 +506,17 @@ static func open_ground(l: CityLayout, rail_lines: Array) -> void:
 				for j in range(-n, n + 1):
 					var q := c + ax * (i * step + step * 0.5) + az * (j * step + step * 0.5)
 					if (i + j) % 2 == 0:
+						# Big squares: every other planter along a row is a lawn
+						# bed (8 x 4.4 m) instead, when there's room for it.
+						if big and posmod(i, 2) == 0 and posmod(j, 4) == 0 and free.call(q, 4.8, inner):
+							lawn(l, at.call(q), ang, Vector2(8.0, 4.4))
+							mark.call(q, 5.0)
+							for sd: float in [-1.0, 1.0]:
+								var lq := q + az * 3.2 * sd
+								if free.call(lq, 1.0, inner):
+									furniture(l, "bench", at.call(lq), ang + (PI if sd > 0.0 else 0.0))
+									mark.call(lq, 1.0)
+							continue
 						if not free.call(q, 2.2, inner):
 							continue
 						garden(l, at.call(q), Vector2(2.8, 2.8), true)

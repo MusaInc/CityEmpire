@@ -88,6 +88,10 @@ func _run() -> void:
 					return [Transform3D(Basis.looking_at(to - f2, Vector3.UP), f2), fov])
 				await get_tree().create_timer(2.0).timeout
 		await RenderingServer.frame_post_draw
+		# --tour-probe=name@x,y;name@x,y (pixels at 1280x720)
+		for pr in String(args.get("tour-probe", "")).split(";", false):
+			if pr.split("@")[0] == nm:
+				_probe(pr.split("@")[1].split_floats(","))
 		var img := get_viewport().get_texture().get_image()
 		if args.has("tour-jpg"):
 			# (tools/photos: property photos, w px wide, JPEG.)
@@ -100,6 +104,28 @@ func _run() -> void:
 		print("TOUR_SHOT ", nm, " ", JSON.stringify({"draws": ri.call(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
 			"prims": ri.call(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)}))
 	get_tree().quit()
+
+
+## --tour-probe=px,py: what is under that pixel (finding what draws an
+## artefact): the collider the ray hits, and every visible mesh whose
+## bounds hold the hit point.
+func _probe(px: PackedFloat64Array) -> void:
+	var cam := get_viewport().get_camera_3d()
+	var vs := get_viewport().get_visible_rect().size
+	var sp := Vector2(px[0], px[1]) * vs / Vector2(1280, 720)
+	var o := cam.project_ray_origin(sp)
+	var d := cam.project_ray_normal(sp)
+	var space := get_viewport().world_3d.direct_space_state
+	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(o, o + d * 2000.0))
+	var p: Vector3 = hit.get("position", o + d * 15.0)
+	print("TOUR_PROBE hit ", p, " ", (hit["collider"] as Node).get_path() if hit else "nothing")
+	for nd in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
+		var g := nd as GeometryInstance3D
+		if not g.is_visible_in_tree():
+			continue
+		var bb := g.global_transform * g.get_aabb()
+		if bb.grow(0.5).has_point(p) and bb.size.length() < 400.0:
+			print("TOUR_PROBE mesh ", g.get_path(), " ", bb)
 
 
 ## [] when the camera at `from` sees `to` (nothing solid between them, the
