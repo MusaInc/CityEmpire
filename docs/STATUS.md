@@ -1,5 +1,14 @@
 # Status (2026-11-19, WORLDSTATE final overhaul; branch final-overhaul → 0.8.0)
 
+## Release push (2026-11-20, after the three-game audit; TestFlight 0.9.1)
+- Wardrobe fits 4:3 iPad and wide phones (viewport/safe-area sized panel, wrapping tabs, grids by real width); opened from the light phone it is no longer dark-on-dark (close_panel switches the palette synchronously); studio light on the preview (WS-01/02).
+- Saves: shared SafeSave (src/core/safe_save.gd) – checked atomic write, schema-checked load (older saves without newer fields still load), damaged save → backup with a notice, unusable → new game with the files kept as .broken; `--save=<path>` works. Desktop save from the old "City Empire" app-data folder is copied over once (WS-07). tests/test_saves.gd.
+- City500 "Your next step" card: near milestone, days at today's profit, what +£10/day is worth, one lever, the companies just above you (WS-05).
+- Notifications: two on screen, no repeats (all still in the phone's news).
+- Rail piers inside roundabouts skipped (shared-roads regression, SH-04). Prop MultiMesh buffer packed once (no GPU readback).
+- tools/shared: sync.py reports .import drift and `--pin`s each game (tools/shared/pinned.json); publish_privacy.sh (owner, sudo) publishes /privacy/worldstate and /privacy/neverstop.
+- Not done: character reconstruction (another session), first-session play on a device, FrameGovernor in EmpireGame (needs a device measurement), tester money still in (0.x). Scenario D's delivery checks fail as on 54f17f7 (pre-existing).
+
 ## Final overhaul (2026-11-19)
 - Renamed WORLDSTATE (project name, title, boot; bundle id and App Store record unchanged; save path changes on desktop only).
 - City500: 500 seeded companies (12 sectors), valuations a pure function of the day (trend, sector cycles, own cycles, fortnightly shocks) – no save cost; your empire valued on the same terms (book net assets + 3.2 years of last-7-day operating profit × reputation; transfers/recycling add nothing). Phone tab: rank card, progress to the next company, value breakdown, market headlines, searchable/filterable table in pages of 25, company profile with 30-day chart, side-by-side comparison and "why it's ahead". Daily rank notices + City500 headlines in the news; history in flags.c500.
