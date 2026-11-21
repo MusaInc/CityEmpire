@@ -3,22 +3,24 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://d2waibd67op3i"
-path="res://.godot/imported/character_b_top_tee_albedo.png-2dd1d6bf9678ae52952b6e74d3b8a2d1.ctex"
+path.s3tc="res://.godot/imported/character_b_top_tee_albedo.png-2dd1d6bf9678ae52952b6e74d3b8a2d1.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_top_tee_albedo.png-2dd1d6bf9678ae52952b6e74d3b8a2d1.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "234558c1487fc9072de7dbbf08de58a8"
+"md5": "1eaf7034d9f302d52d31dc45959a92d2"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_top_tee_albedo.png"
-dest_files=["res://.godot/imported/character_b_top_tee_albedo.png-2dd1d6bf9678ae52952b6e74d3b8a2d1.ctex"]
+dest_files=["res://.godot/imported/character_b_top_tee_albedo.png-2dd1d6bf9678ae52952b6e74d3b8a2d1.s3tc.ctex", "res://.godot/imported/character_b_top_tee_albedo.png-2dd1d6bf9678ae52952b6e74d3b8a2d1.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=512
 detect_3d/compress_to=1

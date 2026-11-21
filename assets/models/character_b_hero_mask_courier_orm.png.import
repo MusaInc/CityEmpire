@@ -3,22 +3,24 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://jt2r3x0eq4hg"
-path="res://.godot/imported/character_b_hero_mask_courier_orm.png-4e900c401941c01c60a5c62e1a110b2e.ctex"
+path.s3tc="res://.godot/imported/character_b_hero_mask_courier_orm.png-4e900c401941c01c60a5c62e1a110b2e.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_hero_mask_courier_orm.png-4e900c401941c01c60a5c62e1a110b2e.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "ca9687e4eeab869a4b7489cc052b46c6"
+"md5": "db4a7e1489ece686d8228647dbe1a1e9"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_hero_mask_courier_orm.png"
-dest_files=["res://.godot/imported/character_b_hero_mask_courier_orm.png-4e900c401941c01c60a5c62e1a110b2e.ctex"]
+dest_files=["res://.godot/imported/character_b_hero_mask_courier_orm.png-4e900c401941c01c60a5c62e1a110b2e.s3tc.ctex", "res://.godot/imported/character_b_hero_mask_courier_orm.png-4e900c401941c01c60a5c62e1a110b2e.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=512
 detect_3d/compress_to=1

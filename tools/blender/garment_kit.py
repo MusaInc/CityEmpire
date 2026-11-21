@@ -536,60 +536,188 @@ def face_out(ob, outward):
         me.update()
 
 
+class SkinSurface:
+    """Sample continuous skin weights from a finished garment's triangles."""
+
+    def __init__(self, source):
+        me = source.data
+        me.calc_loop_triangles()
+        self.triangles = [tuple(t.vertices) for t in me.loop_triangles]
+        self.positions = [v.co.copy() for v in me.vertices]
+        self.tree = BVHTree.FromPolygons(self.positions, self.triangles, all_triangles=True)
+        group = {g.index: g.name for g in source.vertex_groups}
+        self.weights = [{group[g.group]: g.weight for g in v.groups} for v in me.vertices]
+
+    def at(self, co):
+        nearest, _, index, _ = self.tree.find_nearest(co)
+        if nearest is None:
+            return {}
+        ids = self.triangles[index]
+        a, b, c = (self.positions[i] for i in ids)
+        ab, ac, ap = b - a, c - a, nearest - a
+        bb, bc, cc = ab.dot(ab), ab.dot(ac), ac.dot(ac)
+        det = bb * cc - bc * bc
+        if det <= 1e-14:
+            return self.weights[ids[0]]
+        u = (cc * ab.dot(ap) - bc * ac.dot(ap)) / det
+        v = (bb * ac.dot(ap) - bc * ab.dot(ap)) / det
+        result = {}
+        for i, k in zip(ids, (1.0 - u - v, u, v)):
+            for bone, weight in self.weights[i].items():
+                result[bone] = result.get(bone, 0.0) + max(0.0, k) * weight
+        return result
+
+
 def follow_layer(ob, under, zmax, depth, k_max=.7):
-    """Weights for cloth hanging over another garment (a shirttail over the
-    trousers): below zmax the weights blend toward the under-layer's own
-    (nearest vertex), up to k_max at `depth` below, so both layers move
-    together instead of the trousers pushing through in motion."""
-    vs = under.data.vertices
-    kd = KDTree(len(vs))
-    for v in vs:
-        kd.insert(v.co, v.index)
-    kd.balance()
-    ug = {g.index: g.name for g in under.vertex_groups}
-    og = {g.index: g.name for g in ob.vertex_groups}
-    for v in ob.data.vertices:
-        if v.co.z >= zmax:
-            continue
-        k = min(1.0, (zmax - v.co.z) / depth) * k_max
-        w = {og[g.group]: g.weight * (1 - k) for g in v.groups}
-        _, j, _ = kd.find(v.co)
-        for g in vs[j].groups:
-            n = ug[g.group]
-            w[n] = w.get(n, 0) + g.weight * k
-        for g in list(v.groups):
-            ob.vertex_groups[og[g.group]].remove([v.index])
-        for n, x in w.items():
-            if x > .002:
-                if n not in ob.vertex_groups:
-                    ob.vertex_groups.new(name=n)
-                ob.vertex_groups[n].add([v.index], x, 'REPLACE')
+    """Blend hanging hems continuously into the lower layer's deformation."""
+    weights_from(ob, under, lambda co: min(1.0, (zmax - co.z) / depth) * k_max)
 
 
 def weights_from(ob, src, k_fn=lambda co: 1.0):
-    """Pieces sewn onto a garment (collar, placket, cuffs, buttons) move with
-    it: weights = (1-k) own + k * the nearest vertex of `src`'s."""
-    vs = src.data.vertices
-    kd = KDTree(len(vs))
-    for v in vs:
-        kd.insert(v.co, v.index)
-    kd.balance()
-    sg = {g.index: g.name for g in src.vertex_groups}
-    og = {g.index: g.name for g in ob.vertex_groups}
+    """Transfer surface skin weights to sewn trims and overlapping layers."""
+    skin = SkinSurface(src)
+    target = {g.name: g for g in ob.vertex_groups}
     for v in ob.data.vertices:
         k = max(0.0, min(1.0, k_fn(v.co)))
-        w = {og[g.group]: g.weight * (1 - k) for g in v.groups}
-        _, j, _ = kd.find(v.co)
-        for g in vs[j].groups:
-            n = sg[g.group]
-            w[n] = w.get(n, 0) + g.weight * k
-        for g in list(v.groups):
-            ob.vertex_groups[og[g.group]].remove([v.index])
-        for n, x in w.items():
-            if x > .002:
-                if n not in ob.vertex_groups:
-                    ob.vertex_groups.new(name=n)
-                ob.vertex_groups[n].add([v.index], x, 'REPLACE')
+        if k == 0.0:
+            continue
+        sampled = skin.at(v.co)
+        if not sampled:
+            continue
+        groups = [(ob.vertex_groups[g.group], g.weight) for g in v.groups]
+        w = {group.name: weight * (1 - k) for group, weight in groups}
+        for name, value in sampled.items():
+            w[name] = w.get(name, 0.0) + value * k
+        for group, _ in groups:
+            group.remove([v.index])
+        for name, value in w.items():
+            if value > .002:
+                if name not in target:
+                    target[name] = ob.vertex_groups.new(name=name)
+                target[name].add([v.index], value, 'REPLACE')
+
+
+def fit_over_waist(ob, trousers, band, tucked, gap):
+    """Make both trouser cuts share one anti-clipping waist fitting rule."""
+    if tucked:
+        tuck_into(ob, trousers, PANTS_TOP, gap)
+        follow_layer(ob, trousers, PANTS_TOP + .026, .033, k_max=1.0)
+    else:
+        clear_layer(ob, trousers, gap, zmax=PANTS_TOP + .037)
+        clear_layer(ob, band, .004, zmax=PANTS_TOP + .024)
+        follow_layer(ob, trousers, PANTS_TOP + .028, .057, k_max=.88)
+
+
+def drape_top(ob, amount, hem):
+    """Low-frequency gravity folds and diagonal shoulder drag in the mesh."""
+    tf, arms = frames()
+
+    def torso_mask(co):
+        side = 'l' if co.x < 0 else 'r'
+        t, _, radius = arms[side].polar(co)
+        if t > .055 and radius < .095:
+            return 0.0
+        return max(0.0, min(1.0, (co.z - hem) / .026, (1.48 - co.z) / .10))
+
+    def hang(co):
+        cy = float(np.interp(co.z, tf.zs, tf.cy))
+        a = math.atan2(co.x, (co.y - cy) * FRONT)
+        z = co.z
+        tension = math.exp(-((z - (1.12 + .095 * abs(math.sin(a)))) / .18) ** 2)
+        return tension * (.58 * math.sin(a * 8 + z * 7) + .42 * math.sin(a * 13 - z * 18 + .6))
+
+    def drag(co):
+        x = abs(co.x)
+        z = co.z
+        return math.exp(-((x - .15) / .075) ** 2 - ((z - 1.35) / .12) ** 2) * math.sin(z * 45 + x * 33)
+
+    fold_relief(ob, [(torso_mask, hang, amount), (torso_mask, drag, amount * .65)])
+    clear_body(ob, .003)
+
+
+def enforce_skin_clearance(ob, names, gap, max_push):
+    """Resolve local authored-mesh penetrations without reshaping loose panels."""
+    me = ob.data
+    for vertex in me.vertices:
+        if not names(vertex.co):
+            continue
+        pos, normal, _, distance = _btree.find_nearest(vertex.co)
+        if pos is None or distance > max_push:
+            continue
+        signed = (vertex.co - pos).dot(normal)
+        if signed < gap:
+            vertex.co += normal * min(gap - signed, max_push)
+    me.update()
+
+def lay_on_front(ob, under, direction, clearance):
+    """Keep narrow overlay pieces in front of the whole fabric envelope."""
+    me = under.data
+    tree = BVHTree.FromPolygons([v.co for v in me.vertices], [list(f.vertices) for f in me.polygons])
+    into = Vector((0, -direction, 0))
+    for vertex in ob.data.vertices:
+        p = vertex.co
+        depths = [direction * p.y]
+        for dx, dz in ((0, 0), (-.002, 0), (.002, 0), (0, -.005), (0, .005)):
+            hit, _, _, _ = tree.ray_cast(Vector((p.x + dx, .45 * direction, p.z + dz)), into)
+            if hit is not None and hit.y * direction > .04:
+                depths.append(hit.y * direction + clearance)
+        p.y = direction * max(depths)
+    ob.data.update()
+
+
+def hoodie_lining(tee, hood):
+    """Use the fitted crew-neck as the visible lining inside the zip opening."""
+    lining = tee.copy()
+    lining.data = tee.data.copy()
+    lining.name = 'Topx_Hoodie_Undershirt'
+    bpy.context.collection.objects.link(lining)
+    bm = bmesh.new()
+    bm.from_mesh(lining.data)
+    for centre, normal in (((0,0,1.19),(0,0,1)),((.162,0,0),(1,0,0)),((-.162,0,0),(1,0,0))):
+        bmesh.ops.bisect_plane(bm,geom=bm.verts[:]+bm.edges[:]+bm.faces[:],
+                               plane_co=centre,plane_no=normal)
+    outside = [v for v in bm.verts if v.co.z<1.18999 or abs(v.co.x)>.16201]
+    if outside:
+        bmesh.ops.delete(bm,geom=outside,context='VERTS')
+    bm.to_mesh(lining.data)
+    bm.free()
+    lining.data.update()
+    shell = BVHTree.FromPolygons([v.co for v in hood.data.vertices], [list(p.vertices) for p in hood.data.polygons])
+    for vertex in lining.data.vertices:
+        co = vertex.co
+        if (co.y-NECK_Y)*FRONT <= .029:
+            continue
+        from_front = Vector((co.x,NECK_Y+FRONT*.4,co.z))
+        hit, _, _, _ = shell.ray_cast(from_front,Vector((0,-FRONT,0)))
+        if hit is not None and (hit.y-NECK_Y)*FRONT > .036:
+            co.y = FRONT*min(FRONT*co.y,FRONT*hit.y-.004)
+    lining.data.update()
+    trim_hoodie_lining(lining, FRONT, NECK_Y)
+    lining.data.materials.clear()
+    lining.data.materials.append(material('hero_hood_lining',(.105,.110,.120),.87))
+    return lining
+
+
+
+def trim_hoodie_lining(lining, front, neck_y):
+    """Keep the jersey inside the zipper opening, clear of the folded hood."""
+    bm = bmesh.new()
+    bm.from_mesh(lining.data)
+
+    def inside(co):
+        rise = max(0.0,min(1.0,(co.z-1.30)/.23))
+        half_width = .044 + .041*rise
+        return min(half_width-abs(co.x),(co.y-neck_y)*front-.020)
+
+    iso_cut(bm,inside)
+    for vertex in bm.verts:
+        co = vertex.co
+        side = max(0.0,min(1.0,(abs(co.x)-.047)/.037))
+        collar = max(0.0,min(1.0,(co.z-1.36)/.16))
+        co.y -= front*.011*side*collar
+    bm.to_mesh(lining.data)
+    bm.free()
+    lining.data.update()
 
 
 def crisp(ob, angle=55):
@@ -810,7 +938,7 @@ def trim_atlas(name='trim'):
     H[m] += seam_height(d, along, groove=0, stitch_off=0, stitch_len=.0022, stitch_h=.00014)[m]
     m, t = row(.5)
     rib = np.sin(u * math.tau * 60)
-    H[m] += (.0005 * rib)[m]
+    H[m] += (.00019 * rib)[m]
     A[m] *= (1 - .05 * (rib < 0))[m]
     gx = (np.roll(H, -1, 1) - np.roll(H, 1, 1)) * .5 / (.30 / n)
     gy = (np.roll(H, -1, 0) - np.roll(H, 1, 0)) * .5 / (.04 / (n * .25))

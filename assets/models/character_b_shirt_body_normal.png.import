@@ -3,28 +3,30 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dr88h48xadrxm"
-path="res://.godot/imported/character_b_shirt_body_normal.png-ac996ea8ad164f882524c4623b95a3b3.ctex"
+path.s3tc="res://.godot/imported/character_b_shirt_body_normal.png-ac996ea8ad164f882524c4623b95a3b3.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_shirt_body_normal.png-ac996ea8ad164f882524c4623b95a3b3.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "c127e61bac416fa5d27bae5c4ecdfc0e"
+"md5": "19fc48493bfcd107b6bda28051170d00"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_shirt_body_normal.png"
-dest_files=["res://.godot/imported/character_b_shirt_body_normal.png-ac996ea8ad164f882524c4623b95a3b3.ctex"]
+dest_files=["res://.godot/imported/character_b_shirt_body_normal.png-ac996ea8ad164f882524c4623b95a3b3.s3tc.ctex", "res://.godot/imported/character_b_shirt_body_normal.png-ac996ea8ad164f882524c4623b95a3b3.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
-compress/normal_map=0
+compress/normal_map=1
 compress/channel_pack=0
 mipmaps/generate=true
 mipmaps/limit=-1
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=1024
 detect_3d/compress_to=1

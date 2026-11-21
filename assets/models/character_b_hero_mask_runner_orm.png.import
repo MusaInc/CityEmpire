@@ -3,22 +3,24 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://d4js6tjfguf1r"
-path="res://.godot/imported/character_b_hero_mask_runner_orm.png-57532d16299a6ddd44178d1ed8d72549.ctex"
+path.s3tc="res://.godot/imported/character_b_hero_mask_runner_orm.png-57532d16299a6ddd44178d1ed8d72549.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_hero_mask_runner_orm.png-57532d16299a6ddd44178d1ed8d72549.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "8132e591aeb489ebde39837a9e415f1e"
+"md5": "ad078eca229610630e6a99d291ac3b5d"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_hero_mask_runner_orm.png"
-dest_files=["res://.godot/imported/character_b_hero_mask_runner_orm.png-57532d16299a6ddd44178d1ed8d72549.ctex"]
+dest_files=["res://.godot/imported/character_b_hero_mask_runner_orm.png-57532d16299a6ddd44178d1ed8d72549.s3tc.ctex", "res://.godot/imported/character_b_hero_mask_runner_orm.png-57532d16299a6ddd44178d1ed8d72549.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=512
 detect_3d/compress_to=1

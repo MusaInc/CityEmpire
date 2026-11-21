@@ -70,7 +70,7 @@ var phase := 0.0          # 0..1 gait clock (left touchdown at 0)
 var freq := 0.0           # cycles per second
 var duty := 0.6           # stance fraction of the cycle
 var run := 0.0            # 0 walk … 1 run (gait style)
-var step_k := 1.0         # cadence multiplier (everyday hero: quicker, shorter steps)
+var everyday := false
 const FOLD_MIN := 0.36    # m: closest an ankle comes to its hip (calf against hamstring)
 var sprint := 0.0         # 0..1 above a jog
 var moving := false       # stepping (false = standing)
@@ -168,8 +168,8 @@ func _u(f: Foot) -> float:
 
 
 func _style(s: float) -> void:
-	run = smoothstep(1.9, 3.6, s)
-	sprint = smoothstep(5.0, 12.0, s)
+	run = smoothstep(2.05, 3.7, s) if everyday else smoothstep(1.9, 3.6, s)
+	sprint = smoothstep(4.9, 6.4, s) * 0.35 if everyday else smoothstep(5.0, 12.0, s)
 
 
 func _plant_at(f: Foot, a: Vector3, ground: Callable) -> void:
@@ -233,9 +233,9 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 		return
 
 	# --- clock -----------------------------------------------------------
-	var steps := cadence(maxf(speed, 0.8)) * step_k
+	var steps := cadence(maxf(speed, 0.8)) * (lerpf(1.035, 1.16, run) if everyday else 1.0)
 	freq = steps * 0.5
-	var want_duty := lerpf(0.62, 0.38, run) - 0.1 * sprint
+	var want_duty := lerpf(0.64 if everyday else 0.62, 0.40 if everyday else 0.38, run) - 0.1 * sprint
 	# Ground covered while a foot is down must fit the legs' reach.
 	var cover_max := reach_f + reach_b
 	duty = minf(want_duty, cover_max * freq / maxf(speed, 0.01))
@@ -244,8 +244,8 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 	var cover := speed * duty / freq  # m travelled during one stance
 	# Walking lands well ahead (heel strike); running lands closer under the
 	# hips and pushes off further behind – no reaching, braking overstride.
-	var ahead := cover * lerpf(reach_f / cover_max, 0.36, run)
-	var width := lerpf(0.095, 0.035, run)
+	var ahead := cover * lerpf(reach_f / cover_max, 0.29 if everyday else 0.36, run)
+	var width := lerpf(0.079, 0.063, run) if everyday else lerpf(0.095, 0.035, run)
 
 	for sd in ["l", "r"]:
 		var f: Foot = feet[sd]
@@ -291,7 +291,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				f.due = true
 			f.last_u = u
 			var left := 0.06 if f.due else (1.0 - u) / freq
-			if speed < 1.5 or _jolt > 0.0:
+			if speed < (0.65 if everyday else 1.5) or _jolt > 0.0:
 				f.rush = minf(f.rush, 0.07 + 0.06 * minf(speed, 1.5))  # stopped dead mid-stride: come down now
 			if f.rush < INF:
 				f.rush -= dt
@@ -328,8 +328,8 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			# early and flung it half a metre ahead late – a straight-legged
 			# kick out front, with the hips sinking to reach it. Near-steady
 			# instead: the leg swings through under the body.)
-			e = lerpf(e, f.w, 0.85 * sprint)
-			var paw := 0.08 * run * smoothstep(0.55, 0.82, f.w) * (1.0 - smoothstep(0.82, 1.0, f.w))
+			e = lerpf(e, f.w, 0.85 * sprint + (0.13 * run if everyday else 0.0))
+			var paw := (0.035 if everyday else 0.08) * run * smoothstep(0.55, 0.82, f.w) * (1.0 - smoothstep(0.82, 1.0, f.w))
 			var p := f.from.lerp(f.target, e) + dir * paw
 			# Height: an early heel kick at a run (the foot folds up behind),
 			# a low clearance arc walking; step up early, step down late.
@@ -338,7 +338,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			p.y = f.from.y + up * ey
 			# (A sprint's heel comes up behind, but not tucked against the seat
 			# for half the stride: that read as running sitting down.)
-			var lift_h := lerpf(0.1, 0.26 + 0.03 * sprint, run) * clampf(speed / 1.2, 0.35, 1.0)
+			var lift_h := lerpf(0.075 if everyday else 0.1, 0.26 + 0.05 * sprint, run) * clampf(speed / 1.2, 0.35, 1.0)
 			# (Peak skewed early running – the heel kicks up behind – with zero
 			# vertical speed at lift and touchdown: no pops.)
 			var wk := f.w + 0.15 * f.w * (1.0 - f.w)
@@ -368,7 +368,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			f.cur = p
 			# Foot pitch: toes stay pointed after the push-off, then come up
 			# to meet the ground (heel first walking, flat-ish running).
-			var land_pitch := lerpf(0.3, 0.08, run)
+			var land_pitch := lerpf(0.23 if everyday else 0.3, 0.08, run)
 			# Mid-swing the foot hangs relaxed off the shin (the rig blends to a
 			# shin-relative pose by world_k).
 			f.pitch = lerpf(-f.lift_toe, land_pitch, smoothstep(0.35, 1.0, f.w))
@@ -465,7 +465,7 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 		var far := SETTLE_DIST
 		for sd in ["l", "r"]:
 			var f: Foot = feet[sd]
-			var rest := centre + right * f.sgn * STAND_W
+			var rest := _standing_spot(centre, facing, right, f)
 			var off := Vector2(f.pos.x - rest.x, f.pos.z - rest.z).length()
 			var twist := absf(f.heading.signed_angle_to(facing, Vector3.UP))
 			if off > far or twist > 0.9:
@@ -489,7 +489,7 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 			f.stance_u = 0.5
 			continue
 		f.w = minf(f.w + dt / (0.1 if f.quick else SETTLE_TIME), 1.0)
-		var rest := centre + right * f.sgn * STAND_W
+		var rest := _standing_spot(centre, facing, right, f)
 		rest.y = f.from.y
 		var hit: Dictionary = ground.call(rest + Vector3.UP * 0.3)
 		if not hit.is_empty():
@@ -498,7 +498,8 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 		var p := f.from.lerp(rest, e)
 		p.y = lerpf(f.from.y, rest.y, e) + sin(PI * f.w) * (0.03 if f.quick else 0.07)
 		f.cur = p
-		f.heading = _yaw_to(f.from_heading, facing, e)
+		var toe_out := facing.rotated(Vector3.UP, -.105 * f.sgn) if everyday else facing
+		f.heading = _yaw_to(f.from_heading, toe_out, e)
 		f.pitch = 0.15 * sin(PI * f.w)
 		f.world_k = 1.0
 		f.toe = 0.0
@@ -507,6 +508,11 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 			f.settle = false
 			_settle_side = ""
 			_stand_t = 0.0
+
+
+func _standing_spot(centre: Vector3, facing: Vector3, right: Vector3, foot: Foot) -> Vector3:
+	var spot := centre + right * foot.sgn * STAND_W
+	return spot + facing * foot.sgn * 0.025 if everyday else spot
 
 
 ## A locked foot keeps its heading while the body turns over it, pivoting on

@@ -584,6 +584,9 @@ func close_panel(resume := true) -> void:
 	# street's dark controls: the wardrobe opened from the phone). Switch now.
 	if phone != null and not Glass.dark:
 		Glass.set_dark(true)
+	if resume and game and game.rig and game.rig.wardrobe_preview:
+		_style_pose(false)
+		game.studio_light(false)
 	for c in _panel_root.get_children():
 		c.queue_free()
 	_panel = null
@@ -2106,6 +2109,7 @@ func _swatch(a: Color, b: Color, on: bool, cb: Callable) -> Button:
 ## straight after the welcome, with a "Start" button.
 var _style_tab := "you"
 var _style_orbit := 0.0
+var _style_portrait := true
 var _style_first := false
 
 
@@ -2154,6 +2158,7 @@ func open_style(first := false) -> void:
 	for tb in tab_list:
 		tabs.add_child(S.button(tb[1], func():
 			_style_tab = tb[0]
+			_style_portrait = _style_tab == "you"
 			open_style(_style_first), _style_tab == tb[0], 0.0))
 	v.add_child(tabs)
 	var body := S.vbox(10)
@@ -2169,7 +2174,8 @@ func open_style(first := false) -> void:
 		"clothes":
 			_style_choices(body, "TOP", _style_list(HeroLook.TOPS, first), l, "top", 3)
 			_style_colours(body, "TOP COLOUR", HeroLook.CLOTH, l, "top_col")
-			_style_colours(body, "TROUSERS", HeroLook.TROUSERS, l, "pants_col")
+			_style_choices(body, "BOTTOMS", HeroLook.LOWER_CUTS, l, "trousers", 3)
+			_style_colours(body, "BOTTOM COLOUR", HeroLook.TROUSERS, l, "pants_col")
 		"extras":
 			_style_choices(body, "SHOES", _style_list(HeroLook.SHOES, first), l, "shoes", 3)
 			_style_choices(body, "HAT", _style_list(HeroLook.HATS, first), l, "head", 4)
@@ -2183,24 +2189,32 @@ func open_style(first := false) -> void:
 				var od: Dictionary = o
 				body.add_child(_row([_fixed("%s · %s" % [HeroLook.label(HeroLook.TOPS, String(od.get("top", ""))),
 					HeroLook.label(HeroLook.SHOES, String(od.get("shoes", "")))], 300, 17, S.PAPER, "bold"), S.spacer(),
-					S.button("Wear", func(): _style_set(od), true, 110)]))
+					S.button("Wear", func(): _style_set({"trousers": "auto"}.merged(od, true)), true, 110)]))
 			body.add_child(S.button("Save what I'm wearing", func():
 				Wardrobe.save_outfit(e.flags, HeroLook.current(e.flags))
 				open_style(false), false, 300))
-	v.add_child(_scroll(body, 120.0))  # (fills what the header/footer leave)
-	var foot := S.hbox(10)
+	v.add_child(_scroll(body, 120.0))
+	var foot := HFlowContainer.new()
+	foot.add_theme_constant_override("h_separation", 8)
+	foot.add_theme_constant_override("v_separation", 8)
 	foot.add_child(S.button("⟲", func():
-		_style_orbit -= 0.6
-		_style_frame(), false, 64))
+		_style_orbit -= PI / 6.0
+		_style_frame(), false, 45))
 	foot.add_child(S.button("⟳", func():
-		_style_orbit += 0.6
-		_style_frame(), false, 64))
+		_style_orbit += PI / 6.0
+		_style_frame(), false, 45))
+	var zoom := S.button("Full body" if _style_portrait else "Close-up", func():
+		_style_portrait = not _style_portrait
+		_style_frame()
+		_update_style_zoom(), false, 100)
+	zoom.name = "StyleZoom"
+	foot.add_child(zoom)
 	foot.add_child(S.button("Random", func():
 		var rng := RandomNumberGenerator.new()
 		rng.randomize()
 		var r := {}
 		r["body"] = String(HeroLook.BODIES[rng.randi() % HeroLook.BODIES.size()][0]) if HeroLook.BODY_B_ENABLED else "a"
-		for pair in [["face", HeroLook.faces_for(r["body"])], ["hair", HeroLook.HAIRS], ["top", HeroLook.TOPS], ["shoes", HeroLook.SHOES]]:
+		for pair in [["face", HeroLook.faces_for(r["body"])], ["hair", HeroLook.HAIRS], ["top", HeroLook.TOPS], ["trousers", HeroLook.LOWER_CUTS], ["shoes", HeroLook.SHOES]]:
 			var lst: Array = pair[1]
 			r[pair[0]] = lst[rng.randi() % lst.size()][0]
 		r["top_col"] = HeroLook.CLOTH[rng.randi() % HeroLook.CLOTH.size()]
@@ -2209,12 +2223,12 @@ func open_style(first := false) -> void:
 		r["skin"] = ""
 		r["head"] = "head_bare"
 		r["eyewear"] = "face_none"
-		_style_set(r), false, 130))
+		_style_set(r), false, 85))
 	var unpaid := Wardrobe.unpaid(e.flags, l) if (shop != "" and not first) else []
 	if not unpaid.is_empty():
 		# Second row for Buy + Leave (one row would run off a narrow panel).
 		v.add_child(foot)
-		foot = S.hbox(10)
+		foot = HFlowContainer.new()
 	foot.add_child(S.spacer())
 	if not unpaid.is_empty():
 		var tot := 0
@@ -2272,6 +2286,7 @@ func open_store(store: String) -> void:
 	style_shop = store
 	_style_entry = HeroLook.current(game.empire.flags).duplicate()
 	_style_tab = "clothes"
+	_style_portrait = false
 	open_style(false)
 
 
@@ -2320,29 +2335,37 @@ func _style_pose(on: bool) -> void:
 	if on:
 		p.velocity = Vector3.ZERO
 		p.s.velocity = Vector3.ZERO
+	game.rig.wardrobe_preview = on
 	game.rig.process_mode = Node.PROCESS_MODE_ALWAYS if on else Node.PROCESS_MODE_INHERIT
 
 
 ## The camera in front of the hero (orbiting with ⟲ ⟳), the hero on the left
 ## half of the screen, clear of the panel.
+func _update_style_zoom() -> void:
+	var button := _panel.find_child("StyleZoom", true, false) as Button
+	if button:
+		button.text = "Full body" if _style_portrait else "Close-up"
+
+
 func _style_frame() -> void:
 	var p: Player = game.player
-	var fwd: Vector3 = game.rig._facing
-	fwd = fwd.rotated(Vector3.UP, _style_orbit)
+	var fwd: Vector3 = game.rig._facing.rotated(Vector3.UP, _style_orbit)
 	var side := fwd.cross(Vector3.UP).normalized()
-	var chest := p.global_position + Vector3.UP * 0.35
-	var eye := chest + fwd * 3.1 + Vector3.UP * 0.25
-	var look_at := chest - side * 0.95  # look right of the hero: they sit left of centre
 	var cam: Camera3D = game.camera.cam
-	cam.global_transform = Transform3D(Basis.looking_at(look_at - eye, Vector3.UP), eye)
-	cam.fov = 50.0
+	var target := p.global_position + Vector3.UP * (0.64 if _style_portrait else 0.02)
+	var eye := target + fwd * (1.25 if _style_portrait else 2.85) + Vector3.UP * (0.055 if _style_portrait else 0.21)
+	var vp := get_viewport().get_visible_rect().size
+	var panel_ratio := clampf(vp.x * 0.47, 440.0, 600.0) / vp.x
+	cam.fov = 40.0 if _style_portrait else 47.0
+	var half_span := eye.distance_to(target) * tan(deg_to_rad(cam.fov) * 0.5) * vp.aspect()
+	# Shift both the camera and its aim so orbit is always centred on the hero.
+	var shift := side * half_span * panel_ratio
+	cam.global_transform = Transform3D(Basis.looking_at(target - eye, Vector3.UP), eye - shift)
 	game.studio_light(true)
 
 
 func _close_style() -> void:
 	var first := _style_first
-	_style_pose(false)
-	game.studio_light(false)
 	_style_first = false
 	var e := game.empire
 	if first:

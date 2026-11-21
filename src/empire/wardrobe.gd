@@ -27,8 +27,8 @@ const STORES := {
 }
 ## The boutique you're in (its name on receipts and the store screen).
 static var boutique_name := "Boutique"
-## What everyone owns: the defaults, and "nothing" for hats / eyewear.
-const FREE := ["head_bare", "face_none"]
+## Style options everyone can wear, including in stores.
+const FREE := ["head_bare", "face_none", "top_bomber"]
 
 
 static func owned(flags: Dictionary) -> Array:
@@ -74,7 +74,7 @@ static func buy(e: Empire, items: Array, store: String) -> String:
 
 static func save_outfit(flags: Dictionary, look: Dictionary) -> void:
 	var outs: Array = flags.get("outfits", [])
-	var keep := {}
+	var keep := {"trousers": look.get("trousers", "auto")}
 	for k in ["top", "top_col", "pants_col", "shoes", "head", "eyewear"]:
 		keep[k] = look.get(k, "")
 	outs.push_front(keep)

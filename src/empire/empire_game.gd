@@ -1260,33 +1260,31 @@ func _update_indoors() -> void:
 	camera.indoor_ceiling = ceiling
 	if atmosphere.rain_fx:
 		atmosphere.rain_fx.sheltered = ceiling < INF
-	_hero_fill(ceiling < INF)
+	var close := camera.cam.global_position.distance_squared_to(player.global_position) < 12.25
+	_hero_fill(1.0 if ceiling < INF else (0.27 if close and driving == "" else 0.0))
 
 
 ## Indoors the building shadows the sun and the hero (dark clothes, deep skin
 ## tones) went to a silhouette against bright shelving. A soft light on the
 ## camera's side that lights only the hero (its own render layer), faded in
 ## while you're inside.
-const HERO_LAYER := 1 << 19
 var _fill: OmniLight3D
+var _portrait_rim: OmniLight3D
 var _fill_e := 0.0
 
 
-func _hero_fill(on: bool) -> void:
+func _hero_fill(amount: float) -> void:
 	if _fill == null:
 		_fill = OmniLight3D.new()
 		_fill.name = "HeroFill"
-		_fill.light_cull_mask = HERO_LAYER
+		_fill.light_cull_mask = CharacterRig.HERO_LIGHT_LAYER
 		_fill.shadow_enabled = false
 		_fill.omni_range = 5.0
 		_fill.omni_attenuation = 0.6
 		_fill.light_color = Color(1.0, 0.96, 0.9)
 		_fill.light_specular = 0.2
 		add_child(_fill)
-	if rig.skeleton:
-		for mi in rig.skeleton.find_children("*", "MeshInstance3D", true, false):
-			(mi as MeshInstance3D).layers |= HERO_LAYER
-	_fill_e = move_toward(_fill_e, 1.0 if on else 0.0, get_process_delta_time() * 2.0)
+	_fill_e = move_toward(_fill_e, amount, get_process_delta_time() * 2.0)
 	_fill.visible = _fill_e > 0.01
 	if _fill.visible:
 		var h := player.global_position + Vector3.UP * 0.4
@@ -1300,18 +1298,35 @@ func _hero_fill(on: bool) -> void:
 ## run): the same hero-only fill, brighter, from the camera's side, so deep
 ## skin tones and dark clothes read instead of a silhouette.
 func studio_light(on: bool) -> void:
-	_hero_fill(false)
+	_hero_fill(0.0)
 	_fill_e = 0.0
 	_fill.visible = on
-	if on:
-		var h := player.global_position + Vector3.UP * 0.5
-		var c := camera.cam.global_position
-		var to_c := Vector3(c.x - h.x, 0.0, c.z - h.z).normalized()
-		_fill.global_position = h + to_c * 2.0 - to_c.cross(Vector3.UP) * 0.9 + Vector3.UP * 1.1
-		_fill.omni_range = 6.0
-		_fill.light_energy = 1.8
-	else:
+	if not on:
 		_fill.omni_range = 5.0
+		_fill.light_color = Color(1.0, 0.96, 0.9)
+		if _portrait_rim:
+			_portrait_rim.hide()
+		return
+	var head := (rig.bones["head"] as Node3D).global_position
+	var cam_pos := camera.cam.global_position
+	var front := Vector3(cam_pos.x - head.x, 0.0, cam_pos.z - head.z).normalized()
+	var side := front.cross(Vector3.UP)
+	_fill.global_position = head + front * 1.45 - side * 0.8 + Vector3.UP * 0.65
+	_fill.omni_range = 5.0
+	_fill.light_color = Color(1.0, 0.95, 0.88)
+	_fill.light_energy = 1.62
+	if _portrait_rim == null:
+		_portrait_rim = OmniLight3D.new()
+		_portrait_rim.name = "PortraitRim"
+		_portrait_rim.light_cull_mask = CharacterRig.HERO_LIGHT_LAYER
+		_portrait_rim.light_color = Color(0.72, 0.83, 1.0)
+		_portrait_rim.light_energy = 0.40
+		_portrait_rim.light_specular = 0.14
+		_portrait_rim.omni_range = 4.2
+		_portrait_rim.omni_attenuation = 0.85
+		add_child(_portrait_rim)
+	_portrait_rim.global_position = head - front * 0.45 + side * 1.35 + Vector3.UP * 0.42
+	_portrait_rim.show()
 
 
 func _end_floor() -> void:

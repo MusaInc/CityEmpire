@@ -18,7 +18,9 @@ static func faces_for(body: String) -> Array:
 const HAIRS := [["hair_natural", "Natural"], ["hair_buzz", "Buzz Cut"], ["hair_crop", "Crop"], ["hair_fade", "High Fade"],
 	["hair_curls", "Curls"], ["hair_pixie", "Pixie"], ["hair_bob", "Bob"], ["hair_ponytail", "Ponytail"], ["hair_bun", "Bun"]]
 const TOPS := [["top_tee", "T-Shirt"], ["top_polo", "Polo"], ["top_shirt", "Shirt"], ["top_jumper", "Jumper"],
-	["top_hoodie", "Hoodie"], ["top_blazer", "Blazer & Tie"], ["top_long", "Base Layer"]]
+	["top_hoodie", "Hoodie"], ["top_blazer", "Blazer & Tie"], ["top_long", "Base Layer"], ["top_bomber", "Bomber Jacket"]]
+const LOWER_CUTS := [["auto", "Match top"], ["cargo", "Cargo"], ["chinos", "Chinos"],
+	["jeans", "Jeans"], ["joggers", "Joggers"], ["shorts", "Shorts"]]
 const HATS := [["head_bare", "None"], ["head_cap", "Cap"], ["head_beanie", "Beanie"], ["head_phones", "Headphones"]]
 const EYEWEAR := [["face_none", "None"], ["face_shades", "Shades"]]
 const SHOES := [["shoes_classic", "White"], ["shoes_blackout", "Black"], ["shoes_gum", "Gum Sole"], ["shoes_royal", "Royal"],
@@ -33,7 +35,7 @@ const CLOTH := ["#f2f1ec", "#c9c4b8", "#1a1c20", "#3b3f46", "#1f2d4a", "#3f6db3"
 const TROUSERS := ["#1a1c20", "#3b3f46", "#25304a", "#2f4a73", "#8a7a5a", "#c9bc9c", "#3d4530", "#5a3d2c", "#e8e6df"]
 
 const DEFAULT := {"body": "a", "face": "hero_ade", "hair": "hair_natural", "top": "top_polo", "top_col": "#3f6db3",
-	"pants_col": "#3b3f46", "shoes": "shoes_classic", "head": "head_bare", "eyewear": "face_none",
+	"trousers": "auto", "pants_col": "#3b3f46", "shoes": "shoes_classic", "head": "head_bare", "eyewear": "face_none",
 	"skin": "", "hair_col": ""}
 
 
@@ -46,6 +48,8 @@ static func current(flags: Dictionary) -> Dictionary:
 				d[k] = String(saved[k])
 	if String(d["body"]) not in ["a", "b"]:
 		d["body"] = "a"
+	if not LOWER_CUTS.any(func(entry): return entry[0] == d["trousers"]):
+		d["trousers"] = "auto"
 	# (a face belongs to a body type: switching body takes that body's first face)
 	var fl := faces_for(String(d["body"]))
 	if not fl.any(func(f): return f[0] == d["face"]):
@@ -72,7 +76,9 @@ static func build(l: Dictionary) -> Dictionary:
 	var sk: Color = look["skin"]
 	look["glove"] = Color(sk.r * 0.8, sk.g * 0.7, sk.b * 0.66)
 	look["bare_hands"] = true
-	look["trousers"] = "chinos" if String(l.get("top", "")) in ["top_shirt", "top_blazer"] else "cargo"
+	var lower := String(l.get("trousers", "auto"))
+	look["trousers"] = lower if lower in ["cargo", "chinos", "jeans", "joggers", "shorts"] else (
+		"chinos" if String(l.get("top", "")) in ["top_shirt", "top_blazer"] else "cargo")
 	return look
 
 

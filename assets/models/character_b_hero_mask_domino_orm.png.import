@@ -3,22 +3,24 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://daanhgsu7rxtx"
-path="res://.godot/imported/character_b_hero_mask_domino_orm.png-90a219d5fbea89a4e43b01e445f87c44.ctex"
+path.s3tc="res://.godot/imported/character_b_hero_mask_domino_orm.png-90a219d5fbea89a4e43b01e445f87c44.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_hero_mask_domino_orm.png-90a219d5fbea89a4e43b01e445f87c44.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "c89c730eebf8043e55a41604fa6bd298"
+"md5": "643c8cbf26ac1c2c84dda40b089fe5fd"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_hero_mask_domino_orm.png"
-dest_files=["res://.godot/imported/character_b_hero_mask_domino_orm.png-90a219d5fbea89a4e43b01e445f87c44.ctex"]
+dest_files=["res://.godot/imported/character_b_hero_mask_domino_orm.png-90a219d5fbea89a4e43b01e445f87c44.s3tc.ctex", "res://.godot/imported/character_b_hero_mask_domino_orm.png-90a219d5fbea89a4e43b01e445f87c44.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=512
 detect_3d/compress_to=1

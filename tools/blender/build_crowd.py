@@ -27,19 +27,21 @@ from mathutils import Matrix, Vector
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = ARGS[0] if ARGS else "assets/models"
 PREVIEW = ARGS[1] if len(ARGS) > 1 else ""
-TARGET = int(os.environ.get("CROWD_TARGET", "3200"))   # CROWD_TARGET=900 CROWD_OUT=crowd_far.glb: the far walkers
+TARGET = int(os.environ.get("CROWD_TARGET", "3100"))   # CROWD_TARGET=900 CROWD_OUT=crowd_far.glb: the far walkers
 
 # Alternate builds while keeping the eight existing runtime slots.
 VARIANTS = {
-    "a": [(0, "ade", "crop", "long"), (2, "malik", "fade", "tq"),
-          (4, "theo", "curls", "long"), (6, "kai", "buzz", "tq")],
-    "b": [(1, "rio", "ponytail", "short"), (3, "sam", "bun", "tq"),
-          (5, "noa", "pixie", "short"), (7, "jules", "bob", "long")],
+    "a": [(0, "ade", "crop", "polo"), (2, "malik", "fade", "blazer"),
+          (4, "theo", "curls", "hoodie"), (6, "kai", "buzz", "shirt")],
+    "b": [(1, "rio", "ponytail", "tee"), (3, "sam", "bun", "jumper"),
+          (5, "noa", "pixie", "polo"), (7, "jules", "bob", "blazer")],
 }
 
 PART = {"hero_skin": 1, "hero_skin_body": 1, "hero_glove": 1, "hero_lips": 9, "hero_sclera": 8, "hero_iris": 5,
         "hero_pupil": 5, "hero_lash": 5, "hero_brow": 5, "hero_cargo": 2, "hero_cargo_pocket": 2, "hero_liner": 0,
-        "hero_trainer": 0, "hero_hair": 3, "hero_top": 4, "hero_top_panel": 6, "hero_top_collar": 6}
+        "hero_trainer": 0, "hero_trainer_panels": 0, "hero_midsole": 0, "hero_outsole": 0, "hero_lid_rim": 1, "hero_chino": 2, "hero_waistband": 2, "hero_eye": 8,
+        "hero_hair": 3, "hero_top": 4, "hero_top_panel": 6, "hero_top_collar": 6,
+        "hero_shirt_white": 6, "hero_tie": 6, "hero_rib": 6, "hero_lapel": 6}
 CHAINS = {1: ("b_thigh_l", "b_shin_l", "b_foot_l"), 2: ("b_thigh_r", "b_shin_r", "b_foot_r"),
           3: ("b_upper_arm_l", "b_forearm_l", "b_hand_l"), 4: ("b_upper_arm_r", "b_forearm_r", "b_hand_r"),
           5: ("b_head", "b_neck")}
@@ -85,11 +87,15 @@ def pose(arm):
 
 
 def pieces(face, hair, cut):
-    names = {"Courier_Cargo", "Cargo_gusset_l", "Cargo_gusset_r", "Ankle_Liner", "Courier_Trainers", "Courier_Gloves",
-             "Face_" + face, "Hair_%s_%s" % (hair, face), "Top_" + cut.capitalize()}
-    if cut != "long":
-        names.add("Skin_Arms_" + cut.capitalize())
-    return [o for o in bpy.context.scene.objects if o.type == "MESH" and o.name in names]
+    formal = cut in ("shirt", "blazer")
+    trouser = {"Courier_Chinos"} if formal else {"Courier_Cargo", "Cargo_gusset_l", "Cargo_gusset_r"}
+    names = trouser | {"Ankle_Liner", "Courier_Trainers", "Courier_Soles", "Skin_Hands",
+                       "Face_" + face, "Hair_%s_%s" % (hair, face), "Top_" + cut.capitalize(),
+                       "Skin_Arms_" + cut.capitalize()}
+    if cut == "shirt":
+        names.add("Courier_Waistband")
+    return [o for o in bpy.context.scene.objects if o.type == "MESH"
+            and (o.name in names or o.name.startswith("Topx_" + cut.capitalize() + "_"))]
 
 
 def build(arm, v, face, hair, cut):
@@ -101,7 +107,7 @@ def build(arm, v, face, hair, cut):
         c.data = o.data.copy()
         bpy.context.scene.collection.objects.link(c)
         if c.data.shape_keys:
-            c.shape_key_clear()  # (face expressions: keep the basis)
+            c.shape_key_clear()
         dup.append(c)
     # Bake the pose (armature modifier), keep the vertex groups.
     for c in dup:

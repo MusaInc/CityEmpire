@@ -3,22 +3,24 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://b0xppycyqjpl4"
-path="res://.godot/imported/character_b_shirt_body_albedo.png-2a528a0b55eeb87921fa646ce70ebb2f.ctex"
+path.s3tc="res://.godot/imported/character_b_shirt_body_albedo.png-2a528a0b55eeb87921fa646ce70ebb2f.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_shirt_body_albedo.png-2a528a0b55eeb87921fa646ce70ebb2f.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "20580ce22b95c7a2ce472d4d177cbb71"
+"md5": "7cad7816a5528f0b6318b50b0f19a218"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_shirt_body_albedo.png"
-dest_files=["res://.godot/imported/character_b_shirt_body_albedo.png-2a528a0b55eeb87921fa646ce70ebb2f.ctex"]
+dest_files=["res://.godot/imported/character_b_shirt_body_albedo.png-2a528a0b55eeb87921fa646ce70ebb2f.s3tc.ctex", "res://.godot/imported/character_b_shirt_body_albedo.png-2a528a0b55eeb87921fa646ce70ebb2f.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=512
 detect_3d/compress_to=1

@@ -1,21 +1,25 @@
 # WorldState character & clothing pipeline
 
-One Blender build (`tools/blender/build_character.py`, headless) produces
-`assets/models/character.glb`: the 17-bone gameplay skeleton, the five faces,
-every hairstyle, every garment and every fitted accessory, skinned with at most
-four influences. The game shows the worn variants (`CharacterRig._show_variants`)
-and tints them through one shared shader family (`src/player/shaders/hero_*`).
+Blender exports both WorldState builds from `tools/blender/build_character.py`.
+Each build contains five faces, eight hairstyles, the wardrobe and fitted
+accessories around the same 17-bone gameplay skeleton. The editable projects
+are `art/hero/courier.blend` and `art/hero/courier_b.blend`, with the matching
+GLBs in `assets/models/`. Godot shows the worn variants through `CharacterRig`
+and shares shader parameters across surfaces using the same source material.
 
 ```
-tools/character_review/rebuild.sh       # Blender build -> Godot import -> texture import policy -> reimport (~1.5 min)
+tools/character_review/rebuild.sh       # Both builds, both crowd LODs and Godot texture imports
 python3 tools/character_review/review.py capture <milestone> --quick   # Godot + Blender review renders, before/after, dashboard
 ```
 
 ## Conventions
 
 **Skeleton.** Never changes: bone names `b_<name>` = `CharacterRig.BONES`, bind
-pose with arms 42 degrees out (`ARM_A`), legs 5 degrees (`LEG_A`). Animation,
-ragdoll and IK are untouched by anything here.
+pose with arms 42 degrees out (`ARM_A`), legs 5 degrees (`LEG_A`). The
+gameplay rig drives world-space foot contact. Its blend shapes close the
+sculpted lids, flex the individual fingers, and restore fabric volume at the
+elbows and knees from the active joint rotation. Fingers retain the source hand's joint weights in the
+Blender bake and use the existing two hand blend shapes in Godot.
 
 **Body.** MakeHuman hm08 (CC0), lean young-adult morph, retargeted onto the rig
 (`torso()` maps the anatomy's heights onto the rig's joints). Weights: MakeHuman's,
@@ -33,7 +37,10 @@ no clavicle bone) and the base of the neck (follows the chest).
    `iso_cut` along a smooth curve, snapped onto the collar/rib's base ring.
 4. Layering against the garment underneath: `clear_layer` (clearance),
    `follow_layer` (weights blend toward the under-layer's own, so both move
-   together), `tuck_into` (inside the waistband).
+   together), `tuck_into` (inside the waistband). `fit_over_waist` applies
+   the same rules to both cuts. Cargo, chinos, jeans, joggers and shorts share the same
+   waist block and bend weights. The shorts use their own skinned legs. Trim transfers interpolate weights across the closest
+   surface triangle to avoid switching to a different joint at each vertex.
 5. Construction pieces (`shirt_collar`, `shirt_placket`, `button_mesh`,
    `shirt_cuff`, `rib_band`, lapels) are parametric, low-passed and mirrored,
    UV into the shared trim atlas, wound outward (`face_out`), crisp-edged
@@ -42,7 +49,11 @@ no clavicle bone) and the base of the neck (follows the chest).
 6. `pack_uvs` then `bake_detail`: seams, topstitching and fine folds baked into
    the garment's own normal map from 3D seam definitions (`seam_height`,
    `seams_fn`); albedo near-white (the game tints it).
-7. `finish` (edge thickness), `add()`.
+7. `finish` (edge thickness), `add()`. The fleece hoodie also uses this
+   pipeline for its sleeve openings and rib cuffs. The bomber includes a zip, ribbed neck and cuffs, and fitted welt pockets.
+   Trainers use fitted uppers and separate foam midsoles, rubber outsoles,
+   tongues, eyestays and laces. Their tint regions keep the original shoe
+   and sole choices. Cargo pockets have separate gusseted bodies and flaps.
 
 **Names the rig keys on.** `Top_<cut>` (the garment), `Topx_<cut>_*` (its extra
 pieces), `Skin_Arms_<cut>` (bare skin it needs), `Acc_<model>_<face>` (fitted
@@ -58,10 +69,13 @@ worn under them (`CharacterRig.HAT_HAIR`).
 fit, construction, bake and shader. Price changes the design (cut, trims,
 fabric colour and weave strength), never the rendering quality.
 
-**Textures** (iPhone budget, enforced by `tools/character_review/fix_imports.py`
-after every build): VRAM-compressed with mipmaps; normals 1024, ORM 512,
-near-flat garment/face/hair albedos 512; one shared 256 weave and one shared
-256 pore detail tile (`FABRIC_DETAIL` in the rig).
+**Textures and LODs.** Runtime maps are VRAM-compressed with mipmaps. The
+import policy caps face and hair maps at 512, seam and panel normals at
+1024, and preserves the 1024 hair-card atlas. Both GLBs use Godot mesh LODs.
+The alpha-tested groom cards draw only up close and the opaque groom
+retains the silhouette farther back. The same Blender files produce the
+eight pedestrian outfits at 3,100 and 900 triangles per figure. Art sources
+and intermediate bakes are excluded from exports.
 
 **Adding a garment.** Write it in `empire_wardrobe.py` with `everyday_top` (or
 `tailored_top` + kit steps for a new construction), give it a `Top_<cut>` name,
@@ -70,8 +84,19 @@ material name to the rig's tint table and `FABRIC_DETAIL`, rebuild, capture.
 
 ## Review
 
-`tools/character_lab.gd` renders the hero through the real look path under the
+`tools/character_lab.tscn` renders the hero through the real look path under the
 game's atmosphere from fixed cameras (and a neutral studio light with
 `neutral`); `tools/blender/render_character_review.py` renders Cycles material
 and clay passes; `review.py` builds before/after pairs and the dashboard at
 `art/character_review/index.html`.
+
+The stage opens the same look path as the game. Use `catalog` to review all
+eight tops on both builds. The lab outfits a_denim through b_shorts cover
+the three new lower cuts. City mode opens the live wardrobe, changes the
+outfit through its normal controls and saves the portrait, outfit and rear
+views. Set a temporary `XDG_DATA_HOME` and pass an isolated `--save` when
+capturing the city.
+
+```sh
+godot --rendering-method mobile --fixed-fps 30 res://tools/character_lab.tscn -- screenshots/character-review catalog idle neutral three_quarter,collar
+```

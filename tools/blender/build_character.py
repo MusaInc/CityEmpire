@@ -21,6 +21,7 @@ BODY=os.environ.get('HERO_BODY','a')
 SUF='' if BODY=='a' else '_'+BODY
 TEX=ROOT/('art/hero/textures'+SUF)
 TEX.mkdir(parents=True,exist_ok=True);OUT.mkdir(parents=True,exist_ok=True)
+BLEND = ROOT / ('art/hero/courier%s.blend' % SUF)
 bpy.ops.object.select_all(action='SELECT');bpy.ops.object.delete(use_global=False)
 
 def obj_read(path):
@@ -132,7 +133,13 @@ def torso(v):
     else:
         kx=np.interp(y,[TK[1],TK[2],TK[3],(TK[3]+TK[4])/2+.3,TK[4]+.14,TK[5]-.05],[1.0,.975,1.0,1.045,1.06,1.0])
         kz=np.interp(y,[TK[1],TK[2],TK[3],TK[5]-.05],[1.02,1.0,1.03,1.0])
-    return Vector((x*.1*kx,z*.1*kz,h))
+    # Shape the waist and lateral ribcage before fitting garments. Keep full
+    # chest depth and add a slight forward curve at the upper spine.
+    waist = math.exp(-((h-1.108)/.12)**2)
+    ribs = math.exp(-((h-1.365)/.11)**2)
+    kx *= 1.0 - (.035 if BODY=='a' else .048)*waist + .021*ribs
+    posture = -.009*ribs + .006*waist
+    return Vector((x*.1*kx,z*.1*kz+posture,h))
 def retarget(v,w):
     result=Vector((0,0,0));p=coord(v)
     for n,i in ni.items():
@@ -222,6 +229,12 @@ def apply(ob,mod):
 def subdiv(ob,level):
     m=ob.modifiers.new('Tailored surface','SUBSURF');m.levels=level;apply(ob,m)
 
+def simplify_surface(ob, ratio):
+    reduction = ob.modifiers.new('Mobile surface topology', 'DECIMATE')
+    reduction.ratio = ratio
+    apply(ob, reduction)
+
+
 def image_load(path):
     im=bpy.data.images.load(str(path),check_existing=True);return im
 
@@ -305,10 +318,8 @@ for v in pants.data.vertices:
         v.co.z+=.045*t  # the hem ends inside the trainer's collar, never above it
 ptex=recolor_texture(SRC/'cortu_cargo_pants'/'cargo_pants_diff.png','cargo_albedo',(.21,.225,.24)) if (SRC/'cortu_cargo_pants'/'cargo_pants_diff.png').exists() else None
 pmat=material('hero_cargo',(.046,.051,.054),.86,ptex,SRC/'cortu_cargo_pants'/'cargo_pants_norm.png')
-stex=recolor_texture(SRC/'punkduck_running_shoes_01'/'runningshoes.png','trainer_albedo',(.94,.95,.96),True)
-smat=material('hero_trainer',(.8,.8,.8),.55,stex)
 gmat=material('hero_glove',(.023,.026,.029),.58)
-for ob,mat in [(pants,pmat),(shoes,smat),(gloves,gmat)]:ob.data.materials.clear();ob.data.materials.append(mat)
+for ob,mat in [(pants,pmat),(gloves,gmat)]:ob.data.materials.clear();ob.data.materials.append(mat)
 
 # ------------------------------------------------------------------ body parts
 # The anatomy itself (MakeHuman hm08 body, morphed above) is the source for
@@ -340,7 +351,10 @@ for j in range(len(base)):
     d=RB[j]-W_;along=d.dot(ax)
     if along>.085:along2=.085+(along-.085)*.9
     else:along2=along
-    d2=(d+ax*(along2-along))*.94
+    # Keep the broader palm and knuckle arch, slim only the tapered fingers.
+    across = d - ax*along
+    finger = max(0., min(1., (along-.065)/.065))
+    d2 = ax*along2*.97 + across*(.98 - .065*finger)
     RB[j]=W_+(d+(d2-d)*k)
 def wsum(j,*bones):return float(sum(weights[j,ni[b]] for b in bones))
 def part(name,faces,positions,wts,flip=True):
@@ -473,7 +487,6 @@ so=collar.modifiers.new('Knit','SOLIDIFY');so.thickness=.003;so.offset=-1;apply(
 subdiv(collar,1)
 # Bare forearms for the short sleeve: skin from under the sleeve to under
 # the glove cuff (overlapping both, so no seam opens when the arm bends).
-skinmat=material('hero_skin',(.5,.34,.25),.48,skin_tex)
 armskin=material('hero_skin_body',(.5,.34,.25),.5,skin_tex)
 skin_arms=[]
 for cut in ['Tq','Short','Vest']:
@@ -491,25 +504,22 @@ ob,_=part('Skin_Arms_Shirt',af,RB,weights);ob.data.materials.append(armskin);ski
 # from the hand weight 0.35 line down, exactly where the forearm skin ends.
 # Grip shapes curl the fingers for the rig (as the glove's do).
 hf_=[i for i in body if any(wsum(j,'hand_l','hand_r')>=.35 for j in bf[i]) and all(armish(j) or wsum(j,'hand_l','hand_r')>.2 for j in bf[i])]
-hands,_=part('Skin_Hands',hf_,RB,weights);hands.data.materials.append(armskin)
-hands.shape_key_add(name='Basis')
-for side,sx in [('l',-1),('r',1)]:
-    key=hands.shape_key_add(name='Grip_'+side)
-    direction=(J['hand_'+side]-J['forearm_'+side]).normalized()
-    pivot=J['hand_'+side]+direction*.05
-    for v,k_ in zip(hands.data.vertices,key.data):
-        if v.co.x*sx<0:continue
-        d=v.co-pivot;length=d.dot(direction)
-        if length<=0:continue
-        angle=min(2.2,length/.07*2.2);radius=.07/2.2
-        sideways=d-direction*length
-        k_.co=pivot+sideways+direction*(math.sin(angle)*radius)+Vector((0,1,0))*(1-math.cos(angle))*radius
+hands, hand_vertex_ids = part('Skin_Hands', hf_, RB, weights)
+hands.data.materials.append(armskin)
+exec(compile((ROOT/'tools/blender/hand_pose.py').read_text(), 'hand_pose.py', 'exec'))
+hand_grips(hands, hand_vertex_ids)
 skin_arms.append(hands)
 # Ankle liners: the skin round each ankle, from inside the trainer to well
 # under the trouser hem, in a dark knit. Invisible when everything fits; when
 # the ankle flexes it fills the gap instead of showing the sky through it.
 liner_faces=[i for i in body if all(.045<RB[j].z<.24 and wsum(j,'hand_l','hand_r')<.1 for j in bf[i])]
 liner,_=part('Ankle_Liner',liner_faces,RB,weights);push(liner,.003)
+for vertex in liner.data.vertices:
+    p = vertex.co
+    foot = J['foot_l' if p.x < 0 else 'foot_r']
+    taper = .12 * max(0.0, min(1.0, (.128 - p.z) / .066))
+    p.x = foot.x + (p.x - foot.x) * (1 - taper)
+    p.y *= 1 - taper
 liner.data.materials.append(material('hero_liner',(.03,.032,.036),.9));skin_arms.append(liner)
 
 # ------------------------------------------------------------------ faces
@@ -615,19 +625,18 @@ head_faces=[i for i in body if all(base[j,1]>6.3 for j in bf[i])]
 _hfs=set(head_faces)
 face_faces=head_faces+[i for i in body if i not in _hfs and all(RB[j].z>1.46 and abs(RB[j].x)<.13 and not armish(j) for j in bf[i])]
 face_meshes={}
-lipmat=material('hero_lips',(.46,.29,.23),.42)
 hairmat=material('hero_hair',(.05,.04,.035),.75)
 browmat=material('hero_brow',(.1,.075,.06),.7)   # (near-black read as painted bars)
-lashmat=material('hero_lash',(.06,.045,.035),.8)
-sclmat=material('hero_sclera',(.78,.75,.7),.25)
-irismat=material('hero_iris',(.25,.15,.08),.2)
-pupmat=material('hero_pupil',(.01,.01,.01),.1)
 HAIR_STYLES=['buzz','crop','fade','curls','pixie','bob','ponytail','bun']
 exec(compile((ROOT/'tools/blender/accessories.py').read_text(),'accessories.py','exec'))
 # Garment kit helpers (UV raster bakes) are needed for hair textures here;
 # empire_wardrobe.py loads the kit again for the garments.
 _btree=None;NECK_Y=0.0;FRONT=1.0
 exec(compile((ROOT/'tools/blender/garment_kit.py').read_text(),'garment_kit.py','exec'))
+exec(compile((ROOT/'tools/blender/character_detail.py').read_text(),'character_detail.py','exec'))
+LOCK_MATERIAL = make_lock_material()
+EYE_MATERIAL = eye_material()
+LID_MATERIAL = material('hero_lid_rim', (.29,.19,.16), .52)
 HAIR_MATS={}
 def hair_material(style,hair_ob,ecz,ecy):
     """One strand texture set per hairstyle (512 normal + albedo), baked on the
@@ -645,10 +654,10 @@ def hair_material(style,hair_ob,ecz,ecy):
            +.0006*np.sin(phi*48+np.sin(d*38)*2.2)*(.6+.4*np.sin(d*70)))
         return h.astype(np.float32)
     def albedo(P,N,H):
-        a=.82+np.clip(H,-.0012,.0012)*170
+        a=.76+np.clip(H,-.0012,.0012)*100
         return np.repeat(np.clip(a,.55,1.0)[:,None],3,1).astype(np.float32)
     n_,a_=bake_detail(hair_ob,'hair_'+style,512,height,albedo)
-    m=material('hero_hair_'+style,(.05,.04,.035),.66,a_,n_)
+    m=material('hero_hair_'+style,(.05,.04,.035),.76,a_,n_)
     m.node_tree.nodes['Normal Map'].inputs['Strength'].default_value=1.0
     HAIR_MATS[style]=m
     return m
@@ -657,32 +666,37 @@ def make_hair(fid,style,pos,ecz,ecy):
     long_=style=='bob'
     short_=style in ('buzz','crop','fade','curls')
     def margin(q):
-        hl=.035 if style=='pixie' else .052   # forehead hairline above the eyes
+        hl=.035 if style=='pixie' else .045   # forehead hairline above the eyes
         if short_:
             # a natural hairline: slight recession at the temples, small irregularity
             hl+=.008*min(1.0,max(0.0,abs(q.x)-.022)/.035)**2+.0009*math.sin(q.x*95+.7)
             # (crop/fade: a softly uneven front line - small peaks and dips, not a ruler edge)
-            if style in ('crop','fade'):hl+=.0009*math.sin(q.x*150+1.9)+.0004*math.sin(q.x*330+.4)
+            if style in ('crop','fade'):hl+=.0014*math.sin(q.x*157+1.9)+.0005*math.sin(q.x*311+.4)
+        if long_:
+            # Side part and the longer sweep across one temple.
+            hl = .053 + .019*math.exp(-((q.x+.026)/.029)**2) - .011*math.exp(-((q.x-.043)/.024)**2)
         top=q.z-(ecz+hl)
         k=.005 if style not in ('crop','fade') else .011   # rounding of the hairline's corners (temples, sideburns, nape)
         smin=lambda *a:-k*math.log(sum(math.exp(-x/k) for x in a))
         smax=lambda *a:k*math.log(sum(math.exp(x/k) for x in a))
         # (crop/fade: the back stops above the nape - the skin's stubble
         # shading carries the fade below it; down to the nape it read as a cap)
-        back=smin(ecy-.085-q.y,q.z-(ecz-(.115 if long_ else (.035 if style in ('crop','fade') else .07))))
+        back=smin(ecy-.085-q.y,q.z-(ecz-(.115 if long_ else (.048 if style in ('crop','fade') else .07))))
         if long_:
             temple=smin(abs(q.x)-.055,ecy-.035-q.y,q.z-(ecz-.09))
         else:
             temple=smin(abs(q.x)-.055,ecy-.03-q.y,q.z-(ecz+(-.012 if style=='pixie' else .012)))
-        return smax(top,back,temple)
+        extent = smax(top,back,temple)
+        if not long_:
+            # Cut around the actual auricle rather than across its surface.
+            ear = math.sqrt(((q.y-(ecy-.059))/.034)**2 + ((q.z-(ecz-.019))/.035)**2)
+            if abs(q.x) > .059:
+                extent = min(extent, (ear - 1.0) * .028)
+        return extent
     hf=[i for i in head_faces if any(margin(pos[j])>-.012 for j in bf[i])]
     hair,_=part('Hair_%s_%s'%(style,fid),hf,pos,weights)
     subdiv(hair,1)
     bm=bmesh.new();bm.from_mesh(hair.data)
-    cuts=[((0,0,ecz+(.035 if style=='pixie' else .052)),(0,0,1)),((0,ecy-.085,0),(0,-1,0)),
-          ((.055,0,0),(1,0,0)),((-.055,0,0),(-1,0,0))]
-    if long_:cuts+=[((0,0,ecz-.115),(0,0,1)),((0,ecy-.035,0),(0,-1,0)),((0,0,ecz-.09),(0,0,1))]
-    else:cuts+=[((0,0,ecz-.07),(0,0,1)),((0,ecy-.03,0),(0,-1,0)),((0,0,ecz+(-.012 if style=='pixie' else .012)),(0,0,1))]
     # Cut exactly along the hairline (the margin's zero line): split every edge
     # where it crosses, join the splits across faces, drop the outside. Plane
     # cuts plus whole-vertex deletion left a saw-tooth and square sideburns.
@@ -713,8 +727,8 @@ def make_hair(fid,style,pos,ecz,ecy):
         up_f=max(0.0,min(1.0,(v.co.z-(top-.055))/.03))   # the fade's top block starts higher, sharper
         # Sides and back hug the scalp (short, faded); the volume is on top.
         side=max(0.0,min(1.0,(v.co.z-(ecz+.035))/.045))
-        lift={'buzz':.0024,'crop':.0012+.0016*side+.0105*up,'fade':.0008+.03*up_f**1.3,'curls':.009+.022*up,
-              'pixie':.006+.012*up,'bob':.008+.008*up,'ponytail':.0035,'bun':.0035}[style]
+        lift={'buzz':.0009,'crop':.00065+.0011*side+.0037*up,'fade':.00052+.010*up_f**1.65,'curls':.004+.012*up,
+              'pixie':.0023+.0065*up,'bob':.004+.006*up,'ponytail':.0035,'bun':.0035}[style]
         if style=='curls':
             p_=v.co*170.0
             lift+=.0045*(math.sin(p_.x)*math.sin(p_.y+1.3)*math.sin(p_.z+.7)+.4)
@@ -731,8 +745,10 @@ def make_hair(fid,style,pos,ecz,ecy):
                 fw=v.co.y-(ecy-.095)
                 edge_=max(0.0,min(1.0,(margin(v.co)-.006)/.015))
                 lift+=(.0026*up+.0004)*edge_*max(0.0,math.sin(v.co.x*260+math.sin(fw*60)*2.2)*math.sin(fw*95+v.co.x*40))
-                lift+=.0007*up*math.sin(v.co.x*610+fw*330)*math.sin(fw*540-v.co.x*200)
-        v.co+=v.normal*(.0006+lift*fadein)
+                swept = v.co.x + .40*fw + .0026*math.sin(fw*54)
+                lift += .0029*up*edge_*max(0,math.sin(swept*220+math.sin(fw*92)*.8))**2
+                lift += .0006*up*math.sin(v.co.x*610+fw*330)*math.sin(fw*540-v.co.x*200)
+        v.co+=v.normal*(.00006+lift*fadein)
         if long_ and v.co.z<ecz+.03:
             # Below the temples the bob hangs straight down from the head's
             # widest ring instead of following the jaw and neck in.
@@ -745,8 +761,20 @@ def make_hair(fid,style,pos,ecz,ecy):
                 d2=d.normalized()*want
                 v.co.x=d2.x;v.co.y=hc.y+d2.y
     bm.to_mesh(hair.data);bm.free();hair.data.update()
-    so=hair.modifiers.new('Edge','SOLIDIFY');so.thickness=.002 if style!='bob' else .006;so.offset=-1;so.use_rim_only=style!='bob';apply(hair,so)
+    simplify_surface(hair, .61)
+    so=hair.modifiers.new('Edge','SOLIDIFY');so.thickness=.0007 if style!='bob' else .0018;so.offset=-1;so.use_rim_only=True;apply(hair,so)
     hair.data.materials.append(hair_material(style,hair,ecz,ecy))
+    cards = groom_locks(hair, fid, style, margin, ecz, ecy, LOCK_MATERIAL)
+    # Per-corner density lets scalp shading transition gradually into the roots.
+    layer = hair.data.uv_layers.new(name='GroomDensity')
+    for loop in hair.data.loops:
+        p = hair.data.vertices[loop.vertex_index].co
+        edge = max(0.0, min(1.0, margin(p) / (.009 if short_ else .004)))
+        if style in ('buzz', 'crop', 'fade'):
+            fade = max(0.0, min(1.0, (p.z - top + .11) / (.065 if style == 'fade' else .060)))
+            edge *= .18 + .82 * fade if style != 'buzz' else .52
+        layer.data[loop.index].uv = (0.0, edge)
+    hair.data.uv_layers.active_index = 0
     extras=[]
     if style in ('ponytail','bun'):
         vs=[v.co for v in hair.data.vertices]
@@ -797,25 +825,25 @@ def make_hair(fid,style,pos,ecz,ecy):
                     for poly in o_.data.polygons:
                         for li in poly.loop_indices:
                             co=o_.data.vertices[o_.data.loops[li].vertex_index].co
-                            o_.data.uv_layers[k_].data[li].uv=(src.x+(co.x+.6*co.y)*.04,src.y+co.z*.04)
+                            if L.name == 'GroomDensity':
+                                o_.data.uv_layers[k_].data[li].uv = (0, 1)
+                            else:
+                                o_.data.uv_layers[k_].data[li].uv=(src.x+(co.x+.6*co.y)*.04,src.y+co.z*.04)
         for o_ in extras:
             vg=o_.vertex_groups.new(name='b_head');vg.add(list(range(len(o_.data.vertices))),1,'REPLACE')
         bpy.ops.object.select_all(action='DESELECT')
         for o_ in extras:o_.select_set(True)
         hair.select_set(True);bpy.context.view_layer.objects.active=hair;bpy.ops.object.join()
-    return hair
+    return hair, cards
 canon=None
 for fid,eth,tg,style in FACES:
     fb=face_base(eth,tg,fid)
     pos=[retarget(fb[j],weights[j]) for j in range(len(fb))]
+    sculpt_head(pos, fid)
     face,ids=part('Face_'+fid,face_faces,pos,weights)
-    face.data.materials.append(skinmat);face.data.materials.append(lipmat)
     # Lips: around the mouth, in front of the tongue.
     tongue=[pos[j] for i in GROUP_FACES['helper-tongue'] for j in bf[i]]
     mc=sum(tongue,Vector())/len(tongue)
-    for poly in face.data.polygons:
-        c=poly.center
-        if ((c.x/.025)**2+((c.z-mc.z)/.0095)**2)<1 and c.y>mc.y+.014:poly.material_index=1
     if canon is None:canon=(fb,pos,mc)
     # Face albedo, per face (1024, the face's own packed UVs): skin mottling;
     # lips from a smooth mask (the per-polygon lip material had a stair-step
@@ -825,28 +853,48 @@ for fid,eth,tg,style in FACES:
     pack_uvs(face)
     _ev=[pos[j] for i in GROUP_FACES['helper-l-eye']+GROUP_FACES['helper-r-eye'] for j in bf[i]]
     _ez=sum(v.z for v in _ev)/len(_ev);_ey=sum(v.y for v in _ev)/len(_ev);_ex=max(abs(v.x) for v in _ev)-.012
-    P_,N_,M_=raster_uv(face,1024)
+    P_,N_,M_=raster_uv(face,768)
     X,Y,Z=P_[M_,0],P_[M_,1],P_[M_,2]
-    mott=.955+.025*np.sin(X*900)*np.sin(Z*870+1)*np.sin(Y*910+2)+.015*np.sin(X*230+Z*190)
-    col=np.stack([mott,mott*.985+.01,mott*.975+.015],1)
-    lm=np.clip(1-((X/.0265)**2+((Z-mc.z+.001)/.0105)**2),0,1)
-    lm=np.clip(lm*2.6,0,1)**1.4*np.clip((Y-(mc.y+.006))/.006,0,1)
-    col=col*(1-lm[:,None])+col*np.array([.9,.74,.72])*lm[:,None]
+    nx,ny,nz = N_[M_].T
+    mott = (.93 + .009*np.sin(X*128+Z*154)*np.sin(Y*149-Z*86)
+            + .011*np.sin(X*431+Y*379)*np.sin(Z*373+1)
+            + .008*np.sin(X*1477+Z*1517)*np.sin(Y*1630+2))
+    col = np.stack([mott * 1.035, mott, mott * .982], 1)
+    tip = np.exp(-((X/.022)**2 + ((Z-(_ez-.034))/.019)**2)) * np.clip(ny, 0, 1)
+    ear = np.exp(-(((np.abs(X)-.075)/.024)**2+((Z-(_ez-.021))/.042)**2)) * np.clip(np.abs(nx)*2-.45,0,1)
+    warmth = np.clip(tip + .72*ear, 0, 1)
+    col *= 1 + warmth[:,None] * np.array([.042,-.052,-.082])
+    nasal = np.exp(-((np.abs(X)-.0134)/.0047)**2 - ((Z-(_ez-.042))/.0048)**2)
+    col *= (1 - .24*nasal*np.clip(ny+.2,0,1))[:,None]
+    ear_cavity = ear * np.clip(-ny, 0, 1) * np.exp(-((Z-(_ez-.013))/.018)**2)
+    col *= (1 - .16*ear_cavity)[:,None]
+    # Slightly cooler jaw; backlit cartilage and lips keep their own pigment.
+    jaw = np.exp(-(((Z-(mc.z-.018))/.033)**2+((Y-mc.y+.002)/.073)**2))
+    if BODY == 'a':
+        col *= 1 + jaw[:,None] * np.array([-.092,-.055,-.018])
+
+    lip_u = X/.026
+    seam_z = mc.z-.0007 + .0018*np.minimum(lip_u**2,1)
+    cupid = .0018*np.exp(-((np.abs(lip_u)-.27)/.20)**2)
+    lip_h = np.where(Z > seam_z, .0059+cupid, .0082)
+    lm = np.clip(1-lip_u**2-((Z-seam_z)/lip_h)**2,0,1)
+    lm = np.clip(lm*1.85,0,1)**1.2*np.clip((Y-(mc.y+.006))/.006,0,1)
+    col *= 1 + lm[:,None]*np.array([-.101,-.252,-.265])
     # the lips' parting: a thin soft dark line, not a dark mouth
-    pl=np.clip(1-np.abs(Z-(mc.z-.0007))/.0011,0,1)*np.clip(1-(X/.024)**2,0,1)*np.clip((Y-(mc.y+.006))/.004,0,1)
-    col*=(1-.38*pl)[:,None]
+    pl=np.clip(1-np.abs(Z-seam_z)/.0011,0,1)*np.clip(1-(X/.024)**2,0,1)*np.clip((Y-(mc.y+.006))/.004,0,1)
+    col*=(1-.32*pl)[:,None]
     # a soft highlight along the upper lip's top (volume, a Cupid's bow)
     hl_=np.clip(1-((X/.017)**2+((Z-(mc.z+.0055))/.0024)**2),0,1)*np.clip((Y-(mc.y+.008))/.004,0,1)
     col*=(1+.07*hl_)[:,None]
-    m_=np.maximum.reduce([Z-(_ez+.052),np.minimum(_ey-.085-Y,Z-(_ez-.07)),np.minimum.reduce([np.abs(X)-.055,_ey-.03-Y,Z-(_ez+.012)])])
+    m_=np.maximum.reduce([Z-(_ez+.045),np.minimum(_ey-.085-Y,Z-(_ez-.07)),np.minimum.reduce([np.abs(X)-.055,_ey-.03-Y,Z-(_ez+.012)])])
     k_=np.clip((m_+.005)/.009,0,1)
-    col*=(1-.45*k_)[:,None]
+    col*=(1-.24*k_)[:,None]
     # The fade: short stubble under the hair edge on the sides and back,
     # thinning out over ~2.5 cm (not on the forehead or face).
     sides_=np.clip(((_ez+.035)-Z)/.02,0,1)+np.clip(((_ey-.06)-Y)/.02,0,1)
     st_=np.clip(1+m_/.026,0,1)*(m_<0)*np.clip(sides_,0,1)*np.clip((Z-(_ez-.075))/.02,0,1)
     st_*=.85+.15*np.sin(X*1900)*np.sin(Z*2100+Y*700)   # (stubble grain)
-    col*=(1-.4*st_**1.3)[:,None]
+    col*=(1-.22*st_**1.4)[:,None]
     for side_ in ('l','r'):
         _e=[pos[j] for i in GROUP_FACES['helper-%s-eye'%side_] for j in bf[i]];_ec=sum(_e,Vector())/len(_e)
         _,bl,bw=brow_curve(_ec)
@@ -854,8 +902,8 @@ for fid,eth,tg,style in FACES:
         d=np.full(len(X),9.0);wn=np.zeros(len(X))
         for (px,pz),w in zip(pts,ws):
             dd=np.hypot(X-px,Z-pz);m=dd<d;d[m]=dd[m];wn[m]=w
-        bm_=np.clip(1-d/(wn*.62+.0008),0,1)**.7*(Y>_ec.y-.01)
-        col*=(1-.2*bm_)[:,None]   # (.42 read as painted brows under the hairs)
+        bm_=np.exp(-2.8*(d/(wn*.72+.0007))**2)*(Y>_ec.y-.01)
+        col*=(1-.46*bm_)[:,None]   # (.42 read as painted brows under the hairs)
         # upper-lid crease: a faint shadow arc above the eye
         cr_=np.clip(1-(((X-_ec.x)/.015)**2+((Z-(_ec.z+.0075))/.0028)**2),0,1)*(Y>_ec.y-.006)
         col*=(1-.12*cr_)[:,None]
@@ -864,36 +912,47 @@ for fid,eth,tg,style in FACES:
         col*=(1+np.array([.035,-.01,-.015])*ck[:,None])
         ue=np.clip(1-(((X-sx_*_ex)/.017)**2+((Z-(_ez-.012))/.006)**2),0,1)
         col*=(1-.07*ue)[:,None]
-    A_=np.ones((1024,1024,3),np.float32);A_[M_]=col
-    _fa=_save('face_%s_albedo'%fid,_dilate(A_,M_,16))
-    fmat=material('hero_skin_face_'+fid,(.5,.34,.25),.5,_fa)
-    face.data.materials[0]=fmat
-    for poly in face.data.polygons:poly.material_index=0
-    face.data.materials.pop(index=1)
+    A_=np.ones((768,768,3),np.float32);A_[M_]=col
+    _fa=_save('face_%s_albedo'%fid,_dilate(A_,M_,12))
+    def face_relief(P, N):
+        x,y,z = P.T
+        lip = np.exp(-(x/.028)**2-((z-mc.z)/.010)**2)*np.clip((y-mc.y-.004)/.007,0,1)
+        philtrum = np.exp(-((np.abs(x)-.004)/.0028)**2-((z-mc.z-.013)/.012)**2)
+        return .000095*np.sin(x*1371+z*54)*lip + .00038*philtrum*np.clip(N[:,1],0,1)
+    face_normal, _ = bake_detail(face,'face_'+fid,512,face_relief)
+    fmat=material('hero_skin_face_'+fid,(.5,.34,.25),.56,_fa,face_normal)
+    fmat.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = .62
+    subdiv(face, 1)
+    simplify_surface(face, .36)
+    face.data.materials.append(fmat)
     parts_=[face]
-    # Eyes: the helper spheres, subdivided, iris and pupil by angle from forward.
+    lashes, eye_centres, eye_radii = [], [], []
+    # Anatomical spheres with a continuous sclera, iris and pupil atlas.
     for side in ['l','r']:
         ef=GROUP_FACES['helper-%s-eye'%side]
         eye,eids=part('Eye_%s_%s'%(side,fid),ef,pos,weights)
         subdiv(eye,1)
-        for m_ in [sclmat,irismat,pupmat]:eye.data.materials.append(m_)
+        origin = sum((v.co for v in eye.data.vertices), Vector())/len(eye.data.vertices)
+        for v in eye.data.vertices:
+            d = (v.co-origin).normalized()
+            v.co.y += .0018 * max(d.y,0.0)**12
+        map_eye(eye)
+        eye.data.materials.append(EYE_MATERIAL)
         c=sum((v.co for v in eye.data.vertices),Vector())/len(eye.data.vertices)
-        for poly in eye.data.polygons:
-            d=(poly.center-c).normalized();k=d.y
-            poly.material_index=2 if k>.93 else (1 if k>.78 else 0)
+        eye_centres.append(c)
+        eye_radii.append(max((v.co-c).length for v in eye.data.vertices))
         parts_.append(eye)
-        # Upper lashes only: the lower lash helper rendered as a grey band under the eye.
-        _ez_=sum(pos[j].z for i in ef for j in bf[i])/max(1,sum(len(bf[i]) for i in ef))
-        lf=[g for g in (GROUP_FACES['helper-%s-eyelashes-1'%side],GROUP_FACES['helper-%s-eyelashes-2'%side])
-            if sum(pos[j].z for i in g for j in bf[i])/max(1,sum(len(bf[i]) for i in g))>_ez_][:1]
-        lf=lf[0] if lf else GROUP_FACES['helper-%s-eyelashes-1'%side]
-        lash,_=part('Lash_%s_%s'%(side,fid),lf,pos,weights);lash.data.materials.append(lashmat);parts_.append(lash)
+        # Eyelid helper landmarks drive closure; the eyelid itself supplies
+        # the visible edge. A separate opaque lash strip obscures the tearline.
+        lf = GROUP_FACES['helper-%s-eyelashes-1'%side] + GROUP_FACES['helper-%s-eyelashes-2'%side]
+        lashes.append([pos[j] for j in sorted({j for i in lf for j in bf[i]})])
     # Brows: tapered strand clumps laid on the brow ridge (the old flat strips
     # read as painted bars and met in the middle). Inner strands point up and
     # out, the body runs outward, the tail tapers down; a 2.5 cm gap between.
     tree=BVHTree.FromPolygons([v.co for v in face.data.vertices],[list(p.vertices) for p in face.data.polygons])
-    brng=np.random.default_rng(hash(fid)%1000)
-    brow_info={}
+    for side, centre, radius, tips in zip(('l','r'), eye_centres, eye_radii, lashes):
+        parts_.extend(eye_lid_rims(tree, centre, radius, tips, 'Lid_'+side+'_'+fid))
+    brng=np.random.default_rng(stable_seed(fid, 'brows'))
     for side,sx in [('l',-1),('r',1)]:
         ev=[pos[j] for i in GROUP_FACES['helper-%s-eye'%side] for j in bf[i]]
         ec=sum(ev,Vector())/len(ev)
@@ -902,30 +961,31 @@ for fid,eth,tg,style in FACES:
         def on_face(x,z,lift=.0005):
             hit=tree.ray_cast(Vector((x,ec.y+.2,z)),Vector((0,-1,0)))
             return (hit[0]+hit[1]*lift) if hit[0] is not None else Vector((x,ec.y+.012,z))
-        brow_info[sx]=(brow_line,width)
         vs=[];fs=[]
-        for k in range(150):
-            u=float(brng.random())**1.15
-            v=float(brng.random())-.5
+        for k in range(83):
+            u=min(.998, max(.003, (k+.35+brng.uniform(-.35,.35))/83))**1.12
+            v=float(brng.uniform(-.38,.38))
             bx,bz=brow_line(u);w=width(u)
             ang=math.radians(72-75*min(1.0,u/.45)) if u<.75 else math.radians(-3-18*(u-.75)/.25)
-            ln=.0045+.0028*min(1.0,u/.4)
+            ln=(.0057+.0023*min(1.0,u/.4))*(1-.31*u**3)
             d2=(sx*math.cos(ang),math.sin(ang))
             sx0,sz0=bx-d2[0]*ln*.45,bz+v*w-d2[1]*ln*.45
-            sw=.00105*(1-.35*u)
+            sw=brng.uniform(.00012,.00023)*(1-.36*u)
             b0=len(vs)
             for t_ in range(4):
                 tt=t_/3
                 px,pz=sx0+d2[0]*ln*tt,sz0+d2[1]*ln*tt
-                c=on_face(px,pz,.0004+.0003*math.sin(math.pi*tt))
+                c=on_face(px,pz,.00024+.00034*math.sin(math.pi*tt)+k*.0000012)
                 ww=sw*(1-.85*tt)
                 nx,nz=-d2[1],d2[0]
-                vs.append(on_face(px+nx*ww,pz+nz*ww,.0004+.0003*math.sin(math.pi*tt)))
-                vs.append(on_face(px-nx*ww,pz-nz*ww,.0004+.0003*math.sin(math.pi*tt)))
+                vs.append(on_face(px+nx*ww,pz+nz*ww,.00024+.00034*math.sin(math.pi*tt)+k*.0000012))
+                vs.append(on_face(px-nx*ww,pz-nz*ww,.00024+.00034*math.sin(math.pi*tt)+k*.0000012))
             for t_ in range(3):
                 a_=b0+2*t_
                 fs.append([a_,a_+2,a_+3,a_+1] if sx>0 else [a_,a_+1,a_+3,a_+2])
-        brow=mesh('Brow_%s_%s'%(side,fid),vs,[],fs,[]);brow.data.materials.append(browmat)
+        brow=mesh('Brow_%s_%s'%(side,fid),vs,[],fs,[])
+        face_out(brow, lambda _: Vector((0,1,0)))
+        brow.data.materials.append(browmat)
         for p_ in brow.data.polygons:p_.use_smooth=True
         vg=brow.vertex_groups.new(name='b_head');vg.add(list(range(len(vs))),1,'REPLACE');parts_.append(brow)
     # Hair: cut from the scalp itself above a hairline and lifted off it,
@@ -937,13 +997,14 @@ for fid,eth,tg,style in FACES:
     # (MakeHuman's hair helper is long draped cards, not a cap.)
     ev2=[pos[j] for i in GROUP_FACES['helper-l-eye']+GROUP_FACES['helper-r-eye'] for j in bf[i]]
     ecz=sum((v.z for v in ev2))/len(ev2);ecy=sum((v.y for v in ev2))/len(ev2)
-    hair_meshes=[make_hair(fid,style_,pos,ecz,ecy) for style_ in HAIR_STYLES]
+    hair_meshes, groom_meshes = zip(*(make_hair(fid, style_, pos, ecz, ecy) for style_ in HAIR_STYLES))
     # One object per face (skin, lips, eyes, lashes, brows); hair apart.
     bpy.ops.object.select_all(action='DESELECT')
     for o in parts_:o.select_set(True)
     bpy.context.view_layer.objects.active=face;bpy.ops.object.join()
+    blink_shape(face, lashes, (eye_centres, eye_radii), fmat)
     acc_meshes=make_accessories(fid,pos,face,ecz,ecy,dict(zip(HAIR_STYLES,hair_meshes)))
-    face_meshes[fid]=[face]+hair_meshes+acc_meshes
+    face_meshes[fid]=[face, *hair_meshes, *groom_meshes, *acc_meshes]
 
 # ------------------------------------------------------------------ masks
 # Fitted to the canonical (first) face, 9-12 mm off it so every face fits.
@@ -1058,32 +1119,38 @@ for sx in [-1,1]:
 exec(compile((ROOT/'tools/blender/empire_wardrobe.py').read_text(),'empire_wardrobe.py','exec'))
 # Bare forearms under the short sleeves of the tee and polo.
 for cut in ['Tee','Polo']:
-    src=next(o for o in skin_arms if o.name=='Skin_Arms_Short')
-    cp=src.copy();cp.data=src.data.copy();cp.name='Skin_Arms_'+cut;bpy.context.collection.objects.link(cp);skin_arms.append(cp)
+    # Skin extends inside the actual sleeve opening by 2.5cm. Trims and
+    # exposed skin use the same arm weights all the way to the hand seam.
+    def inside_sleeve(j):
+        p = RB[j]
+        arm = frames()[1]['l' if p.x < 0 else 'r']
+        t, _, radius = arm.polar(p)
+        return t > SHORT_T - .047 and radius < .105 and wsum(j, 'hand_l', 'hand_r') < .35
+    arm_faces = [i for i in body if all(inside_sleeve(j) for j in bf[i])]
+    arm_skin, _ = part('Skin_Arms_' + cut, arm_faces, RB, weights)
+    arm_skin.data.materials.append(armskin)
+    skin_arms.append(arm_skin)
+for cut in ('Jumper', 'Hoodie', 'Bomber', 'Blazer', 'Long'):
+    wrist_skin = next(o for o in skin_arms if o.name == 'Skin_Arms_Shirt')
+    copy = wrist_skin.copy()
+    copy.data = wrist_skin.data.copy()
+    copy.name = 'Skin_Arms_' + cut
+    bpy.context.collection.objects.link(copy)
+    skin_arms.append(copy)
 all_meshes=[top_long,top_tq,top_short,top_vest,collar]+skin_arms+[pants,shoes,gloves]+[o for ps in face_meshes.values() for o in ps]+masks+wardrobe
 for ob in [pants]:
     solid=ob.modifiers.new('Bound cloth edges','SOLIDIFY');solid.thickness=.0025;solid.offset=-1;solid.use_rim_only=True;apply(ob,solid)
 
-pocketmat=material('hero_cargo_pocket',(.034,.04,.046),.85)
-def pocket(side):
-    sx=-1 if side=='l' else 1
-    vs=[]
-    tree=BVHTree.FromPolygons([v.co for v in pants.data.vertices],[list(p.vertices) for p in pants.data.polygons])
-    for r in range(5):
-        z=.78-r*.038
-        for c in range(5):
-            y=-.055+c*.034
-            hit=tree.ray_cast(Vector((sx,y,z)),Vector((-sx,0,0)))
-            edge=hit[0].x if hit[0] is not None else sx*.19
-            x=edge+sx*(.004+.014*math.sin(math.pi*c/4)*math.sin(math.pi*r/4))
-            vs.append((x,y,z))
-    fs=[]
-    for r in range(4):
-        for c in range(4):
-            a=r*5+c;fs.append([a,a+1,a+6,a+5] if sx<0 else [a+5,a+6,a+1,a])
-    ob=mesh('Cargo_gusset_'+side,vs,[],fs,[]);vg=ob.vertex_groups.new(name='b_thigh_'+side);vg.add(list(range(25)),1,'REPLACE');subdiv(ob,1)
-    so=ob.modifiers.new('Pocket welt','SOLIDIFY');so.thickness=.003;apply(ob,so);ob.data.materials.append(pocketmat);all_meshes.append(ob)
-for s in ['l','r']:pocket(s)
+for side in ('l','r'):
+    pocket = cargo_pocket(pants,side)
+    if pocket is not None:
+        all_meshes.append(pocket)
+
+for ob in all_meshes:
+    if ob.name in ('Courier_Cargo','Courier_Chinos','Lower_jeans','Lower_joggers'):
+        bend_corrective(ob,'Knee')
+    elif ob.name in ('Top_Shirt','Top_Hoodie','Top_Bomber','Top_Jumper','Top_Blazer'):
+        bend_corrective(ob,'Elbow')
 
 # Rig: same rest joints and names as CharacterRig; gameplay animation remains
 # the source of truth. Four normalized influences per vertex, no bone heat.
@@ -1103,14 +1170,19 @@ for ob in all_meshes:
     bpy.ops.object.vertex_group_limit_total(limit=4)
     bpy.ops.object.vertex_group_normalize_all(lock_active=False)
     mod=ob.modifiers.new('Gameplay skin','ARMATURE');mod.object=rig;ob.parent=rig
-    # UV2.x is the cloth freedom mask, UV2.y reserved. Imported PBR keeps UV1.
-    uv2=ob.data.uv_layers.new(name='ClothFreedom')
+    # UV2.x is cloth freedom, UV2.y carries the outsole or groom density mask.
+    density = ob.data.uv_layers.get('GroomDensity')
+    uv2 = density or ob.data.uv_layers.new(name='ClothFreedom')
     for face in ob.data.polygons:
         for li in face.loop_indices:
             p=ob.data.vertices[ob.data.loops[li].vertex_index].co
             freedom=0
-            if (ob in tops or ob in loose_tops) and abs(p.x)<.24:freedom=max(0,min(.06,(1.0-p.z)*1.2))
+            if (ob in tops or ob in loose_tops or ob.name=='Topx_Bomber_Trims') and abs(p.x)<.24:freedom=max(0,min(.15,(1.12-p.z)*.85))
             sole=1-max(0,min(1,(p.z-.027)/.012)) if ob==shoes else 0
+            if density is not None:
+                sole = density.data[li].uv.y
+                if ob.name.startswith('Hair_ponytail') and p.z < 1.68 and p.y < -.025:
+                    freedom = min(.08, (1.68 - p.z) * .36)
             uv2.data[li].uv=(freedom,sole)
     # Some authored meshes have no UVs (signature/pockets); unwrap those.
     if len(ob.data.uv_layers)==1:
@@ -1125,11 +1197,11 @@ for ob in all_meshes:
 
 # Bake per-garment ambient occlusion into actual UV textures. The source normal
 # map is retained; the procedural microfabric is baked, never evaluated per pixel.
-scene=bpy.context.scene;scene.render.engine='CYCLES';scene.cycles.samples=12;scene.cycles.bake_type='AO'
+scene=bpy.context.scene;scene.render.engine='CYCLES';scene.cycles.samples=8;scene.cycles.bake_type='AO'
 scene.render.bake.margin=8
 BAKE=[top_long,pants,shoes,gloves,shirt]+[face_meshes[f][0] for f in face_meshes]+[m_ for m_ in masks if m_.name in ('Mask_courier','Mask_runner','Mask_balaclava','Mask_domino','Mask_respirator')]
 for ob in BAKE:
-    size=1024 if ob in (top_long,pants,shoes,gloves,shirt) else 512
+    size=512 if ob in (top_long,pants,shoes,gloves,shirt) else 384
     active(ob);mat=ob.data.materials[0];nodes=mat.node_tree.nodes
     im=bpy.data.images.new(ob.name+'_ao',size,size,alpha=False);im.colorspace_settings.name='Non-Color'
     target=nodes.new('ShaderNodeTexImage');target.image=im;nodes.active=target
@@ -1139,8 +1211,10 @@ for ob in BAKE:
     data=np.empty(size*size*4,dtype=np.float32);im.pixels.foreach_get(data);pixels=data.reshape(-1,4)
     # Packed ORM: occlusion red, roughness green, metallic blue.
     rough=float(nodes['Principled BSDF'].inputs['Roughness'].default_value)
-    rng=np.random.default_rng(42)
-    pixels[:,1]=np.clip(rough+rng.normal(0,.008,len(pixels)),0,1);pixels[:,2]=0;pixels[:,3]=1
+    occlusion = pixels[:,0].copy()
+    pixels[:,1]=np.clip(rough + (occlusion-.85)*.09,.12,1)
+    pixels[:,2]=0
+    pixels[:,3]=1
     im.pixels.foreach_set(data)
     im.filepath_raw=str(TEX/(mat.name+'_orm.png'));im.file_format='PNG';im.save()
     separate=nodes.new('ShaderNodeSeparateColor');mat.node_tree.links.new(target.outputs['Color'],separate.inputs[0])
@@ -1154,10 +1228,28 @@ for ob in all_meshes:ob.hide_render=False
 # Retain editable meshes, original garment UVs, weights and material nodes.
 for im in bpy.data.images:
     if im.source=='FILE':im.pack()
-bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'art/hero/courier.blend'),compress=True)
 bpy.ops.object.select_all(action='DESELECT');rig.select_set(True)
 for ob in all_meshes:ob.select_set(True)
 bpy.ops.export_scene.gltf(filepath=str(OUT/('character%s.glb'%SUF)),export_format='GLB',use_selection=True,export_apply=False,export_yup=True,export_materials='EXPORT',export_skins=True,export_animations=False)
+# Open the authoring file on a single complete outfit. Variant objects stay
+# in the file and retain their editable geometry, weights and material nodes.
+preview_fid, preview_hair = ('ade', 'crop') if BODY == 'a' else ('rio', 'curls')
+show = {'Face_' + preview_fid, 'Hair_%s_%s' % (preview_hair, preview_fid),
+        'Groom_%s_%s' % (preview_hair, preview_fid), 'Skin_Hands', 'Skin_Arms_Polo',
+        'Top_Polo', 'Topx_Polo_Trim', 'Courier_Cargo', 'Cargo_gusset_l',
+        'Cargo_gusset_r', 'Ankle_Liner', 'Courier_Trainers', 'Courier_Soles',
+        'Courier_TrainerTongues', 'Courier_TrainerLaces'}
+bpy.ops.object.select_all(action='DESELECT')
+for ob in all_meshes:
+    ob.hide_set(ob.name not in show)
+for screen in bpy.data.screens:
+    for area in screen.areas:
+        if area.type == 'VIEW_3D':
+            view = area.spaces.active.region_3d
+            view.view_location = (0, 0, .94)
+            view.view_distance = 3.3
+            view.view_rotation = Vector((1, 3, .35)).to_track_quat('Z', 'Y')
+bpy.ops.wm.save_as_mainfile(filepath=str(BLEND), compress=True)
 triangles=sum(sum(len(p.vertices)-2 for p in ob.data.polygons) for ob in all_meshes)
 (ROOT/('art/hero/build_report%s.json'%SUF)).write_text(json.dumps({'triangles':triangles,'meshes':{o.name:len(o.data.vertices) for o in all_meshes},'bones':len(names),'max_influences':4},indent=2))
 # Shared garment-kit textures the game loads directly (not via the GLB).

@@ -1,6 +1,6 @@
 """Headless Blender review renders of the exported hero (assets/models/character.glb).
 
-blender -b --factory-startup --python tools/blender/render_character_review.py -- <glb> <outdir> [outfits]
+blender -b --factory-startup --python tools/blender/render_character_review.py -- <glb> <outdir> [outfits] [views]
 
 Imports the shipping GLB (so what is reviewed is what the game loads), shows
 one outfit's variant meshes (the same selection rules as CharacterRig.
@@ -14,6 +14,7 @@ from mathutils import Vector
 argv = sys.argv[sys.argv.index('--') + 1:]
 GLB, OUT = argv[0], argv[1]
 WANT = argv[2].split(',') if len(argv) > 2 else ['orange_shirt', 'tee_cap']
+VIEWS_WANTED = argv[3].split(',') if len(argv) > 3 else None
 
 # outfit -> (face, hair style, top cut, extra accessory meshes, colours)
 OUTFITS = {
@@ -21,8 +22,11 @@ OUTFITS = {
     'tee_cap': dict(face='theo', hair='crop', top='tee', acc=['cap'], top_col=(0.25, 0.43, 0.70), pants=(0.79, 0.74, 0.61)),
     'polo_phones': dict(face='kai', hair='fade', top='polo', acc=['headphones'], top_col=(0.95, 0.95, 0.93), pants=(0.12, 0.18, 0.29)),
     'blazer': dict(face='malik', hair='crop', top='blazer', acc=['shades'], top_col=(0.1, 0.11, 0.13), pants=(0.1, 0.11, 0.13)),
+    'rio_tee': dict(face='rio', hair='curls', top='tee', acc=[], top_col=(0.79, 0.43, 0.57), pants=(0.12, 0.18, 0.29)),
+    'sam_blazer': dict(face='sam', hair='bob', top='blazer', acc=[], top_col=(.23, .25, .27), pants=(.15, .19, .29)),
 }
-SKIN = {'ade': (0.32, 0.2, 0.14), 'theo': (0.78, 0.6, 0.5), 'kai': (0.6, 0.43, 0.32), 'malik': (0.42, 0.27, 0.18), 'ren': (0.72, 0.55, 0.42)}
+SKIN = {'ade': (0.32, 0.2, 0.14), 'theo': (0.78, 0.6, 0.5), 'kai': (0.6, 0.43, 0.32), 'malik': (0.42, 0.27, 0.18), 'ren': (0.72, 0.55, 0.42),
+        'rio': (0.36, 0.22, 0.15), 'sam': (0.9, 0.74, 0.64)}
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=GLB)
@@ -113,8 +117,16 @@ def show(spec):
             vis = not any(m.name.startswith('Skin_Hands') for m in meshes)
         elif n.startswith('Face_'):
             vis = n == 'Face_' + f
-        elif n.startswith('Hair_'):
-            vis = n == 'Hair_%s_%s' % (hs, f)
+        elif n.startswith(('Hair_', 'Groom_')):
+            vis = n.endswith('_%s_%s' % (hs, f))
+            if n.startswith('Groom_') and any(a in ('cap', 'beanie') for a in spec['acc']):
+                vis = False
+        elif n == 'Courier_Chinos':
+            vis = top in ('shirt', 'blazer')
+        elif n == 'Courier_Cargo' or n.startswith('Cargo_gusset'):
+            vis = top not in ('shirt', 'blazer')
+        elif n == 'Courier_Waistband':
+            vis = top == 'shirt'
         elif n.startswith('Mask_'):
             vis = False
         elif n.startswith('Acc_'):
@@ -148,7 +160,7 @@ def tint(spec):
             elif nm == 'hero_glove':
                 sk = SKIN[spec['face']]
                 col = (sk[0] * .8, sk[1] * .7, sk[2] * .66)
-            elif nm in ('hero_cargo', 'hero_cargo_pocket', 'hero_waistband'):
+            elif nm in ('hero_chino', 'hero_cargo', 'hero_cargo_pocket', 'hero_waistband'):
                 col = spec['pants']
             if col is not None:
                 tex = [l for l in m.node_tree.links if l.to_socket == p.inputs['Base Color']]
@@ -180,11 +192,11 @@ for name in WANT:
     spec = OUTFITS[name]
     show(spec)
     tint(spec)
-    for v in VIEWS:
+    for v in VIEWS_WANTED or VIEWS:
         aim(v)
         sc.render.filepath = '%s/%s__%s.png' % (OUT, name, v)
         bpy.ops.render.render(write_still=True)
-    if name == WANT[0]:
+    if name == WANT[0] and VIEWS_WANTED is None:
         saved = {o.name: list(o.data.materials) for o in meshes}
         for o in meshes:
             for i in range(len(o.data.materials)):

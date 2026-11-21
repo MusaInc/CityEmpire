@@ -82,6 +82,7 @@ const OTHER_ITEMS := [
 	{"id": "top_jumper", "slot": "top", "name": "Jumper", "cut": "jumper", "price": 0},
 	{"id": "top_hoodie", "slot": "top", "name": "Hoodie", "cut": "hoodie", "price": 0},
 	{"id": "top_blazer", "slot": "top", "name": "Blazer & Tie", "cut": "blazer", "price": 0},
+	{"id": "top_bomber", "slot": "top", "name": "Bomber Jacket", "cut": "bomber", "price": 0},
 	# Trousers
 	{"id": "pants_navy", "slot": "pants", "name": "Graphite", "color": Color(0.24, 0.26, 0.28), "price": 0},
 	{"id": "pants_black", "slot": "pants", "name": "Black", "color": Color(0.05, 0.05, 0.06), "price": 150},

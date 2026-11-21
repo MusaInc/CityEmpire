@@ -3,22 +3,24 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cm65kgs08es46"
-path="res://.godot/imported/character_b_hero_skin_face_rio_orm.png-750c8c26dcfae0fe496511bc0bd87536.ctex"
+path.s3tc="res://.godot/imported/character_b_hero_skin_face_rio_orm.png-750c8c26dcfae0fe496511bc0bd87536.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_hero_skin_face_rio_orm.png-750c8c26dcfae0fe496511bc0bd87536.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "684d84de75bf7a95dbceae3e5d23446d"
+"md5": "9b6e49c7a64c3f4c094ebe2c3892dad7"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_hero_skin_face_rio_orm.png"
-dest_files=["res://.godot/imported/character_b_hero_skin_face_rio_orm.png-750c8c26dcfae0fe496511bc0bd87536.ctex"]
+dest_files=["res://.godot/imported/character_b_hero_skin_face_rio_orm.png-750c8c26dcfae0fe496511bc0bd87536.s3tc.ctex", "res://.godot/imported/character_b_hero_skin_face_rio_orm.png-750c8c26dcfae0fe496511bc0bd87536.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=512
 detect_3d/compress_to=1

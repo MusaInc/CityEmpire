@@ -3,22 +3,24 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cctbe2a3lhxfv"
-path="res://.godot/imported/character_b_face_rio_albedo.png-bdd1d870a2c586df8ce507aaf65e3d7e.ctex"
+path.s3tc="res://.godot/imported/character_b_face_rio_albedo.png-bdd1d870a2c586df8ce507aaf65e3d7e.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_face_rio_albedo.png-bdd1d870a2c586df8ce507aaf65e3d7e.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "199470f42ab8ff502a434f72ffe488cc"
+"md5": "72aa8ea2f57f1947c3b4e8decc3dc103"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_face_rio_albedo.png"
-dest_files=["res://.godot/imported/character_b_face_rio_albedo.png-bdd1d870a2c586df8ce507aaf65e3d7e.ctex"]
+dest_files=["res://.godot/imported/character_b_face_rio_albedo.png-bdd1d870a2c586df8ce507aaf65e3d7e.s3tc.ctex", "res://.godot/imported/character_b_face_rio_albedo.png-bdd1d870a2c586df8ce507aaf65e3d7e.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=512
 detect_3d/compress_to=1

@@ -54,7 +54,7 @@ def capture(mid, quick=False, blender=True):
                                       str(ROOT / 'assets/models/character.glb'), str(b), 'orange_shirt,tee_cap'],
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     lab = XVFB + ['godot', '--path', str(ROOT), '--rendering-method', 'mobile', '--resolution', '800x1000',
-                  '--fixed-fps', '30', '-s', 'res://tools/character_lab.gd', '--', str(g)]
+                  '--fixed-fps', '30', 'res://tools/character_lab.tscn', '--', str(g)]
     if quick:
         run(lab + ['orange_shirt', 'all'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         run(lab[:-1] + [str(g / 'outfits'), 'tee_cap,polo_phones,blazer', 'idle'],

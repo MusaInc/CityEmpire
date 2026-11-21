@@ -3,22 +3,24 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dtlwvwtftauuu"
-path="res://.godot/imported/character_b_hero_top_orm.png-41b000eb2378436d6e6b4f7bf968b5ac.ctex"
+path.s3tc="res://.godot/imported/character_b_hero_top_orm.png-41b000eb2378436d6e6b4f7bf968b5ac.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_hero_top_orm.png-41b000eb2378436d6e6b4f7bf968b5ac.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "59992da8b38a8f112edb21516cfec04c"
+"md5": "200a07e17f17301a1b9bc4fd41ee4c5c"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_hero_top_orm.png"
-dest_files=["res://.godot/imported/character_b_hero_top_orm.png-41b000eb2378436d6e6b4f7bf968b5ac.ctex"]
+dest_files=["res://.godot/imported/character_b_hero_top_orm.png-41b000eb2378436d6e6b4f7bf968b5ac.s3tc.ctex", "res://.godot/imported/character_b_hero_top_orm.png-41b000eb2378436d6e6b4f7bf968b5ac.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=512
 detect_3d/compress_to=1

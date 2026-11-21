@@ -3,22 +3,24 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://c23dhmtfm7fh1"
-path="res://.godot/imported/character_b_face_jules_albedo.png-b11b16e77ec315592d5e65e06309fc7c.ctex"
+path.s3tc="res://.godot/imported/character_b_face_jules_albedo.png-b11b16e77ec315592d5e65e06309fc7c.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_face_jules_albedo.png-b11b16e77ec315592d5e65e06309fc7c.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
-"md5": "fa2cdc80764c3ed7eeecbc6c51b51574"
+"md5": "bddf83b114148dcb8a4bfac374c96632"
 }
 
 [deps]
 
 source_file="res://assets/models/character_b_face_jules_albedo.png"
-dest_files=["res://.godot/imported/character_b_face_jules_albedo.png-b11b16e77ec315592d5e65e06309fc7c.ctex"]
+dest_files=["res://.godot/imported/character_b_face_jules_albedo.png-b11b16e77ec315592d5e65e06309fc7c.s3tc.ctex", "res://.godot/imported/character_b_face_jules_albedo.png-b11b16e77ec315592d5e65e06309fc7c.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=512
 detect_3d/compress_to=1
