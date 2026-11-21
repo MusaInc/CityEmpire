@@ -243,6 +243,30 @@ func _ready() -> void:
 			out.append_array(pursuit.police.filter(func(c): return is_instance_valid(c)))
 		return out
 	props.broke.connect(_on_prop_broke)
+	# Clouds in the world at the towers' height (weather-driven).
+	if Settings.quality > 0 and not args.has("no-clouds"):
+		var clouds := CloudLayer.new()
+		clouds.name = "Clouds"
+		clouds.slices = 3 if Settings.quality >= 2 else 2
+		add_child(clouds)
+		clouds.view_fn = func() -> Vector3:
+			var c := get_viewport().get_camera_3d()
+			return c.global_position if c else player.global_position
+		var skym: ShaderMaterial = atmosphere.sky_mat if "sky_mat" in atmosphere else null
+		clouds.set_process(true)
+		var sync := func():
+			if skym:
+				clouds.cover = float(skym.get_shader_parameter("cloud_cover"))
+				clouds.dark = float(skym.get_shader_parameter("cloud_dark"))
+		get_tree().process_frame.connect(sync)
+	# City reflections in glass, paint and wet streets (off on Low).
+	if Settings.quality > 0 and not args.has("no-refl"):
+		var refl := CityReflections.new()
+		refl.name = "CityReflections"
+		add_child(refl)
+		refl.view_fn = func() -> Vector3:
+			var c := get_viewport().get_camera_3d()
+			return c.global_position if c else player.global_position
 
 	if args.has("save"):
 		save_path = String(args["save"])

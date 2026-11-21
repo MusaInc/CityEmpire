@@ -77,9 +77,9 @@ func set_style(look: String) -> void:
 	mat.set_shader_parameter("style", id)
 	# The screen copy only holds the opaque pass. Crisp draws FIRST among the
 	# transparent surfaces so water, glass, rain and particles land on top of
-	# it (drawn last, it painted the sea out). Cartoon styles keep the old
+	# it (drawn last, it painted the sea out; Cinematic too). Cartoon styles keep the old
 	# order (after transparents, before the web at 127).
-	mat.render_priority = -128 if look == "crisp" else 100
+	mat.render_priority = -128 if look in ["crisp", "cinematic"] else 100
 	var t: Dictionary = TUNING.get(look, {})
 	for k in t:
 		mat.set_shader_parameter(k, t[k])

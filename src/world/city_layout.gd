@@ -1888,7 +1888,11 @@ func _roof_furniture(b: Dictionary, tiers: Array, style: int, h: float, col: Col
 		var wx := rx + brng.randf_range(-tw, tw) * 0.25
 		var wz := rz + brng.randf_range(-td, td) * 0.25
 		if free.call(wx, wz):
-			props.append(["water_tower", Transform3D(Basis(Vector3.UP, brng.randf_range(0, TAU)), Vector3(wx, ry, wz))])
+			var wrot := brng.randf_range(0, TAU)   # (always drawn: later features keep their random stream)
+			# Far fewer water towers (2026-11-21: they topped every old roof):
+			# about one in five of those that used to get one, by position.
+			if hash(Vector2i(roundi(wx * 3.0), roundi(wz * 3.0))) % 100 < 20:
+				props.append(["water_tower", Transform3D(Basis(Vector3.UP, wrot), Vector3(wx, ry, wz))])
 	if h > 235.0 and tw > 16.0 and td > 16.0:
 		# Supertall crown: a slim spire, the highest anchor in the city.
 		var sp := brng.randf_range(2.5, 3.5)

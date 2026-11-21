@@ -199,9 +199,9 @@ vec3 cas(vec3 c, vec3 n, vec3 s, vec3 e, vec3 w, float amount) {
 	return clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0);
 }
 
-vec3 cinematic(sampler2D stex, sampler2D smip, vec2 uv, vec2 px, vec2 fragcoord) {
+vec3 cinematic(sampler2D stex, sampler2D smip, vec2 uv, vec2 px, vec2 fragcoord, vec3 centre) {
 	vec3 g = vec3(1.0 / 2.2);
-	vec3 c = pow(max(texture(stex, uv).rgb, 0.0), g);
+	vec3 c = pow(max(centre, 0.0), g);
 	vec3 n = pow(max(texture(stex, uv + vec2(0.0, -px.y)).rgb, 0.0), g);
 	vec3 s = pow(max(texture(stex, uv + vec2(0.0, px.y)).rgb, 0.0), g);
 	vec3 e = pow(max(texture(stex, uv + vec2(px.x, 0.0)).rgb, 0.0), g);
@@ -224,8 +224,9 @@ void fragment() {
 	vec2 uv = SCREEN_UV;
 	vec2 res = VIEWPORT_SIZE;
 	vec2 px = 1.0 / res;
+	vec3 col = texture(screen_tex, uv).rgb;
 	if (style == 5) {
-		vec3 c5 = cinematic(screen_tex, screen_mip, uv, px, FRAGCOORD.xy);
+		vec3 c5 = cinematic(screen_tex, screen_mip, uv, px, FRAGCOORD.xy, col);
 		if (lens > 0.0) {
 			float th5 = mix(lens_threshold * 2.2, lens_threshold, night);
 			c5 += pow(max(lens_light(screen_mip, uv, px, th5, streak_tint, night), 0.0), vec3(1.0 / 2.2)) * lens * mix(0.35, 0.8, night);
@@ -241,7 +242,6 @@ void fragment() {
 		c5 += (h.x + h.y - 1.0) / 255.0 * dither;
 		ALBEDO = pow(max(c5, 0.0), vec3(2.2));
 	} else {
-	vec3 col = texture(screen_tex, uv).rgb;
 	if (style == 3) {
 		col = kuwahara(screen_tex, uv, px * max(res.y / 720.0, 1.0));
 	} else if (style == 4 && smooth_amount > 0.0) {
