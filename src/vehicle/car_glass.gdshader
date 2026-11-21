@@ -8,6 +8,7 @@ global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
 global uniform float night;
+#include "res://src/world/shaders/fake_reflect.gdshaderinc"
 
 void fragment() {
 	ALBEDO = tint;
@@ -17,10 +18,8 @@ void fragment() {
 	vec3 n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 v = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 	vec3 r = reflect(-v, n);
-	vec3 sky = mix(sky_horizon, sky_top, smoothstep(0.02, 0.6, r.y));
-	vec3 ground = vec3(0.03, 0.03, 0.035);
-	vec3 env = mix(ground, sky, smoothstep(-0.02, 0.04, r.y));
+	vec3 env = city_reflection(r, (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz, sky_top, sky_horizon, sun_dir, night);
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
 	float glint = pow(max(dot(r, normalize(sun_dir)), 0.0), 300.0) * 8.0;
-	EMISSION = (env * mix(0.12, 0.85, fres) + vec3(glint)) * (1.0 - night * 0.8);
+	EMISSION = (env * mix(0.18, 0.9, fres) + vec3(glint)) * (1.0 - night * 0.5);
 }

@@ -1453,13 +1453,22 @@ func break_item(p: Vector3) -> void:
 		sh.set_deferred("disabled", true)
 
 
+## Puts a driven-off parked car back (a near miss that never touched it).
+func unbreak_item(p: Vector3) -> void:
+	var k := item_key(p)
+	broken.erase(k)
+	var sh: CollisionShape3D = _shape_by_key.get(k)
+	if sh and is_instance_valid(sh):
+		sh.set_deferred("disabled", false)
+
+
 ## Rebuilds a loaded chunk's props and furniture (after something broke).
 func refresh_props(key: Vector2i) -> void:
 	var root: Node3D = _loaded.get(key)
 	if root == null:
 		return
 	for ch in root.get_children():
-		if ch.name.begins_with("Props_") or ch.name == "Furniture" or ch.name == "LampHalos":
+		if ch.name.begins_with("Props_") or ch.name == "Furniture" or ch.name == "LampHalos" or ch.name.begins_with("Signal"):
 			root.remove_child(ch)
 			ch.queue_free()
 	_add_props(root, key, null)   # (the ground pools stay: only the halos are rebuilt)
@@ -2173,8 +2182,58 @@ func _add_props(root: Node3D, key: Vector2i, pools: Variant = null) -> void:
 		if kind in ["ac_unit", "streetlight", "traffic_light"]:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mmi)
+		if kind == "traffic_light":
+			_add_signal_glow(root, list)
 		if kind == "streetlight" and not _glow_meshes.is_empty():
 			_add_lamp_glow(root, list, pools)
+
+
+## Traffic signals that work (2026-11-21): a lens disc per aspect over the
+## modelled lenses (one lit: red, amber or green) and a halo round the lit
+## one, cycling (signal_glow.gdshader). A junction's lights share a phase;
+## the cross street runs half a cycle off. Lenses in the model's frame:
+## heads at x 2.6 / 4.9 m, red / amber / green at 5.62 / 5.30 / 4.98 m,
+## facing -Z (ws_street.py traffic_light).
+const SIGNAL_HEADS := [2.6, 4.9]
+const SIGNAL_Y := [5.62, 5.30, 4.98]
+static var _signal_mats: Array = []
+
+
+func _add_signal_glow(root: Node3D, lights: Array) -> void:
+	if _signal_mats.is_empty():
+		for f in ["signal_glow", "signal_halo"]:
+			var sm := ShaderMaterial.new()
+			sm.shader = load("res://src/world/shaders/%s.gdshader" % f)
+			_signal_mats.append(sm)
+	var n := lights.size() * SIGNAL_HEADS.size() * 3
+	for which in 2:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_custom_data = true
+		var q := QuadMesh.new()
+		q.size = Vector2(0.2, 0.2) if which == 0 else Vector2(1.0, 1.0)
+		mm.mesh = q
+		mm.instance_count = n
+		var i := 0
+		for xf: Transform3D in lights:
+			var o := xf.origin
+			var junction := Vector2i(roundi(o.x / 30.0), roundi(o.z / 30.0))
+			var face := xf.basis.z
+			var axis := 0.5 if absf(face.x) > absf(face.z) else 0.0
+			var off := fmod(float(absi(hash(junction)) % 1000) / 1000.0 + axis, 1.0)
+			for hx in SIGNAL_HEADS:
+				for a in 3:
+					var local := Transform3D(Basis(), Vector3(hx, SIGNAL_Y[a], -0.135 if which == 0 else -0.2))
+					mm.set_instance_transform(i, xf * local)
+					mm.set_instance_custom_data(i, Color(float(a) / 3.0, off, 0.0, 0.0))
+					i += 1
+		var mi := MultiMeshInstance3D.new()
+		mi.name = "Signals" if which == 0 else "SignalHalos"
+		mi.multimesh = mm
+		mi.material_override = _signal_mats[which]
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.visibility_range_end = 260.0 if which == 0 else 420.0
+		root.add_child(mi)
 
 
 ## Night light for a chunk's streetlights: the draped ground pools (one mesh,

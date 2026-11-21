@@ -12,6 +12,10 @@ global uniform sampler2D ground_height : filter_linear, repeat_disable;
 global uniform vec4 ground_rect;
 global uniform float night;
 global uniform float wetness;
+global uniform vec3 sky_top;
+global uniform vec3 sky_horizon;
+global uniform vec3 sun_dir;
+#include "res://src/world/shaders/fake_reflect.gdshaderinc"
 uniform vec3 tint : source_color = vec3(1.0);
 uniform bool use_instance_color = false;
 uniform float emission = 0.0;
@@ -58,4 +62,15 @@ void fragment() {
 		ALBEDO = max(c, vec3(0.55));
 	}
 	EMISSION = tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
+	if (finish > 0) {
+		// The city in paint, glass and chrome (fake_reflect.gdshaderinc).
+		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+		vec3 vw = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
+		vec3 rw = reflect(-vw, nw);
+		vec3 env = city_reflection(rw, (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz, sky_top, sky_horizon, sun_dir, night);
+		float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), finish == 2 ? 3.0 : 4.0);
+		float k = finish == 1 ? mix(0.07, 0.55, fres) : (finish == 2 ? mix(0.18, 0.85, fres) : 0.65);
+		float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 200.0 : 300.0) * (finish == 1 ? 2.5 : 5.0);
+		EMISSION += (env * k + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night);
+	}
 }

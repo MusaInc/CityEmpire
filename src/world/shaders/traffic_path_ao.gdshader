@@ -78,11 +78,11 @@ void vertex() {
 	NORMAL = normalize(mat3(VIEW_MATRIX) * (B * NORMAL));
 }
 
-uniform float strength = 0.62;
+uniform float strength = 0.3;   // (0.62 read as a dark pool under every car on device)
 
 void fragment() {
 	vec2 q = (UV - 0.5) * 2.0;
-	float a = (1.0 - smoothstep(0.35, 1.0, length(q))) * strength * mix(1.0, 0.7, night);
+	float a = (1.0 - smoothstep(0.15, 1.0, length(q))) * strength * mix(1.0, 0.7, night);
 	ALBEDO = vec3(0.0);
 	ALPHA = a;
 }

@@ -13,6 +13,7 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
+#include "res://src/world/shaders/fake_reflect.gdshaderinc"
 global uniform float night;
 global uniform float wetness;
 uniform sampler2D asph_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
@@ -1014,6 +1015,17 @@ void fragment() {
 			vec3 nw = pbr_wall_normal(d, normalize(v_world_normal), 0.7 * kw);
 			NORMAL = normalize(mix(NORMAL, (VIEW_MATRIX * vec4(nw, 0.0)).xyz, kw));
 		}
+	}
+	// Fake city reflection in the glass (smooth surfaces): the skyline, sky
+	// and street across the road, strongest at grazing angles – the probe's
+	// look at none of its cost (2026-11-21).
+	float glassy = 1.0 - smoothstep(0.12, 0.45, rough);
+	if (glassy > 0.0 && abs(v_world_normal.y) < 0.5) {
+		vec3 vw = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
+		vec3 rw = reflect(-vw, normalize(v_world_normal));
+		vec3 env = city_reflection(rw, v_wpos, sky_top, sky_horizon, sun_dir, night);
+		float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
+		emit += env * mix(0.16, 0.7, fres) * glassy * (1.0 - 0.6 * night);
 	}
 	ALBEDO = albedo * (1.0 - 0.16 * wetness);
 	ROUGHNESS = mix(rough, min(rough, 0.32), wetness * 0.75);

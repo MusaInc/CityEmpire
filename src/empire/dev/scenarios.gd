@@ -1247,6 +1247,8 @@ func _run() -> void:
 			await call("scenario_" + k.to_lower())
 	if _which.split(",").has("K"):
 		await scenario_k()
+	if _which.split(",").has("KS"):
+		await scenario_ks()
 	if _which.split(",").has("UI"):
 		await scenario_ui()
 	if _which.split(",").has("U"):
@@ -2146,4 +2148,75 @@ func scenario_k() -> void:
 		var w2: Array = game.wrecks.wrecks.slice(n1)
 		check(not w2.is_empty() and (w2[0]["car"] as Car).speed > 1.0 or not w2.is_empty() and (w2[0]["car"] as Car).global_position.distance_to(start) > 16.0,
 			"…and becomes a real car that the hit pushes along")
+	game.drive_input.enabled = true
+
+
+## KS: a minute of real driving through traffic (AIDriver on your car, no
+## avoidance: it hits things): every swap is either touched or put back, no
+## wreck is flung, no traffic slot leaks, no CPU car is left inside another.
+func scenario_ks() -> void:
+	print("--- KS: a minute in traffic")
+	await until(func(): return game.gps.ready_net(), 30.0)
+	var vid := String(game.empire.vehicles[0]["id"])
+	game.enter_vehicle(vid)
+	game.drive_input.enabled = false
+	var car: Car = game.cars[vid]
+	var net: RoadNet = game.gps.net
+	# A busy avenue on the Commercial Island.
+	var start := Vector3(560.0, 0.0, -120.0)
+	var n := net.nearest(start, Vector3.ZERO, 200.0, -1, true)
+	check(not n.is_empty(), "found a lane to start on")
+	if n.is_empty():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var path := net.wander(int(n["lane"]), float(n["s"]), 900.0, rng, 0.3)
+	car.place(Transform3D(Basis.looking_at((path[1] - path[0]).normalized(), Vector3.UP), path[0] + Vector3.UP * 0.4), Vector3.ZERO)
+	var d := AIDriver.new(car)
+	d.avoid = false
+	d.skill = 1.0
+	d.set_path(path)
+	var space := game.get_world_3d().direct_space_state
+	var swaps := 0
+	var hit := 0
+	var flung := 0
+	var max_w := 0
+	var t := 0.0
+	var seen := {}
+	while t < 60.0:
+		car.handbrake = false
+		d.update(get_physics_process_delta_time(), space)
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		if d.remaining() < 20:
+			var nn := net.nearest(car.global_position, -car.global_basis.z, 30.0)
+			if not nn.is_empty():
+				d.set_path(net.wander(int(nn["lane"]), float(nn["s"]), 900.0, rng, 0.3))
+		for w in game.wrecks.wrecks:
+			var c: Car = w["car"]
+			if not is_instance_valid(c):
+				continue
+			if not seen.has(c):
+				seen[c] = true
+				swaps += 1
+			if w["hit"] and not seen.has(str(c.get_instance_id()) + "h"):
+				seen[str(c.get_instance_id()) + "h"] = true
+				hit += 1
+			if c.linear_velocity.length() > 45.0:
+				flung += 1
+		max_w = maxi(max_w, game.wrecks.wrecks.size())
+	var tr: Traffic = game.world.traffic
+	var live := {}
+	for w in game.wrecks.wrecks:
+		if int(w["traffic"]) >= 0:
+			live[int(w["traffic"])] = true
+	var leaked := 0
+	for id in tr.knocked:
+		if not live.has(id):
+			leaked += 1
+	print("  drove %.0f m: swaps %d, touched %d, wrecks now %d (max %d), knocked %d" % [car.global_position.distance_to(path[0]), swaps, hit, game.wrecks.wrecks.size(), max_w, tr.knocked.size()])
+	check(swaps == 0 or hit > 0, "swapped cars are ones you actually hit (%d/%d)" % [hit, swaps])
+	check(game.wrecks.wrecks.all(func(w): return w["hit"] or float(w["t"]) <= 1.3), "no untouched swap left standing in a lane")
+	check(flung == 0, "no wreck flung by a bad spawn (%d frames)" % flung)
+	check(leaked == 0, "no traffic slot left knocked without its wreck (%d)" % leaked)
 	game.drive_input.enabled = true

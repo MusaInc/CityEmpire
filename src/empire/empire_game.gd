@@ -260,7 +260,9 @@ func _ready() -> void:
 				clouds.dark = float(skym.get_shader_parameter("cloud_dark"))
 		get_tree().process_frame.connect(sync)
 	# City reflections in glass, paint and wet streets (off on Low).
-	if Settings.quality > 0 and not args.has("no-refl"):
+	# (The probe is replaced by fake reflections in the shaders: kept for
+	# comparisons with --probe; it re-rendered the city 6 times per capture.)
+	if args.has("probe"):
 		var refl := CityReflections.new()
 		refl.name = "CityReflections"
 		add_child(refl)
@@ -552,6 +554,26 @@ func _after_start() -> void:
 			var from := cc.global_transform * (vw[0] as Vector3)
 			var to := cc.global_transform * Vector3(0, float(vw[1]), 0)
 			return [Transform3D(Basis.looking_at(to - from, Vector3.UP), from), 50.0]
+	if args.has("signal-cam"):
+		# Captures: the nearest traffic light's heads, from 14 m down the street.
+		var best: Transform3D
+		var bd := INF
+		var here := player.global_position
+		for w2 in [world, world.mainland]:
+			if w2 == null:
+				continue
+			for key in (w2 as CityWorld)._all_keys:
+				for it in (w2 as CityWorld).chunk_props(key):
+					if it[0] == "traffic_light":
+						var dd := (it[1] as Transform3D).origin.distance_to(here)
+						if dd < bd:
+							bd = dd
+							best = it[1]
+		if bd < INF:
+			var head := best * Vector3(3.7, 5.2, 0.0)
+			var from := best * Vector3(3.7, 4.0, -14.0)
+			camera.cine = func(_dt: float) -> Array:
+				return [Transform3D(Basis.looking_at(head - from, Vector3.UP), from), 40.0]
 	if args.has("cam"):
 		# Captures: a fixed camera in world metres, "x,y,z,lx,ly,lz" (unlike
 		# --view, independent of where the hero lands; y is above the ground).

@@ -17,7 +17,8 @@ const CLEAR_AFTER := 45.0     # s, at most
 const CLEAR_AWAY := 110.0     # m: a settled wreck clears once you're this far
 
 var game: EmpireGame
-var wrecks: Array = []        # {car, t, traffic: id or -1, hit: bool}
+var wrecks: Array = []        # {car, t, traffic: id or -1, hit, spawn_y, parked: [CityWorld, key, xf, kind] or []}
+const UNTOUCHED_BACK := 1.2   # s: a swapped car nothing touched goes back to traffic / the kerb
 var _parked := {}             # [CityWorld, chunk key] -> [[Transform3D, kind]]
 var _rng := RandomNumberGenerator.new()
 
@@ -49,8 +50,22 @@ func _physics_process(dt: float) -> void:
 			_free(w, tr)
 			continue
 		w["t"] += dt
+		if not w["hit"]:
+			for b in c.get_colliding_bodies():
+				if b is Car or b is RigidBody3D:
+					w["hit"] = true
+		# A near miss (swapped, never touched): straight back into traffic –
+		# a car that just stopped in its lane looked broken.
+		if not w["hit"] and w["t"] > UNTOUCHED_BACK:
+			_restore(w, tr)
+			continue
+		# Spawn sanity: thrown by an overlap, or fallen through the world.
+		if (w["t"] < 2.0 and c.linear_velocity.length() > 45.0) or c.global_position.y < float(w["spawn_y"]) - 8.0:
+			_restore(w, tr)
+			continue
 		# Nobody's driving it: it rolls on, then brakes to a stop.
 		c.throttle = 0.0
+		c.handbrake = false
 		c.brake = 0.0 if w["t"] < 1.2 else 0.7
 		var far := c.global_position.distance_to(here) > CLEAR_AWAY
 		if w["t"] > CLEAR_AFTER and far or w["t"] > CLEAR_AFTER * 3.0 or (far and w["t"] > 8.0 and c.speed < 0.5):
@@ -62,6 +77,23 @@ func _physics_process(dt: float) -> void:
 	wrecks = keep
 	if tr:
 		tr.obstacles = obs
+
+
+## Undo a swap: the physical car goes, the traffic slot / parked car comes back.
+func _restore(w: Dictionary, tr: Traffic) -> void:
+	var c: Car = w["car"]
+	if is_instance_valid(c):
+		c.queue_free()
+	_free(w, tr)
+	var pk: Array = w.get("parked", [])
+	if not pk.is_empty():
+		var cw: CityWorld = pk[0]
+		if is_instance_valid(cw):
+			cw.unbreak_item((pk[2] as Transform3D).origin)
+			cw.refresh_parked(pk[1])
+			var ck := [cw, pk[1]]
+			if _parked.has(ck):
+				(_parked[ck] as Array).append([pk[2], pk[3]])
 
 
 func _free(w: Dictionary, tr: Traffic) -> void:
@@ -113,7 +145,7 @@ func _look_ahead(me: Car) -> void:
 						w.break_item(xf.origin)
 						w.refresh_parked(key)
 						_spawn(int(pc[1]), xf, Vector3.ZERO, CityWorld.kind_colour(int(pc[1]),
-							CityWorld.CAR_COLORS[_rng.randi() % CityWorld.CAR_COLORS.size()]), -1)
+							CityWorld.CAR_COLORS[_rng.randi() % CityWorld.CAR_COLORS.size()]), -1, [w, key, xf, int(pc[1])])
 
 
 ## Half extents (x, z) of a traffic/parked car kind from its drawn model.
@@ -136,7 +168,7 @@ static func _hits(me: Car, at: Vector3, mh: Vector2, xf: Transform3D, oh: Vector
 	return true
 
 
-func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int) -> void:
+func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, parked := []) -> void:
 	while wrecks.size() >= MAX:
 		var old: Dictionary = wrecks.pop_front()
 		if is_instance_valid(old["car"]):
@@ -158,4 +190,4 @@ func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int) 
 	var vis := CarVisual.new()
 	c.add_child(vis)
 	vis.setup(c)
-	wrecks.append({"car": c, "t": 0.0, "traffic": traffic_id})
+	wrecks.append({"car": c, "t": 0.0, "traffic": traffic_id, "hit": false, "spawn_y": xf.origin.y, "parked": parked})

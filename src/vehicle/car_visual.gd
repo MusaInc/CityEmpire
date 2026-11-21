@@ -181,11 +181,11 @@ static func shared_mat(name: String) -> Material:
 const CONTACT_SHADER := """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
-uniform float strength = 0.62;
+uniform float strength = 0.3;
 void fragment() {
 	float d = length((UV - 0.5) * 2.0);
 	ALBEDO = vec3(0.0);
-	ALPHA = (1.0 - smoothstep(0.35, 1.0, d)) * strength;
+	ALPHA = (1.0 - smoothstep(0.15, 1.0, d)) * strength;
 }
 """
 static var _contact_shader: Shader
@@ -466,7 +466,7 @@ func _process(dt: float) -> void:
 		return
 	if _contact:
 		var sm := _contact.material_override as ShaderMaterial
-		sm.set_shader_parameter("strength", 0.62 * clampf(float(car.wheels_on_ground) / 4.0, 0.0, 1.0))
+		sm.set_shader_parameter("strength", 0.3 * clampf(float(car.wheels_on_ground) / 4.0, 0.0, 1.0))
 	_t += dt
 	_dent_cooldown -= dt
 	var spec := car.spec

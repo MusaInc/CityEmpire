@@ -15,6 +15,7 @@ global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
 global uniform float night;
+#include "res://src/world/shaders/fake_reflect.gdshaderinc"
 
 uniform float flake = 1.0;       // metallic flake sparkle (0 = solid colour)
 
@@ -51,10 +52,8 @@ void fragment() {
 	vec3 n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 v = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 	vec3 r = reflect(-v, n);
-	// Sky above the horizon, a soft dark street/building band below.
-	vec3 sky = mix(sky_horizon, sky_top, smoothstep(0.02, 0.55, r.y));
-	vec3 ground = mix(vec3(0.05, 0.05, 0.055), sky_horizon * 0.22, smoothstep(-0.6, -0.02, r.y));
-	vec3 env = mix(ground, sky, smoothstep(-0.015, 0.025, r.y));
+	// The city in the coat: sky, skyline, street (fake_reflect.gdshaderinc).
+	vec3 env = city_reflection(r, (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz, sky_top, sky_horizon, sun_dir, night);
 	// Sun glint on the coat.
 	float sd = max(dot(r, normalize(sun_dir)), 0.0);
 	float glint = pow(sd, 220.0) * 3.2 + pow(sd, 24.0) * 0.12;   // crisp coat glint + soft base-coat sheen
@@ -66,7 +65,7 @@ void fragment() {
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
 	// (2026-11-20: 0.75 at grazing + a 6x glint washed bodies out milky
 	// grey under overcast skies and bloomed in the sun.)
-	float k = mix(0.05, 0.5, fres) * gloss * (1.0 - dirt * 0.85);
+	float k = mix(0.08, 0.62, fres) * gloss * (1.0 - dirt * 0.85);
 	vec3 em = env * k + vec3(glint) * gloss * (1.0 - dirt);
-	EMISSION = min(em, vec3(2.4)) * (1.0 - night * 0.85);
+	EMISSION = min(em, vec3(2.4)) * (1.0 - night * 0.6);
 }
