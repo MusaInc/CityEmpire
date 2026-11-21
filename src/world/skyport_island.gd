@@ -56,6 +56,11 @@ const BRIDGE_W := 22.0
 ## 1.8 km (was 1 km: too short for the jets that use it; the island grew a
 ## runway peninsula to the south for it – see coast_points).
 const RUNWAY := {"from": Vector3(1430.0, LAND_Y, 470.0), "to": Vector3(3230.0, LAND_Y, 470.0), "w": 45.0}
+const HANGARS := [
+	[1640, 192, 1712, 288, 20.0, Color(0.8, 0.81, 0.82), 0.21, true],
+	[1722, 184, 1808, 292, 25.0, Color(0.62, 0.68, 0.74), 0.33, false],
+	[1818, 204, 1870, 282, 15.0, Color(0.84, 0.8, 0.7), 0.47, true],
+]
 const COL_PAVE := Color(0.56, 0.56, 0.55)
 const COL_GRASS := Color(0.33, 0.47, 0.26)
 const COL_ROAD := Color(0.3, 0.3, 0.31)
@@ -701,6 +706,8 @@ static func plan(layout: CityLayout) -> Dictionary:
 	areas.append([5, _rect(2140, -300, 2450, -196), COL_APRON])            # container yard
 	for f in [[1630, 8, 1725, 96], [1745, 8, 1875, 96], [2350, -80, 2448, -50]]:
 		areas.append([0, _rect(f[0], f[1], f[2], f[3]), Color(0.62, 0.6, 0.57), "bays"])  # dealer forecourts (display bays)
+	areas.append([0, _rect(1568, 119.5, 1644, 126), Color(0.64, 0.61, 0.56)])
+	areas.append([0, _rect(1396, -196, 1445, -176), Color(0.64, 0.61, 0.56)])
 	P["areas"] = areas
 	# Airport strips: [kind, from, to, half width].
 	var strips: Array = [
@@ -749,7 +756,7 @@ static func plan(layout: CityLayout) -> Dictionary:
 		"clothes_everyday": {"name": "Threadline", "door": Vector3(1685, LAND_Y, -52), "face": Vector3(0, 0, 1)},
 		"clothes_premium": {"name": "Maison Arden", "door": Vector3(1815, LAND_Y, -52), "face": Vector3(0, 0, 1)},
 		# (Its sales office is the hangar's landside annex, on Hangar Access.)
-		"aviation": {"name": "Skyport Aviation", "door": Vector3(1656, LAND_Y, 176), "face": Vector3(0, 0, -1)},
+		"aviation": {"name": "Skyport Aviation", "door": Vector3(1606, LAND_Y, 119.5), "face": Vector3(0, 0, -1)},
 		"marina": {"name": "Skyport Marina", "door": Vector3(1410, LAND_Y, -192), "face": Vector3(0, 0, 1)},
 		"cargo": {"name": "Skyport Cargo", "door": Vector3(2398, LAND_Y, 155), "face": Vector3(0, 0, -1)},
 		"terminal": {"name": "Skyport Airport", "door": Vector3(2110, LAND_Y, 160), "face": Vector3(0, 0, -1)},
@@ -1430,14 +1437,7 @@ static func _buildings(P: Dictionary) -> Array:
 	# clones from the air) – the aviation company's maintenance hangar, a
 	# wide-body bay and a small GA hangar – each with a ridged roof (stepped
 	# tiers along the span) and a lean-to office annex on the landside.
-	# (Doors face the apron; the first keeps its front at z 288 for the
-	# Skyport Aviation door.)
-	var hangars := [
-		[1640, 192, 1712, 288, 20.0, Color(0.8, 0.81, 0.82), 0.21, true],
-		[1722, 184, 1808, 292, 25.0, Color(0.62, 0.68, 0.74), 0.33, false],
-		[1818, 204, 1870, 282, 15.0, Color(0.84, 0.8, 0.7), 0.47, true],
-	]
-	for hg: Array in hangars:
+	for hg: Array in HANGARS:
 		var x0: float = hg[0]
 		var z0: float = hg[1]
 		var x1: float = hg[2]
@@ -1461,8 +1461,13 @@ static func _buildings(P: Dictionary) -> Array:
 		Color(0.55, 0.62, 0.66), 0.39)
 	ac["district"] = "airport"
 	out.append(ac)
-	# Marina office and boat sales.
-	out.append(_b([[1396, -246, 1424, -196, LAND_Y, LAND_Y + 7.0]], S.MODERN, Color(0.9, 0.9, 0.88), 0.66))
+	# Landside galleries have their own footprint, accessible from the public
+	# road network without crossing the apron or walking along the quay edge.
+	var sales := _b([[1568, 126, 1644, 169, LAND_Y, LAND_Y + 10.47]],
+		S.MODERN, Color(0.36, 0.40, 0.44), 0.38)
+	sales["district"] = "airport"
+	out.append(sales)
+	out.append(_b([[1396, -245, 1424, -196, LAND_Y, LAND_Y + 9.16]], S.MODERN, Color(0.85, 0.84, 0.78), 0.66))
 	return out
 
 
@@ -1711,7 +1716,12 @@ func _ground_mat() -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = load("res://src/world/shaders/island_ground.gdshader")
 	m.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/asphalt_01.png"))
+	m.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/concrete_pavement.png"))
 	m.set_shader_parameter("pbr_on", true)
+	m.set_shader_parameter("skyport_grass", true)
+	var edge := w(Vector3(0.0, 0.0, 180.0))
+	var into_airfield := wd(Vector3.BACK)
+	m.set_shader_parameter("airfield_edge", Vector3(into_airfield.x, into_airfield.z, -into_airfield.dot(edge)))
 	return m
 
 
@@ -1997,22 +2007,25 @@ func _build_ground(street: StaticBody3D) -> void:
 	# quay); the planted areas on top of that; concrete aprons and yards;
 	# airport strips; roads. (It was one sheet of beige paving.)
 	_poly_tris(st, outline(), LAND_Y, 1, COL_GRASS)
-	var pave_y := LAND_Y + 0.008
+	var coast := outline()
+	var forecourt_y := LAND_Y + 0.012
 	for r in plan_data["roads"]:
 		if not r[3]:
 			_strip(st, r[1], float(r[2]) * 0.5 + 5.0, 0.008, 0, COL_PAVE)
 	for b: Dictionary in plan_data["buildings"]:
 		var t: Array = b["tiers"][0]
 		var g := 6.0 if float(t[5]) - float(t[4]) > 40.0 else 4.0
-		_poly_tris(st, _rect(float(t[0]) - g, float(t[1]) - g, float(t[2]) + g, float(t[3]) + g), pave_y, 0, COL_PAVE)
+		var forecourt := _rect(float(t[0]) - g, float(t[1]) - g, float(t[2]) + g, float(t[3]) + g)
+		for part: PackedVector2Array in Geometry2D.intersect_polygons(forecourt, coast):
+			_poly_tris(st, part, forecourt_y, 0, COL_PAVE)
 	for pr in [[1385, -312, 1475, -184], [1955, 135, 2265, 168]]:
-		var poly := Geometry2D.intersect_polygons(_rect(pr[0], pr[1], pr[2], pr[3]), outline())
+		var poly := Geometry2D.intersect_polygons(_rect(pr[0], pr[1], pr[2], pr[3]), coast)
 		for q in poly:
-			_poly_tris(st, q, pave_y, 0, COL_PAVE.lightened(0.04))
+			_poly_tris(st, q, LAND_Y + 0.016, 0, COL_PAVE.lightened(0.04))
 	for a in plan_data["areas"]:
-		_poly_tris(st, a[1], LAND_Y + (0.011 if int(a[0]) == 1 else 0.014), int(a[0]), a[2], 3.0 if a.size() > 3 and a[3] == "bays" else 0.0)
+		_poly_tris(st, a[1], LAND_Y + (0.018 if int(a[0]) == 1 else 0.019), int(a[0]), a[2], 3.0 if a.size() > 3 and a[3] == "bays" else 0.0)
 	for s in plan_data["strips"]:
-		_strip(st, PackedVector3Array([s[1], s[2]]), s[3], 0.025 if int(s[0]) == 3 else 0.02, int(s[0]), COL_RUNWAY if int(s[0]) == 3 else COL_APRON.darkened(0.15))
+		_strip(st, PackedVector3Array([s[1], s[2]]), s[3], 0.027 if int(s[0]) == 3 else 0.023, int(s[0]), COL_RUNWAY if int(s[0]) == 3 else COL_APRON.darkened(0.15))
 	# Junctions (3+ road ends meet): each road's markings stop at the
 	# crossing road's kerb – the box between is plain asphalt – and its
 	# approach lanes get a stop line. (They used to run straight through
@@ -2852,10 +2865,21 @@ func _build_airport_dressing() -> void:
 			m.beam(Vector3(tx + 1.5, LAND_Y, zs[1]), top, 0.45, 0.45, Color(0.86, 0.87, 0.88))
 			m.beam(Vector3(tx - 1.5, LAND_Y, zs[1]), top, 0.45, 0.45, Color(0.86, 0.87, 0.88))
 		tx += 32.0
-	# Hangar doors (dark, ribbed by the warehouse style) facing the apron.
-	for k in 3:
-		var hx := 1640.0 + k * 80.0
-		m.solid(hx + 6.0, 287.6, hx + 66.0, 288.4, LAND_Y, LAND_Y + 15.0, Color(0.3, 0.33, 0.36))
+	# The door frames attach to each hangar's actual apron-facing wall.
+	# Their depth clears the facade's cladding and its ledges.
+	for hangar: Array in HANGARS:
+		var left := float(hangar[0]) + 4.0
+		var right := float(hangar[2]) - 4.0
+		var front := float(hangar[3])
+		var height := float(hangar[4]) - 4.2
+		var frame := Color("777f85")
+		m.solid(left, front - 0.03, right, front + 0.35, LAND_Y, LAND_Y + height, Color("48525c"))
+		m.solid(left - 0.28, front - 0.06, right + 0.28, front + 0.62, LAND_Y + height, LAND_Y + height + 0.62, frame)
+		for k in 9:
+			var gate := lerpf(left, right, float(k) / 8.0)
+			m.solid(gate - 0.105, front + 0.29, gate + 0.105, front + 0.48, LAND_Y, LAND_Y + height, frame)
+		for k in [2.4, 4.8, 7.2]:
+			m.solid(left, front + 0.30, right, front + 0.455, LAND_Y + k, LAND_Y + k + 0.11, frame)
 	_mesh(m, "AirportDressing", 0.0, 1400.0)
 
 
@@ -3316,7 +3340,7 @@ func _build_trees() -> void:
 		if not Geometry2D.is_point_in_polygon(q, o) or _shore_dist(q) < 12.0:
 			continue
 		# (Off every carriageway and out of the rail corridor's piers.)
-		if road_clearance(plan_data, q) < 3.5 or rail_clearance(plan_data, q) < 5.0:
+		if road_clearance(plan_data, q) < 4.4 or rail_clearance(plan_data, q) < 7.0:
 			continue
 		var paved := false
 		for ar in plan_data["areas"]:
@@ -3330,31 +3354,27 @@ func _build_trees() -> void:
 	# The terminal car park's planters (on paving: added after the filter).
 	for tq: Vector2 in SkyportAirport.park_trees():
 		kept.append(Transform3D(Basis(Vector3.UP, tq.x * 0.31).scaled(Vector3.ONE * 0.95), Vector3(tq.x, LAND_Y, tq.y)))
-	xfs = kept
-	# TreeKit species (avenues mostly one kind, parks mixed), one MultiMesh
-	# per species.
-	var by_sp := {}
-	for xf: Transform3D in xfs:
-		var park := absf(xf.origin.z - e.z) > 20.0
-		var sp := TreeKit.pick(xf.origin, park)
-		if not by_sp.has(sp):
-			by_sp[sp] = []
-		by_sp[sp].append(Transform3D(TreeKit.shape(xf.origin, xf.basis.get_scale().y), xf.origin))
-	for sp: String in by_sp:
-		var list: Array = by_sp[sp]
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.use_custom_data = true
-		mm.mesh = TreeKit.mesh(sp)
-		mm.instance_count = list.size()
-		for i in list.size():
-			mm.set_instance_transform(i, list[i])
-			mm.set_instance_custom_data(i, TreeKit.tint((list[i] as Transform3D).origin, sp))
-		var mi := MultiMeshInstance3D.new()
-		mi.name = "Trees_" + sp
-		mi.multimesh = mm
-		mi.visibility_range_end = 900.0
-		_target.add_child(mi)
+	# Keep the planted rhythm across the island with room for mature crowns.
+	var plots := {}
+	var batches := {}
+	for xf: Transform3D in kept:
+		var p := xf.origin
+		if hash(Vector3i(roundi(p.x * 4.0), roundi(p.z * 4.0), 43)) % 3 != 0:
+			continue
+		var plot := Vector2i(floori(p.x / 10.0), floori(p.z / 10.0))
+		if plots.has(plot):
+			continue
+		plots[plot] = true
+		var species := TreeKit.pick(p, absf(p.z - e.z) > 20.0)
+		var sector := Vector2i(floori(p.x / 120.0), floori(p.z / 120.0))
+		if not batches.has(sector):
+			batches[sector] = {}
+		if not batches[sector].has(species):
+			batches[sector][species] = []
+		batches[sector][species].append(Transform3D(TreeKit.shape(p, xf.basis.get_scale().y), p))
+	for sector in batches:
+		for species in batches[sector]:
+			TreeKit.instance_batch(_target, species, batches[sector][species], 620.0)
 
 
 ## Container stacks and quay cranes in the logistics district.

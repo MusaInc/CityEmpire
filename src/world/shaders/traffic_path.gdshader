@@ -93,11 +93,13 @@ void fragment() {
 		CLEARCOAT = 1.0;
 		CLEARCOAT_ROUGHNESS = 0.08;
 	} else if (finish == 2) {
-		// Tinted glass: dark, mirror-smooth (the sky and street reflect in it).
-		ALBEDO = c * 0.6;
-		METALLIC = 0.75;
-		ROUGHNESS = 0.05;
-		SPECULAR = 0.9;
+		// Glass as on your own car (car_glass.gdshader): dark tint, smooth,
+		// the city reflected strongest at grazing angles (below). It was a
+		// near-mirror metal and read oddly next to the player's car.
+		ALBEDO = vec3(0.035, 0.045, 0.06);
+		METALLIC = 0.2;
+		ROUGHNESS = 0.08;
+		SPECULAR = 0.8;
 	} else if (finish == 3) {
 		METALLIC = 1.0;
 		ROUGHNESS = 0.16;
@@ -111,8 +113,8 @@ void fragment() {
 		vec3 rw = reflect(-vw, nw);
 		vec3 env = city_reflection(rw, (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz, sky_top, sky_horizon, sun_dir, night);
 		float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), finish == 2 ? 3.0 : 4.0);
-		float k = finish == 1 ? mix(0.07, 0.55, fres) : (finish == 2 ? mix(0.18, 0.85, fres) : 0.65);
-		float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 200.0 : 300.0) * (finish == 1 ? 2.5 : 5.0);
+		float k = finish == 1 ? mix(0.08, 0.62, fres) : (finish == 2 ? mix(0.18, 0.9, fres) : 0.65);
+		float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 220.0 : 300.0) * (finish == 1 ? 3.2 : 8.0);
 		EMISSION += (env * k + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night);
 	}
 }

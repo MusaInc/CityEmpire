@@ -110,7 +110,7 @@ void fragment() {
 	float t = UV.y;
 	float x = abs(UV.x - 0.5) * 2.0;
 	float lobes = exp(-pow((x - 0.25) / 0.45, 2.0));
-	float edge = smoothstep(1.0, 0.75, x);
+	float edge = (1.0 - smoothstep(0.75, 1.0, x));
 	float a = smoothstep(0.0, 0.1, t) * pow(1.0 - t, 1.5) * lobes * edge * (0.6 + 0.4 * wetness);
 	ALBEDO = vec3(1.0, 0.92, 0.78) * a * beam * smoothstep(0.25, 0.7, night) * moving;
 }

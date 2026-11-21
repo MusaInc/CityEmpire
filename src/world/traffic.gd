@@ -776,8 +776,8 @@ func _queue_behind(id: int, lead: int) -> void:
 
 ## The car ahead moved off: once at rest, pull away (keeping behind it).
 func _follow(id: int) -> void:
-	if knocked.has(id):
-		return   # (held where it was hit until Wrecks releases it)
+	if knocked.has(id) or _held.has(id):
+		return   # Remain stopped while the lane is still obstructed.
 	var lead := _leader(id)
 	var lead_slow := lead >= 0 and (c_stop[lead] < NO_STOP or c_v[lead] < 0.0)
 	if c_stop[id] < NO_STOP and not _at_rest(id) and lead_slow:
@@ -1084,7 +1084,7 @@ func yield_to(p0: Vector3, ids: Array) -> void:
 				continue
 			still[id] = true
 			var stop := s + ahead - 6.5
-			if not _held.has(id) or c_stop[id] > stop + 0.5:
+			if not _held.has(id) or (not _at_rest(id) and c_stop[id] > stop + 0.5):
 				_rebase(id, _at_rest(id), stop)
 				c_ek[id] = EV_FOLLOW
 				c_ev[id] = INF

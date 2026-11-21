@@ -13,7 +13,7 @@ const PRESETS := {
 		"msaa": Viewport.MSAA_DISABLED, "fog": true, "props": 0.5, "traffic": 0.4, "glow": false,
 	},
 	Quality.MEDIUM: {
-		"fps": 30, "render_scale": 0.85, "pixels": 1.3e6, "shadows": true, "view_distance": 900.0,
+		"fps": 30, "render_scale": 1.0, "pixels": 1.7e6, "shadows": true, "view_distance": 900.0,
 		"msaa": Viewport.MSAA_2X, "fog": true, "props": 0.8, "traffic": 0.7, "glow": true,
 	},
 	Quality.HIGH: {
@@ -24,7 +24,7 @@ const PRESETS := {
 
 var quality: int = Quality.MEDIUM
 var fps_60 := true  # swinging needs it; Settings can drop to 30 for battery
-const VERSION := 5  # bump to migrate saved settings to new defaults
+const VERSION := 6  # bump to migrate saved settings to new defaults
 var haptics := true
 var show_perf := false
 var look_sensitivity := 1.0
@@ -38,9 +38,7 @@ var invert_y := false
 var aim_mode := "assist"
 var music_volume := 0.6
 var sfx_volume := 1.0
-## Post-process style, a LookFilter.STYLES key. "crisp" (subtle clean-up pass)
-## since 0.7.3, "clean" = no filter; cartoon styles stay for `--look=` comparisons.
-var look := "cinematic"
+var look := "clean"  # Alternate filters are available for developer captures.
 var appearance := "auto"   # the phone's look: "auto" (light by day, dark at night), "light", "dark"
 ## Sky: "cycle" (day → night → day, ~16 min) or a fixed "day" / "sunset" / "night".
 var time_of_day := "cycle"
@@ -55,7 +53,6 @@ func _ready() -> void:
 		quality = cfg.get_value("gfx", "quality", quality)
 		fps_60 = cfg.get_value("gfx", "fps_60", fps_60)
 		show_perf = cfg.get_value("gfx", "show_perf", show_perf)
-		look = cfg.get_value("gfx", "look", look)
 		appearance = cfg.get_value("gfx", "appearance", appearance)
 		time_of_day = cfg.get_value("gfx", "time_of_day", time_of_day)
 		weather = cfg.get_value("gfx", "weather", weather)
@@ -68,12 +65,6 @@ func _ready() -> void:
 		tuning_overrides = cfg.get_value("tuning", "overrides", {})
 		if cfg.get_value("meta", "version", 1) < 2:
 			fps_60 = true  # 0.1.x saved the old 30 fps default
-		if cfg.get_value("meta", "version", 1) < 3:
-			look = "clean"  # cartoon filters removed from Settings
-		if cfg.get_value("meta", "version", 1) < 4:
-			look = "crisp"  # new default filter
-		if cfg.get_value("meta", "version", 1) < 5 and look == "crisp":
-			look = "cinematic"  # premium PBR look (2026-11-21); "clean" choices are kept
 		if not OS.is_debug_build():
 			tuning_overrides = {}  # the tuning panel is a developer tool
 	apply()
@@ -113,7 +104,7 @@ func apply() -> void:
 		var stylised := look != "clean" and RenderingServer.get_current_rendering_method() != "gl_compatibility"
 		vp.msaa_3d = Viewport.MSAA_DISABLED if stylised else p["msaa"]
 		if RenderingServer.get_current_rendering_method() != "gl_compatibility":  # no FXAA there
-			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if stylised else Viewport.SCREEN_SPACE_AA_DISABLED
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if vp.msaa_3d == Viewport.MSAA_DISABLED else Viewport.SCREEN_SPACE_AA_DISABLED
 	changed.emit()
 
 
@@ -122,7 +113,6 @@ func save() -> void:
 	cfg.set_value("gfx", "quality", quality)
 	cfg.set_value("gfx", "fps_60", fps_60)
 	cfg.set_value("gfx", "show_perf", show_perf)
-	cfg.set_value("gfx", "look", look)
 	cfg.set_value("gfx", "appearance", appearance)
 	cfg.set_value("gfx", "time_of_day", time_of_day)
 	cfg.set_value("gfx", "weather", weather)

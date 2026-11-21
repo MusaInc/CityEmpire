@@ -56,7 +56,8 @@ const DRIFT_PATH := 1.25
 var spec: Dictionary
 ## Controls, set every frame by the driver (player input or an AI brain).
 var throttle := 0.0   # 0..1
-var brake := 0.0      # 0..1 (held at a standstill = reverse)
+var brake := 0.0      # 0..1
+var reverse_enabled := true
 var steer := 0.0      # -1 left .. +1 right
 var handbrake := false
 var nitro := false
@@ -356,7 +357,7 @@ func _physics_process(dt: float) -> void:
 	steer_angle = move_toward(steer_angle, target_steer, steer_rate * dt)
 
 	# Reverse: brake held at (near) standstill.
-	var reversing := brk > 0.5 and forward_speed < 1.5 and thr < 0.5
+	var reversing := reverse_enabled and brk > 0.5 and forward_speed < 1.5 and thr < 0.5
 	var drive := 0.0
 	var top: float = spec["top_speed"] * (1.0 - 0.2 * (1.0 - health)) * (1.0 - 0.18 * puncture)
 	if reversing:
@@ -558,10 +559,9 @@ func _physics_process(dt: float) -> void:
 		var pivot := lerpf(1.0, LOW_SPEED_PIVOT, town)
 		var want := clampf(-forward_speed * tan(steer_angle) / wb * pivot, -grip_yaw * turn_k, grip_yaw * turn_k)
 		var assist: float = spec.get("yaw_assist", 0.35)
-		# The drift assist (which HOLDS a slide angle) is for deliberate drifts:
-		# the handbrake, or power-oversteer on the throttle. A slide that comes
-		# from braking or a knock is caught and straightened instead.
-		var drift_mode := (handbrake and speed > 8.0) or (drifting and thr > 0.3 and brk < 0.2)
+		# A handbrake input starts a deliberate drift. Ordinary tyre slip
+		# under throttle gets the grip recovery below.
+		var drift_mode := handbrake and speed > 8.0
 		if drift_mode:
 			# Drift assist: steering sets the slide angle it holds; centred
 			# steering (or counter-steer) straightens it. The path itself

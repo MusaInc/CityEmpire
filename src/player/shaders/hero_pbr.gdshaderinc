@@ -8,6 +8,7 @@ uniform sampler2D normal_map : hint_normal, filter_linear_mipmap_anisotropic;
 uniform sampler2D ao_map : filter_linear_mipmap, hint_default_white;
 uniform sampler2D roughness_map : filter_linear_mipmap, hint_default_white;
 uniform float roughness = 0.8;
+uniform float hair_fibres = 0.0;
 uniform float normal_strength = 0.0;
 // How dark the inside (back faces) of the cloth is: deep inside a garment
 // opening 0.32; thin trims (collars, cuffs) show their edges, so lighter.
@@ -70,6 +71,12 @@ void fragment() {
     if (detail_strength > 0.0) {
         vec2 d = texture(detail_normal_map, UV * detail_scale).rg * 2.0 - 1.0;
         n.xy += d * detail_strength;
+    }
+    if (hair_fibres > 0.0) {
+        // The authored strand normals break up a broad highlight along the flow.
+        ANISOTROPY = hair_fibres;
+        ANISOTROPY_FLOW = vec2(0.0, 1.0);
+        ROUGHNESS = clamp(ROUGHNESS + n.x * 0.08, 0.36, 0.78);
     }
     NORMAL_MAP = normalize(n) * 0.5 + 0.5;
     NORMAL_MAP_DEPTH = 1.0;

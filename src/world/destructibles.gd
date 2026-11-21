@@ -182,22 +182,11 @@ func _throw(kind: String, xf: Transform3D, car: Car, w: CityWorld) -> void:
 		bs.size.x = minf(bs.size.x, 1.2)   # (the trunk's line, not the crown's width)
 		bs.size.z = minf(bs.size.z, 1.2)
 	cs.shape = bs
-	cs.position = aabb.get_center() * sc
+	cs.position = Vector3(0, 1.3 * sc.y, 0) if tree else aabb.get_center() * sc
+	if tree:
+		bs.size.y = 2.6 * sc.y
 	b.add_child(cs)
-	if mesh and tree:
-		# tree.gdshader takes its leaf tint from INSTANCE_CUSTOM: a one-tree MultiMesh.
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.use_custom_data = true
-		mm.mesh = mesh
-		mm.instance_count = 1
-		mm.set_instance_transform(0, Transform3D(Basis().scaled(sc), Vector3.ZERO))
-		mm.set_instance_custom_data(0, TreeKit.tint(xf.origin, kind.trim_prefix("tree_")))
-		var tmi := MultiMeshInstance3D.new()
-		tmi.multimesh = mm
-		tmi.material_override = TreeKit.material()
-		b.add_child(tmi)
-	elif mesh:
+	if mesh:
 		var mi := MeshInstance3D.new()
 		mi.mesh = mesh
 		mi.scale = sc

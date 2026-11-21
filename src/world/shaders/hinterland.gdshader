@@ -45,7 +45,7 @@ void fragment() {
 	// faces are rock at any height.
 	float rocky = smoothstep(0.42, 0.62, slope + n * 0.15) + smoothstep(500.0, 760.0, y + n * 180.0 - slope * 120.0);
 	vec3 scree = mix(vec3(0.46, 0.44, 0.41), vec3(0.36, 0.34, 0.33), vnoise(p * 0.012));
-	rock = mix(rock, scree, smoothstep(0.35, 0.15, slope) * 0.6);
+	rock = mix(rock, scree, (1.0 - smoothstep(0.15, 0.35, slope)) * 0.6);
 	c = mix(c, rock, clamp(rocky, 0.0, 1.0));
 	// Snow only on the high massifs: lower on shaded (north-facing) slopes,
 	// lying in gullies and on gentle ledges, never on the steep faces – so

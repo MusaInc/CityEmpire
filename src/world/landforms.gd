@@ -537,7 +537,7 @@ func _trees(f: Dictionary) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(String(f["name"]))
 	var by_sp := {}
-	var n := int(bb.get_area() / 900.0)
+	var n := int(bb.get_area() / 2700.0)
 	for i in n:
 		var q := Vector2(rng.randf_range(bb.position.x, bb.end.x), rng.randf_range(bb.position.y, bb.end.y))
 		if not Geometry2D.is_point_in_polygon(q, o) or _edge_dist(f, q) < 14.0 or _beach_dist(f, q) < 16.0 \
@@ -549,19 +549,7 @@ func _trees(f: Dictionary) -> void:
 			by_sp[sp] = []
 		by_sp[sp].append(Transform3D(TreeKit.shape(p, rng.randf_range(0.8, 1.15)), p))
 	for sp: String in by_sp:
-		var list: Array = by_sp[sp]
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.use_custom_data = true
-		mm.mesh = TreeKit.mesh(sp)
-		mm.instance_count = list.size()
-		for i in list.size():
-			mm.set_instance_transform(i, list[i])
-			mm.set_instance_custom_data(i, TreeKit.tint((list[i] as Transform3D).origin, sp))
-		var mmi := MultiMeshInstance3D.new()
-		mmi.multimesh = mm
-		mmi.visibility_range_end = 900.0
-		add_child(mmi)
+		TreeKit.instance_batch(self, sp, by_sp[sp], 900.0, false)
 
 
 func _foam(f: Dictionary) -> void:

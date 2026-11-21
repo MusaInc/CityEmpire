@@ -28,7 +28,7 @@ func _build_view() -> void:
 	surface.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(surface)
 	var bg := ColorRect.new()
-	bg.color = Color("0f1a22")
+	bg.color = Color("121b21")
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	surface.add_child(bg)

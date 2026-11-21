@@ -40,9 +40,24 @@ static func _owned(ui: EmpireUI, model: String) -> int:
 ## buy it or try it.
 static func vehicle_card(ui: EmpireUI, model: String, site: String) -> void:
 	var md := EmpireData.vehicle_model(model)
-	var v := ui._open(String(md.get("name", model)), 640, 420)
 	var cls := String(md.get("class", "car"))
-	v.add_child(S.label(String(md.get("desc", {"car": "A good everyday car", "heli": "", "plane": "", "boat": ""}.get(cls, ""))), 17, S.MUTED))
+	var v := ui._open(String(md.get("name", model)), 640 if cls == "car" else 825, 420 if cls == "car" else 465)
+	var detail := v
+	if cls != "car":
+		var gallery := S.hbox(22)
+		v.add_child(gallery)
+		var preview := S.vbox(5)
+		gallery.add_child(preview)
+		preview.add_child(_craft_preview(model, cls))
+		preview.add_child(S.label("Drag to rotate", 13, S.MUTED))
+		detail = S.vbox(10)
+		detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		detail.alignment = BoxContainer.ALIGNMENT_CENTER
+		gallery.add_child(detail)
+	var description := S.label(String(md.get("desc", "A good everyday car" if cls == "car" else "")), 17, S.MUTED)
+	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if not description.text.is_empty():
+		detail.add_child(description)
 	var top := S.hbox(16)
 	top.add_child(S.label(EmpireData.money(float(md.get("price", 0))), 40, S.PAPER, "black"))
 	var own := _owned(ui, model)
@@ -50,9 +65,11 @@ static func vehicle_card(ui: EmpireUI, model: String, site: String) -> void:
 		top.add_child(S.chip("You own %d" % own, S.GREEN))
 	if model == "used_kestrel":
 		top.add_child(S.chip("Used · 82% condition", S.AMBER))
-	v.add_child(top)
-	v.add_child(S.label(_specs(md), 19, S.PAPER, "bold"))
-	v.add_child(S.label(_running(md), 16, S.MUTED))
+	detail.add_child(top)
+	for item in [[_specs(md), S.PAPER], [_running(md), S.MUTED]]:
+		var line := S.label(item[0], 16, item[1])
+		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		detail.add_child(line)
 	var acts := S.hbox(10)
 	acts.add_child(S.button("Buy · %s" % EmpireData.money(float(md.get("price", 0))), func():
 		var err := ""
@@ -72,6 +89,60 @@ static func vehicle_card(ui: EmpireUI, model: String, site: String) -> void:
 	acts.add_child(S.spacer())
 	acts.add_child(S.button("Back", func(): showroom(ui, site) if site in SkyportPlay.STOCK else ui.close_panel(true), false, 110))
 	v.add_child(acts)
+
+
+static func _craft_preview(model: String, cls: String) -> Control:
+	var container := SubViewportContainer.new()
+	container.custom_minimum_size = Vector2(345, 240)
+	container.stretch = true
+	var view := SubViewport.new()
+	view.own_world_3d = true
+	view.msaa_3d = Viewport.MSAA_2X
+	view.render_target_update_mode = SubViewport.UPDATE_ONCE
+	container.add_child(view)
+	var environment := WorldEnvironment.new()
+	var studio := Environment.new()
+	studio.background_mode = Environment.BG_COLOR
+	studio.background_color = Color("263741")
+	studio.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	studio.ambient_light_color = Color("c0d4e5")
+	studio.ambient_light_energy = 0.66
+	environment.environment = studio
+	view.add_child(environment)
+	var key := DirectionalLight3D.new()
+	key.rotation_degrees = Vector3(-52, -24, 0)
+	key.light_energy = 1.25
+	view.add_child(key)
+	var rim := DirectionalLight3D.new()
+	rim.rotation_degrees = Vector3(-27, 151, 0)
+	rim.light_energy = 0.68
+	rim.light_color = Color("deebed")
+	view.add_child(rim)
+
+	var spec := SkyportPlay.craft_spec(model)
+	var craft := CraftModels.build(cls, model, spec)
+	view.add_child(craft)
+	craft.rotation.y = -0.60
+	var cam := Camera3D.new()
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	var size: Vector3 = spec["size"]
+	var radius := maxf(size.z, size.x)
+	cam.size = radius * 0.88
+	view.add_child(cam)
+	var eye := Vector3(1.25, 0.72, 1.4) * radius
+	cam.transform = Transform3D(Basis.looking_at(Vector3.UP * size.y * 0.36 - eye), eye)
+	cam.current = true
+	container.gui_input.connect(func(event: InputEvent):
+		var drag := 0.0
+		if event is InputEventScreenDrag:
+			drag = event.relative.x
+		elif event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			drag = event.relative.x
+		if not is_zero_approx(drag):
+			craft.rotate_y(drag * 0.012)
+			view.render_target_update_mode = SubViewport.UPDATE_ONCE
+			container.accept_event())
+	return container
 
 
 ## A showroom's list (dealers, aviation, marina): one row each, tap for

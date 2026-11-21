@@ -54,8 +54,8 @@ vec3 fx_color(int kind, vec2 q, vec3 acc, vec3 base, float seed) {
 		float row = floor(q.y * 22.0);
 		float r = hash(row + seed);
 		float x = fract(q.x * 0.7 + t * (0.9 + r * 1.3) + r);
-		float thin = smoothstep(0.42, 0.5, fract(q.y * 22.0)) * smoothstep(0.58, 0.5, fract(q.y * 22.0));
-		float s = smoothstep(0.0, 0.35, x) * smoothstep(0.6, 0.35, x) * step(0.45, r);
+		float thin = smoothstep(0.42, 0.5, fract(q.y * 22.0)) * (1.0 - smoothstep(0.5, 0.58, fract(q.y * 22.0)));
+		float s = smoothstep(0.0, 0.35, x) * (1.0 - smoothstep(0.35, 0.6, x)) * step(0.45, r);
 		return acc * s * thin * 0.9;
 	} else if (kind == 3) {  // pulse rings
 		float d = length(q - 0.5);

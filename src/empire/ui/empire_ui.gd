@@ -633,17 +633,15 @@ func show_title(has_save: bool) -> void:
 	for c in _title_root.get_children():
 		c.queue_free()
 	_title_root.visible = true
-	# A scrim from the left (the city stays bright on the right), and a
-	# darker floor for the footer.
 	var g := Gradient.new()
-	g.set_color(0, Color(0.02, 0.04, 0.06, 0.88))
-	g.set_color(1, Color(0.02, 0.04, 0.06, 0.0))
-	g.add_point(0.45, Color(0.02, 0.04, 0.06, 0.62))
+	g.set_color(0, Color(0.03, 0.055, 0.07, 0.98))
+	g.add_point(0.33, Color(0.03, 0.055, 0.07, 0.86))
+	g.add_point(0.68, Color(0.03, 0.055, 0.07, 0.20))
+	g.set_color(g.get_point_count() - 1, Color(0.03, 0.055, 0.07, 0.05))
 	var gt := GradientTexture2D.new()
 	gt.gradient = g
 	gt.width = 256
 	gt.height = 4
-	gt.fill_from = Vector2(0, 0)
 	gt.fill_to = Vector2(1, 0)
 	var shade := TextureRect.new()
 	shade.texture = gt
@@ -651,64 +649,52 @@ func show_title(has_save: bool) -> void:
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_title_root.add_child(shade)
-	var v := S.vbox(12)
-	v.position = Vector2(84, 96)
-	_title_root.add_child(v)
-	var mark := S.label("M U S A   S T U D I O S", 14, S.GOLD, "bold")
-	v.add_child(mark)
-	var t := S.label("WORLDSTATE", 96, S.PAPER, "black")
-	t.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.45))
-	t.add_theme_constant_override("shadow_offset_y", 4)
-	t.add_theme_constant_override("shadow_offset_x", 0)
-	t.add_theme_constant_override("shadow_outline_size", 10)
-	v.add_child(t)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
+	center.offset_left = 80.0
+	center.offset_right = 600.0
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_title_root.add_child(center)
+	var stack := S.vbox(16)
+	stack.custom_minimum_size.x = 520.0
+	center.add_child(stack)
+	var title := S.label("WORLDSTATE", 60, Color("f3eee5"), "bold")
+	var title_font := FontVariation.new()
+	title_font.base_font = S.font("bold")
+	title_font.spacing_glyph = 4
+	title.add_theme_font_override("font", title_font)
+	stack.add_child(title)
 	var rule := ColorRect.new()
-	rule.color = S.GOLD
-	rule.custom_minimum_size = Vector2(120, 3)
-	v.add_child(rule)
-	v.add_child(S.label("Start with nothing. Build a business empire. Climb the City500.", 22, Color(S.PAPER, 0.85)))
-	var foot := S.label("v%s  ·  a Musa Studios game" % String(ProjectSettings.get_setting("application/config/version", "")), 14, Color(S.MUTED, 0.8))
-	_anchor(foot, 0.0, 1.0, Vector2(84, -48), Vector2(500, 24))
-	_title_root.add_child(foot)
-	var gap := Control.new()
-	gap.custom_minimum_size.y = 18
-	v.add_child(gap)
-	var e := game.empire
-	if has_save and e:
-		# What you're continuing: day, money and your City500 standing.
-		var yr := City500.your_rank(e)
-		var cc := PanelContainer.new()
-		var csb := StyleBoxFlat.new()
-		csb.bg_color = Color(0.02, 0.04, 0.06, 0.55)
-		csb.border_color = Color(S.GOLD, 0.35)
-		csb.set_border_width_all(1)
-		csb.set_corner_radius_all(14)
-		for m in ["left", "right", "top", "bottom"]:
-			csb.set("content_margin_" + m, 14)
-		cc.add_theme_stylebox_override("panel", csb)
-		cc.custom_minimum_size.x = 380
-		var cv := S.vbox(2)
-		cc.add_child(cv)
-		var nm := String(e.brand.get("name", ""))
-		cv.add_child(S.label((nm if nm != "" else "Your empire").to_upper() + "  ·  DAY %d" % e.day, 13, S.GOLD, "black"))
-		cv.add_child(S.label("%s net worth  ·  %s" % [EmpireData.money(e.net_worth()),
-			("City500 #%d" % int(yr["rank"])) if int(yr["rank"]) > 0 else "outside the City500"], 17, S.PAPER, "bold"))
-		cv.add_child(S.label("%d business%s · %d vehicle%s" % [e.businesses.size(), "" if e.businesses.size() == 1 else "es",
-			e.vehicles.size(), "" if e.vehicles.size() == 1 else "s"], 14, S.MUTED))
-		v.add_child(cc)
-		v.add_child(S.button("CONTINUE", func(): game.continue_game(), true, 380))
-	v.add_child(S.button("NEW GAME", func():
+	rule.color = Color("e8b961")
+	rule.custom_minimum_size = Vector2(57, 2)
+	rule.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(rule)
+	var space := Control.new()
+	space.custom_minimum_size.y = 13
+	stack.add_child(space)
+
+	var actions := S.vbox(10)
+	actions.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	stack.add_child(actions)
+	if has_save:
+		actions.add_child(S.button("Continue", game.continue_game, true, 246))
+	actions.add_child(S.button("New game", func():
 		if has_save:
 			_confirm_new()
 		else:
-			game.start_new(), not has_save, 380))
-	var row := S.hbox(10)
+			game.start_new(), not has_save, 246))
+	var options := S.hbox(10)
 	if has_save:
-		row.add_child(S.button("CHARACTER", func():
+		options.add_child(S.button("Character", func():
 			game.continue_game()
-			open_style(), false, 185))
-	row.add_child(S.button("SETTINGS", func(): _settings_panel(), false, 185 if has_save else 380))
-	v.add_child(row)
+			open_style(), false, 118))
+	options.add_child(S.button("Settings", _settings_panel, false, 118 if has_save else 246))
+	actions.add_child(options)
+	var studio := S.label("Musa Studios", 15, Color("c0c5c5"))
+	_anchor(studio, 0.0, 1.0, Vector2(80, -52), Vector2(200, 26))
+	_title_root.add_child(studio)
 
 
 func _confirm_new() -> void:
@@ -2453,16 +2439,6 @@ func _settings_panel() -> void:
 			Settings.save()
 			_settings_panel(), Settings.quality == i))
 	v.add_child(q)
-	var lf := S.hbox(10)
-	lf.add_child(S.label("Image filter", 18, S.MUTED))
-	for pair in [["Cinematic", "cinematic"], ["Crisp", "crisp"], ["Off", "clean"]]:
-		var id: String = pair[1]
-		lf.add_child(S.button(pair[0], func():
-			Settings.look = id
-			Settings.apply()
-			Settings.save()
-			_settings_panel(), Settings.look == id))
-	v.add_child(lf)
 	var ap := S.hbox(10)
 	ap.add_child(S.label("Phone appearance", 18, S.MUTED))
 	ap.add_child(Glass.segmented([["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]], Settings.appearance, func(k):

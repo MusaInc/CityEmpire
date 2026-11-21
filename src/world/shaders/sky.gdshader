@@ -67,7 +67,7 @@ void sky() {
 			vec2 id = floor(sp);
 			float r = hash12(id);
 			vec2 f = fract(sp) - vec2(hash12(id + 7.1), hash12(id + 3.3)) * 0.6 - 0.2;
-			float st = step(0.985, r) * smoothstep(0.09, 0.0, length(f)) * (0.6 + 0.4 * sin(TIME * (1.0 + r * 3.0) + r * 40.0));
+			float st = step(0.985, r) * (1.0 - smoothstep(0.0, 0.09, length(f))) * (0.6 + 0.4 * sin(TIME * (1.0 + r * 3.0) + r * 40.0));
 			col += vec3(0.85, 0.9, 1.0) * st * stars * 1.6 * smoothstep(0.0, 0.25, h);
 		}
 	}

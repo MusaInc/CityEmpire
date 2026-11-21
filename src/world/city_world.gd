@@ -119,7 +119,6 @@ var car_far_meshes: Array[Mesh] = []  # two-box stand-ins (24 tris) past CAR_MID
 ## mid LOD beyond. Same total cost as the 170 m band of the old bodies.)
 const CAR_NEAR := 90.0
 ## Trees: the Blender-grown model within this range, the procedural one beyond.
-const TREE_NEAR := 110.0
 const CAR_MID := 240.0
 const CAR_FAR := 520.0
 var walker_mesh: Mesh
@@ -1377,7 +1376,7 @@ func _prop_boxes(kind: String) -> Array:
 			return [[Vector3(0.3, 6.2, 0.3), Vector3(0, 2.8, 0)]]
 		"sign_post":
 			return [[Vector3(0.14, 2.9, 0.14), Vector3(0, 1.45, 0)]]
-		"tree", "tree_tall", "tree_plane", "tree_lime", "tree_birch", "tree_pine", "tree_cherry", "tree_poplar":
+		"tree", "tree_tall", "tree_oak", "tree_birch", "tree_pine":
 			return [[Vector3(0.36, 2.6, 0.36), Vector3(0, 1.3, 0)]]
 		"antenna":
 			return [[Vector3(0.3, 14.3, 0.3), Vector3(0, 7.15, 0)]]
@@ -2083,11 +2082,8 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 
 ## The props drawn in a chunk at the current density: [kind, Transform3D].
 ## Collision is built from the same list, so a prop you can't see never blocks you.
-## Trees (2026-11-21 overhaul): fewer and larger. One tree per TREE_CELL m
-## cell (the one with the lowest position hash: street lines keep their
-## rhythm at a wider spacing, parks become spaced groups), planter trees kept;
-## every tree TREE_SCALE x larger (±12%) – the Blender near LOD and TreeKit's
-## far LOD scale together. Drawing, collision and Destructibles all read this.
+## Keep the established planter and kerb positions, thinning existing groups
+## by a stable spatial hash so revisiting a block preserves its planting.
 const TREE_CELL := 12.0
 const TREE_SCALE := 1.45
 
@@ -2124,6 +2120,8 @@ func chunk_props(key: Vector2i) -> Array:
 				continue
 			# A TreeKit species (mostly one per street), its own height,
 			# width, lean and turn (looks only: positions don't change).
+			if hash(Vector3i(roundi(to.x * 4.0), roundi(to.z * 4.0), 43)) % 3 != 0:
+				continue
 			var vary := 0.88 + 0.24 * float(_tree_rank(to) % 1000) / 1000.0
 			var sc := xf.basis.get_scale().y * (1.15 if planted else TREE_SCALE * vary)
 			kind = "tree_" + TreeKit.pick(xf.origin)
@@ -2160,12 +2158,10 @@ func chunk_furniture(key: Vector2i) -> Array:
 
 
 
-## Instance buffer for a prop MultiMesh: 12 floats of transform, plus 4 of
-## custom data (TreeKit tint) when `tree` names a species.
-static func _prop_buffer(list: Array, tree: String) -> PackedFloat32Array:
-	var stride := 16 if tree != "" else 12
+## The twelve transform floats for each prop instance.
+static func _prop_buffer(list: Array) -> PackedFloat32Array:
 	var buf := PackedFloat32Array()
-	buf.resize(list.size() * stride)
+	buf.resize(list.size() * 12)
 	var j := 0
 	for x: Transform3D in list:
 		for r in 3:
@@ -2173,10 +2169,6 @@ static func _prop_buffer(list: Array, tree: String) -> PackedFloat32Array:
 			buf[j + 1] = x.basis.y[r]
 			buf[j + 2] = x.basis.z[r]
 			buf[j + 3] = x.origin[r]
-			j += 4
-		if tree != "":
-			var cu: Color = TreeKit.tint(x.origin, tree)
-			buf[j] = cu.r; buf[j + 1] = cu.g; buf[j + 2] = cu.b; buf[j + 3] = cu.a
 			j += 4
 	return buf
 
@@ -2193,39 +2185,19 @@ func _add_props(root: Node3D, key: Vector2i, pools: Variant = null) -> void:
 		if mesh == null:
 			continue
 		var list: Array = by_kind[kind]
+		if kind.begins_with("tree_"):
+			TreeKit.instance_batch(root, kind.trim_prefix("tree_"), list, 320.0)
+			continue
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
-		var is_tree: bool = kind.begins_with("tree_")
-		mm.use_custom_data = is_tree
 		mm.mesh = mesh
 		mm.instance_count = list.size()
-		# One packed buffer (transform + tree tint), shared with the near LOD:
-		# reading mm.buffer back is a GPU readback (empty on the dummy renderer).
-		var pbuf := _prop_buffer(list, kind.trim_prefix("tree_") if is_tree else "")
-		mm.buffer = pbuf
+		mm.buffer = _prop_buffer(list)
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "Props_" + kind
 		mmi.multimesh = mm
-		mmi.visibility_range_end = PROP_RANGES.get(kind, 320.0 if is_tree else 300.0)
+		mmi.visibility_range_end = PROP_RANGES.get(kind, 300.0)
 		mmi.visibility_range_end_margin = 20.0
-		var near: Mesh = TreeKit.near_mesh(kind.trim_prefix("tree_")) if is_tree else null
-		if near:
-			# Blender tree up close, the procedural one from TREE_NEAR on
-			# (same instances, transforms and tints: one buffer).
-			var nm := MultiMesh.new()
-			nm.transform_format = MultiMesh.TRANSFORM_3D
-			nm.use_custom_data = true
-			nm.mesh = near
-			nm.instance_count = list.size()
-			nm.buffer = pbuf
-			var nmi := MultiMeshInstance3D.new()
-			nmi.name = "Props_" + kind + "_near"
-			nmi.multimesh = nm
-			nmi.visibility_range_end = TREE_NEAR
-			nmi.visibility_range_end_margin = 10.0
-			root.add_child(nmi)
-			mmi.visibility_range_begin = TREE_NEAR
-			mmi.visibility_range_begin_margin = 10.0
 		if kind in ["ac_unit", "streetlight", "traffic_light"]:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mmi)

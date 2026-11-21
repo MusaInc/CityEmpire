@@ -8,9 +8,7 @@ extends RefCounted
 ## Body types (character.glb / character_b.glb): the same clothes, hair and
 ## kit on either; each has its own faces. Neutral names, chosen freely.
 const BODIES := [["a", "Build A"], ["b", "Build B"]]
-## Build B's garment fit isn't validated yet (tops rode over the face; see
-## the body-types commits): kept, not offered. Saves that chose it get A.
-const BODY_B_ENABLED := false
+const BODY_B_ENABLED := true
 const FACES := [["hero_ade", "Ade"], ["hero_kai", "Kai"], ["hero_malik", "Malik"], ["hero_ren", "Ren"], ["hero_theo", "Theo"]]
 const FACES_B := [["hero_rio", "Rio"], ["hero_sam", "Sam"], ["hero_noa", "Noa"], ["hero_remy", "Remy"], ["hero_jules", "Jules"]]
 
@@ -46,7 +44,7 @@ static func current(flags: Dictionary) -> Dictionary:
 		for k in saved:
 			if d.has(k):
 				d[k] = String(saved[k])
-	if not BODY_B_ENABLED:
+	if String(d["body"]) not in ["a", "b"]:
 		d["body"] = "a"
 	# (a face belongs to a body type: switching body takes that body's first face)
 	var fl := faces_for(String(d["body"]))

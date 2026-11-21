@@ -17,7 +17,7 @@ void fragment() {
 	// Edge-on fade so the column has soft sides instead of a hard outline.
 	float rim = abs(dot(normalize(NORMAL), normalize(VIEW)));
 	float side = smoothstep(0.0, 0.65, rim);
-	float band = smoothstep(0.035, 0.0, abs(fract(h * 3.0 - TIME * 0.22) - 0.5) - 0.44);
+	float band = (1.0 - smoothstep(0.0, 0.035, abs(fract(h * 3.0 - TIME * 0.22) - 0.5) - 0.44));
 	float pulse = 0.82 + 0.18 * sin(TIME * pulse_rate * 6.2832);
 	// Distance boost: far beacons stay legible against the skyline.
 	float d = length(VERTEX);

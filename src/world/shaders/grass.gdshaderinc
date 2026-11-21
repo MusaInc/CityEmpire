@@ -1,8 +1,9 @@
-// Shared lawn/verge shading (ground.gdshader, island_ground.gdshader).
-// p = world xz in metres, c = the surface's base green (linear), near = 1 up
-// close → 0 far (fine detail fades so it never shimmers), aa = pixel size in
-// metres. Broad lush ↔ dry drift, clover and straw patches, streaky blades
-// and the odd daisy/buttercup up close.
+// Grass used on the city parks, coastal landforms and airfields. Base colour
+// and slow variation are visible at distance. Mipmapped botanical detail
+// resolves on foot and along the road, with no per-blade geometry.
+global uniform sampler2D grass_lawn : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+global uniform sampler2D grass_coast : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+global uniform sampler2D grass_verge : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 
 float gr_hash(vec2 p) {
 	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -17,35 +18,35 @@ float gr_noise(vec2 p) {
 	return mix(mix(gr_hash(i), gr_hash(i + vec2(1.0, 0.0)), f.x), mix(gr_hash(i + vec2(0.0, 1.0)), gr_hash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
-vec3 grass_shade(vec3 c, vec2 p, float near, float aa) {
-	float lum = dot(c, vec3(0.3, 0.55, 0.15));
-	vec3 lush = c * vec3(0.82, 1.0, 0.78);
-	vec3 dry = vec3(lum * 1.25, lum * 1.12, lum * 0.55);
-	// Broad drift (tens of metres): wetter hollows and drier rises.
-	float broad = gr_noise(p / 38.0) * 0.65 + gr_noise(p / 13.0) * 0.35;
-	vec3 g = mix(lush, mix(c, dry, 0.35), smoothstep(0.35, 0.8, broad));
-	// Straw patches where it's thin and sun-baked.
-	float straw = smoothstep(0.66, 0.8, gr_noise(p / 9.0 + 31.0));
-	g = mix(g, dry * vec3(1.05, 0.98, 0.9), straw * 0.55);
-	// Clover / moss: darker, bluer green clumps.
-	float clover = smoothstep(0.62, 0.75, gr_noise(p / 2.6 + 7.0));
-	g = mix(g, c * vec3(0.62, 0.78, 0.66), clover * 0.5);
-	// Mid tuft variation (≈ 0.7 m), always on, gentle.
-	g *= 0.9 + 0.2 * gr_noise(p * 1.4);
-	// Blades up close: short streaks (stretched cells, a little skewed),
-	// faded out as soon as a cell gets near pixel size.
-	float bl = smoothstep(0.08, 0.02, aa) * near;
-	if (bl > 0.0) {
-		vec2 q = vec2(p.x * 9.0 + p.y * 2.0, p.y * 3.0 - p.x * 0.6);
-		float b1 = gr_hash(floor(q));
-		float b2 = gr_hash(floor(q * vec2(1.7, 1.3) + 5.0));
-		g *= mix(1.0, 0.78 + 0.34 * b1 * b2 + 0.12 * b1, bl);
-		// Flowers: a few white daisies / yellow buttercups per square metre.
-		vec2 fc = floor(p * 4.0);
-		float fh = gr_hash(fc + 91.0);
-		vec2 fo = fract(p * 4.0) - 0.5 - (vec2(gr_hash(fc + 3.0), gr_hash(fc + 9.0)) - 0.5) * 0.5;
-		float dot_ = (1.0 - smoothstep(0.07, 0.12, length(fo))) * step(0.985, fh) * (1.0 - straw);
-		g = mix(g, fh > 0.993 ? vec3(0.9, 0.78, 0.15) : vec3(0.88, 0.88, 0.84), dot_ * bl);
+// terrain: 0 park, 0..1 airport transition, 2 coastal fescue.
+vec3 grass_shade(vec3 base, vec2 p, float closeup, float metres_per_pixel, float terrain) {
+	float broad = gr_noise(p / 38.0) * 0.66 + gr_noise(p / 13.0) * 0.34;
+	float patch = gr_noise(p * 0.58 + vec2(7.1, 4.2));
+	float dry = clamp(terrain * 0.48 + smoothstep(0.44, 0.84, broad) * 0.64, 0.0, 1.0);
+	vec3 g = base * mix(vec3(0.90, 1.0, 0.84), vec3(1.16, 0.98, 0.67), dry);
+	g *= 0.86 + 0.28 * patch;
+
+	float detail = closeup * (1.0 - smoothstep(0.027, 0.115, metres_per_pixel));
+	vec2 du = dFdx(p / 1.6);
+	vec2 dv = dFdy(p / 1.6);
+	if (detail > 0.005) {
+		vec2 uv = p / 1.6;
+		vec3 sample_rgb;
+		if (terrain > 1.5) {
+			sample_rgb = textureGrad(grass_coast, uv, du, dv).rgb / vec3(0.155, 0.164, 0.043);
+		} else {
+			float verge = clamp(terrain + smoothstep(0.52, 0.78, broad) * 0.31, 0.0, 1.0);
+			if (verge >= 0.995) {
+				sample_rgb = textureGrad(grass_verge, uv, du, dv).rgb / vec3(0.147, 0.153, 0.040);
+			} else {
+				sample_rgb = textureGrad(grass_lawn, uv, du, dv).rgb / vec3(0.078, 0.142, 0.012);
+				if (verge > 0.005) {
+					vec3 parched = textureGrad(grass_verge, uv, du, dv).rgb / vec3(0.147, 0.153, 0.040);
+					sample_rgb = mix(sample_rgb, parched, verge);
+				}
+			}
+		}
+		g *= mix(vec3(1.0), clamp(sample_rgb, vec3(0.38), vec3(1.85)), detail * 0.78);
 	}
 	return g;
 }

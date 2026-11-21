@@ -13,7 +13,10 @@ render_mode diffuse_burley;
 global uniform float wetness;
 global uniform float night;
 uniform sampler2D asph_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
+uniform sampler2D pave_tex : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool pbr_on = false;
+uniform bool skyport_grass = false;
+uniform vec3 airfield_edge = vec3(1.0, 0.0, 0.0);
 #include "res://src/world/shaders/pbr_detail.gdshaderinc"
 uniform float strip_w = 20.0;   // (per-strip half widths come in UV2.x)
 
@@ -50,7 +53,7 @@ vec3 shore_look(vec3 c, vec2 p, float y, float fp, float near, float tone, vec3 
 		wet *= 1.0 - under;
 		float rip = sin(p.x * 1.7 + p.y * 1.1 + vnoise(p * 0.3) * 4.0) * 0.5 + 0.5;
 		albedo = c * (0.9 + 0.12 * vnoise(p * 2.3) * near + 0.05 * rip * near);
-		albedo *= 1.0 - 0.12 * smoothstep(0.02, 0.0, abs(y - 0.45));   // tide line
+		albedo *= 1.0 - 0.12 * (1.0 - smoothstep(0.0, 0.02, abs(y - 0.45)));   // tide line
 		// Wrack line: a broken band of dried weed and shells above the tide.
 		float wrack = band(y - 1.25 - 0.25 * vnoise(p * 0.07), 0.12, 0.08) * smoothstep(0.35, 0.6, vnoise(p * 0.9 + 4.0));
 		albedo = mix(albedo, vec3(0.2, 0.17, 0.11), wrack * 0.55 * near);
@@ -63,7 +66,7 @@ vec3 shore_look(vec3 c, vec2 p, float y, float fp, float near, float tone, vec3 
 		float rag = vnoise(p * 0.11) * 0.9 + vnoise(p * 0.5) * 0.35 * near;
 		float topk = smoothstep(3.3, 4.35, y + rag - 0.45);
 		if (topk > 0.0) {
-			vec3 turf = grass_shade(pow(vec3(0.33, 0.47, 0.26), vec3(2.2)), p, near, fp * 0.5);
+			vec3 turf = grass_shade(pow(vec3(0.33, 0.47, 0.26), vec3(2.2)), p, near, fp * 0.5, 2.0);
 			vec3 marram = mix(turf, vec3(0.42, 0.42, 0.24), 0.55) * (0.85 + 0.3 * vnoise(p * 1.3));
 			float tuft = smoothstep(0.42, 0.5, vnoise(p * 0.8 + 3.0) + topk * 0.25);
 			albedo = mix(albedo, mix(albedo * 0.96, marram, tuft), smoothstep(0.0, 0.6, topk));
@@ -88,7 +91,7 @@ vec3 shore_look(vec3 c, vec2 p, float y, float fp, float near, float tone, vec3 
 			float streak = smoothstep(0.55, 0.85, vnoise(vec2(s * 1.7, wp.y * 0.08))) * smoothstep(-0.5, 3.0, y);
 			albedo = mix(albedo, albedo * vec3(0.75, 0.62, 0.5), streak * 0.5);
 			albedo = mix(albedo, albedo * 1.25 + 0.04, band(y - 1.3, 0.35, 0.3) * 0.5);   // salt bloom
-			albedo = mix(albedo, vec3(0.05, 0.08, 0.05), smoothstep(1.0, 0.2, y + 0.3 * vnoise(vec2(s * 0.8, 1.0))) * 0.8);
+			albedo = mix(albedo, vec3(0.05, 0.08, 0.05), (1.0 - smoothstep(0.2, 1.0, y + 0.3 * vnoise(vec2(s * 0.8, 1.0)))) * 0.8);
 			albedo = mix(albedo, vec3(0.62, 0.6, 0.56), smoothstep(4.35, 4.5, y));   // coping
 		} else {
 			albedo = mix(albedo, vec3(0.14, 0.17, 0.12), wet * 0.7);
@@ -129,8 +132,16 @@ void fragment() {
 		albedo = mix(albedo, c * vec3(0.62, 0.62, 0.64), granite * 0.8);
 		albedo *= 1.0 - 0.1 * smoothstep(0.6, 0.85, vnoise(p * 0.12 + 5.0));
 		albedo *= 1.0 - 0.08 * smoothstep(0.7, 0.9, vnoise(p * 0.7 + 11.0)) * near;
+		if (pbr_on) {
+			float kd = pbr_fade(v_dist);
+			vec4 detail = texture(pave_tex, p / 2.5);
+			albedo *= mix(1.0, 2.0 * detail.r, kd * 0.48);
+			rough = mix(0.83, detail.a, 0.45 * kd);
+			pbr_n = pbr_flat_normal(detail, normalize(v_wn), 0.65 * kd);
+		}
 	} else if (v_kind == 1.0) {
-		albedo = grass_shade(c, p, near, (fwidth(p.x) + fwidth(p.y)) * 0.5);
+		float terrain = skyport_grass ? smoothstep(-28.0, 82.0, dot(airfield_edge.xy, p) + airfield_edge.z) : 2.0;
+		albedo = grass_shade(c, p, near, (fwidth(p.x) + fwidth(p.y)) * 0.5, terrain);
 		rough = 0.97;
 		if (hw < -0.5) {
 			// Landform tops near a beach (Landforms: UV2.x = -(metres to the

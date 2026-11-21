@@ -356,6 +356,9 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			region = "skin"  # per-face baked albedo (lips, scalp and brow shading are in the texture)
 			reference = source.albedo_color
 		if source.resource_name.begins_with("hero_hair_") and source.resource_name != "hero_hair_tie":
+			material.set_shader_parameter("hair_fibres", 0.42)
+			material.set_shader_parameter("normal_strength", 0.72 if mapped else 0.0)
+			material.set_shader_parameter("rim_strength", 0.21)
 			region = "hair"  # per-style strand textures (build_character.hair_material)
 			reference = source.albedo_color
 		match source.resource_name:
@@ -503,6 +506,9 @@ func _show_variants() -> void:
 			mi.visible = not (look_state.get("bare_hands", false) and is_instance_valid(_hand_mesh))
 		elif n == "Skin_Hands":
 			mi.visible = look_state.get("bare_hands", false)
+		elif n == "Courier_Waistband":
+			# Belt loops have no visible surface under a top worn over the waist.
+			mi.visible = cut not in ["tee", "polo", "jumper", "hoodie", "blazer"]
 		elif n.begins_with("Cargo_gusset"):
 			mi.visible = look_state.get("trousers", "cargo") == "cargo"
 		elif n.begins_with("Skin_Arms_"):
@@ -1641,8 +1647,8 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	# Forward bend (+ = forward; torso bones tilt back on +X): runners lean a
 	# little from the hips on top of the ankle lean; pulling away the weight
 	# goes forward, braking it sits back; landing folds.
-	var lean := (0.03 * walk + 0.24 * run + 0.12 * spr) * amp + push * 0.5 + _land_squash * 0.45 - brake * 0.4
-	var sh_yaw := (0.1 + 0.08 * run) * amp
+	var lean := (0.025 * walk + 0.18 * run + 0.10 * spr) * amp + push * 0.5 + _land_squash * 0.45 - brake * 0.4
+	var sh_yaw := (0.075 + 0.055 * run) * amp
 	q["spine"] = _rx(-lean * 0.55) * _ry(lf * hip_yaw * 0.6) * _rz(-list * 0.8)
 	q["chest"] = _rx(-lean * 0.45 + 0.03 * walk) * _ry(lf * (hip_yaw * 0.4 + sh_yaw)) \
 		* _rz(-list * 0.4 + lf * 0.03 * run * amp)
@@ -1656,7 +1662,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	# softly bent (it flexes a little as the arm comes forward). Running: the
 	# elbow holds ~80–90°, opening on the back swing and closing coming
 	# through, the hand travelling hip → chest toward the midline.
-	var a_amp := (lerpf(0.3, 0.55, run) + 0.3 * spr) * amp
+	var a_amp := (lerpf(0.25, 0.49, run) + 0.24 * spr) * amp
 	var a_base := lerpf(0.02, -0.1, run) * amp
 	for sd in ["l", "r"]:
 		var sdg := 1.0 if sd == "r" else -1.0
@@ -1664,7 +1670,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		var arm := a_base + fwd * a_amp
 		var fwd_n := maxf(fwd, 0.0)
 		var back_n := maxf(-fwd, 0.0)
-		var abd := (0.2 + 0.08 * run - 0.06 * run * fwd_n) * sdg  # loose: arms swing clear of the body
+		var abd := (0.13 + 0.07 * run - 0.04 * run * fwd_n) * sdg  # loose: arms swing clear of the body
 		q["upper_arm_" + sd] = _rx(arm) * _rz(abd) * _ry(-0.18 * sdg)
 		var elbow_w := 0.2 + 0.2 * fwd_n * amp
 		var elbow_r := 1.15 + 0.12 * spr + 0.25 * fwd_n - 0.3 * back_n

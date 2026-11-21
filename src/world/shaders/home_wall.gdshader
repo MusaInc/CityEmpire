@@ -71,7 +71,7 @@ void fragment() {
 		float n2 = vnoise(q * vec2(4.5, 2.0) - seed * 1.7);
 		float field = smoothstep(0.35, 0.65, n1 + (q.y - 0.5) * 0.6);
 		c = mix(a, b, field);
-		float band = smoothstep(0.02, 0.0, abs(n2 - 0.5) - 0.06);
+		float band = (1.0 - smoothstep(0.0, 0.02, abs(n2 - 0.5) - 0.06));
 		c = mix(c, d, band * 0.85);
 		float stroke = sin(q.x * 90.0 + vnoise(q * 8.0) * 6.0) * 0.03;
 		c *= 0.92 + stroke + vnoise(q * 40.0) * 0.06;

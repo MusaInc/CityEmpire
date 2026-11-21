@@ -12,10 +12,7 @@ extends Control
 ##      slide down a bit= lift off (coast, engine braking)
 ##      slide down more = brake, harder the further you pull (held at a
 ##                        standstill = reverse, as with the brake pedal)
-##      slide sideways  = drift: only above DRIFT_SPEED, the rear wheels are
-##                        unlocked again once the car is sliding (a
-##                        controlled slide, not a spin); with the left thumb
-##                        free it steers too
+##    DRIFT is a separate handbrake button for cars.
 ##      let go          = coast (the car's engine braking slows it)
 ##    A small tick (haptic) marks each zone change. A small round button
 ##    above the pad is the contextual action (OUT when slow enough, or what
@@ -39,16 +36,14 @@ const PAD_R := 112.0
 const LIFT_PX := 18.0        # below the landing point: lift off
 const BRAKE_PX := 38.0       # further down: brake, progressive to PAD_R
 const KICK_PX := 56.0        # up this far: full throttle + kickdown
-const DRIFT_PX := 74.0       # sideways this far (deliberate)
 const HOLD_THROTTLE := 0.68
 const DRIFT_SPEED := 9.0     # m/s (~20 mph): no handbrake turns while parking
 var _pad_id := -1
 var _pad_o := Vector2.ZERO
 var _pad_p := Vector2.ZERO
 var _pad_zone := ""
-var _drifting := false
 ## What the pad is doing now (drawn, and read by tests).
-var pad := {"gas": 0.0, "brake": 0.0, "kick": false, "drift": false, "steer": 0.0, "zone": ""}
+var pad := {"gas": 0.0, "brake": 0.0, "kick": false, "zone": ""}
 
 
 func _ready() -> void:
@@ -87,14 +82,14 @@ func profile() -> Dictionary:
 	var k := String(v.get("kind")) if v is Craft else "car"
 	match k:
 		"heli":
-			return {"up": "CLIMB", "down": "DESCEND", "side": "TURN", "hold": "FLY", "idle": "HOVER"}
+			return {"up": "CLIMB", "down": "DESCEND", "hold": "FLY", "idle": "HOVER"}
 		"plane":
 			var air := String(v.get("state")) in ["air", "stall"]
 			return {"up": "CLIMB" if air else "TAKE OFF", "down": "DESCEND" if air else "BRAKE", "side": "BANK" if air else "STEER",
 				"hold": "CRUISE" if air else "TAXI", "idle": "LEVEL" if air else "IDLE"}
 		"boat":
-			return {"up": "FULL AHEAD", "down": "ASTERN", "side": "RUDDER", "hold": "AHEAD", "idle": "DRIFT"}
-	return {"up": "KICKDOWN", "down": "BRAKE", "side": "DRIFT", "hold": "DRIVE", "idle": "DRIVE"}
+			return {"up": "FULL AHEAD", "down": "ASTERN", "hold": "AHEAD", "idle": "DRIFT"}
+	return {"up": "KICKDOWN", "down": "BRAKE", "hold": "DRIVE", "idle": "DRIVE"}
 
 
 func pad_home() -> Vector2:
@@ -109,9 +104,11 @@ func _buttons() -> Dictionary:
 	var k := ui_k()
 	var out := {}
 	if _driving():
-		# Only when there is something to do (OUT needs the car slow).
+		var h := pad_home()
+		if _car() is Car:
+			out["drift"] = Rect2(h + Vector2(-PAD_R - 110.0, -42.0) * k, Vector2(80, 80) * k)
+		# OUT needs the car to be slow.
 		if action_text != "":
-			var h := pad_home()
 			out["action"] = Rect2(h + Vector2(-PAD_R - 40.0, -PAD_R - 70.0) * k, Vector2(92, 92) * k)
 	else:
 		out["action"] = Rect2(s.x - 200 * k, s.y - 220 * k, 160 * k, 160 * k)
@@ -143,7 +140,6 @@ func _input(event: InputEvent) -> void:
 				_pad_o = t.position
 				_pad_p = t.position
 				_pad_zone = ""
-				_drifting = false
 				_apply_pad()
 			elif _look_id < 0:
 				_look_id = t.index
@@ -195,53 +191,32 @@ func _press(k: String, on: bool) -> void:
 
 
 func _apply_stick() -> void:
-	var v := _stick_v
-	for a in ["move_left", "move_right", "move_forward", "move_back", "steer_left", "steer_right"]:
-		Input.action_release(a)
-	if v.length() < 0.08:
-		_steer_from_pad()
+	var v := _stick_v if _stick_v.length() >= 0.08 else Vector2.ZERO
+	for action in ["move_left", "move_right", "move_forward", "move_back"]:
+		Input.action_release(action)
+	var driving := _driving()
+	if ui.game and ui.game.drive_input:
+		ui.game.drive_input.touch_steer = v.x if driving else 0.0
+	if driving or v.is_zero_approx():
 		return
-	if v.x < 0.0:
-		Input.action_press("move_left", -v.x)
-		Input.action_press("steer_left", -v.x)
-	else:
-		Input.action_press("move_right", v.x)
-		Input.action_press("steer_right", v.x)
-	if _driving():
-		return  # (driving: the stick only steers; the pad drives)
-	if v.y < 0.0:
-		Input.action_press("move_forward", -v.y)
-	else:
-		Input.action_press("move_back", v.y)
+	Input.action_press("move_left" if v.x < 0.0 else "move_right", absf(v.x))
+	Input.action_press("move_forward" if v.y < 0.0 else "move_back", absf(v.y))
 
 
-## Pad offset -> drive controls. Axes are independent, so diagonals combine
-## (up + sideways = a powered slide; down + sideways = trail-braking turn).
-static func read_pad(o: Vector2, k: float, speed: float, was_drifting: bool) -> Dictionary:
-	var out := {"gas": 0.0, "brake": 0.0, "kick": false, "drift": false, "steer": 0.0, "zone": "G"}
+## Vertical travel on the right pad controls power and braking.
+static func read_pad(o: Vector2, k: float) -> Dictionary:
+	var out := {"gas": 0.0, "brake": 0.0, "kick": false, "zone": "G"}
 	if o.y > BRAKE_PX * k:
-		# Brake builds with the pull (eased: the first part of the travel
-		# scrubs speed gently for traffic and parking, a full pull stops hard).
 		var bt := clampf((o.y - BRAKE_PX * k) / ((PAD_R - BRAKE_PX) * k), 0.0, 1.0)
 		out["brake"] = 0.08 + 0.92 * pow(bt, 1.5)
 		out["zone"] = "B"
 	elif o.y > LIFT_PX * k:
-		out["zone"] = "C"   # coast
+		out["zone"] = "C"
 	else:
 		var up := clampf(-o.y / (KICK_PX * k), 0.0, 1.0)
 		out["gas"] = lerpf(HOLD_THROTTLE, 1.0, up)
 		out["kick"] = -o.y >= KICK_PX * k
 		out["zone"] = "K" if out["kick"] else "G"
-	var side := absf(o.x)
-	# Hysteresis: a slide that has started holds until the thumb comes
-	# well back in (or the car slows to a crawl); none below DRIFT_SPEED.
-	var want := side > DRIFT_PX * k and speed > DRIFT_SPEED
-	if was_drifting:
-		want = side > DRIFT_PX * k * 0.7 and speed > DRIFT_SPEED * 0.65
-	out["drift"] = want and float(out["brake"]) < 0.6
-	if out["drift"]:
-		out["zone"] += "D"
-	out["steer"] = clampf(o.x / (PAD_R * k), -1.0, 1.0) if side > 8.0 * k else 0.0
 	return out
 
 
@@ -251,14 +226,10 @@ func _apply_pad() -> void:
 		return
 	var car = _car()
 	if _pad_id < 0 or car == null:
-		pad = {"gas": 0.0, "brake": 0.0, "kick": false, "drift": false, "steer": 0.0, "zone": ""}
-		_drifting = false
+		pad = {"gas": 0.0, "brake": 0.0, "kick": false, "zone": ""}
 		_pad_zone = ""
 	else:
-		pad = read_pad(_pad_p - _pad_o, ui_k(), absf(float(car.get("forward_speed"))), _drifting if car is Car else false)
-		if not car is Car:
-			pad["drift"] = false   # (craft steer with the sideways slide, no handbrake)
-		_drifting = pad["drift"]
+		pad = read_pad(_pad_p - _pad_o, ui_k())
 		if String(pad["zone"]) != _pad_zone:
 			if _pad_zone != "":
 				Settings.haptic(12, 0.35)
@@ -267,29 +238,14 @@ func _apply_pad() -> void:
 	di.touch_gas = pad["gas"]
 	di.touch_brake = pad["brake"]
 	di.touch_kickdown = pad["kick"]
-	_steer_from_pad()
-
-
-## Sideways on the pad steers when the left thumb is free.
-func _steer_from_pad() -> void:
-	var di: DriveInput = ui.game.drive_input if ui.game else null
-	if di == null:
-		return
-	di.touch_steer = float(pad["steer"]) if _stick_id < 0 else 0.0
 
 
 func _physics_process(_dt: float) -> void:
-	# The handbrake for a pad drift is applied only while the slide builds:
-	# once the rear has stepped out (~20°) it is let go so the car holds a
-	# controllable angle on steering and throttle instead of spinning.
 	var di: DriveInput = ui.game.drive_input if ui != null and ui.game else null
 	if di == null:
 		return
-	var car = _car()
-	if car is Car and pad["drift"]:
-		di.touch_handbrake = absf((car as Car).drift_angle) < deg_to_rad(20.0)
-	else:
-		di.touch_handbrake = false
+	var car := _car() as Car
+	di.touch_handbrake = car != null and absf(car.forward_speed) > DRIFT_SPEED and _held.values().has("drift")
 
 
 func release_all() -> void:
@@ -312,9 +268,8 @@ func _process(_dt: float) -> void:
 	if blocked and (_stick_id >= 0 or _look_id >= 0 or _pad_id >= 0 or not _held.is_empty()):
 		release_all()
 	# Getting out with a thumb still on the pad: drop it.
-	if _pad_id >= 0 and not _driving():
-		_pad_id = -1
-		_apply_pad()
+	if not _driving() and (_pad_id >= 0 or _held.values().has("drift")):
+		release_all()
 	if visible:
 		queue_redraw()
 
@@ -387,11 +342,8 @@ func _draw_pad(f: Font, k: float) -> void:
 	var a := 1.0 if live else 0.6
 	draw_circle(c, r, Color(EmpireStyle.INK, 0.28 * a))
 	draw_arc(c, r, 0, TAU, 56, Color(1, 1, 1, 0.3 * a), 1.5, true)
-	# Zones: throttle up, brake down, drift either side; the coast band is
-	# the thin gap just below the middle.
-	var zones := [[-PI * 0.5, EmpireStyle.GREEN, bool(pad["kick"])], [PI * 0.5, EmpireStyle.RED, float(pad["brake"]) > 0.0],
-		[0.0, EmpireStyle.AMBER, bool(pad["drift"]) and float(pad["steer"]) > 0.0],
-		[PI, EmpireStyle.AMBER, bool(pad["drift"]) and float(pad["steer"]) <= 0.0]]
+	var zones := [[-PI * 0.5, EmpireStyle.GREEN, bool(pad["kick"])],
+		[PI * 0.5, EmpireStyle.RED, float(pad["brake"]) > 0.0]]
 	for z in zones:
 		var on: bool = z[2]
 		draw_arc(c, r + 4.0, float(z[0]) - 0.5, float(z[0]) + 0.5, 16, Color(z[1] as Color, 0.95 if on else 0.38 * a), 6.0 if on else 3.0, true)
@@ -401,15 +353,13 @@ func _draw_pad(f: Font, k: float) -> void:
 	var rev := car is Car and float(pad["brake"]) > 0.5 and float(car.get("forward_speed")) < 1.5
 	_label(f, c + Vector2(0, -r - 12 * k), String(prof["up"]), fs, Color(1, 1, 1, 0.65 * a))
 	_label(f, c + Vector2(0, r + 22 * k), "REVERSE" if rev else String(prof["down"]), fs, Color(1, 1, 1, 0.65 * a))
-	_label(f, c + Vector2(-r - 30 * k, 4), String(prof["side"]), fs, Color(1, 1, 1, 0.5 * a))
-	_label(f, c + Vector2(r + 30 * k, 4), String(prof["side"]), fs, Color(1, 1, 1, 0.5 * a))
 	# Brake depth as a fill down the lower arc.
 	if float(pad["brake"]) > 0.0:
 		var bd := float(pad["brake"])
 		draw_arc(c, r - 7.0, PI * 0.5 - bd * 0.9, PI * 0.5 + bd * 0.9, 24, Color(EmpireStyle.RED, 0.7), 5.0, true)
 	var knob := c
 	if live:
-		knob = c + (_pad_p - _pad_o).limit_length(r)
+		knob.y += clampf(_pad_p.y - _pad_o.y, -r, r)
 	var kr := 44.0 * k
 	var z := String(pad["zone"])
 	var kc := Color(1, 1, 1, 0.14)
@@ -427,8 +377,6 @@ func _draw_pad(f: Font, k: float) -> void:
 		else:
 			kc = EmpireStyle.AMBER
 			txt = String(prof["hold"])
-		if pad["drift"]:
-			txt = "DRIFT"
 		kc = Color(kc, 0.88)
 	draw_circle(knob, kr, kc)
 	draw_arc(knob, kr, 0, TAU, 40, Color(1, 1, 1, 0.0 if live else 0.4), 1.5, true)

@@ -185,6 +185,7 @@ func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, 
 	var c := Car.new()
 	c.name = "Wreck"
 	c.setup(spec, "civilian")
+	c.reverse_enabled = false
 	game.add_child(c)
 	c.global_transform = Transform3D(xf.basis.orthonormalized(), xf.origin + Vector3.UP * 0.05)
 	c.linear_velocity = vel

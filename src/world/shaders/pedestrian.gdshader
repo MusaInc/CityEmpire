@@ -72,7 +72,7 @@ void vertex() {
 	// Standing people shift their weight and glance about now and then.
 	float idle_look = (1.0 - walking) * sin(TIME * 0.4 + seed * 40.0) * 0.5 * step(0.4, sin(TIME * 0.13 + seed * 9.0));
 	float a = atan(rel.x, -rel.z);
-	person_pose(v, n, limb, ph, walking, 0.0, idle_look + (limb == 5 ? a * k * 0.6 : 0.0));
+	person_pose_w(v, n, limb, UV2.x, 1.0 - UV2.y, ph, walking, 0.0, idle_look + (limb == 5 ? a * k * 0.6 : 0.0));
 	if (k > 0.001) {
 		// Turn towards the hero, and step aside.
 		float turn = a * k * 0.35;
@@ -88,7 +88,7 @@ void vertex() {
 	vec4 clip = PROJECTION_MATRIX * VIEW_MATRIX * vec4(wp + vec3(0.0, 1.0, 0.0), 1.0);
 	float onscreen = (clip.w > 0.0 && abs(clip.x / clip.w) < 1.2 && abs(clip.y / clip.w) < 1.2) ? 1.0 : 0.0;
 	float far_k = smoothstep(110.0, 140.0, length(CAMERA_POSITION_WORLD - wp));
-	float endk = smoothstep(0.0, 1.5, d) * smoothstep(len, len - 1.5, d);
+	float endk = smoothstep(0.0, 1.5, d) * (1.0 - smoothstep(len - 1.5, len, d));
 	float s = walking > 0.5 ? mix(1.0, endk, max(1.0 - onscreen, far_k)) : 1.0;
 	// Near the hero the CPU crowd (City Empire's Crowd) takes over the
 	// pavements: these walkers only carry the streets beyond it.

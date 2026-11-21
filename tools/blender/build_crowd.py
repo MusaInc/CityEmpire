@@ -2,8 +2,7 @@
 
 Run:  blender -b --factory-startup --python tools/blender/build_crowd.py -- assets/models [preview.png]
 
-Imports assets/models/character.glb (the skinned hero: 5 faces, 8 hair
-styles, 4 tops, cargo trousers, trainers, gloves), and for each outfit in
+Imports both skinned hero builds, including fitted hair and clothes. For each outfit in
 VARIANTS: poses the arms down from the bind A-pose and the legs together,
 bakes the pose, joins the pieces, decimates to ~TARGET triangles and exports
 an unskinned mesh `person_<n>` into crowd.glb, one material ("person").
@@ -30,11 +29,13 @@ OUT = ARGS[0] if ARGS else "assets/models"
 PREVIEW = ARGS[1] if len(ARGS) > 1 else ""
 TARGET = int(os.environ.get("CROWD_TARGET", "3200"))   # CROWD_TARGET=900 CROWD_OUT=crowd_far.glb: the far walkers
 
-# face, hair, top cut
-VARIANTS = [
-    ("ade", "crop", "long"), ("kai", "ponytail", "short"), ("malik", "fade", "tq"), ("ren", "bun", "vest"),
-    ("theo", "curls", "long"), ("ade", "pixie", "short"), ("kai", "buzz", "tq"), ("malik", "bob", "long"),
-]
+# Alternate builds while keeping the eight existing runtime slots.
+VARIANTS = {
+    "a": [(0, "ade", "crop", "long"), (2, "malik", "fade", "tq"),
+          (4, "theo", "curls", "long"), (6, "kai", "buzz", "tq")],
+    "b": [(1, "rio", "ponytail", "short"), (3, "sam", "bun", "tq"),
+          (5, "noa", "pixie", "short"), (7, "jules", "bob", "long")],
+}
 
 PART = {"hero_skin": 1, "hero_skin_body": 1, "hero_glove": 1, "hero_lips": 9, "hero_sclera": 8, "hero_iris": 5,
         "hero_pupil": 5, "hero_lash": 5, "hero_brow": 5, "hero_cargo": 2, "hero_cargo_pocket": 2, "hero_liner": 0,
@@ -48,14 +49,18 @@ LOWER = {"b_shin_l", "b_foot_l", "b_shin_r", "b_foot_r", "b_forearm_l", "b_hand_
 def part_of(mat_name):
     if mat_name.startswith("hero_hair_tie"):
         return 6
-    return PART.get(mat_name, 4)
+    if mat_name.startswith("hero_hair"):
+        return 3
+    if mat_name.startswith("hero_skin_face"):
+        return 1
+    return PART.get(mat_name.split(".")[0], 4)
 
 
-def load():
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    bpy.ops.import_scene.gltf(filepath=os.path.join(OUT, "character.glb"))
-    arm = next(o for o in bpy.context.scene.objects if o.type == "ARMATURE")
-    return arm
+def load(model):
+    imported = set(bpy.context.scene.objects)
+    bpy.ops.import_scene.gltf(filepath=os.path.join(OUT, model))
+    objects = set(bpy.context.scene.objects) - imported
+    return next(o for o in objects if o.type == "ARMATURE"), objects
 
 
 def rotate_bone(arm, name, axis, deg):
@@ -161,13 +166,14 @@ def build(arm, v, face, hair, cut):
 
 
 def main():
-    arm = load()
-    pose(arm)
-    people = [build(arm, i, *spec) for i, spec in enumerate(VARIANTS)]
-    # Drop everything else (the hero, the rig) and export the people.
-    for o in list(bpy.context.scene.objects):
-        if o not in people:
-            bpy.data.objects.remove(o, do_unlink=True)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    people = []
+    for body, variants in VARIANTS.items():
+        arm, objects = load("character.glb" if body == "a" else "character_b.glb")
+        pose(arm)
+        people.extend(build(arm, *spec) for spec in variants)
+        for obj in objects:
+            bpy.data.objects.remove(obj, do_unlink=True)
     for i, p in enumerate(people):
         p.location = (0, 0, 0)
     bpy.ops.object.select_all(action="DESELECT")

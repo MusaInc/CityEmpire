@@ -10,8 +10,11 @@ float fr_h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453)
 
 vec3 city_reflection(vec3 r, vec3 wp, vec3 top, vec3 hor, vec3 sun, float nt) {
 	r = normalize(r);
-	float az = atan(r.z, r.x) / 6.2832 + (wp.x + wp.z) * 0.0011;
-	float y = r.y;
+	// Position slides the reflected skyline (a flat facade reflects one
+	// direction everywhere: without this a whole tower face mirrored one block
+	// as a flat slab, 2026-11-21) – along the face and up it.
+	float az = atan(r.z, r.x) / 6.2832 + (wp.x + wp.z) * 0.006;
+	float y = r.y + sin(wp.y * 0.05 + wp.x * 0.01) * 0.04;
 	// Sky.
 	vec3 sky = mix(hor, top, smoothstep(0.02, 0.55, y));
 	float sd = max(dot(r, normalize(sun)), 0.0);

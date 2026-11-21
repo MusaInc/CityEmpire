@@ -86,6 +86,17 @@ static func build_terminal(isl: SkyportIsland, target: Node3D, body: StaticBody3
 	for x: float in [2010.0, 2056.0, 2142.0, 2188.0, 2234.0]:
 		m.solid(x - 3.0, hall.position.y - 3.2, x + 3.0, hall.position.y, Y, Y + 3.6, Color(0.16, 0.2, 0.24))
 		m.solid(x - 3.3, hall.position.y - 3.5, x + 3.3, hall.position.y, Y + 3.6, Y + 4.3, Color(0.92, 0.92, 0.9))
+	# Low rails and seats run between the terminal entrances, leaving a
+	# clear step-free path from the existing drop-off lane to every door.
+	for x: float in [2033.0, 2083.0, 2117.0, 2165.0, 2210.0]:
+		m.solid(x - 2.4, 161.6, x + 2.4, 162.24, Y + 0.44, Y + 0.55, Color("777072"))
+		for dx: float in [-1.6, 1.6]:
+			m.solid(x + dx - 0.075, 161.67, x + dx + 0.075, 162.1, Y, Y + 0.44, Color("737c80"))
+		for dx: float in [-4.5, 4.5]:
+			m.solid(x + dx - 0.14, 159.3, x + dx + 0.14, 159.58, Y, Y + 1.05, Color("46565f"))
+	_terminal_sign(target, m, "SKYPORT AIRPORT", Vector3(2110.0, Y + 10.6, 167.1), 45.0, 2.75, PI)
+	_terminal_sign(target, m, "DEPARTURES", Vector3(2010.0, Y + 4.15, 164.36), 5.75, 0.72, PI)
+	_terminal_sign(target, m, "ARRIVALS", Vector3(2234.0, Y + 4.15, 164.36), 5.75, 0.72, PI)
 	# Airside: the gate lounge floor shows as a dark band behind the glass at
 	# the jet bridges' level (the bridges plug into it).
 	m.solid(hall.position.x, hall.end.y - 0.4, hall.end.x, hall.end.y + 0.2, Y + 4.2, Y + 4.6, Color(0.5, 0.52, 0.55))
@@ -99,8 +110,8 @@ static func build_terminal(isl: SkyportIsland, target: Node3D, body: StaticBody3
 	# Jet bridges: a fixed link out of the hall under the roof, the
 	# telescoping tunnel to a rotunda leg on wheels, and the cab at the
 	# aircraft's front door (parked noses sit at z ≈ 292).
-	for sx: float in STANDS_AT:
-		var x := sx - 4.2
+	for gate in STANDS_AT.size():
+		var x := float(STANDS_AT[gate]) - 4.2
 		var h0 := Y + 4.4
 		var p0 := Vector3(x, h0, hall.end.y)
 		var p1 := Vector3(x, h0, 252.0)
@@ -111,9 +122,26 @@ static func build_terminal(isl: SkyportIsland, target: Node3D, body: StaticBody3
 		m.beam(p2 + Vector3(0, 0.2, -2.0), Vector3(p2.x, Y, p2.z - 2.0), 0.9, 0.9, Color(0.5, 0.52, 0.55))  # drive leg
 		m.solid(p2.x - 1.6, p2.z - 3.0, p2.x + 1.6, p2.z - 1.0, Y, Y + 0.9, Color(0.2, 0.2, 0.22))           # bogie
 		m.solid(p2.x - 2.2, p2.z - 0.5, p2.x + 2.2, p2.z + 3.2, p2.y, p2.y + 3.4, Color(0.62, 0.64, 0.66))  # cab
+		_terminal_sign(target, m, "A%02d" % (gate + 1), p2 + Vector3(0, 2.25, 3.26), 2.8, 0.92, 0.0)
 		_col(body, p0 + Vector3(0, 1.6, 0), p1 + Vector3(0, 1.6, 0), 3.4, 3.2)
 		_col(body, p1 + Vector3(0, 1.6, 0), p2 + Vector3(0, 1.6, 0), 3.0, 3.0)
 	isl._mesh_into(m, "Terminal", target, 0.0, 1800.0)
+
+
+static func _terminal_sign(target: Node3D, mesh: BuildingMesher, message: String, at: Vector3, width: float, height: float, yaw: float) -> void:
+	mesh.solid(at.x - width * 0.5, at.z - 0.08, at.x + width * 0.5, at.z + 0.08,
+		at.y - height * 0.5, at.y + height * 0.5, Color("20333f"))
+	var text := Label3D.new()
+	text.text = message
+	text.font = preload("res://assets/fonts/brand/Oswald.ttf")
+	text.font_size = 144
+	text.outline_size = 0
+	text.modulate = Color("f3e9d6")
+	text.pixel_size = height * 0.76 / text.font_size
+	text.position = at + Vector3(0, 0, cos(yaw) * 0.10)
+	text.rotation.y = yaw
+	text.visibility_range_end = 480.0
+	target.add_child(text)
 
 
 ## Parked aircraft: airliners at the gates the scripted traffic leaves free,

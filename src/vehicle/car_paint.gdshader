@@ -60,7 +60,7 @@ void fragment() {
 	// Flakes: tiny sparkles in the base coat near the sun's reflection, faded
 	// out with distance (no shimmer far away).
 	float dist = length(VERTEX);
-	float fl = step(0.985, hash3(floor(v_p * 520.0))) * pow(sd, 40.0) * smoothstep(6.0, 2.5, dist);
+	float fl = step(0.985, hash3(floor(v_p * 520.0))) * pow(sd, 40.0) * (1.0 - smoothstep(2.5, 6.0, dist));
 	glint += fl * flake * metallic * 0.7;
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
 	// (2026-11-20: 0.75 at grazing + a 6x glint washed bodies out milky

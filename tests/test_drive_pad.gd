@@ -1,9 +1,5 @@
 extends RefCounted
-## The one-thumb drive pad (EmpireTouch.read_pad) on a real Car on flat
-## ground: hold drives, slide up = full throttle + kickdown (quicker, not a
-## boost past top speed), slide down = brake in proportion to the pull, let
-## go = believable coasting, sideways = a drift only at speed, and nothing
-## at parking speeds slides the car about.
+## Right-pad throttle and braking, with steering and handbrake provided separately.
 
 const K := 1.0   # phone scale
 
@@ -33,20 +29,17 @@ func _car(runner: SceneTree, model := "hatch") -> Car:
 	return c
 
 
-## Drives the car with a pad offset for `secs` (the drift handbrake rule as
-## EmpireTouch applies it). Returns [distance travelled, max |drift angle|].
-func _hold(runner: SceneTree, c: Car, o: Vector2, secs: float) -> Array:
+## Returns [distance travelled, max absolute tyre slip angle].
+func _hold(runner: SceneTree, c: Car, o: Vector2, secs: float, steer := 0.0, drift := false) -> Array:
 	var p0 := c.global_position
-	var drifting := false
 	var max_drift := 0.0
 	for i in int(secs * 60.0):
-		var pd := EmpireTouch.read_pad(o, K, absf(c.forward_speed), drifting)
-		drifting = pd["drift"]
+		var pd := EmpireTouch.read_pad(o, K)
 		c.throttle = pd["gas"]
 		c.brake = pd["brake"]
 		c.kickdown = pd["kick"]
-		c.steer = pd["steer"]
-		c.handbrake = bool(pd["drift"]) and absf(c.drift_angle) < deg_to_rad(20.0)
+		c.steer = steer
+		c.handbrake = drift
 		await runner.physics_frame
 		max_drift = maxf(max_drift, absf(c.drift_angle) if c.speed > 3.0 else 0.0)
 	return [Vector2(c.global_position.x - p0.x, c.global_position.z - p0.z).length(), max_drift]
@@ -60,22 +53,20 @@ func _launch(runner: SceneTree, c: Car, v: float) -> void:
 
 
 func test_pad_zones(t) -> void:
-	var hold := EmpireTouch.read_pad(Vector2.ZERO, K, 10.0, false)
+	var hold := EmpireTouch.read_pad(Vector2.ZERO, K)
 	t.near(float(hold["gas"]), EmpireTouch.HOLD_THROTTLE, 0.01, "hold = part throttle")
 	t.check(not hold["kick"] and float(hold["brake"]) == 0.0, "hold: no kickdown, no brake")
-	var up := EmpireTouch.read_pad(Vector2(0, -80), K, 10.0, false)
+	var up := EmpireTouch.read_pad(Vector2(0, -80), K)
 	t.check(float(up["gas"]) == 1.0 and up["kick"], "slide up = full throttle + kickdown")
-	var coast := EmpireTouch.read_pad(Vector2(0, 28), K, 10.0, false)
+	var coast := EmpireTouch.read_pad(Vector2(0, 28), K)
 	t.check(float(coast["gas"]) == 0.0 and float(coast["brake"]) == 0.0, "a little down = lift off (coast)")
-	var light := EmpireTouch.read_pad(Vector2(0, 50), K, 10.0, false)
-	var hard := EmpireTouch.read_pad(Vector2(0, 112), K, 10.0, false)
+	var light := EmpireTouch.read_pad(Vector2(0, 50), K)
+	var hard := EmpireTouch.read_pad(Vector2(0, 112), K)
 	t.check(float(light["brake"]) > 0.0 and float(light["brake"]) < 0.45, "a short pull brakes lightly (%.2f)" % light["brake"])
 	t.near(float(hard["brake"]), 1.0, 0.01, "a full pull brakes fully")
-	t.check(not EmpireTouch.read_pad(Vector2(100, 0), K, 5.0, false)["drift"], "no drift at parking speed")
-	t.check(not EmpireTouch.read_pad(Vector2(40, 0), K, 20.0, false)["drift"], "steering on the pad never drifts by accident")
-	t.check(EmpireTouch.read_pad(Vector2(100, 0), K, 20.0, false)["drift"], "a deliberate sideways slide drifts at speed")
-	t.check(EmpireTouch.read_pad(Vector2(60, 0), K, 20.0, true)["drift"], "a drift holds while the thumb stays out (hysteresis)")
-	t.check(not EmpireTouch.read_pad(Vector2(100, 112), K, 20.0, false)["drift"], "no drift while braking hard")
+	for x in [-112.0, -50.0, 50.0, 112.0]:
+		t.check(EmpireTouch.read_pad(Vector2(x, 0), K) == hold, "sideways motion on the throttle pad keeps the same input")
+		t.check(EmpireTouch.read_pad(Vector2(x, 112), K) == hard, "diagonal braking keeps the same input")
 	t.check(EmpireTouch.verb("PARK & GET OUT") == "OUT" and EmpireTouch.verb("TO LET · £26/day") == "VIEW", "action button verbs")
 
 
@@ -131,26 +122,19 @@ func test_brake_is_progressive_and_coast_is_gentle(t) -> void:
 	g.queue_free()
 
 
-func test_drift_only_at_speed_and_controlled(t) -> void:
+func test_steering_and_drift_are_independent(t) -> void:
 	var runner: SceneTree = t
 	var g := _ground(runner)
 	var c := _car(runner)
 	await runner.physics_frame
-	# Parking speed: full sideways on the pad just turns.
-	c.place(Transform3D(Basis.IDENTITY, Vector3(0, 0.6, 0)), Vector3(0, 0, -3.0))
-	var slow: Array = await _hold(runner, c, Vector2(110, 30), 2.0)
-	t.check(float(slow[1]) < deg_to_rad(8.0), "no slide at parking speed (%.1f°)" % rad_to_deg(slow[1]))
-	# At speed: a sideways slide with throttle steps the rear out and holds
-	# a controllable angle (no spin).
 	await _launch(runner, c, 19.0)
 	var yaw0 := c.global_basis.get_euler().y
-	var fast: Array = await _hold(runner, c, Vector2(100, -10), 1.6)
-	t.note("drift at 19 m/s: peak slip %.0f°" % rad_to_deg(fast[1]))
-	t.check(float(fast[1]) > deg_to_rad(12.0), "sideways at speed drifts")
-	t.check(float(fast[1]) < deg_to_rad(70.0), "the drift doesn't spin the car")
-	# Thumb back to the middle: it straightens up.
-	await _hold(runner, c, Vector2(0, 0), 2.0)
-	t.check(absf(c.drift_angle) < deg_to_rad(10.0), "centring the thumb catches the slide (%.0f°)" % rad_to_deg(absf(c.drift_angle)))
-	t.check(absf(wrapf(c.global_basis.get_euler().y - yaw0, -PI, PI)) > 0.3, "the drift turned the car")
+	await _hold(runner, c, Vector2(105, -10), 1.5)
+	t.near(c.global_basis.get_euler().y, yaw0, 0.025, "right thumb cannot rotate the car")
+	var grip: Array = await _hold(runner, c, Vector2.ZERO, 0.8, 0.7)
+	t.check(absf(wrapf(c.global_basis.get_euler().y - yaw0, -PI, PI)) > 0.12, "left control steers at speed")
+	await _launch(runner, c, 19.0)
+	var slide: Array = await _hold(runner, c, Vector2.ZERO, 0.8, 0.7, true)
+	t.check(float(slide[1]) > float(grip[1]) + deg_to_rad(5.0), "the handbrake initiates an independent slide")
 	c.queue_free()
 	g.queue_free()

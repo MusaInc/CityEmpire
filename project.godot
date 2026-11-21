@@ -5,11 +5,12 @@ config_version=5
 
 config/name="WORLDSTATE"
 config/description="Open-world business life sim: start as the worker, become the owner, build the empire, climb the City500. Musa Studios."
-config/version="0.9.0"
+config/version="0.10.0"
 run/main_scene="res://scenes/boot.tscn"
 config/features=PackedStringArray("4.5", "Mobile")
 config/icon="res://assets/icon_1024.png"
-boot_splash/bg_color=Color(0.059, 0.102, 0.133, 1)
+boot_splash/bg_color=Color(0.071, 0.106, 0.129, 1)
+boot_splash/image="res://assets/splash/launch.png"
 boot_splash/fullsize=true
 boot_splash/use_filter=true
 
@@ -100,4 +101,19 @@ rain={
 traffic_time={
 "type": "float",
 "value": 0.0
+}
+
+grass_lawn={
+"type": "sampler2D",
+"value": "res://assets/textures/pbr/grass_lawn.jpg"
+}
+
+grass_coast={
+"type": "sampler2D",
+"value": "res://assets/textures/pbr/grass_coast.jpg"
+}
+
+grass_verge={
+"type": "sampler2D",
+"value": "res://assets/textures/pbr/grass_verge.jpg"
 }

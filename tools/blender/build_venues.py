@@ -983,8 +983,85 @@ def v_hq(m):
     return parts, nodes, marks, {"size": [W, D, H]}
 
 
+
+def v_craft_sales(m, aviation):
+    W, D, H = (74.0, 42.0, 10.0) if aviation else (27.0, 46.0, 8.7)
+    dark = m["wall_dark"] if aviation else m["wall"]
+    floor = m["floor_stone"] if aviation else m["floor_oak"]
+    trim = m["brass"] if aviation else m["steel"]
+    ink = m["white"] if aviation else m["wall_dark"]
+    parts = shell(m, W, D, H, floor, dark)
+    glass_height = H - 1.65
+    parts += curtain_wall("front", -W/2, W/2, .10, glass_height, m, bay=3.2,
+                          door=(0, 4.8, 3.4), transom=3.5, mull=.13)
+    parts += [
+        B("fascia", (W+.55, .6, H-glass_height), (0, -.12, (H+glass_height)/2), dark),
+        B("entrance_canopy", (9, 3.1, .28), (0, -1.36, 3.85), m["black_steel"], .035),
+        B("entrance_lighting", (6, .09, .025), (0, -1.8, 3.70), m["led"]),
+        B("threshold", (4.8, .8, .035), (0, .14, .016), m["rubber"]),
+    ]
+    nodes = sliding_doors("entrance_", 0, .14, 4.8, 3.4, m)
+    # Broad ribs and recessed strips above the walkways, aligned with the bays.
+    for y in range(4, int(D), 6):
+        parts.append(B(f"beam_{y}", (W-.25, .28, .46), (0, y, H-.25), trim))
+        parts.append(B(f"light_{y}", (W-3, .09, .025), (0, y, H-.49), m["led_cool"]))
+    desk_x = W/2 - 5.0
+    desk_y = 4.8 if aviation else 7.0
+    parts += [
+        B("reception", (4.6, .9, 1.05), (desk_x, desk_y, .52), m["walnut"], .05),
+        B("desk_cap", (4.72, 1.04, .12), (desk_x, desk_y, 1.07), m["floor_stone"], .025),
+        B("desk_inlay", (4.2, .035, .07), (desk_x, desk_y-.46, .73), trim),
+        text("sales", "SALES", (desk_x, desk_y-.48, .45), .27, m["white"], "Oswald.ttf"),
+        sofa("lounge", (-W/2+3.4, 5.5, 0), 0, 2.9, m, m["leather" if aviation else "fabric_cream"]),
+        B("lounge_table", (1.5, .64, .46), (-W/2+3.4, 4.2, .23), m["walnut"], .04),
+        text("rear_wordmark", "SKYPORT AVIATION" if aviation else "SKYPORT MARINA",
+             (0, D-.07, H-2.3), 1.35, ink, "Oswald.ttf", .035),
+    ]
+    for x in (-W/2+1.25, W/2-1.25):
+        parts += plant(f"palm_{x}", (x, 2.1, .05), 2.5, m)
+    marks = [("spot_sales", (desk_x, desk_y-1.4, 0), 0)]
+    if aviation:
+        exhibits = [
+            ("wren", -23, 13, 5.7, 10.2),
+            ("kite", 0, 13, 6.0, 10.8),
+            ("regent", 23, 15, 7.5, 13.8),
+            ("skylark", -23, 31.5, 13.0, 10.2),
+            ("merlin", 0, 32, 15.8, 12.4),
+            ("aurora", 22, 30.2, 18.0, 20.8),
+        ]
+    else:
+        exhibits = [
+            ("dart", -7.5, 14, 3.8, 7.0),
+            ("swift", -7.5, 30, 4.4, 10.0),
+            ("majesty", 5.1, 25.4, 8.5, 30.6),
+        ]
+    for model, x, y, width, length in exhibits:
+        parts += [
+            B(f"{model}_inset", (width, length, .025), (x, y, .012), m["floor_light" if aviation else "floor_dark"], .008),
+            B(f"{model}_edge", (width, .045, .022), (x, y-length/2+.07, .029), trim),
+        ]
+        if not aviation:
+            # Short padded supports leave the hull shape visible from the aisle.
+            for side in (-1, 1):
+                parts.append(B(f"{model}_cradle_{side}", (width*.62, .38, .38),
+                               (x, y+length*.20*side, .19), m["black_steel"], .04))
+        marks += [
+            (f"craft_{model}", (x, y, .04 if aviation else .55), 0),
+            (f"inspect_{model}", (x-width*.33, y-length/2-.75, 0), 0),
+        ]
+    return parts, nodes, marks, {"size": [W, D, H]}
+
+
+def v_aviation(m):
+    return v_craft_sales(m, True)
+
+
+def v_marina(m):
+    return v_craft_sales(m, False)
+
+
 VENUES = {"meridian": v_meridian, "kestrel": v_kestrel, "arden": v_arden, "threadline": v_threadline,
-          "lobby": v_lobby, "study": v_study, "hq": v_hq}
+          "lobby": v_lobby, "study": v_study, "hq": v_hq, "aviation": v_aviation, "marina": v_marina}
 
 CAR_TINTS = [(0.55, 0.03, 0.03), (0.02, 0.02, 0.025), (0.85, 0.85, 0.83), (0.06, 0.16, 0.36), (0.5, 0.5, 0.52), (0.85, 0.42, 0.05)]
 OUTFITS = [((0.1, 0.12, 0.18), (0.2, 0.2, 0.22)), ((0.9, 0.9, 0.88), (0.1, 0.1, 0.12)), ((0.4, 0.15, 0.1), (0.75, 0.7, 0.6))]

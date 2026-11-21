@@ -51,9 +51,9 @@ void fragment() {
 		// A lumpy, billowy edge rather than a perfect disc.
 		float ang = atan(d.y, d.x);
 		float lump = 0.09 * sin(ang * 3.0 + v_seed * 17.0) + 0.06 * sin(ang * 5.0 - v_seed * 29.0);
-		soft = smoothstep(1.0, 0.1, r + lump);
+		soft = (1.0 - smoothstep(0.1, 1.0, r + lump));
 		// Denser in the middle, a little lighter on top: reads as volume.
-		soft *= 0.75 + 0.25 * smoothstep(0.9, 0.0, r);
+		soft *= 0.75 + 0.25 * (1.0 - smoothstep(0.0, 0.9, r));
 		c *= mix(0.86, 1.06, clamp(v_shade, 0.0, 1.0));
 		// Smoke takes the scene's light: darker at night.
 		c *= mix(1.0, 0.25, night);

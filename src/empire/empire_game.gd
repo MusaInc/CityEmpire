@@ -123,7 +123,10 @@ func _ready() -> void:
 	lfn.name = "Landforms"
 	add_child(lfn)
 	lfn.build(layout)
-	skyport.viewer = func() -> Vector3: return vehicle_node().global_position if vehicle_node() else player.global_position
+	skyport.viewer = func() -> Vector3:
+		if state == "title" and is_instance_valid(_title_focus):
+			return _title_focus.global_position
+		return vehicle_node().global_position if vehicle_node() else player.global_position
 	print("Skyport Island: %d ms" % (Time.get_ticks_msec() - t1))
 	EmpireMinimap.bake.call_deferred(self, layout)  # (the minimap's and phone map's city image)
 	atmosphere.configure(args, world)
@@ -918,35 +921,22 @@ func _title(_has_save: bool) -> void:
 	state = "title"
 	player.input_enabled = false
 	ui.show_title(FileAccess.file_exists(save_path) or FileAccess.file_exists(save_path + ".bak"))
-	# A slow, high orbit round the financial district's towers at blue hour
-	# (it used to circle the starter street from 22 m). The city streams
-	# round the camera itself, so the skyline is the full-detail city.
-	var acc := Vector3.ZERO
-	var n := 0
-	for u in units:
-		if String(u.get("district", "")) == "east:cbd":
-			acc += Premises.door_point(u)
-			n += 1
-	var c := acc / float(n) if n > 0 else Premises.door_point(starter_unit())
+	# Frame the bridges from open water so the menu camera never crosses a
+	# building or the city streaming boundary during the reveal.
+	var eye := Vector3(268.0, 42.0, 840.0)
+	var look := Vector3(-38.0, 29.0, 817.0)
 	atmosphere.hour = TITLE_HOUR
-	atmosphere.set_weather("haze", true)
-	# (Streamed round the skyline's centre: the towers in full detail even
-	# from the camera's distance.)
+	atmosphere.set_weather("clear", true)
 	if _title_focus == null:
 		_title_focus = Node3D.new()
 		_title_focus.name = "TitleFocus"
 		add_child(_title_focus)
-	_title_focus.global_position = c
+	var focus := Vector3(96.0, 10.0, 795.0)
+	_title_focus.global_position = focus
 	world.set_viewer(_title_focus)
-	world.build_all_near(c, 300.0)
-	var t := [2.35]
-	camera.cine = func(dt: float) -> Array:
-		t[0] += dt * 0.011
-		var a: float = t[0]
-		var rad := 720.0 + 50.0 * sin(a * 1.7)
-		var p := c + Vector3(cos(a) * rad, 240.0 + 25.0 * sin(a * 2.3), sin(a) * rad)
-		var look := c + Vector3(0.0, 15.0, 0.0)
-		return [Transform3D(Basis.looking_at(look - p, Vector3.UP), p), 40.0]
+	world.build_all_near(focus, 320.0)
+	camera.cine = func(_dt: float) -> Array:
+		return [Transform3D(Basis.looking_at(look - eye, Vector3.UP), eye), 56.0]
 
 
 func start_new() -> void:

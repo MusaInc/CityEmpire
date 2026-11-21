@@ -298,7 +298,7 @@ func _physics_process(_dt: float) -> void:
 	var key_gas := Input.get_action_strength("accelerate")
 	var key_brake := Input.get_action_strength("brake")
 	var key_steer := Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left")
-	var touch_steer := game.drive_input.touch_steer if game.drive_input.touch_active else 0.0
+	var touch_steer := game.drive_input.touch_steer
 	var steer := key_steer if absf(key_steer) > absf(touch_steer) else touch_steer
 	var pad_on := String(pad.get("zone", "")) != ""
 	c.input = {
@@ -517,8 +517,8 @@ func spot_near(p: Vector3) -> Dictionary:
 	if game.skyport:
 		var sites: Dictionary = game.skyport.wplan.get("sites", {})
 		for sid in sites:
-			if String(sid).begins_with("clothes") and game.venues and game.venues.has_venue(sid):
-				continue   # (a walk-in shop: its points are inside)
+			if sid in ["aviation", "marina", "clothes_everyday", "clothes_premium"] and game.venues and game.venues.has_venue(sid):
+				continue   # Walk-in sales and inspection points are inside.
 			var door: Vector3 = sites[sid]["door"]
 			var d3 := Vector2(door.x - p.x, door.z - p.z).length() - 3.0
 			if d3 < REACH and absf(door.y - p.y) < 3.0 and d3 < bd:

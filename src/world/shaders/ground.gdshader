@@ -142,7 +142,7 @@ void fragment() {
 			sd = vec3(0.78, 0.7, 0.52) * (0.93 + 0.08 * vnoise(p * 0.45) + 0.04 * vnoise(p * 3.1));
 			float rip = sin(p.x * 1.7 + p.y * 1.1 + vnoise(p * 0.3) * 4.0) * 0.5 + 0.5;
 			sd *= 0.97 + 0.05 * rip * near;
-			sd *= 1.0 - 0.1 * smoothstep(0.03, 0.0, abs(v_world.y + 1.15));   // tide line (sea at -1.6)
+			sd *= 1.0 - 0.1 * (1.0 - smoothstep(0.0, 0.03, abs(v_world.y + 1.15)));   // tide line (sea at -1.6)
 			float wet = 1.0 - smoothstep(-1.7, -1.0, v_world.y);
 			sd *= 1.0 - 0.38 * wet;
 		}
@@ -425,7 +425,7 @@ void fragment() {
 		} else if (grass) {
 			// Lawn: mowing stripes, soft colour drift, a gravel path round the edge.
 			float stripe = step(0.5, fract(p.x / 6.0));
-			albedo = grass_shade(c, v_world.xz, near, (fwidth(v_world.x) + fwidth(v_world.z)) * 0.5) * (1.0 + 0.07 * (stripe - 0.5) * near);
+			albedo = grass_shade(c, v_world.xz, near, (fwidth(v_world.x) + fwidth(v_world.z)) * 0.5, 0.0) * (1.0 + 0.07 * (stripe - 0.5) * near);
 			float path = band(kerb - 4.8, 1.0, aa);
 			albedo = mix(albedo, vec3(0.62, 0.56, 0.45) * (0.92 + 0.12 * n), path);
 		}

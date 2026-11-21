@@ -244,7 +244,7 @@ void fragment() {
 	// Surf: lines along the depth contours running in to the shore over the
 	// sand shelves (rocks get a ragged wash), broken up along their length;
 	// higher seas, bigger surf.
-	float surf_zone = smoothstep(2.2, 0.5, depth);
+	float surf_zone = (1.0 - smoothstep(0.5, 2.2, depth));
 	float lines = sin(depth * 7.5 + TIME * 2.2 + vnoise(p0 * 0.08) * 3.0) * 0.5 + 0.5;
 	float surf = surf_zone * smoothstep(0.62, 0.92, lines) * smoothstep(0.3, 0.7, vnoise(p0 * 0.12 + vec2(TIME * 0.15, 0.0)))
 		* mix(0.75, 1.0, rocky) * (0.65 + 0.6 * blow) * mid;

@@ -359,7 +359,7 @@ vec3 world_reflection(vec3 r) {
 	bld += lit_w * (1.0 - rows) * mix(sky_horizon * 0.08, vec3(1.0, 0.75, 0.45) * 1.1, night);
 	vec3 ground = mix(vec3(0.16, 0.17, 0.18), sky_horizon * 0.3, 0.3);
 	vec3 c = mix(sky, bld, in_city);
-	return r.y < 0.0 ? mix(bld, ground, smoothstep(0.0, -0.15, r.y)) : c;
+	return r.y < 0.0 ? mix(bld, ground, (1.0 - smoothstep(-0.15, 0.0, r.y))) : c;
 }
 
 void fragment() {
@@ -816,7 +816,7 @@ void fragment() {
 				float aw = step(3.05, uv.y) * step(uv.y, 3.6) * step(abs(bay_x - 3.0), 2.9);
 				float st = step(0.5, fract(uv.x / 0.55));
 				vec3 ac = mix(sign_col * 1.2, vec3(0.92, 0.9, 0.84), st);
-				ac *= 1.0 - 0.25 * smoothstep(3.6, 3.05, uv.y);   // shade under the roll
+				ac *= 1.0 - 0.25 * (1.0 - smoothstep(3.05, 3.6, uv.y));   // shade under the roll
 				albedo = mix(albedo, mix(ac, ac * 0.75 + vec3(0.1), age * 0.6), aw * detail);
 				emit *= 1.0 - aw;
 			} else if (sk < 0.38 + 0.1 + 0.15 * age) {
@@ -1050,7 +1050,12 @@ void fragment() {
 		vec3 rw = reflect(-vw, normalize(v_world_normal));
 		vec3 env = city_reflection(rw, v_wpos, sky_top, sky_horizon, sun_dir, night);
 		float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-		emit += env * mix(0.16, 0.7, fres) * glassy * (1.0 - 0.6 * night);
+		// Panes, not a sheet: each pane its own tilt/tone, darker mullions.
+		vec2 pane = uv / vec2(1.5, 3.4);
+		vec2 pf = fract(pane);
+		float mull = step(0.06, pf.x) * step(0.06, pf.y);
+		float tone = 0.7 + 0.45 * hash12(floor(pane) + seed * 31.0);
+		emit += env * mix(0.12, 0.45, fres) * glassy * tone * mix(0.35, 1.0, mull) * (1.0 - 0.6 * night);
 	}
 	ALBEDO = albedo * (1.0 - 0.16 * wetness);
 	ROUGHNESS = mix(rough, min(rough, 0.32), wetness * 0.75);
