@@ -1,0 +1,35 @@
+Godot Engine v4.5.1.stable.official.f62fdbde1 - https://godotengine.org
+
+City Loop: 1 buildings cleared from its path
+PieceBlocks: 9 buildings round the set pieces
+OpenGround: 4 squares, 16 parks dressed, 9 buildings on bare squares
+OpenGround: 4 squares, 9 parks dressed, 13 buildings on bare squares (mainland)
+CoastKit: { "lookout": 6, "steps": 0, "jetty": 9, "ladder": 7, "viewpoint": 7, "beach": 5 }
+AdScreens: 94 screens (61 in Lumen Circus), 73 ms
+SeaAndSky: 5 ships, 7 boats, helicopter, airliner
+CoastKit (mainland): { "lookout": 7, "steps": 0, "jetty": 7, "ladder": 9, "viewpoint": 7, "beach": 6 }
+SeaAndSky: 5 ships, 7 boats, helicopter, airliner
+Mainland: 480 buildings, 56 chunks, 1022 ms
+CityWorld: 1645 buildings, 3775 props, 65 chunks, layout+collision 8450 ms
+Skyport Island: 1518 ms
+City Empire world: 9968 ms, 113 units
+PERF frames=31 fps=30.0 process=13.20ms physics=2.93ms draws=0 prims=0k objects=0 sim=0.005ms customers=0.0 mem=786MB
+FRAME_MS wall_clock p50=8.83 p95=13.08 p99=15.31 max=16.42 samples=31
+PROF chunk_upload              2.209 ms/frame  (37 calls, peak 6.804 ms)
+PROF stream_select             0.926 ms/frame  (240 calls, peak 0.374 ms)
+PROF chunk_props               0.507 ms/frame  (37 calls, peak 2.481 ms)
+PROF far_upload                0.366 ms/frame  (61 calls, peak 0.514 ms)
+PROF car                       0.192 ms/frame  (240 calls, peak 0.117 ms)
+PROF chunk_cars                0.096 ms/frame  (37 calls, peak 0.358 ms)
+PROF chunk_walkers             0.032 ms/frame  (37 calls, peak 0.088 ms)
+PROF camera                    0.015 ms/frame  (240 calls, peak 0.008 ms)
+PROF integrate                 0.013 ms/frame  (93 calls, peak 0.013 ms)
+PROF input                     0.013 ms/frame  (240 calls, peak 0.012 ms)
+WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
+     at: cleanup (core/object/object.cpp:2514)
+ERROR: 7 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:795)
+ERROR: Pages in use exist at exit in PagedAllocator: N7Variant5Pools12BucketMediumE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:169)
+ERROR: Pages in use exist at exit in PagedAllocator: N7Variant5Pools11BucketSmallE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:169)

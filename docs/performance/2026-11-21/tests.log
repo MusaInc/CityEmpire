@@ -1,0 +1,11 @@
+Godot Engine v4.5.1.stable.official.f62fdbde1 - https://godotengine.org
+
+  ok    test_worldstate_render.test_far_upload_is_bounded_and_finish_drains
+  ok    test_worldstate_render.test_walker_worker_matches_main_thread
+  ok    test_worldstate_render.test_westbank_collision_and_drop_are_source_specific
+  ok    test_worldstate_render.test_occluder_does_not_fill_elevated_or_shaped_space
+  ok    test_worldstate_render.test_parked_cache_survives_wreck_removal_and_restore
+  ok    test_worldstate_render.test_chase_camera_respects_close_wall
+  ok    test_worldstate_render.test_resolution_governor_discards_resume_interval
+
+7 passed, 0 failed  (3.8s)
