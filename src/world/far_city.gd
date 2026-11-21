@@ -19,6 +19,9 @@ var _arrays: Array = []
 var _task := -1
 var _nodes := {}          # chunk key -> Node3D
 var _lock := Mutex.new()
+var _next := 0
+const UPLOADS_PER_FRAME := 2
+const UPLOAD_BUDGET_US := 2000
 
 
 func setup(w: CityWorld) -> void:
@@ -52,14 +55,15 @@ func _exit_tree() -> void:
 
 
 func ready_now() -> bool:
-	return _task < 0
+	return _task < 0 and _next >= _keys.size()
 
 
 ## Block until built (tests and captures).
 func finish() -> void:
 	if _task >= 0:
 		WorkerThreadPool.wait_for_group_task_completion(_task)
-		_instantiate()
+		_task = -1
+	_instantiate(true)
 
 
 func _process(_dt: float) -> void:
@@ -67,15 +71,25 @@ func _process(_dt: float) -> void:
 		if not WorkerThreadPool.is_group_task_completed(_task):
 			return
 		WorkerThreadPool.wait_for_group_task_completion(_task)
+		_task = -1
+	if _next < _keys.size():
 		_instantiate()
 	for key in _nodes:
 		(_nodes[key] as Node3D).visible = not world._loaded.has(key)
 
 
-func _instantiate() -> void:
-	_task = -1
-	for i in _keys.size():
+func _instantiate(all_now := false) -> void:
+	Prof.begin("far_upload")
+	var started := Time.get_ticks_usec()
+	var count := 0
+	while _next < _keys.size():
+		if not all_now and count > 0 and (count >= UPLOADS_PER_FRAME or Time.get_ticks_usec() - started >= UPLOAD_BUDGET_US):
+			break
+		var i := _next
+		_next += 1
+		count += 1
 		var res: Variant = _arrays[i]
+		_arrays[i] = null  # release CPU arrays as each mesh is uploaded
 		if res == null:
 			continue
 		var root := Node3D.new()
@@ -97,7 +111,9 @@ func _instantiate() -> void:
 		root.visible = not world._loaded.has(_keys[i])
 		add_child(root)
 		_nodes[_keys[i]] = root
-	_arrays.clear()
+	if _next >= _keys.size():
+		_arrays.clear()
+	Prof.end("far_upload")
 
 
 ## Triangles in the far layer (tests / perf notes).

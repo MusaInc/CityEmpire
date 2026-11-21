@@ -144,6 +144,7 @@ var _glow_on := false
 const LAMP_HEAD := Vector3(0.0, 6.85, -1.45)
 var _furn_src := {}             # kind -> [verts, normals, colors, indices] (material colours baked in)
 var _furniture_by_chunk := {}   # Vector2i -> Array of [kind, Transform3D]
+var _parked_cache := {}  # immutable layouts, shared by collision and streamed visuals
 var _walk_paths: Array = []  # [from, to] pavement segments (directional)
 const WALKER_RANGE := 130.0
 const CLOTHES := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.12, 0.12), Color(0.16, 0.28, 0.5),
@@ -799,6 +800,7 @@ func _load_props() -> void:
 	# Street/park trees: TreeKit species (replace the single glTF tree).
 	for sp in TreeKit.SPECIES:
 		prop_meshes["tree_" + sp] = TreeKit.mesh(sp)
+		TreeKit.near_mesh(sp)  # warm resource cache under the loading screen
 	for mode in 2:
 		var gm := ShaderMaterial.new()
 		gm.shader = load("res://src/world/shaders/lamp_glow.gdshader")
@@ -1662,6 +1664,17 @@ func _build_structures() -> void:
 				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			root.add_child(mi)
 		add_child(root)
+		link_lods(root.get_node_or_null("Detail"), root.get_node_or_null("Low"))
+
+
+## One visibility decision for a pair: separate AABB centres/margins can
+## draw coplanar walls together or leave a gap. The far mesh owns hysteresis.
+static func link_lods(near: GeometryInstance3D, far: GeometryInstance3D) -> void:
+	if near == null or far == null:
+		return
+	near.visibility_range_end = 0.0
+	near.visibility_range_end_margin = 0.0
+	near.visibility_parent = near.get_path_to(far)
 
 
 ## Pigeon flocks circling over parks, plazas and a few rooftops – a little
@@ -1757,6 +1770,7 @@ func _process(dt: float) -> void:
 func update_streaming(pos: Vector3, budget := -1) -> void:
 	if budget < 0:
 		budget = max_builds_per_frame
+	Prof.begin("stream_select")
 	var here := Vector2(pos.x, pos.z)
 	var want := {}
 	# Elevated homes need distant skyline chunks after the initial spawn load.
@@ -1798,6 +1812,7 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 			break
 		_request(key)
 		in_flight += 1
+	Prof.end("stream_select")
 	_collect(budget)
 
 
@@ -1841,6 +1856,7 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 		"ground": _ground_cache.get(key),
 		"furniture": furn,
 		"pools": _pool_arrays(key),
+		"walkers": _walker_buffers(key),
 	}
 
 
@@ -1984,6 +2000,7 @@ func _mesh_from(arrays) -> ArrayMesh:
 func _instantiate(key: Vector2i, res: Dictionary) -> void:
 	if _loaded.has(key):
 		return
+	Prof.begin("chunk_upload")
 	gen_ms_total += res.get("usec", 0) / 1000.0
 	var root := Node3D.new()
 	root.name = "Chunk_%d_%d" % [key.x, key.y]
@@ -2046,13 +2063,22 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 		fi.visibility_range_end = FURNITURE_RANGE
 		fi.visibility_range_end_margin = 20.0
 		root.add_child(fi)
+	Prof.begin("chunk_props")
 	_add_props(root, key, res.get("pools"))
+	Prof.end("chunk_props")
+	Prof.begin("chunk_cars")
 	_add_traffic(root, key)
-	_add_walkers(root, key)
+	Prof.end("chunk_cars")
+	Prof.begin("chunk_walkers")
+	_add_walkers(root, key, res.get("walkers", []))
+	Prof.end("chunk_walkers")
 	_add_occluder(root, key)
 	add_child(root)
+	link_lods(root.get_node_or_null("Detail"), root.get_node_or_null("Low"))
+	link_lods(root.get_node_or_null("ShadowProxy"), root.get_node_or_null("Low"))
 	_loaded[key] = root
 	chunks_built += 1
+	Prof.end("chunk_upload")
 
 
 ## The props drawn in a chunk at the current density: [kind, Transform3D].
@@ -2401,9 +2427,10 @@ func _pavement_paths() -> Array:
 	return out
 
 
-func _add_walkers(root: Node3D, key: Vector2i) -> void:
+## Worker-side placement; only packed buffers cross to the render thread.
+func _walker_buffers(key: Vector2i) -> Array:
 	if walker_meshes.is_empty() or traffic_density <= 0.0:
-		return
+		return []
 	var rect := Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(key) ^ 0x5eed
@@ -2440,17 +2467,25 @@ func _add_walkers(root: Node3D, key: Vector2i) -> void:
 				var sc2 := rng.randf_range(0.92, 1.06)
 				(groups[rng.randi() % groups.size()] as Array).append([Transform3D((q[1] as Basis).scaled(Vector3.ONE * sc2), Vector3(q[0].x, _walk_lift(q[0]), q[0].z)),
 					Color(0.0, 0.0, 10.0, 0.0), CLOTHES[rng.randi() % CLOTHES.size()]])
-	for gi in groups.size():
-		var items: Array = groups[gi]
-		if items.is_empty():
+	var buffers: Array = []
+	for items: Array in groups:
+		buffers.append(_instance_buffer(items))
+	return buffers
+
+
+func _add_walkers(root: Node3D, key: Vector2i, buffers: Array) -> void:
+	var rect := Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK))
+	for gi in buffers.size():
+		var buf: PackedFloat32Array = buffers[gi]
+		if buf.is_empty():
 			continue
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_colors = true
 		mm.use_custom_data = true
 		mm.mesh = walker_meshes[gi]
-		mm.instance_count = items.size()
-		mm.buffer = _instance_buffer(items)
+		mm.instance_count = buf.size() / 20
+		mm.buffer = buf
 		mm.custom_aabb = AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 70.0, CHUNK))  # walks stay in the chunk
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "Walkers%d" % gi
@@ -2506,6 +2541,14 @@ static func kind_weight(k: int, west: bool) -> float:
 ## random stream per chunk, independent of the traffic density, so the
 ## collision built up front matches what the chunk later draws.
 func parked_cars(key: Vector2i) -> Array:
+	if not _parked_cache.has(key):
+		_parked_cache[key] = _generate_parked_cars(key)
+	var cached: Array = _parked_cache[key]
+	# Callers (Wrecks) remove entries from their working list, never the cache.
+	return cached.duplicate() if broken.is_empty() else cached.filter(func(pc): return not broken.has(item_key((pc[0] as Transform3D).origin)))
+
+
+func _generate_parked_cars(key: Vector2i) -> Array:
 	var rect := Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(key) ^ 0x9a4c
@@ -2519,8 +2562,6 @@ func parked_cars(key: Vector2i) -> Array:
 		# The shader shifts a parked car 5 m back along its segment (see below).
 		var at := (t as Transform3D).origin - (t as Transform3D).basis.z * 5.0
 		var kind := _car_kind(rng.randf(), layout.is_mainland)   # (drawn first: the others keep theirs)
-		if not broken.is_empty() and broken.has(item_key(at)):
-			continue
 		out.append([Transform3D((t as Transform3D).basis, at), kind])
 	return out
 
@@ -2590,8 +2631,8 @@ func _add_occluder(root: Node3D, key: Vector2i) -> void:
 	var v := PackedVector3Array()
 	var idx := PackedInt32Array()
 	for b in _by_chunk.get(key, []):
-		if b["kind"] not in ["normal", "landmark"]:
-			continue
+		if b["kind"] not in ["normal", "landmark"] or BuildingMesher.shaped(b):
+			continue  # a rectangular occluder leaks outside rounded/notched facades
 		var t: Array = b["tiers"][0]
 		if t[5] - t[4] < 20.0 or t[2] - t[0] < 12.0 or t[3] - t[1] < 12.0:
 			continue
@@ -2610,7 +2651,8 @@ func _add_occluder(root: Node3D, key: Vector2i) -> void:
 				continue
 		var base := v.size()
 		var X := CityLayout.bxf(b)
-		for q: Vector3 in [Vector3(x0, 0, z0), Vector3(x1, 0, z0), Vector3(x1, 0, z1), Vector3(x0, 0, z1),
+		var y0 := float(t[4]) + 0.5
+		for q: Vector3 in [Vector3(x0, y0, z0), Vector3(x1, y0, z0), Vector3(x1, y0, z1), Vector3(x0, y0, z1),
 				Vector3(x0, y1, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1), Vector3(x0, y1, z1)]:
 			v.append(X * q)
 		for f in [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7], [4, 5, 6, 7]]:

@@ -6,6 +6,7 @@ static var enabled := false
 static var _t := {}
 static var _acc := {}
 static var _n := {}
+static var _max := {}
 
 
 static func begin(k: String) -> void:
@@ -15,7 +16,9 @@ static func begin(k: String) -> void:
 
 static func end(k: String) -> void:
 	if enabled and _t.has(k):
-		_acc[k] = _acc.get(k, 0) + Time.get_ticks_usec() - _t[k]
+		var elapsed: int = Time.get_ticks_usec() - _t[k]
+		_acc[k] = _acc.get(k, 0) + elapsed
+		_max[k] = maxi(_max.get(k, 0), elapsed)
 		_n[k] = _n.get(k, 0) + 1
 
 
@@ -34,8 +37,9 @@ static func frame_ms() -> float:
 	return d / 1000.0
 
 
-static func report(frames: int) -> void:
+static func report(_frames: int) -> void:
 	var keys := _acc.keys()
 	keys.sort_custom(func(a, b): return _acc[a] > _acc[b])
 	for k in keys:
-		print("PROF %-22s %8.3f ms/frame  (%d calls)" % [k, _acc[k] / 1000.0 / maxf(frames, 1), _n[k]])
+		print("PROF %-22s total=%.3f ms calls=%d mean=%.3f ms peak=%.3f ms" % [
+			k, _acc[k] / 1000.0, _n[k], _acc[k] / 1000.0 / maxf(_n[k], 1), _max[k] / 1000.0])

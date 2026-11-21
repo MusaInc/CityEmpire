@@ -528,7 +528,7 @@ func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:
 	var full := (to - from).length()
 	if full < 0.001:
 		return to
-	var allowed := full if res.is_empty() or res[0] >= 1.0 else full * maxf(res[0], 0.05)
+	var allowed := full if res.is_empty() or res[0] >= 1.0 else full * maxf(res[0], 0.0)
 	if _col_dist < 0.0:
 		_col_dist = allowed
 	# Pull in quickly (≈0.15 s) and ease back out slowly – no pops either way.

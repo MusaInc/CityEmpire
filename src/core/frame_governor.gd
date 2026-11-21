@@ -29,7 +29,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var vp := get_viewport()
 	_vp_rid = vp.get_viewport_rid()
-	RenderingServer.viewport_set_measure_render_time(_vp_rid, true)
+	RenderingServer.viewport_set_measure_render_time(_vp_rid, enabled)
 	var settings := get_node_or_null("/root/Settings")
 	if settings:
 		settings.changed.connect(_reset)
@@ -43,13 +43,19 @@ func _reset() -> void:
 	scale = _cap
 	_since_change = 0.0
 	_headroom_time = 0.0
+	_acc = 0.0
+	_frames = 0
+	_last_us = Time.get_ticks_usec()
 
 
-func _process(dt: float) -> void:
+func _process(_dt: float) -> void:
 	var now := Time.get_ticks_usec()
 	var real_dt := (now - _last_us) / 1e6
 	_last_us = now
-	if not enabled or get_tree().paused:
+	if not enabled or get_tree().paused or real_dt > 0.5:
+		_acc = 0.0
+		_frames = 0
+		_headroom_time = 0.0
 		return
 	_acc += real_dt
 	_frames += 1

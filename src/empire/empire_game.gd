@@ -81,6 +81,7 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		var kv := a.trim_prefix("--").split("=", true, 1)
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
+	Prof.enabled = args.has("profile-world")
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
 	if args.has("look"):
@@ -1050,10 +1051,15 @@ func _process(dt: float) -> void:
 
 var _perf_sim := 0
 var _perf := {}
+var _perf_last_us := 0
+var _perf_frames_ms: Array[float] = []
 
 
 ## `--perf=<seconds>`: averages over the run, printed at the end (and quit).
 func _perf_sample(dt: float) -> void:
+	var now := Time.get_ticks_usec()
+	var elapsed := (now - _perf_last_us) / 1000.0 if _perf_last_us > 0 else 0.0
+	_perf_last_us = now
 	if _perf.is_empty():
 		_perf = {"n": 0, "dt": 0.0, "proc": 0.0, "phys": 0.0, "draw": 0.0, "prim": 0.0, "obj": 0.0, "sim": 0, "floor": 0,
 			"cust": 0, "t": 0.0}
@@ -1061,6 +1067,8 @@ func _perf_sample(dt: float) -> void:
 	if float(_perf["t"]) < 3.0:
 		_perf_sim = 0
 		return  # (warm-up)
+	if elapsed > 0.0:
+		_perf_frames_ms.append(elapsed)
 	_perf["n"] = int(_perf["n"]) + 1
 	_perf["dt"] = float(_perf["dt"]) + dt
 	_perf["proc"] = float(_perf["proc"]) + Performance.get_monitor(Performance.TIME_PROCESS)
@@ -1074,10 +1082,18 @@ func _perf_sample(dt: float) -> void:
 		_perf["cust"] = int(_perf["cust"]) + floor.customers.size()
 	if float(_perf["t"]) >= float(args["perf"]) + 3.0:
 		var n := maxf(float(_perf["n"]), 1.0)
-		print("PERF frames=%d fps=%.1f process=%.2fms physics=%.2fms draws=%.0f prims=%.0fk objects=%.0f sim=%.3fms customers=%.1f mem=%.0fMB" % [
+		print("PERF frames=%d sim_fps=%.1f process=%.2fms physics=%.2fms draws=%.0f prims=%.0fk objects=%.0f sim=%.3fms customers=%.1f mem=%.0fMB" % [
 			int(n), n / float(_perf["dt"]), float(_perf["proc"]) / n * 1000.0, float(_perf["phys"]) / n * 1000.0,
 			float(_perf["draw"]) / n, float(_perf["prim"]) / n / 1000.0, float(_perf["obj"]) / n,
 			float(_perf["sim"]) / n / 1000.0, float(_perf["cust"]) / n, Performance.get_monitor(Performance.MEMORY_STATIC) / 1e6])
+		_perf_frames_ms.sort()
+		if not _perf_frames_ms.is_empty():
+			var count := _perf_frames_ms.size()
+			print("FRAME_MS wall_clock p50=%.2f p95=%.2f p99=%.2f max=%.2f samples=%d" % [
+				_perf_frames_ms[int((count - 1) * 0.5)], _perf_frames_ms[int((count - 1) * 0.95)],
+				_perf_frames_ms[int((count - 1) * 0.99)], _perf_frames_ms[-1], count])
+		if Prof.enabled:
+			Prof.report(int(n))
 		get_tree().quit()
 
 

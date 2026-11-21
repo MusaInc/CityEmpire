@@ -40,11 +40,11 @@ func _physics_process(dt: float) -> void:
 	var me := game.vehicle_node() as Car
 	if me and is_instance_valid(me) and not me.freeze and me.linear_velocity.length() > 1.5:
 		_look_ahead(me)
-	var tr: Traffic = game.world.traffic
 	var keep: Array = []
 	var here := game.vehicle_node().global_position if game.vehicle_node() else game.player.global_position
 	var obs: Array = []
 	for w in wrecks:
+		var tr: Traffic = w.get("source")
 		var c: Car = w["car"]
 		if not is_instance_valid(c):
 			_free(w, tr)
@@ -75,8 +75,9 @@ func _physics_process(dt: float) -> void:
 		obs.append(c.global_position)
 		keep.append(w)
 	wrecks = keep
-	if tr:
-		tr.obstacles = obs
+	for world in [game.world, game.world.mainland]:
+		if world and world.traffic:
+			world.traffic.obstacles = obs
 
 
 ## Undo a swap: the physical car goes, the traffic slot / parked car comes back.
@@ -107,9 +108,9 @@ func _look_ahead(me: Car) -> void:
 	var mp := me.global_position
 	var mv := me.linear_velocity
 	var tb: TrafficBodies = game.traffic_bodies
-	var tr: Traffic = game.world.traffic
-	if tb and tr:
+	if tb:
 		for it in tb.city_cars():
+			var tr: Traffic = it[2]
 			var id: int = it[0]
 			var xf: Transform3D = it[1]
 			var ov := -xf.basis.z * tr.car_speed(id)
@@ -117,9 +118,9 @@ func _look_ahead(me: Car) -> void:
 				continue
 			var k := int(tr.c_kind[id])
 			if _hits(me, mp + (mv - ov) * LOOKAHEAD, mh, xf, _half(game.world, k)):
-				tb.drop(id)
+				tb.drop(id, tr)
 				tr.knock(id)
-				_spawn(k, xf, ov, tr.c_col[id], id)
+				_spawn(k, xf, ov, tr.c_col[id], id, [], tr)
 	# Parked cars in the chunks round you (both landmasses).
 	for w2 in [game.world, game.world.mainland]:
 		var w: CityWorld = w2
@@ -168,12 +169,12 @@ static func _hits(me: Car, at: Vector3, mh: Vector2, xf: Transform3D, oh: Vector
 	return true
 
 
-func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, parked := []) -> void:
+func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, parked := [], source: Traffic = null) -> void:
 	while wrecks.size() >= MAX:
 		var old: Dictionary = wrecks.pop_front()
 		if is_instance_valid(old["car"]):
 			(old["car"] as Car).queue_free()
-		_free(old, game.world.traffic)
+		_free(old, old.get("source"))
 	var body: String = CityWorld.CAR_KINDS[k][2]
 	var base := body if CarCatalog.CIVILIANS.has(body) else "civ_sedan"
 	var spec := CarCatalog.civ_spec(base, _rng)
@@ -190,4 +191,4 @@ func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, 
 	var vis := CarVisual.new()
 	c.add_child(vis)
 	vis.setup(c)
-	wrecks.append({"car": c, "t": 0.0, "traffic": traffic_id, "hit": false, "spawn_y": xf.origin.y, "parked": parked})
+	wrecks.append({"car": c, "t": 0.0, "traffic": traffic_id, "source": source, "hit": false, "spawn_y": xf.origin.y, "parked": parked})

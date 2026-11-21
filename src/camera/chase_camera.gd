@@ -190,7 +190,7 @@ func _chase(dt: float) -> void:
 	_query.exclude = [car.get_rid()]
 	var frac := space.cast_motion(_query)
 	if frac.size() == 2 and frac[0] < 1.0:
-		lens = from + (lens - from) * maxf(frac[0], 0.15)
+		lens = from + (lens - from) * maxf(frac[0] - 0.01, 0.0)
 	# Above the ground.
 	# (From just above the lens: from 3 m up it found the expressway deck
 	# overhead and popped the lens on top of it.)
@@ -267,7 +267,7 @@ func _orbit(dt: float) -> void:
 	var frac := space.cast_motion(_query)
 	_query.collision_mask = 1
 	if frac.size() == 2 and frac[0] < 1.0:
-		want = from + (want - from) * maxf(frac[0] - 0.05, 0.1) + Vector3.UP * 1.5
+		want = from + (want - from) * maxf(frac[0] - 0.01, 0.0)
 	_ray.from = want + Vector3.UP * 4.0
 	_ray.to = want - Vector3.UP * 3.0
 	_ray.exclude = [target.get_rid()]

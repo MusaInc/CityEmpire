@@ -18,7 +18,7 @@ const HALF := Vector3(1.0, 0.75, 2.3)
 
 var game: EmpireGame
 var _bodies: Array = []        # AnimatableBody3D
-var _near: Array = []          # [[source, id]]: source 0 = city Traffic (id = car), 1 = island (id = car dict)
+var _near: Array = []          # [[source, id]]: source 0 = Commercial, 1 = Skyport, 2 = Westbank
 var _list_t := 0.0
 
 
@@ -44,16 +44,24 @@ func setup(g: EmpireGame) -> void:
 		_bodies.append(b)
 
 
-## City traffic cars that currently have a body: [[id, Transform3D]] (Wrecks).
+## City traffic cars that currently have a body: [[id, Transform3D, Traffic source]] (Wrecks).
 func city_cars() -> Array:
 	var out: Array = []
-	var tr: Traffic = game.world.traffic if game and game.world else null
-	if tr == null:
-		return out
 	for src in _near:
-		if int(src[0]) == 0 and not tr.knocked.has(int(src[1])):
-			out.append([int(src[1]), traffic_xf(tr, int(src[1]))])
+		var tr := _traffic(int(src[0]))
+		if tr and not tr.knocked.has(int(src[1])):
+			out.append([int(src[1]), traffic_xf(tr, int(src[1])), tr])
 	return out
+
+
+func _traffic(source: int) -> Traffic:
+	if game == null or game.world == null:
+		return null
+	if source == 0:
+		return game.world.traffic
+	if source == 2 and game.world.mainland:
+		return game.world.mainland.traffic
+	return null
 
 
 static func traffic_xf(tr: Traffic, id: int) -> Transform3D:
@@ -68,10 +76,10 @@ static func traffic_xf(tr: Traffic, id: int) -> Transform3D:
 
 ## A car Wrecks is replacing with a real one: its kinematic body leaves at
 ## once (a rigid car spawned inside it would be flung out).
-func drop(id: int) -> void:
+func drop(id: int, traffic: Traffic = null) -> void:
 	for i in _near.size():
 		var src: Array = _near[i]
-		if int(src[0]) == 0 and int(src[1]) == id:
+		if _traffic(int(src[0])) == (traffic if traffic else _traffic(0)) and int(src[0]) in [0, 2] and int(src[1]) == id:
 			_near[i] = [-1, 0]   # (body i stays parked until the next listing)
 			var b: AnimatableBody3D = _bodies[i]
 			b.global_position = Vector3(0, -500, 0)
@@ -92,7 +100,6 @@ func _physics_process(dt: float) -> void:
 	if game == null or game.world == null:
 		return
 	var here := _here()
-	var tr: Traffic = game.world.traffic
 	var it := _island()
 	if it:
 		var vn := game.vehicle_node()
@@ -101,13 +108,16 @@ func _physics_process(dt: float) -> void:
 	if _list_t <= 0.0:
 		_list_t = LIST_EVERY
 		var cand: Array = []
-		if tr:
+		for source in [0, 2]:
+			var tr := _traffic(source)
+			if tr == null:
+				continue
 			for id in tr.car_count():
 				if tr.knocked.has(id):
 					continue
 				var d := tr.car_position(id).distance_squared_to(here)
 				if d < RANGE * RANGE:
-					cand.append([d, 0, id])
+					cand.append([d, source, id])
 		if it:
 			for c in it.cars:
 				if float(c["wait"]) > 0.0:
@@ -119,25 +129,27 @@ func _physics_process(dt: float) -> void:
 		cand.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
 		_near = cand.slice(0, POOL).map(func(x): return [x[1], x[2]])
 		# City traffic brakes for your vehicle in its lane (and queues).
-		if tr:
+		for source in [0, 2]:
+			var tr := _traffic(source)
+			if tr == null:
+				continue
 			var vn := game.vehicle_node()
 			var ids: Array = []
 			for x in cand:
-				if int(x[1]) == 0 and float(x[0]) < 40.0 * 40.0:
+				if int(x[1]) == source and float(x[0]) < 40.0 * 40.0:
 					ids.append(int(x[2]))
 			tr.yield_to(vn.global_position if vn else game.player.global_position, ids)   # (people crossing too)
 	for i in POOL:
 		var b: AnimatableBody3D = _bodies[i]
-		if i >= _near.size():
+		if i >= _near.size() or int(_near[i][0]) < 0 or (int(_near[i][0]) == 1 and it == null):
 			if b.process_mode != Node.PROCESS_MODE_DISABLED:
 				b.global_position = Vector3(0, -500, 0)
 				b.process_mode = Node.PROCESS_MODE_DISABLED
 			continue
 		var src: Array = _near[i]
-		if int(src[0]) < 0:
-			continue
 		var xf := Transform3D()
-		if int(src[0]) == 0:
+		if int(src[0]) in [0, 2]:
+			var tr := _traffic(int(src[0]))
 			if tr == null:
 				continue
 			xf = traffic_xf(tr, int(src[1]))

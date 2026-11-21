@@ -1662,6 +1662,10 @@ func _near(f: Callable) -> void:
 
 func _free_near() -> void:
 	_steps.clear()
+	for key in _groups():
+		var skyline := get_node_or_null("Skyline_" + key) as GeometryInstance3D
+		if skyline:
+			skyline.visibility_range_begin = 0.0
 	if near_root:
 		near_root.queue_free()
 	near_root = null
@@ -2452,7 +2456,7 @@ func _build_skyline() -> void:
 		for b: Dictionary in groups[key]:
 			if b.get("mesh", true):
 				far.add_building(b, false)
-		_mesh(far, "Skyline_" + key, DETAIL_RANGE - 20.0, FAR_RANGE)
+		_mesh(far, "Skyline_" + key, 0.0, FAR_RANGE)
 
 
 ## One district's detailed buildings and their collision (near content).
@@ -2466,7 +2470,13 @@ func _build_detail(key: String) -> void:
 			continue   # (a walk-in venue: the game builds its room and collision)
 		for bx in BuildingMesher.collision_boxes(b):
 			CityWorld._add_box(body, bx)
-	_mesh(near, "Detail_" + key, 0.0, DETAIL_RANGE)
+	_mesh(near, "Detail_" + key, 0.0, 0.0)
+	var detail := near_root.get_node_or_null("Detail_" + key) as GeometryInstance3D
+	var skyline := get_node_or_null("Skyline_" + key) as GeometryInstance3D
+	if detail and skyline:
+		skyline.visibility_range_begin = DETAIL_RANGE
+		skyline.visibility_range_begin_margin = 20.0
+		CityWorld.link_lods(detail, skyline)
 	if key == "wn":
 		# Penthouse rooftop helipad (on the tower's top).
 		var pad: Vector3 = plan_data["penthouse"]["pad"]
