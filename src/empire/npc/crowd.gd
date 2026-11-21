@@ -19,7 +19,7 @@ extends Node3D
 const NEAR := 92.0           # (was 62: the hand-over to the GPU walkers happened in plain view)
 const KEEP := 104.0
 const DROP := 150.0           # past this anyone goes, seen or not (a few pixels tall)
-const SPACING := 18.0         # one person per this many metres of pavement
+const SPACING := 36.0         # one person per this many metres of pavement (halved 2026-11-21: fewer, better people)
 const LANES := [1.7, 3.0]     # m in from the block edge (as CityWorld)
 const MODEL := "res://assets/models/crowd.glb"
 const TOPS := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.12, 0.12), Color(0.16, 0.28, 0.5),

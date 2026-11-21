@@ -28,7 +28,7 @@ from mathutils import Matrix, Vector
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = ARGS[0] if ARGS else "assets/models"
 PREVIEW = ARGS[1] if len(ARGS) > 1 else ""
-TARGET = 3200
+TARGET = int(os.environ.get("CROWD_TARGET", "3200"))   # CROWD_TARGET=900 CROWD_OUT=crowd_far.glb: the far walkers
 
 # face, hair, top cut
 VARIANTS = [
@@ -173,7 +173,7 @@ def main():
     bpy.ops.object.select_all(action="DESELECT")
     for p in people:
         p.select_set(True)
-    bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, "crowd.glb"), export_format="GLB", use_selection=True,
+    bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, os.environ.get("CROWD_OUT", "crowd.glb")), export_format="GLB", use_selection=True,
                               export_apply=True, export_yup=True, export_materials="EXPORT", export_skins=False,
                               export_animations=False)
     print("CROWD DONE")

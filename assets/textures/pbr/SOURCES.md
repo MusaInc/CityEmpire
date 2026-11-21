@@ -12,3 +12,5 @@ R = albedo luminance (mean 0.5), G/B = OpenGL normal x/y, A = roughness.
 | concrete_wall_008.png | concrete_wall_008 | rendered / concrete / stone facades |
 
 CC0: no attribution required; listed here for provenance.
+| metal_plate_02.png | metal_plate_02 | painted steel: bridges, gantries, kits |
+| codex_concrete.png | (Codex study 04_concrete_wall, owner's) | concrete structures: pylons, viaducts, parapets |

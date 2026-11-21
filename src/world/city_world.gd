@@ -37,9 +37,16 @@ const FURNITURE_RANGE := 190.0
 ## fewer of them (Traffic.SPACING, PARKED_KEEP): quieter roads, better cars.
 ## (tools/blender/ws_fleet.py builds them: Kestrel-generator bodies at
 ## traffic detail, each with a ~1.2k-triangle "_lod1" for mid distance.)
-const CAR_KINDS := [["car_sedan", 0.32, "civ_sedan"], ["car_hatch", 0.25, "civ_compact"], ["car_suv", 0.2, "civ_suv"],
-	["car_taxi", 0.13, "civ_taxi"], ["car_van", 0.1, "civ_van"], ["car_police", 0.025, "civ_police"],
-	["car_ambulance", 0.015, "civ_ambulance"]]
+const CAR_KINDS := [["car_sedan", 0.24, "civ_sedan"], ["car_hatch", 0.19, "civ_compact"], ["car_suv", 0.15, "civ_suv"],
+	["car_taxi", 0.12, "civ_taxi"], ["car_van", 0.09, "civ_van"], ["car_police", 0.025, "civ_police"],
+	["car_ambulance", 0.015, "civ_ambulance"],
+	# The cars you buy and drive, on the road too (2026-11-21): the same
+	# Kestrel-pipeline bodies, cut to ~6k (near) / 1.3k (mid) for traffic.
+	["car_kestrel", 0.05, "kestrel"], ["car_marlin", 0.03, "marlin"], ["car_scout", 0.03, "scout"],
+	["car_warden", 0.025, "warden"], ["car_goliath", 0.02, "goliath"], ["car_vanta", 0.015, "vanta"],
+	["car_brute", 0.015, "brute"], ["car_halcyon", 0.01, "halcyon"]]
+const MODEL_VEH := "res://assets/vehicles/"
+const TRAFFIC_SHARE := 0.5
 ## Share of the kerbside parking spots that hold a car.
 const PARKED_KEEP := 0.35
 ## Traffic material per glTF material name: [merge group, tint, emission, roughness].
@@ -204,7 +211,10 @@ func _ready() -> void:
 		var p: Dictionary = settings.preset()
 		view_distance = p["view_distance"]
 		prop_density = p["props"]
-		traffic_density = p["traffic"]
+		# Half the moving traffic and street walkers of before on every preset
+		# (2026-11-21, owner's call): fewer, better-looking cars and people,
+		# and the frame time goes to quality instead of quantity.
+		traffic_density = p["traffic"] * TRAFFIC_SHARE
 		detail_range = minf(380.0, view_distance * 0.45)
 	_materials()
 	_load_props()
@@ -702,6 +712,8 @@ func _materials() -> void:
 	building_mat.set_shader_parameter("pbr_on", true)
 	building_mat.set_shader_parameter("wall_tex", load("res://assets/textures/pbr/concrete_wall_008.png"))
 	building_mat.set_shader_parameter("brick_tex", load("res://assets/textures/pbr/codex_brick.png"))
+	building_mat.set_shader_parameter("metal_tex", load("res://assets/textures/pbr/metal_plate_02.png"))
+	building_mat.set_shader_parameter("struct_tex", load("res://assets/textures/pbr/codex_concrete.png"))
 	water_mat = ShaderMaterial.new()
 	water_mat.shader = load("res://src/world/shaders/water.gdshader")
 	# The baked seabed (tools/bake_seabed.gd) is City Empire's three-island
@@ -805,7 +817,11 @@ func _load_props() -> void:
 		_glow_meshes.append(q)
 	var shader: Shader = load("res://src/world/shaders/traffic.gdshader")
 	for kind in CAR_KINDS:
-		var cm := _traffic_car_mesh(String(kind[2]), shader)
+		# Near model: <body>_traffic.glb when there is one (the catalogue cars
+		# are ~40k tris in full; a ~6k cut for traffic), else the body itself.
+		var near_name := String(kind[2]) + "_traffic"
+		var cm := _traffic_car_mesh(near_name, shader, String(kind[2])) if ResourceLoader.exists(MODEL_VEH + near_name + ".glb") \
+			else _traffic_car_mesh(String(kind[2]), shader)
 		if cm == null:  # (the old low-detail model as a fallback)
 			cm = _legacy_car_mesh(String(kind[0]), shader)
 		car_meshes.append(cm)
@@ -814,7 +830,10 @@ func _load_props() -> void:
 		car_far_meshes.append(_car_far_mesh(cm) if cm else null)
 	# Four body types (tools/blender/build_street.py), one surface each;
 	# pedestrian.gdshader colours and poses them from their UVs.
-	walker_meshes = _load_meshes("pedestrians")
+	# Far walkers from the current hero too (crowd_far.glb, build_crowd.py at
+	# ~900 tris): the old four-body pedestrians.glb read as a different, older
+	# game next to the near crowd (2026-11-21). Same part/limb encoding.
+	walker_meshes = _load_meshes("crowd_far") if ResourceLoader.exists("res://assets/models/crowd_far.glb") else _load_meshes("pedestrians")
 	if not walker_meshes.is_empty():
 		var wm := ShaderMaterial.new()
 		wm.shader = load("res://src/world/shaders/pedestrian.gdshader")
@@ -877,7 +896,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 	# The light alloy (ws_fleet wheel_traffic: ~430 triangles, radius 1, width
 	# 0.44, axle X, face +X); the mid LOD keeps the plain cylinders.
 	var wpath := "res://assets/vehicles/wheel_traffic.glb"
-	if dims_of == "" and ResourceLoader.exists(wpath):
+	if not body.ends_with("_lod1") and ResourceLoader.exists(wpath):
 		var wi := (load(wpath) as PackedScene).instantiate()
 		var wmis := wi.find_children("*", "MeshInstance3D", true, false)
 		var wm: Mesh = (wmis[0] as MeshInstance3D).mesh if wmis.size() > 0 else null
@@ -894,7 +913,9 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 						var sn := String(smat.resource_name) if smat else ""
 						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si), 0, wxf)
 			# The full model only: mid/far LODs carry no beam.
-			return _commit_traffic(tools, looks, shader, src.get_aabb().position.z, float(d["W"]), src.get_aabb())
+			# (No road beam: an additive patch on the road at the bumper read as a
+			# light under the car at night, 2026-11-21.)
+			return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb())
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -2476,6 +2497,8 @@ static func kind_weight(k: int, west: bool) -> float:
 			w *= 0.35 if west else 1.4
 		"car_hatch":
 			w *= 1.25 if west else 1.0
+		"car_warden", "car_vanta", "car_halcyon":
+			w *= 0.45 if west else 1.6   # (the pricier cars: the Commercial Island)
 	return w
 
 

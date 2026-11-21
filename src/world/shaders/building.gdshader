@@ -20,6 +20,8 @@ uniform sampler2D asph_tex : filter_linear_mipmap_anisotropic, repeat_enable, hi
 uniform bool pbr_on = false;
 uniform sampler2D wall_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
 uniform sampler2D brick_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
+uniform sampler2D metal_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
+uniform sampler2D struct_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
 #include "res://src/world/shaders/pbr_detail.gdshaderinc"
 uniform vec3 interior_warm : source_color = vec3(1.0, 0.78, 0.48);
 uniform float lit_fraction = 0.025;
@@ -1014,6 +1016,29 @@ void fragment() {
 			rough = mix(rough, max(rough, d.a), 0.5 * kw);
 			vec3 nw = pbr_wall_normal(d, normalize(v_world_normal), 0.7 * kw);
 			NORMAL = normalize(mix(NORMAL, (VIEW_MATRIX * vec4(nw, 0.0)).xyz, kw));
+		}
+	}
+	// Structures (2026-11-21): bridges, viaducts, pylons, parapets (kit TRIM
+	// that isn't a road deck) and flat roofs get real material – painted steel
+	// where the colour is saturated (the red bridge), concrete where neutral –
+	// mapped in world metres along the dominant axis, faded with distance.
+	bool deck = v_kind == KIND_TRIM && v_world_normal.y > 0.8 && dot(base, vec3(0.333)) < 0.3 && abs(base.r - base.b) < 0.04;
+	if (pbr_on && !deck && rough > 0.45 && ((v_kind == KIND_TRIM) || (v_kind == KIND_ROOF && metal < 0.05))) {
+		float ks = pbr_fade(v_dist);
+		if (ks > 0.0) {
+			vec3 an = abs(v_world_normal);
+			bool flat_s = an.y > max(an.x, an.z);
+			vec2 tp = flat_s ? v_wpos.xz : (an.x > an.z ? v_wpos.zy : v_wpos.xy);
+			float sat = max(base.r, max(base.g, base.b)) - min(base.r, min(base.g, base.b));
+			bool painted = sat > 0.12 && v_kind == KIND_TRIM;
+			vec4 d = painted ? texture(metal_tex, tp / 1.6) : texture(struct_tex, tp / 2.6);
+			albedo *= mix(1.0, d.r * 2.0, (painted ? 0.45 : 0.6) * ks);
+			rough = mix(rough, painted ? clamp(d.a, 0.35, 0.7) : d.a, 0.55 * ks);
+			vec3 nw2 = flat_s ? pbr_flat_normal(d, normalize(v_world_normal), 0.7 * ks) : pbr_wall_normal(d, normalize(v_world_normal), 0.7 * ks);
+			NORMAL = normalize((VIEW_MATRIX * vec4(nw2, 0.0)).xyz);
+			if (painted) {
+				metal = max(metal, 0.25 * ks);
+			}
 		}
 	}
 	// Fake city reflection in the glass (smooth surfaces): the skyline, sky

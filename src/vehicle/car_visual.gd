@@ -181,11 +181,12 @@ static func shared_mat(name: String) -> Material:
 const CONTACT_SHADER := """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
+global uniform float night;
 uniform float strength = 0.3;
 void fragment() {
 	float d = length((UV - 0.5) * 2.0);
 	ALBEDO = vec3(0.0);
-	ALPHA = (1.0 - smoothstep(0.15, 1.0, d)) * strength;
+	ALPHA = (1.0 - smoothstep(0.15, 1.0, d)) * strength * (1.0 - night);   // (nothing under cars after dark)
 }
 """
 static var _contact_shader: Shader
@@ -425,7 +426,10 @@ func enable_headlights(_shadows := false) -> void:
 	spill.light_specular = 0.15
 	spill.position = Vector3(0.0, mid.y + 0.25, mid.z - 0.6)
 	spill.rotation = Vector3(deg_to_rad(-22.0), 0.0, 0.0)
-	for l: SpotLight3D in [main, spill]:
+	# (No near spill any more: its wide cone, aimed down from behind the lamps,
+	# lit the road round and under the nose – from the chase camera it read as
+	# a light under the car at night, 2026-11-21.)
+	for l: SpotLight3D in [main]:
 		l.light_energy = 0.0
 		l.shadow_enabled = false
 		l.visible = false
@@ -484,8 +488,9 @@ func _process(dt: float) -> void:
 		var on := lamps > 0.05 and not car.disabled
 		head_lights[0].visible = on
 		head_lights[0].light_energy = 18.0 * lamps
-		head_lights[1].visible = on
-		head_lights[1].light_energy = 3.0 * lamps
+		if head_lights.size() > 1:
+			head_lights[1].visible = on
+			head_lights[1].light_energy = 3.0 * lamps
 	if beacon_light_a and beacon_light_a.visible:
 		var ph := fmod(_t * 2.6, 1.0)
 		var a := 1.0 if ph < 0.5 else 0.0
