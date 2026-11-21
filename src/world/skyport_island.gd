@@ -1706,6 +1706,8 @@ func _process(_dt: float) -> void:
 func _ground_mat() -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = load("res://src/world/shaders/island_ground.gdshader")
+	m.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/asphalt_01.png"))
+	m.set_shader_parameter("pbr_on", true)
 	return m
 
 

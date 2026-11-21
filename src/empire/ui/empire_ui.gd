@@ -2455,7 +2455,7 @@ func _settings_panel() -> void:
 	v.add_child(q)
 	var lf := S.hbox(10)
 	lf.add_child(S.label("Image filter", 18, S.MUTED))
-	for pair in [["Crisp", "crisp"], ["Off", "clean"]]:
+	for pair in [["Cinematic", "cinematic"], ["Crisp", "crisp"], ["Off", "clean"]]:
 		var id: String = pair[1]
 		lf.add_child(S.button(pair[0], func():
 			Settings.look = id

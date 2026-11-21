@@ -12,6 +12,9 @@ render_mode diffuse_burley;
 
 global uniform float wetness;
 global uniform float night;
+uniform sampler2D asph_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
+uniform bool pbr_on = false;
+#include "res://src/world/shaders/pbr_detail.gdshaderinc"
 uniform float strip_w = 20.0;   // (per-strip half widths come in UV2.x)
 
 varying flat float v_kind;
@@ -110,6 +113,8 @@ void fragment() {
 	vec3 c = pow(COLOR.rgb, vec3(2.2));   // (vertex colours are sRGB)
 	vec3 albedo = c;
 	float rough = 0.9;
+	float sheen = 0.0;
+	vec3 pbr_n = vec3(0.0);
 	vec3 white = vec3(0.78, 0.78, 0.74);
 	vec3 yellow = vec3(0.78, 0.52, 0.06);
 	float tone = 0.9 + 0.12 * vnoise(p / 30.0) + 0.06 * vnoise(p * 0.7) * near;
@@ -141,7 +146,21 @@ void fragment() {
 			albedo = mix(albedo, sand, sandk);
 		}
 	} else if (v_kind == 2.0 || v_kind == 7.0) {
-		albedo = c * tone;
+		// Asphalt as the cities' (ground.gdshader, 2026-11-21): darker, stone
+		// aggregate faded by pixel size, tyre-polished tracks with a sheen.
+		float fpx = fwidth(p.x) + fwidth(p.y);
+		float agg = (hash12(floor(p * 9.0)) - 0.5) * (1.0 - smoothstep(0.03, 0.12, fpx))
+			+ (hash12(floor(p * 23.0) + 5.0) - 0.5) * 0.7 * (1.0 - smoothstep(0.01, 0.05, fpx));
+		agg *= pbr_on ? 0.0 : 1.0;
+		albedo = c * tone * 0.66 * (1.0 + 0.32 * agg);
+		rough = 0.86 - 0.08 * agg;
+		if (pbr_on) {
+			float kd = pbr_fade(v_dist);
+			vec4 d = texture(asph_tex, p / 2.4);
+			albedo *= mix(1.0, d.r * 2.0, 0.85 * kd);
+			rough = mix(rough, d.a, 0.55 * kd * (1.0 - wetness));
+			pbr_n = pbr_flat_normal(d, normalize(v_wn), 0.9 * kd);
+		}
 		// Centre line, lane dashes, edge lines.
 		// The same standard as the cities (ground.gdshader): yellow parts
 		// opposing traffic – a double solid line on multi-lane roads, dashed
@@ -166,8 +185,10 @@ void fragment() {
 		}
 		albedo = mix(albedo, white, max(edge, dash) * 0.95);
 		albedo = mix(albedo, yellow, centre * 0.95);
-		float tracks = band(abs(fract(abs(uv.x) / 3.5) - 0.5) * 3.5 - 0.9, 0.3, 0.2) * near;
-		albedo *= 1.0 - 0.06 * tracks;
+		float tracks = band(abs(fract(abs(uv.x) / 3.5) - 0.5) * 3.5 - 0.9, 0.32, 0.3) * mix(0.6, 1.0, near);
+		albedo *= 1.0 - 0.16 * tracks;
+		rough -= 0.3 * tracks;
+		sheen = tracks;
 		// Patch repairs, the odd oil stain and a darker gutter by the kerb.
 		vec2 pc = floor(p / vec2(4.0, 2.6) + 7.0);
 		albedo *= 1.0 - 0.08 * step(0.9, hash12(pc)) * near;
@@ -242,6 +263,10 @@ void fragment() {
 			albedo = shore_look(c, p, v_world.y + 1.6, sfp, near, tone, v_world, normalize(v_wn), rough);
 		}
 	}
+	if (pbr_n.y > 0.0) {
+		NORMAL = normalize((VIEW_MATRIX * vec4(pbr_n, 0.0)).xyz);
+	}
 	ALBEDO = albedo * (1.0 - 0.22 * wetness);
-	ROUGHNESS = mix(rough, 0.35, wetness * 0.7);
+	ROUGHNESS = mix(clamp(rough, 0.3, 1.0), 0.35, wetness * 0.7);
+	SPECULAR = 0.5 + 0.2 * sheen;
 }

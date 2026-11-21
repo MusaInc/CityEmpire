@@ -24,7 +24,7 @@ const PRESETS := {
 
 var quality: int = Quality.MEDIUM
 var fps_60 := true  # swinging needs it; Settings can drop to 30 for battery
-const VERSION := 4  # bump to migrate saved settings to new defaults
+const VERSION := 5  # bump to migrate saved settings to new defaults
 var haptics := true
 var show_perf := false
 var look_sensitivity := 1.0
@@ -40,7 +40,7 @@ var music_volume := 0.6
 var sfx_volume := 1.0
 ## Post-process style, a LookFilter.STYLES key. "crisp" (subtle clean-up pass)
 ## since 0.7.3, "clean" = no filter; cartoon styles stay for `--look=` comparisons.
-var look := "crisp"
+var look := "cinematic"
 var appearance := "auto"   # the phone's look: "auto" (light by day, dark at night), "light", "dark"
 ## Sky: "cycle" (day → night → day, ~16 min) or a fixed "day" / "sunset" / "night".
 var time_of_day := "cycle"
@@ -72,6 +72,8 @@ func _ready() -> void:
 			look = "clean"  # cartoon filters removed from Settings
 		if cfg.get_value("meta", "version", 1) < 4:
 			look = "crisp"  # new default filter
+		if cfg.get_value("meta", "version", 1) < 5 and look == "crisp":
+			look = "cinematic"  # premium PBR look (2026-11-21); "clean" choices are kept
 		if not OS.is_debug_build():
 			tuning_overrides = {}  # the tuning panel is a developer tool
 	apply()

@@ -15,6 +15,10 @@ global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
 global uniform float night;
 global uniform float wetness;
+uniform sampler2D asph_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
+uniform bool pbr_on = false;
+uniform sampler2D wall_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
+#include "res://src/world/shaders/pbr_detail.gdshaderinc"
 uniform vec3 interior_warm : source_color = vec3(1.0, 0.78, 0.48);
 uniform float lit_fraction = 0.025;
 uniform float lit_strength = 0.35;
@@ -966,6 +970,41 @@ void fragment() {
 	if (relief > 0.0) {
 		vec3 nv = normalize((VIEW_MATRIX * vec4(bend_n, 0.0)).xyz);
 		NORMAL = normalize(mix(NORMAL, nv, relief));
+	}
+	{
+	// Road decks (bridge approaches, viaducts, ramps: dark neutral kit tops)
+	// get the streets' asphalt (ground.gdshader, 2026-11-21): darker, stone
+	// aggregate faded by pixel size, a broad tone drift.
+	float bl = dot(base, vec3(0.333));
+	if (v_kind == KIND_TRIM && v_world_normal.y > 0.8 && bl < 0.3 && abs(base.r - base.b) < 0.04) {  // (decks 0.2-0.26, stone 0.43)
+		vec2 p = v_wpos.xz;
+		float fpx = fwidth(p.x) + fwidth(p.y);
+		float agg = (hash12(floor(p * 9.0)) - 0.5) * (1.0 - smoothstep(0.03, 0.12, fpx))
+			+ (hash12(floor(p * 23.0) + 5.0) - 0.5) * 0.7 * (1.0 - smoothstep(0.01, 0.05, fpx));
+		float drift = vnoise_b(p * 0.03 + 31.0) * 0.6 + vnoise_b(p * 0.12) * 0.4;
+		agg *= pbr_on ? 0.0 : 1.0;
+		albedo = base * 0.62 * (0.82 + 0.32 * drift) * (1.0 + 0.32 * agg);
+		rough = 0.86 - 0.08 * agg;
+		if (pbr_on) {
+			float kd = pbr_fade(v_dist);
+			vec4 d = texture(asph_tex, p / 2.4);
+			albedo *= mix(1.0, d.r * 2.0, 0.85 * kd);
+			rough = mix(rough, d.a, 0.55 * kd * (1.0 - wetness));
+			NORMAL = normalize((VIEW_MATRIX * vec4(pbr_flat_normal(d, vec3(0.0, 1.0, 0.0), 0.9 * kd), 0.0)).xyz);
+		}
+	}
+	}
+	// Photographic wall detail (CC0 concrete_wall_008): weathered render /
+	// concrete grain and relief on masonry (not glass: rough > 0.5), up close.
+	if (pbr_on && (v_kind == KIND_WALL || v_kind == KIND_STONE) && rough > 0.5 && abs(v_world_normal.y) < 0.5) {
+		float kw = pbr_fade(v_dist);
+		if (kw > 0.0) {
+			vec4 d = texture(wall_tex, uv / 2.2);
+			albedo *= mix(1.0, d.r * 2.0, 0.55 * kw);
+			rough = mix(rough, max(rough, d.a), 0.5 * kw);
+			vec3 nw = pbr_wall_normal(d, normalize(v_world_normal), 0.7 * kw);
+			NORMAL = normalize(mix(NORMAL, (VIEW_MATRIX * vec4(nw, 0.0)).xyz, kw));
+		}
 	}
 	ALBEDO = albedo * (1.0 - 0.16 * wetness);
 	ROUGHNESS = mix(rough, min(rough, 0.32), wetness * 0.75);

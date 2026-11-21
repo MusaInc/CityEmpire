@@ -175,9 +175,44 @@ static func shared_mat(name: String) -> Material:
 	return m
 
 
+## Contact shadow (2026-11-21): a soft dark ellipse on the ground under the
+## body – the shadow map's edge is soft and coarse at the tyres, so cars read
+## as floating. Fades while the wheels are off the ground.
+const CONTACT_SHADER := """
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
+uniform float strength = 0.62;
+void fragment() {
+	float d = length((UV - 0.5) * 2.0);
+	ALBEDO = vec3(0.0);
+	ALPHA = (1.0 - smoothstep(0.35, 1.0, d)) * strength;
+}
+"""
+static var _contact_shader: Shader
+var _contact: MeshInstance3D
+
+
+func _add_contact_shadow(size: Vector3) -> void:
+	if _contact_shader == null:
+		_contact_shader = Shader.new()
+		_contact_shader.code = CONTACT_SHADER
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(size.x * 1.24, size.z * 1.16)
+	var sm := ShaderMaterial.new()
+	sm.shader = _contact_shader
+	_contact = MeshInstance3D.new()
+	_contact.name = "ContactShadow"
+	_contact.mesh = pm
+	_contact.material_override = sm
+	_contact.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_contact.position = Vector3(0, 0.04, 0)
+	add_child(_contact)
+
+
 func setup(p_car: Car) -> void:
 	car = p_car
 	var spec := car.spec
+	_add_contact_shadow(spec.get("size", Vector3(2.0, 1.5, 4.6)))
 	body = MeshInstance3D.new()
 	body.name = "Body"
 	add_child(body)
@@ -429,6 +464,9 @@ func _beacon_light(c: Color, x: float) -> OmniLight3D:
 func _process(dt: float) -> void:
 	if car == null:
 		return
+	if _contact:
+		var sm := _contact.material_override as ShaderMaterial
+		sm.set_shader_parameter("strength", 0.62 * clampf(float(car.wheels_on_ground) / 4.0, 0.0, 1.0))
 	_t += dt
 	_dent_cooldown -= dt
 	var spec := car.spec

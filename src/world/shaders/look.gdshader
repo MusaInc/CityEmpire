@@ -5,6 +5,11 @@
 //   style 3 Painted – Kuwahara brush smoothing + light outlines
 //   style 4 Crisp   – light edge-preserving smoothing (blended, small radius),
 //                     thin shaded depth outlines, mild grade: cleaner, not cartoon
+//   style 5 Cinematic – (default, 2026-11-21) no smoothing or outlines: contrast-
+//                     adaptive sharpening, a touch of local contrast, filmic
+//                     S-curve + split tone, dither against 10-bit banding.
+//                     Reads only the colour buffer (the Mobile renderer's depth
+//                     texture is empty with MSAA on), ~8 taps: phone-cheap.
 // Outlines come from relative depth jumps (silhouettes at any distance) plus
 // colour edges (window grids, kerbs); both fade into the fog.
 shader_type spatial;
@@ -46,6 +51,12 @@ uniform float ink_shade = 0.0;       // 0 = flat ink colour, 1 = darkened scene 
 uniform float lens = 0.0;
 uniform float lens_threshold = 1.15;  // linear HDR: what counts as a light
 uniform vec3 streak_tint : source_color = vec3(0.55, 0.72, 1.0);
+// Cinematic
+uniform float sharpen = 0.55;         // CAS strength 0..1
+uniform float clarity = 0.14;         // local contrast against a blurred mip
+uniform float film_contrast = 0.16;   // S-curve strength in display space
+uniform float film_toe = 0.012;       // shadow floor lift (no crushed blacks)
+uniform float dither = 1.0;
 
 void vertex() {
 	POSITION = vec4(VERTEX.xy, 1.0, 1.0);
@@ -179,10 +190,57 @@ vec3 kuwahara_small(sampler2D stex, vec2 uv, vec2 px) {
 	return best;
 }
 
+// AMD-style contrast-adaptive sharpening on a 5-tap cross, display space.
+vec3 cas(vec3 c, vec3 n, vec3 s, vec3 e, vec3 w, float amount) {
+	vec3 mn = min(c, min(min(n, s), min(e, w)));
+	vec3 mx = max(c, max(max(n, s), max(e, w)));
+	vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0));
+	vec3 wt = -amp * mix(0.125, 0.2, amount);
+	return clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0);
+}
+
+vec3 cinematic(sampler2D stex, sampler2D smip, vec2 uv, vec2 px, vec2 fragcoord) {
+	vec3 g = vec3(1.0 / 2.2);
+	vec3 c = pow(max(texture(stex, uv).rgb, 0.0), g);
+	vec3 n = pow(max(texture(stex, uv + vec2(0.0, -px.y)).rgb, 0.0), g);
+	vec3 s = pow(max(texture(stex, uv + vec2(0.0, px.y)).rgb, 0.0), g);
+	vec3 e = pow(max(texture(stex, uv + vec2(px.x, 0.0)).rgb, 0.0), g);
+	vec3 w = pow(max(texture(stex, uv + vec2(-px.x, 0.0)).rgb, 0.0), g);
+	c = mix(c, cas(c, n, s, e, w, sharpen), sharpen);
+	// Clarity: lift mid-scale detail (facade relief, kerbs, tyre tracks)
+	// against a ~4 px blur; limited in the darks and brights (no halos there).
+	float lc = luma(c);
+	float lb = luma(pow(max(textureLod(smip, uv, 2.0).rgb, 0.0), g));
+	c *= 1.0 + clamp(lc - lb, -0.12, 0.12) * clarity * 4.0 * smoothstep(0.04, 0.3, lc) * (1.0 - smoothstep(0.75, 1.0, lc));
+	// Filmic S-curve on luminance (hue kept), gentle toe.
+	float l = luma(c);
+	float ls = l + film_contrast * (l - l * l) * (2.0 * l - 1.0) * 2.0;
+	c *= max(ls, 0.0) / max(l, 1e-4);
+	c = c * (1.0 - film_toe) + film_toe;
+	return c;
+}
+
 void fragment() {
 	vec2 uv = SCREEN_UV;
 	vec2 res = VIEWPORT_SIZE;
 	vec2 px = 1.0 / res;
+	if (style == 5) {
+		vec3 c5 = cinematic(screen_tex, screen_mip, uv, px, FRAGCOORD.xy);
+		if (lens > 0.0) {
+			float th5 = mix(lens_threshold * 2.2, lens_threshold, night);
+			c5 += pow(max(lens_light(screen_mip, uv, px, th5, streak_tint, night), 0.0), vec3(1.0 / 2.2)) * lens * mix(0.35, 0.8, night);
+		}
+		c5 = saturate_col(c5, saturation);
+		float l5 = luma(c5);
+		c5 = mix(c5, c5 * mix(shadow_tint, light_tint, smoothstep(0.1, 0.7, l5)) * 1.08, split_tone);
+		vec2 q5 = uv - 0.5;
+		c5 *= 1.0 - vignette * smoothstep(0.3, 0.9, dot(q5, q5) * 2.2);
+		// Triangular dither, ±1 LSB of an 8-bit display: no banding in sky,
+		// asphalt or soft shade (the Mobile renderer's 10-bit buffer bands).
+		vec2 h = fract(sin(vec2(dot(FRAGCOORD.xy, vec2(12.9898, 78.233)), dot(FRAGCOORD.xy, vec2(39.3468, 11.135)))) * 43758.5453);
+		c5 += (h.x + h.y - 1.0) / 255.0 * dither;
+		ALBEDO = pow(max(c5, 0.0), vec3(2.2));
+	} else {
 	vec3 col = texture(screen_tex, uv).rgb;
 	if (style == 3) {
 		col = kuwahara(screen_tex, uv, px * max(res.y / 720.0, 1.0));
@@ -267,4 +325,5 @@ void fragment() {
 	}
 	c *= 1.0 - vignette * smoothstep(0.25, 0.85, dot(q, q) * 2.2);
 	ALBEDO = pow(max(c, 0.0), vec3(2.2));
+	}
 }

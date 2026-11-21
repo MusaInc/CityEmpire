@@ -9,6 +9,7 @@ const STYLES := {
 	"toon": 2,
 	"painted": 3,
 	"crisp": 4,
+	"cinematic": 5,
 	"debug_pass": 8,
 	"debug_edges": 9,
 }
@@ -24,6 +25,11 @@ const TUNING := {
 		"line_far": 220.0, "ink_amount": 0.3, "ink_shade": 1.0, "saturation": 1.05,
 		"exposure": 1.0, "lift": 0.0, "split_tone": 0.06, "haze_amount": 0.0, "vignette": 0.0,
 		"speed_lines": 0.0, "lens": 0.6},
+	# Cinematic (default 2026-11-21): premium clean realism – sharpened, no
+	# smoothing or ink, filmic contrast, faint cool-shadow/warm-light split.
+	"cinematic": {"sharpen": 0.55, "clarity": 0.14, "film_contrast": 0.16, "film_toe": 0.012, "saturation": 1.04,
+		"split_tone": 0.08, "shadow_tint": Color(0.86, 0.92, 1.04), "light_tint": Color(1.04, 1.0, 0.93),
+		"vignette": 0.14, "lens": 0.45, "dither": 1.0},
 	# Clean comic: crisp ink and flat cel tones, no halftone grain, gentle grade.
 	"comic": {"line_px": 1.15, "bands": 3.0, "band_soft": 0.1, "saturation": 1.3, "halftone": 0.0,
 		"color_edge": 0.38, "exposure": 1.06, "lift": 0.015, "split_tone": 0.22, "vignette": 0.12,

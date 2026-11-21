@@ -15,6 +15,10 @@ render_mode cull_back, diffuse_burley;
 uniform sampler2D road_field : filter_nearest, repeat_disable;
 uniform vec4 road_rect = vec4(0.0, 0.0, 1.0, 1.0);  // x, z origin, x, z size (m)
 uniform bool has_streets = false;
+uniform sampler2D asph_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
+uniform sampler2D pave_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
+uniform bool pbr_on = false;
+#include "res://src/world/shaders/pbr_detail.gdshaderinc"
 global uniform float wetness;
 global uniform float rain;
 
@@ -114,6 +118,7 @@ void fragment() {
 	float aa = max(fwidth(p.x) + fwidth(p.y), 0.004) * 0.6;
 	vec3 albedo = c * (0.88 + 0.2 * n);
 	float rough = 0.92;
+	float track_sheen = 0.0;
 	bool flat_top = v_up > 0.5;
 	bool asphalt = c.r < 0.3 && c.g < 0.3;
 	bool grass = c.g > c.r + 0.08;
@@ -173,7 +178,19 @@ void fragment() {
 			// mottling up close, so shaded streets still read as a surface.
 			float drift = vnoise(p * 0.022 + 31.0) * 0.6 + vnoise(p * 0.09) * 0.4;
 			float grain = vnoise(p * 3.1) * near;
-			albedo = c * vec3(0.66, 0.66, 0.67) * (0.84 + 0.3 * drift) * (0.94 + 0.12 * grain);
+			// (2026-11-21 cinematic pass) Darker, real-asphalt albedo (~0.08-0.12
+			// linear: it read chalky in full sun) with a faint warm/cool drift,
+			// and aggregate: stones at two scales, faded with their pixel size so
+			// they never shimmer.
+			albedo = c * vec3(0.47, 0.465, 0.46) * (0.82 + 0.32 * drift) * (0.94 + 0.12 * grain);
+			albedo *= mix(vec3(1.0), vec3(1.04, 1.0, 0.95), vnoise(p * 0.05 + 77.0));
+			float fpx = fwidth(p.x) + fwidth(p.y);
+			float st1 = hash12(floor(p * 9.0));
+			float st2 = hash12(floor(p * 23.0) + 5.0);
+			float agg = (st1 - 0.5) * (1.0 - smoothstep(0.03, 0.12, fpx)) + (st2 - 0.5) * 0.7 * (1.0 - smoothstep(0.01, 0.05, fpx));
+			agg *= pbr_on ? 0.0 : 1.0;   // (the photo carries the grain: both read as cobbles)
+			albedo *= 1.0 + 0.32 * agg;
+			rough = 0.86 - 0.08 * agg;
 			// Large-scale tone drift + patch repairs (sharp-edged, slightly off-tone).
 			vec2 pc = floor(p / vec2(5.0, 3.0));
 			float patch = step(0.86, hash12(pc + 17.0));
@@ -208,9 +225,12 @@ void fragment() {
 				float from_j = other;               // metres past the junction mouth
 				// Tyre tracks: two polished bands per 3.5 m lane.
 				float lane_d = abs(fract(a / 3.5) - 0.5) * 3.5;
-				float tracks = band(lane_d - 0.85, 0.28, 0.25) * step(0.9, hw - a) * near;
-				albedo *= 1.0 - 0.07 * tracks;
-				rough -= 0.12 * tracks;
+				float tracks = band(lane_d - 0.85, 0.32, 0.3) * step(0.9, hw - a) * mix(0.6, 1.0, near);
+				// Tyre-polished: darker, smoother, a little oil (a sun sheen runs
+				// along the lanes like on a real road).
+				albedo *= 1.0 - 0.16 * tracks;
+				rough -= 0.3 * tracks;
+				track_sheen = tracks;
 				// Gutter: grimy last 0.5 m along the kerb, drain grates every 16 m.
 				float gutter = smoothstep(hw - 0.7, hw - 0.3, a);
 				albedo *= 1.0 - 0.22 * gutter;
@@ -443,10 +463,19 @@ void fragment() {
 		rough = mix(rough, 0.22, wetness * 0.85);
 		rough = mix(rough, 0.03 + 0.12 * rain * vnoise(p * 6.0 + TIME * 3.0), pud);
 	}
+	// Photographic detail (2026-11-21): real asphalt / paving up close.
+	if (pbr_on && !shore && flat_top && (asphalt || pave)) {
+		float kd = pbr_fade(v_dist);
+		vec4 d = asphalt ? texture(asph_tex, p / 2.4) : texture(pave_tex, p / 2.0);
+		albedo *= mix(1.0, d.r * 2.0, (asphalt ? 0.85 : 0.65) * kd);
+		rough = mix(rough, d.a, 0.55 * kd * (1.0 - wetness));
+		vec3 nw = pbr_flat_normal(d, normalize(v_wn), (asphalt ? 0.9 : 0.6) * kd);
+		NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
+	}
 	ALBEDO = albedo;
-	ROUGHNESS = rough;
+	ROUGHNESS = clamp(rough, 0.3, 1.0);
 	// (Dry tarmac and stone barely mirror the sky. Wet: a sheen, and only the
 	// puddles mirror it fully – a whole wet square at 0.8 turned milky white
 	// under an overcast sky, 2026-11-20.)
-	SPECULAR = 0.25 + 0.25 * wetness + 0.4 * pud;
+	SPECULAR = 0.25 + 0.25 * wetness + 0.4 * pud + 0.2 * track_sheen;
 }

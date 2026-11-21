@@ -694,6 +694,13 @@ func _materials() -> void:
 		building_mat.set_shader_parameter("has_graffiti", true)
 	ground_mat = ShaderMaterial.new()
 	ground_mat.shader = load("res://src/world/shaders/ground.gdshader")
+	# Photographic PBR detail (CC0, assets/textures/pbr/SOURCES.md).
+	ground_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/asphalt_01.png"))
+	ground_mat.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/concrete_pavement.png"))
+	ground_mat.set_shader_parameter("pbr_on", true)
+	building_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/asphalt_01.png"))
+	building_mat.set_shader_parameter("pbr_on", true)
+	building_mat.set_shader_parameter("wall_tex", load("res://assets/textures/pbr/concrete_wall_008.png"))
 	water_mat = ShaderMaterial.new()
 	water_mat.shader = load("res://src/world/shaders/water.gdshader")
 	# The baked seabed (tools/bake_seabed.gd) is City Empire's three-island
@@ -886,7 +893,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 						var sn := String(smat.resource_name) if smat else ""
 						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si), 0, wxf)
 			# The full model only: mid/far LODs carry no beam.
-			return _commit_traffic(tools, looks, shader, src.get_aabb().position.z, float(d["W"]))
+			return _commit_traffic(tools, looks, shader, src.get_aabb().position.z, float(d["W"]), src.get_aabb())
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -904,10 +911,11 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
 			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(tyre, 0, xf)
 			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(hub, 0, xf)
-	return _commit_traffic(tools, looks, shader)   # (no road beam: the user asked for them gone, 2026-11-18)
+	return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb())   # (no road beam: the user asked for them gone, 2026-11-18)
 
 
 const BEAM_SHADER := preload("res://src/world/shaders/traffic_beam.gdshader")
+const AO_SHADER := preload("res://src/world/shaders/traffic_ao.gdshader")
 
 
 ## The headlight beam ahead of a moving car: a grid on the road ahead of
@@ -939,8 +947,25 @@ static func _beam_grid(st: SurfaceTool, front_z: float, w: float) -> void:
 				st.add_vertex(q[0])
 
 
-func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front_z := 0.0, width := 0.0) -> ArrayMesh:
+func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front_z := 0.0, width := 0.0, body := AABB()) -> ArrayMesh:
 	var out := ArrayMesh.new()
+	if body.size.x > 0.5:
+		# Contact shadow: a soft ellipse a little wider/longer than the body.
+		var ast := SurfaceTool.new()
+		ast.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var c := body.get_center()
+		var hx := body.size.x * 0.62
+		var hz := body.size.z * 0.58
+		var q := [[Vector3(c.x - hx, 0.035, c.z - hz), Vector2(0, 0)], [Vector3(c.x + hx, 0.035, c.z - hz), Vector2(1, 0)],
+			[Vector3(c.x + hx, 0.035, c.z + hz), Vector2(1, 1)], [Vector3(c.x - hx, 0.035, c.z + hz), Vector2(0, 1)]]
+		for k in [0, 1, 2, 0, 2, 3]:
+			ast.set_normal(Vector3.UP)
+			ast.set_uv(q[k][1])
+			ast.add_vertex(q[k][0])
+		ast.commit(out)
+		var am := ShaderMaterial.new()
+		am.shader = AO_SHADER
+		out.surface_set_material(out.get_surface_count() - 1, am)
 	if width > 0.0:
 		var bst := SurfaceTool.new()
 		bst.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -997,7 +1022,7 @@ static func _car_far_mesh(full: Mesh) -> Mesh:
 	var first := true
 	for i in full.get_surface_count():
 		var m := full.surface_get_material(i) as ShaderMaterial
-		if m == null or m.shader == BEAM_SHADER:
+		if m == null or m.shader == BEAM_SHADER or m.shader == AO_SHADER:
 			continue   # (the headlight beam: not part of the body's size or looks)
 		var verts: PackedVector3Array = full.surface_get_arrays(i)[Mesh.ARRAY_VERTEX]
 		for v in verts:
