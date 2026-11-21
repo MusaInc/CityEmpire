@@ -223,6 +223,13 @@ func _ready() -> void:
 	traffic_bodies.name = "TrafficBodies"
 	add_child(traffic_bodies)
 	traffic_bodies.setup(self)
+	# Dynamic resolution on phones (CitySwing's FrameGovernor; WorldState never
+	# installed it, audit WS-08): eases the 3-D render scale down under load or
+	# heat and back up with headroom, so heavy views stay smooth.
+	var gov := FrameGovernor.new()
+	gov.name = "FrameGovernor"
+	gov.enabled = OS.has_feature("mobile") and not args.has("fixedscale")
+	add_child(gov)
 	# Hitting things like NEVER STOP: street furniture flies, cars are cars.
 	wrecks = Wrecks.new()
 	wrecks.name = "Wrecks"
