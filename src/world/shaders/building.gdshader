@@ -18,6 +18,7 @@ global uniform float wetness;
 uniform sampler2D asph_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
 uniform bool pbr_on = false;
 uniform sampler2D wall_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
+uniform sampler2D brick_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
 #include "res://src/world/shaders/pbr_detail.gdshaderinc"
 uniform vec3 interior_warm : source_color = vec3(1.0, 0.78, 0.48);
 uniform float lit_fraction = 0.025;
@@ -373,6 +374,7 @@ void fragment() {
 	vec2 uv_dy = dFdy(uv);
 	float rough = 0.85;
 	float metal = 0.0;
+	vec4 brick_d = vec4(0.0);   // set on brick walls (pbr)
 	vec3 albedo = base;
 	vec3 emit = vec3(0.0);
 	float detail = 1.0 - smoothstep(detail_fade_start, detail_fade_end, v_dist);
@@ -536,7 +538,13 @@ void fragment() {
 		}
 		// Brick courses / stone joints at close range only.
 		float tex = 1.0;
-		if (style == 1.0 || style == 3.0) {
+		if ((style == 1.0 || style == 3.0) && pbr_on && detail > 0.0) {
+			// Real brick (the WorldState brick study, packed with a derived
+			// normal: codex_brick.png), 1.77 m a tile = the old 0.077 m
+			// courses; the building keeps its own brick tint.
+			brick_d = texture(brick_tex, uv / 1.77);
+			tex = mix(1.0, brick_d.r * 2.0, detail);
+		} else if (style == 1.0 || style == 3.0) {
 			vec2 b = uv * vec2(4.2, 13.0);
 			b.x += step(1.0, mod(floor(b.y), 2.0)) * 0.5;
 			vec2 bf = fract(b);
@@ -999,8 +1007,9 @@ void fragment() {
 	if (pbr_on && (v_kind == KIND_WALL || v_kind == KIND_STONE) && rough > 0.5 && abs(v_world_normal.y) < 0.5) {
 		float kw = pbr_fade(v_dist);
 		if (kw > 0.0) {
-			vec4 d = texture(wall_tex, uv / 2.2);
-			albedo *= mix(1.0, d.r * 2.0, 0.55 * kw);
+			bool brick = brick_d.a > 0.0;
+			vec4 d = brick ? brick_d : texture(wall_tex, uv / 2.2);
+			albedo *= brick ? 1.0 : mix(1.0, d.r * 2.0, 0.55 * kw);   // (brick: already in tex)
 			rough = mix(rough, max(rough, d.a), 0.5 * kw);
 			vec3 nw = pbr_wall_normal(d, normalize(v_world_normal), 0.7 * kw);
 			NORMAL = normalize(mix(NORMAL, (VIEW_MATRIX * vec4(nw, 0.0)).xyz, kw));

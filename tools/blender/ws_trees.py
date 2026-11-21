@@ -43,17 +43,17 @@ SPECIES = {
     # trunk h, trunk r, limbs, limb angle from vertical (deg), limb len, spread, crown centre y,
     # leaf top/bottom colours (sRGB), bark colour, clump size, clumps per tip, droop
     "plane": dict(th=3.6, tr=0.22, limbs=5, ang=48, ll=2.6, depth=3, leaf=((0.44, 0.6, 0.25), (0.15, 0.25, 0.1)),
-                  bark=(0.56, 0.53, 0.43), clump=0.8, per_tip=1, droop=0.0, height=9.0),
+                  bark=(0.56, 0.53, 0.43), clump=0.8, per_tip=2, droop=0.0, height=9.0),
     "lime": dict(th=2.8, tr=0.2, limbs=6, ang=30, ll=2.7, depth=3, leaf=((0.48, 0.63, 0.27), (0.17, 0.29, 0.12)),
-                 bark=(0.36, 0.3, 0.24), clump=0.72, per_tip=1, droop=0.0, height=10.0),
+                 bark=(0.36, 0.3, 0.24), clump=0.72, per_tip=2, droop=0.0, height=10.0),
     "birch": dict(th=3.2, tr=0.14, limbs=6, ang=34, ll=2.2, depth=3, leaf=((0.64, 0.72, 0.32), (0.3, 0.4, 0.16)),
-                  bark=(0.87, 0.86, 0.81), clump=0.5, per_tip=1, droop=0.35, height=9.0),
+                  bark=(0.87, 0.86, 0.81), clump=0.5, per_tip=2, droop=0.35, height=9.0),
     "pine": dict(th=5.2, tr=0.2, limbs=9, ang=70, ll=2.2, depth=2, leaf=((0.33, 0.48, 0.29), (0.13, 0.24, 0.14)),
-                 bark=(0.55, 0.34, 0.22), clump=0.8, per_tip=1, droop=0.1, height=10.5),
+                 bark=(0.55, 0.34, 0.22), clump=0.8, per_tip=2, droop=0.1, height=10.5),
     "cherry": dict(th=1.7, tr=0.18, limbs=5, ang=55, ll=2.1, depth=3, leaf=((0.98, 0.74, 0.82), (0.66, 0.42, 0.5)),
-                   bark=(0.3, 0.2, 0.18), clump=0.58, per_tip=1, droop=0.0, height=5.2),
+                   bark=(0.3, 0.2, 0.18), clump=0.58, per_tip=2, droop=0.0, height=5.2),
     "poplar": dict(th=1.6, tr=0.18, limbs=9, ang=12, ll=3.6, depth=2, leaf=((0.42, 0.57, 0.25), (0.15, 0.25, 0.1)),
-                   bark=(0.36, 0.31, 0.25), clump=0.58, per_tip=1, droop=0.0, height=12.5),
+                   bark=(0.36, 0.31, 0.25), clump=0.58, per_tip=2, droop=0.0, height=12.5),
 }
 
 
@@ -86,6 +86,11 @@ class Mesh:
 
     def clump(self, centre, size, top, bot, crown_c, crown_r, rnd):
         """A leaf mass: an irregular icosahedron (20 faces) squashed and turned."""
+        # Each clump its own tone and a slight warm/cool shift (sun-bleached,
+        # young growth, shade leaves): natural crowns, not one flat green.
+        self.clump_tone = rnd.uniform(0.86, 1.1)
+        w = rnd.uniform(-1.0, 1.0)
+        self.clump_hue = (1.0 + 0.06 * w, 1.0, 1.0 - 0.08 * w)
         tmp = bmesh.new()
         bmesh.ops.create_icosphere(tmp, subdivisions=1, radius=1.0)
         rot = Matrix.Rotation(rnd.uniform(0, math.pi), 3, V((rnd.random(), rnd.random(), rnd.random())).normalized())
@@ -105,8 +110,8 @@ class Mesh:
                 outer = min(1.0, rel.length / max(crown_r, 0.1))
                 h = max(0.0, min(1.0, 0.5 + 0.5 * rel.z / max(crown_r, 0.1)))
                 t = 0.25 + 0.45 * h + 0.3 * outer
-                jit = rnd.uniform(0.9, 1.08)
-                c = tuple((b + (a - b) * t) * jit for a, b in zip(top, bot))
+                jit = rnd.uniform(0.9, 1.08) * self.clump_tone
+                c = tuple((b + (a - b) * t) * jit * h_ for a, b, h_ in zip(top, bot, self.clump_hue))
                 lp[self.col] = (c[0], c[1], c[2], 1.0)
             self.leaf_normals.append((nf, crown_c))
         tmp.free()
@@ -120,12 +125,13 @@ def grow(sp, P, rnd):
     # Trunk: a gently curving line.
     lean = V((rnd.uniform(-0.15, 0.15), rnd.uniform(-0.15, 0.15), 1.0)).normalized()
     trunk_top = V((0, 0, 0)) + lean * P["th"]
-    tpts = [V((0, 0, 0)).lerp(trunk_top, i / 5) + V((rnd.uniform(-0.04, 0.04), rnd.uniform(-0.04, 0.04), 0)) for i in range(6)]
+    tpts = [V((0, 0, 0)).lerp(trunk_top, i / 8) + V((rnd.uniform(-0.05, 0.05), rnd.uniform(-0.05, 0.05), 0)) * min(1.0, i) for i in range(9)]
     full_h = P["th"] + (H - P["th"]) * (0.75 if sp in ("pine", "poplar") else 0.45)
     # Leader continues up through the crown (thin).
     leader_top = V((0, 0, full_h))
     lpts = [trunk_top.lerp(leader_top, i / 4) for i in range(5)]
-    m.tube(tpts, [P["tr"] * (1.25 if i == 0 else 1.0 - 0.25 * i / 5) for i in range(6)], bark, 7, bands=(sp == "birch"))
+    # Root flare at the foot, then a steady taper.
+    m.tube(tpts, [P["tr"] * (1.65 if i == 0 else (1.2 if i == 1 else 1.0 - 0.25 * i / 8)) for i in range(9)], bark, 9, bands=(sp == "birch"))
     m.tube(lpts, [P["tr"] * 0.72 * (1 - 0.8 * i / 4) for i in range(5)], bark, 5, bands=(sp == "birch"))
     crown_c = V((0, 0, (P["th"] + H) * 0.5 + (0.6 if sp == "cherry" else 0.0)))
     crown_r = (H - P["th"]) * 0.5 + 0.6
@@ -181,7 +187,7 @@ def grow(sp, P, rnd):
     for (p, d) in tips:
         for k in range(P["per_tip"]):
             off = V((rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(-0.4, 0.8))) * P["clump"] * 0.6
-            size = P["clump"] * rnd.uniform(0.75, 1.2)
+            size = P["clump"] * 0.72 * rnd.uniform(0.75, 1.2)   # (finer masses, two per tip: 2026-11-21)
             if sp == "pine":
                 m.clump(p + off * V((1, 1, 0.3)), size, top, bot, crown_c, crown_r, rnd)
             else:

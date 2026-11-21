@@ -701,6 +701,7 @@ func _materials() -> void:
 	building_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/asphalt_01.png"))
 	building_mat.set_shader_parameter("pbr_on", true)
 	building_mat.set_shader_parameter("wall_tex", load("res://assets/textures/pbr/concrete_wall_008.png"))
+	building_mat.set_shader_parameter("brick_tex", load("res://assets/textures/pbr/codex_brick.png"))
 	water_mat = ShaderMaterial.new()
 	water_mat.shader = load("res://src/world/shaders/water.gdshader")
 	# The baked seabed (tools/bake_seabed.gd) is City Empire's three-island
@@ -2026,9 +2027,31 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 
 ## The props drawn in a chunk at the current density: [kind, Transform3D].
 ## Collision is built from the same list, so a prop you can't see never blocks you.
+## Trees (2026-11-21 overhaul): fewer and larger. One tree per TREE_CELL m
+## cell (the one with the lowest position hash: street lines keep their
+## rhythm at a wider spacing, parks become spaced groups), planter trees kept;
+## every tree TREE_SCALE x larger (±12%) – the Blender near LOD and TreeKit's
+## far LOD scale together. Drawing, collision and Destructibles all read this.
+const TREE_CELL := 12.0
+const TREE_SCALE := 1.45
+
+
+static func _tree_rank(o: Vector3) -> int:
+	return hash(Vector2i(roundi(o.x * 4.0), roundi(o.z * 4.0)))
+
+
 func chunk_props(key: Vector2i) -> Array:
 	var out: Array = []
 	var i := 0
+	# The tree that holds each cell in this chunk.
+	var holder := {}
+	for p in _props_by_chunk.get(key, []):
+		if p[0] == "tree" or p[0] == "tree_tall":
+			var o: Vector3 = (p[1] as Transform3D).origin
+			var cell := Vector2i(floori(o.x / TREE_CELL), floori(o.z / TREE_CELL))
+			var r := _tree_rank(o)
+			if not holder.has(cell) or r < int(holder[cell]):
+				holder[cell] = r
 	for p in _props_by_chunk.get(key, []):
 		i += 1
 		if prop_density < 1.0 and p[0] in ["streetlight", "tree", "ac_unit", "traffic_light"] \
@@ -2039,9 +2062,14 @@ func chunk_props(key: Vector2i) -> Array:
 		var kind: String = p[0]
 		var xf: Transform3D = p[1]
 		if kind == "tree" or kind == "tree_tall":
+			var to := xf.origin
+			var planted := _planter_spots.has(Vector2i(roundi(to.x * 4.0), roundi(to.z * 4.0)))
+			if not planted and int(holder.get(Vector2i(floori(to.x / TREE_CELL), floori(to.z / TREE_CELL)), -1)) != _tree_rank(to):
+				continue
 			# A TreeKit species (mostly one per street), its own height,
 			# width, lean and turn (looks only: positions don't change).
-			var sc := xf.basis.get_scale().y
+			var vary := 0.88 + 0.24 * float(_tree_rank(to) % 1000) / 1000.0
+			var sc := xf.basis.get_scale().y * (1.15 if planted else TREE_SCALE * vary)
 			kind = "tree_" + TreeKit.pick(xf.origin)
 			xf.basis = TreeKit.shape(xf.origin, sc)
 		if not broken.is_empty() and broken.has(item_key(xf.origin)):
