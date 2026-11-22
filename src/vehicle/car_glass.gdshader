@@ -12,14 +12,14 @@ global uniform float night;
 
 void fragment() {
 	ALBEDO = tint;
-	METALLIC = 0.2;
-	ROUGHNESS = 0.08;
-	SPECULAR = 0.8;
+	METALLIC = 0.02;
+	ROUGHNESS = 0.18;
+	SPECULAR = 0.5;
 	vec3 n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 v = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 	vec3 r = reflect(-v, n);
 	vec3 env = city_reflection(r, (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz, sky_top, sky_horizon, sun_dir, night);
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	float glint = pow(max(dot(r, normalize(sun_dir)), 0.0), 300.0) * 8.0;
-	EMISSION = (env * mix(0.18, 0.9, fres) + vec3(glint)) * (1.0 - night * 0.5);
+	float glint = pow(max(dot(r, normalize(sun_dir)), 0.0), 180.0) * 0.75;
+	EMISSION = (env * mix(0.11, 0.48, fres) + vec3(glint)) * (1.0 - night * 0.5);
 }

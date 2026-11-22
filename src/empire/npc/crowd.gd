@@ -444,7 +444,7 @@ func _draw_people() -> void:
 		buf.resize(list.size() * 20)
 		var j := 0
 		for pr in list:
-			var b := Basis(Vector3.UP, float(pr["yaw"])).scaled(Vector3.ONE * float(pr["scale"]))
+			var b := Basis(Vector3.UP, float(pr["yaw"])).scaled(_person_scale(pr))
 			var o: Vector3 = pr["pos"]
 			for r in 3:
 				buf[j] = b.x[r]
@@ -463,6 +463,11 @@ func _draw_people() -> void:
 	_draw_blobs()
 
 
+static func _person_scale(person: Dictionary) -> Vector3:
+	var width := lerpf(0.92, 1.09, fposmod(float(person["seed"]) * 7.31, 1.0))
+	return Vector3(width, 1.0, lerpf(1.0, width, 0.58)) * float(person["scale"])
+
+
 ## Contact shadows: flat on the pavement under each person, a touch
 ## lighter as they walk away out of the near range (they fade with them).
 func _draw_blobs() -> void:
@@ -479,8 +484,9 @@ func _draw_blobs() -> void:
 	var j := 0
 	for pr in _people:
 		var o: Vector3 = pr["pos"]
-		var sc := float(pr["scale"])
-		var b := Basis(Vector3.UP, float(pr["yaw"])).scaled(Vector3(sc, 1.0, sc))
+		var scale := _person_scale(pr)
+		scale.y = 1.0
+		var b := Basis(Vector3.UP, float(pr["yaw"])).scaled(scale)
 		for r in 3:
 			buf[j] = b.x[r]
 			buf[j + 1] = b.y[r]

@@ -37,25 +37,29 @@ static func bridge_landing(l: CityLayout) -> void:
 		l.bridge_ramp.append(Vector3(flat[i].x, y, flat[i].y))
 	var k := l._kit("island_bridge_approach")
 	var stone := Color(0.43, 0.44, 0.43)
-	var white := Color(0.76, 0.76, 0.70)
+	var along := l.bridge_ramp[0].x
+	var crossfall := PackedVector3Array()
+	for i in l.bridge_ramp.size():
+		var p := l.bridge_ramp[i]
+		var before := l.bridge_ramp[maxi(0, i - 1)]
+		var after := l.bridge_ramp[mini(l.bridge_ramp.size() - 1, i + 1)]
+		var incoming := Vector3(p.x - before.x, 0.0, p.z - before.z).normalized().cross(Vector3.UP)
+		var outgoing := Vector3(after.x - p.x, 0.0, after.z - p.z).normalized().cross(Vector3.UP)
+		var bisector := (incoming + outgoing).normalized()
+		crossfall.append(bisector * 10.0 / maxf(0.85, maxf(incoming.dot(bisector), outgoing.dot(bisector))))
 	for i in l.bridge_ramp.size() - 1:
 		var a := l.bridge_ramp[i]
 		var b := l.bridge_ramp[i + 1]
 		var d := (b - a).normalized()
 		var side := Vector3(-d.z, 0, d.x).normalized()
-		var ext := d * 0.08
-		# The deck spans overlap generously so bends leave no slivers.
-		var dext := d * 1.2 if i > 0 else d * 0.3
-		l._kbeam(k, a - dext + Vector3.DOWN * 0.65, b + d * 1.2 + Vector3.DOWN * 0.65, 20.0, 1.3, Color(0.15, 0.16, 0.17))
+		l._kdeck(k, a - crossfall[i], a + crossfall[i], b + crossfall[i + 1],
+			b - crossfall[i + 1], 1.3, Color(0.19, 0.19, 0.19), Vector2(along, along + a.distance_to(b)))
+		along += a.distance_to(b)
 		for sg: float in [-1.0, 1.0]:
 			var o := side * sg * 9.8
 			# End barriers before the junction mouth, leaving turning space.
 			if i < l.bridge_ramp.size() - 3:
 				l._kbeam(k, a + o + Vector3.UP * 0.5, b + o + Vector3.UP * 0.5, 0.35, 1.0, stone)
-			l._kbeam(k, a + side * sg * 8.4 + Vector3.UP * 0.025, b + side * sg * 8.4 + Vector3.UP * 0.025, 0.12, 0.02, white, false)
-			if i % 2 == 0:
-				l._kbeam(k, a + side * sg * 5.1 + Vector3.UP * 0.025, a.lerp(b, 0.5) + side * sg * 5.1 + Vector3.UP * 0.025, 0.12, 0.02, white, false)
-		l._kbeam(k, a + Vector3.UP * 0.025, b + Vector3.UP * 0.025, 0.2, 0.02, Color(0.7, 0.6, 0.27), false)
 		if i % 6 == 0:
 			var g := l.terrain.road_y(a.x, a.z)
 			var field := l.roads.field_at(Vector2(a.x, a.z))

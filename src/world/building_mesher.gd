@@ -13,6 +13,7 @@ const KIND_GLASS := 3.0
 const KIND_SIGN := 4.0
 const KIND_SHORE := 5.0   # rock / sand round the island (ground.gdshader shades it)
 const KIND_STONE := 6.0   # dressed-stone base course (ashlar, no windows)
+const KIND_BRIDGE_ROAD := 7.0
 const ROOF_COLOR := Color(0.40, 0.40, 0.41)
 ## Roof finishes picked per building: gravel, tar, pale concrete, rust, green.
 const ROOF_COLORS := [Color(0.40, 0.40, 0.41), Color(0.24, 0.25, 0.27), Color(0.6, 0.59, 0.56),
@@ -319,7 +320,11 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 			return
 		"plain":
 			for t in b["tiers"]:
-				solid(t[0], t[1], t[2], t[3], t[4], t[5], b["color"])
+				if b.get("ashlar", false):
+					walls(t[0], t[1], t[2], t[3], t[4], t[5], b["color"], KIND_STONE, 0.0, b["seed"], 0.0)
+					top(t[0], t[1], t[2], t[3], t[5], b["color"], KIND_TRIM, 0.0, 0.0)
+				else:
+					solid(t[0], t[1], t[2], t[3], t[4], t[5], b["color"])
 			return
 	var style := float(b["style"])
 	var seed: float = b["seed"]
@@ -1355,6 +1360,32 @@ func _kit(s: Dictionary, detailed: bool) -> void:
 			beam(v[0], v[1], v[2], v[3], v[4], KIND_TRIM, true)
 	for v in s["prisms"]:
 		prism(v[0], v[1], v[2], v[3])
+	for v in s.get("deck_sections", []):
+		_deck_section(v[0], v[1], v[2], v[3], v[4], v[5], v[6])
+
+
+## UVs follow the carriageway on both banks and through bends. Paint and
+## tarmac share the same triangles, including where the landing cambers.
+func _bridge_road(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Color, along: Vector2) -> void:
+	quad(a, b, c, d, n, Vector2(along.x, -10), Vector2(along.x, 10),
+		Vector2(along.y, 10), Vector2(along.y, -10), col, KIND_BRIDGE_ROAD, 0, CityLayout.APPROACH_END)
+
+
+func _deck_section(a: Vector3, b: Vector3, c: Vector3, d: Vector3, depth: float, col: Color, along: Vector2) -> void:
+	var n := (c - a).cross(b - a).normalized()
+	if n.y < 0.0:
+		_deck_section(b, a, d, c, depth, col, along)
+		return
+	var drop := Vector3.DOWN * depth
+	_bridge_road(a, b, c, d, n, col, along)
+	quad(d + drop, c + drop, b + drop, a + drop, -n, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO,
+		Color(0.39, 0.39, 0.38), KIND_TRIM, 0.0, 0.0)
+	for edge: Array in [[a, d], [c, b]]:
+		var p: Vector3 = edge[0]
+		var q: Vector3 = edge[1]
+		var normal := drop.cross(q - p).normalized()
+		quad(p, q, q + drop, p + drop, normal, Vector2(p.x + p.z, p.y), Vector2(q.x + q.z, q.y),
+			Vector2(q.x + q.z, q.y - depth), Vector2(p.x + p.z, p.y - depth), Color(0.43, 0.43, 0.41), KIND_TRIM, 0.0, 0.0)
 
 
 ## Vertical prism over a convex polygon given counter-clockwise or clockwise
@@ -1488,7 +1519,8 @@ func _bridge(s: Dictionary, detailed: bool) -> void:
 	var xe: float = s["x_east"]
 	var xw: float = s["x_west"]
 	# Deck: road surface, red side girders, railings.
-	top(xw, zc - 10.0, xe, zc + 10.0, deck, Color(0.23, 0.24, 0.26), KIND_TRIM, 0, 0)
+	_bridge_road(Vector3(xw, deck, zc + 10.0), Vector3(xw, deck, zc - 10.0), Vector3(xe, deck, zc - 10.0),
+		Vector3(xe, deck, zc + 10.0), Vector3.UP, Color(0.23, 0.24, 0.26), Vector2(xw, xe))
 	bottom(xw, zc - 10.0, xe, zc + 10.0, deck - 2.0, BRIDGE_RED.darkened(0.4), KIND_TRIM, 0, 0)
 	for sz: float in [-1.0, 1.0]:
 		var z0 := zc + sz * 10.0
@@ -1496,17 +1528,7 @@ func _bridge(s: Dictionary, detailed: bool) -> void:
 		if detailed:
 			beam(Vector3(xw, deck + 1.2, z0 - sz * 0.4), Vector3(xe, deck + 1.2, z0 - sz * 0.4), 0.12, 0.12, STEEL)
 	if detailed:
-		# Road: a double yellow centre line, lane dashes, edge lines; raised
-		# walkways along both sides.
-		for zz: float in [-0.25, 0.25]:
-			top(xw, zc + zz - 0.08, xe, zc + zz + 0.08, deck + 0.02, Color(0.92, 0.78, 0.25), KIND_TRIM, 0, 0)
 		for sz: float in [-1.0, 1.0]:
-			top(xw, zc + sz * 7.5 - 0.08, xe, zc + sz * 7.5 + 0.08, deck + 0.02, Color(0.9, 0.9, 0.86), KIND_TRIM, 0, 0)
-			var x := xw
-			while x < xe:
-				top(x, zc + sz * 3.8 - 0.07, x + 3.0, zc + sz * 3.8 + 0.07, deck + 0.02, Color(0.9, 0.9, 0.86), KIND_TRIM,
-					0, 0)
-				x += 9.0
 			var w0 := zc + sz * 8.0
 			solid(xw, minf(w0, w0 + sz * 1.6), xe, maxf(w0, w0 + sz * 1.6), deck, deck + 0.22, Color(0.55, 0.54, 0.52))
 		# Stiffening truss under the deck edges: Warren diagonals between a

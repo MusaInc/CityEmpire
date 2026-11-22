@@ -84,8 +84,9 @@ static func shared_mat(name: String) -> Material:
 			m.metallic = 0.65
 			m.roughness = 0.3
 		"tyre_wall":
-			m.albedo_color = Color(0.085, 0.085, 0.09)
-			m.roughness = 0.75
+			m.albedo_color = Color(0.115, 0.112, 0.107)
+			m.roughness = 0.86
+			m.metallic_specular = 0.26
 		"disc":
 			m.albedo_color = Color(0.35, 0.35, 0.36)
 			m.metallic = 0.8
@@ -99,8 +100,9 @@ static func shared_mat(name: String) -> Material:
 			m.metallic = 0.8
 			m.roughness = 0.35
 		"tyre":
-			m.albedo_color = Color(0.045, 0.045, 0.045)
-			m.roughness = 0.88
+			m.albedo_color = Color(0.082, 0.079, 0.075)
+			m.roughness = 0.93
+			m.metallic_specular = 0.23
 		"seam":
 			m.albedo_color = Color(0.01, 0.01, 0.012)
 			m.roughness = 0.9

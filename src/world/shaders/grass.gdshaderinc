@@ -22,11 +22,13 @@ float gr_noise(vec2 p) {
 vec3 grass_shade(vec3 base, vec2 p, float closeup, float metres_per_pixel, float terrain) {
 	float broad = gr_noise(p / 38.0) * 0.66 + gr_noise(p / 13.0) * 0.34;
 	float patch = gr_noise(p * 0.58 + vec2(7.1, 4.2));
-	float dry = clamp(terrain * 0.48 + smoothstep(0.44, 0.84, broad) * 0.64, 0.0, 1.0);
-	vec3 g = base * mix(vec3(0.90, 1.0, 0.84), vec3(1.16, 0.98, 0.67), dry);
-	g *= 0.86 + 0.28 * patch;
+	float dry = clamp(terrain * 0.40 + smoothstep(0.38, 0.82, broad) * 0.68, 0.0, 1.0);
+	float luminance = dot(base, vec3(0.2126, 0.7152, 0.0722));
+	vec3 g = mix(base, vec3(luminance), 0.18)
+		* mix(vec3(0.80, 0.84, 0.75), vec3(1.11, 0.91, 0.68), dry);
+	g *= 0.82 + 0.33 * patch;
 
-	float detail = closeup * (1.0 - smoothstep(0.027, 0.115, metres_per_pixel));
+	float detail = closeup * (1.0 - smoothstep(0.041, 0.14, metres_per_pixel));
 	vec2 du = dFdx(p / 1.6);
 	vec2 dv = dFdy(p / 1.6);
 	if (detail > 0.005) {

@@ -1,6 +1,7 @@
 class_name TreeKit
 ## Mobile LODs baked from the WorldState oak, birch and pine Blender study.
 const SPECIES := ["oak", "birch", "pine"]
+const CANOPY := preload("res://src/world/shaders/tree_canopy.gdshader")
 static var _meshes := {}
 
 
@@ -23,18 +24,22 @@ static func _load_mesh(species: String, lod: String) -> ArrayMesh:
 	var root := scene.instantiate() as Node3D
 	var result := ArrayMesh.new()
 	for node: MeshInstance3D in root.find_children("*", "MeshInstance3D", true, false):
+		var transform := node.transform
+		var ancestor := node.get_parent() as Node3D
+		while ancestor:
+			transform = ancestor.transform * transform
+			ancestor = ancestor.get_parent() as Node3D
 		for surface in node.mesh.get_surface_count():
-			var material := node.mesh.surface_get_material(surface) as StandardMaterial3D
-			if material and String(material.resource_name).begins_with("Foliage"):
-				material = material.duplicate()
-				material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-				material.alpha_scissor_threshold = 0.38
-				material.cull_mode = BaseMaterial3D.CULL_DISABLED
-				material.backlight_enabled = true
-				material.backlight = Color(0.09, 0.13, 0.025)
+			var source := node.mesh.surface_get_material(surface) as StandardMaterial3D
+			var material: Material = source
+			if source and String(source.resource_name).begins_with("Foliage"):
+				var canopy := ShaderMaterial.new()
+				canopy.shader = CANOPY
+				canopy.set_shader_parameter("foliage", source.albedo_texture)
+				material = canopy
 			var geometry := SurfaceTool.new()
 			geometry.begin(Mesh.PRIMITIVE_TRIANGLES)
-			geometry.append_from(node.mesh, surface, root.transform * node.transform)
+			geometry.append_from(node.mesh, surface, transform)
 			geometry.set_material(material)
 			geometry.commit(result)
 	root.free()
@@ -64,7 +69,7 @@ static func instance_batch(parent: Node3D, species: String, placements: Array, e
 	far.visibility_range_end = ends_at
 	far.visibility_range_end_margin = 16.0
 	if detail:
-		far.visibility_range_begin = 78.0
+		far.visibility_range_begin = 105.0
 		far.visibility_range_begin_margin = 8.0
 		var near := _instance_lod(parent, placements, near_mesh(species))
 		near.visibility_parent = near.get_path_to(far)
@@ -79,5 +84,6 @@ static func _instance_lod(parent: Node3D, placements: Array, lod: Mesh) -> Multi
 		mm.set_instance_transform(i, placements[i])
 	var instance := MultiMeshInstance3D.new()
 	instance.multimesh = mm
+	instance.extra_cull_margin = 0.4
 	parent.add_child(instance)
 	return instance

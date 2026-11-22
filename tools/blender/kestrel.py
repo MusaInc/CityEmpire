@@ -1152,7 +1152,7 @@ def glaze(body, clean, m, out, outline, axis, d0, d1, inset=0.008, seal="rubber"
     gp.hide_render = False
     cut(gp, piece, None, "INTERSECT")
     gp.data.materials.clear()
-    gp.data.materials.append(m["glass_clear"])
+    gp.data.materials.append(glass if glass is not None else m["glass_clear"])
     for p in gp.data.polygons:
         p.material_index = 0
         p.use_smooth = True

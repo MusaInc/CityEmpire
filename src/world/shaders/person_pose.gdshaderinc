@@ -84,6 +84,13 @@ void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, flo
 		vec3 vh = pitch_about(v, vec3(0.0, 0.94, 0.0), a);
 		v = mix(v, vh, cw);
 		n = normalize(mix(n, pitch_dir(n, a), cw));
+		float foot = lw * (1.0 - smoothstep(0.065, 0.15, height));
+		// Release the toe in swing and level the foot before the next step.
+		float rollover = clamp(k * 0.62 - a * 0.45, -0.17, 0.27);
+		vec3 ankle = pitch_about(vec3(0.0, 0.070, 0.0), vec3(0.0, 0.49, 0.02), -k);
+		ankle = pitch_about(ankle, vec3(0.0, 0.94, 0.0), a);
+		v = mix(v, pitch_about(v, ankle, rollover), foot);
+		n = normalize(mix(n, pitch_dir(n, rollover), foot));
 	} else if (limb == 3 || limb == 4) {
 		float side = limb == 3 ? -1.0 : 1.0;
 		float a = mix((sw * side - cos(ph) * side * walk * 0.16) * 0.32, 0.30, carry);
@@ -106,6 +113,27 @@ void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, flo
 	float s = sin(yaw);
 	v.xz = mat2(vec2(c, s), vec2(-s, c)) * v.xz;
 	n.xz = mat2(vec2(c, s), vec2(-s, c)) * n.xz;
-	v.y += (1.0 - cos(ph * 2.0)) * 0.009 * walk * smoothstep(0.06, 0.7, height);
+	v.y += (1.0 - cos(ph * 2.0)) * 0.007 * walk * smoothstep(0.06, 0.7, height);
 	v.x += cycle * 0.010 * walk * smoothstep(0.15, 1.0, height);
+}
+
+float person_surface_roughness(int part) {
+	if (part == 1 || part == 9) return .62;
+	if (part == 3) return .70;
+	if (part == 5 || part == 8) return .42;
+	if (part == 0) return .72;
+	return .90;
+}
+
+vec3 person_cloth(vec3 color, vec3 local, float closeup, int part) {
+	if (part == 2 || part == 4 || part == 6 || part == 7) {
+		// Garment-space grain and gentle fold shading, held to the fabric.
+		vec2 weave = local.xy + local.zy * vec2(.63, .13);
+		float grain = sin(weave.x * 460.0) * sin(weave.y * 535.0);
+		float filtered = 1.0 - smoothstep(.003, .011, length(fwidth(weave)));
+		float folds = sin(local.x * 38.0 + local.y * 41.0 + local.z * 28.0);
+		vec3 neutral = vec3(dot(color, vec3(.2126, .7152, .0722)));
+		return mix(color, neutral, .08) * (1.0 + closeup * (.052 * folds + .06 * grain * filtered));
+	}
+	return color;
 }

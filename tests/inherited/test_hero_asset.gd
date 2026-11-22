@@ -92,3 +92,26 @@ func test_courier_tints_are_instance_local_and_grips_are_continuous(t) -> void:
 	first.queue_free()
 	second.queue_free()
 	await get_tree().process_frame
+
+
+func test_body_swap_keeps_the_same_bind_pose_after_sitting(t) -> void:
+	var standing := CharacterRig.new()
+	var seated := CharacterRig.new()
+	add_child(standing)
+	add_child(seated)
+	var hips := seated.bones["hips"] as Node3D
+	var hip_rest := hips.position
+	for body in ["b", "a"]:
+		hips.position = hip_rest + Vector3(0.07, -0.42, 0.02)
+		var look := HeroLook.build(HeroLook.DEFAULT.merged({"body": body}, true))
+		standing.apply_look(look)
+		seated.apply_look(look)
+		hips.position = hip_rest
+		seated._sync_skeleton()
+		standing._sync_skeleton()
+		for i in seated.skeleton.get_bone_count():
+			t.check(seated.skeleton.get_bone_global_pose(i).is_equal_approx(standing.skeleton.get_bone_global_pose(i)),
+				"%s %s returns to the same standing pose" % [body, seated.skeleton.get_bone_name(i)])
+	standing.queue_free()
+	seated.queue_free()
+	await get_tree().process_frame

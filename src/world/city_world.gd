@@ -889,7 +889,8 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 	for i in src.get_surface_count():
 		var m := src.surface_get_material(i)
 		var n := String(m.resource_name) if m else ""
-		var look: Array = TRAFFIC_MATS.get(n, TRAFFIC_DARK)
+		# Traffic uses opaque reflective glass for both imported pane types.
+		var look: Array = TRAFFIC_MATS.get("glass" if n == "glass_clear" else n, TRAFFIC_DARK)
 		(add.call(look) as SurfaceTool).append_from(_surface_mesh(src, i), 0, Transform3D.IDENTITY)
 	var wr: float = d["wheel_r"]
 	var tw: float = d["tyre_w"]
@@ -1056,13 +1057,16 @@ static func _car_far_mesh(full: Mesh) -> Mesh:
 				bb = bb.expand(v)
 		if m.get_shader_parameter("use_instance_color"):
 			paint = m
-		elif is_equal_approx(float(m.get_shader_parameter("roughness") if m.get_shader_parameter("roughness") != null else 0.0), 0.25):
+		elif m.get_shader_parameter("finish") == 2:
 			glass = m
 	var h := bb.size.y
 	var c := bb.get_center()
 	var out := ArrayMesh.new()
 	for part in [[Vector3(bb.size.x * 0.96, h * 0.42, bb.size.z * 0.98), Vector3(c.x, bb.position.y + h * 0.34, c.z), paint],
 			[Vector3(bb.size.x * 0.84, h * 0.4, bb.size.z * 0.5), Vector3(c.x, bb.position.y + h * 0.74, c.z + bb.size.z * 0.04), glass]]:
+		# Only the traffic shader decodes the instance's lane transform.
+		if part[2] == null:
+			continue
 		var box := BoxMesh.new()
 		box.size = part[0]
 		var arr := box.get_mesh_arrays()
@@ -1794,8 +1798,12 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 			var facing := fwd.dot((c - here).normalized()) if d > CHUNK else 0.0
 			want[key] = d * (1.0 - 0.4 * maxf(facing, 0.0) + 0.5 * maxf(-facing, 0.0))
 		elif _loaded.has(key) and d > vista_range + CHUNK * 1.25:
-			_loaded[key].queue_free()
+			var old := _loaded[key] as Node3D
+			remove_child(old)
 			_loaded.erase(key)
+			if far_city:
+				far_city.set_streamed(key, false)
+			old.queue_free()
 	_want = want
 	# Most wanted first.
 	var order := want.keys()
@@ -2072,10 +2080,13 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 	_add_walkers(root, key, res.get("walkers", []))
 	Prof.end("chunk_walkers")
 	_add_occluder(root, key)
-	add_child(root)
-	link_lods(root.get_node_or_null("Detail"), root.get_node_or_null("Low"))
-	link_lods(root.get_node_or_null("ShadowProxy"), root.get_node_or_null("Low"))
 	_loaded[key] = root
+	if far_city:
+		far_city.set_streamed(key, true)
+	add_child(root)
+	var far := root.get_node_or_null("Low") as GeometryInstance3D
+	link_lods(root.get_node_or_null("Detail"), far)
+	link_lods(root.get_node_or_null("ShadowProxy"), far)
 	chunks_built += 1
 	Prof.end("chunk_upload")
 

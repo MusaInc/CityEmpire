@@ -1969,6 +1969,19 @@ func _kbeam(k: Dictionary, a: Vector3, b: Vector3, w: float, h: float, col: Colo
 		(kit_obbs_solid if kit_solid_only else kit_obbs).append(ob)
 
 
+## Each consecutive section shares the exact end edge with its neighbor.
+## Store the solid section for collision using the same eight corners.
+func _kdeck(k: Dictionary, a: Vector3, b: Vector3, c: Vector3, d: Vector3, depth: float, col: Color, along: Vector2) -> void:
+	if not k.has("deck_sections"):
+		k["deck_sections"] = []
+	k["deck_sections"].append([a, b, c, d, depth, col, along])
+	var hull := PackedVector3Array()
+	for p in [a, b, c, d]:
+		hull.append(p)
+		hull.append(p - Vector3.UP * depth)
+	kit_hulls.append(hull)
+
+
 ## Vertical prism over a convex polygon (x, z) from y0 to y1.
 func _kprism(k: Dictionary, pts: PackedVector2Array, y0: float, y1: float, col: Color) -> void:
 	k["prisms"].append([pts, y0, y1, col])
@@ -2142,9 +2155,11 @@ func _bridge() -> void:
 			_anchor(Vector3(tx, yy[0] - 0.1, zc - 9.0), Vector3(tx, yy[0] - 0.1, zc + 9.0))
 	# Cable anchor housings flank a genuinely open roadway.
 	for sz: float in [-1.0, 1.0]:
-		_add(_building([[x_east - 2.0, minf(zc + sz * 10.5, zc + sz * 15.0), x_east + 14.0,
+		var housing := _building([[x_east - 2.0, minf(zc + sz * 10.5, zc + sz * 15.0), x_east + 14.0,
 			maxf(zc + sz * 10.5, zc + sz * 15.0), -2.0, deck + 6.0]], Style.STONE,
-			Color(0.5, 0.47, 0.42), "plain"))
+			Color(0.43, 0.4, 0.36), "plain")
+		housing["ashlar"] = true
+		_add(housing)
 	CityInfrastructure.bridge_landing(self)
 	for sz: float in [-1.0, 1.0]:
 		_anchor_dress(x_east - 2.0, minf(zc + sz * 10.5, zc + sz * 15.0), x_east + 14.0, maxf(zc + sz * 10.5, zc + sz * 15.0), deck + 6.0)
@@ -2158,7 +2173,7 @@ func _bridge() -> void:
 	for sz: float in [-1.0, 1.0]:
 		_add(_building([[x_west - 16.0, minf(zc + sz * 10.5, zc + sz * 15.0), x_west + 2.0,
 			maxf(zc + sz * 10.5, zc + sz * 15.0), -2.0, deck + 3.5]], Style.STONE, Color(0.62, 0.58, 0.52), "plain"))
-	_bridge_approach(x_west + 0.2, zc, deck)
+	_bridge_approach(x_west, zc, deck)
 	# Lamps along both sides of the deck (lit at night like the streets').
 	var lx := x_east - 12.0
 	while lx > x_west:
@@ -2197,7 +2212,7 @@ func _bridge() -> void:
 ## Road height on the bridge's approach (west anchorage → Westbank Hill).
 static func approach_y(x: float) -> float:
 	var x0 := FAR_SHORE - 2.0
-	var y1 := CityTerrain.mainland_design(APPROACH_END, BRIDGE_Z) + CityTerrain.KERB
+	var y1 := CityTerrain.mainland_design(APPROACH_END, BRIDGE_Z) - 0.025
 	var t := clampf((x0 - x) / (x0 - APPROACH_END), 0.0, 1.0)
 	return lerpf(BRIDGE_DECK, y1, t * t * (3.0 - 2.0 * t))
 
@@ -2210,25 +2225,25 @@ func _bridge_approach(x0: float, zc: float, deck: float) -> void:
 	var x1 := APPROACH_END
 	var yf := func(x: float) -> float: return approach_y(x)
 	var conc := Color(0.6, 0.59, 0.56)
+	var shoulder := func(x: float, z: float) -> Vector3:
+		var blend := 1.0 - smoothstep(x1, x1 + 64.0, x)
+		var crown := CityTerrain.mainland_design(x, z) - CityTerrain.mainland_design(x, zc)
+		return Vector3(x, approach_y(x) + crown * blend, z)
 	var n := ceili((x0 - x1) / 18.0)
 	for i in n:
 		var xa := lerpf(x0, x1, float(i) / n)
 		var xb := lerpf(x0, x1, float(i + 1) / n)
-		var A := Vector3(xa + 0.2, float(yf.call(xa)), zc)
-		var B := Vector3(xb - 0.2, float(yf.call(xb)), zc)
-		_kbeam(k, A + Vector3.DOWN * 0.8, B + Vector3.DOWN * 0.8, 20.0, 1.6, Color(0.23, 0.24, 0.26))
-		_kbeam(k, A + Vector3.DOWN * 2.0, B + Vector3.DOWN * 2.0, 12.0, 1.2, conc, false)
+		var A := Vector3(xa, float(yf.call(xa)), zc)
+		var B := Vector3(xb, float(yf.call(xb)), zc)
+		_kdeck(k, shoulder.call(xa, zc + 10.0), shoulder.call(xa, zc - 10.0),
+			shoulder.call(xb, zc - 10.0), shoulder.call(xb, zc + 10.0), 1.6, Color(0.23, 0.24, 0.26), Vector2(xa, xb))
+		if xb > x1 + 55.0:
+			_kbeam(k, A + Vector3.DOWN * 2.0, B + Vector3.DOWN * 2.0, 12.0, 1.2, conc, false)
 		for sz: float in [-1.0, 1.0]:
 			var o := Vector3(0.0, 0.0, sz * 9.8)
-			_kbeam(k, A + o + Vector3.UP * 0.55, B + o + Vector3.UP * 0.55, 0.4, 1.1, conc)
-			_anchor(A + o * 1.03 + Vector3.DOWN * 1.4, B + o * 1.03 + Vector3.DOWN * 1.4)
-			# Lane lines (painted, no collision): edge lines and lane dashes.
-			_kbeam(k, A + Vector3(0, 0.01, sz * 7.6), B + Vector3(0, 0.01, sz * 7.6), 0.15, 0.02, Color(0.9, 0.9, 0.86),
-				false)
-			if i % 2 == 0:
-				_kbeam(k, A + Vector3(0, 0.01, sz * 3.8), A.lerp(B, 0.4) + Vector3(0, 0.01, sz * 3.8), 0.15, 0.02,
-					Color(0.9, 0.9, 0.86), false)
-		_kbeam(k, A + Vector3(0, 0.01, 0.0), B + Vector3(0, 0.01, 0.0), 0.3, 0.02, Color(0.92, 0.78, 0.25), false)
+			if xb > x1 + 55.0:
+				_kbeam(k, A + o + Vector3.UP * 0.55, B + o + Vector3.UP * 0.55, 0.4, 1.1, conc)
+				_anchor(A + o * 1.03 + Vector3.DOWN * 1.4, B + o * 1.03 + Vector3.DOWN * 1.4)
 	var x := x0 - 30.0
 	while x > x1 + 30.0:
 		var y := float(yf.call(x)) - 2.6

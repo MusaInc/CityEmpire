@@ -28,6 +28,7 @@ const VERSION := 6  # bump to migrate saved settings to new defaults
 var haptics := true
 var show_perf := false
 var look_sensitivity := 1.0
+var driving_lens := 0.55
 ## Driving (Never Stop's DriveInput): pedal response and auto-accelerate.
 var steer_sensitivity := 1.0
 var accelerate := "pedal"
@@ -53,6 +54,7 @@ func _ready() -> void:
 		quality = cfg.get_value("gfx", "quality", quality)
 		fps_60 = cfg.get_value("gfx", "fps_60", fps_60)
 		show_perf = cfg.get_value("gfx", "show_perf", show_perf)
+		driving_lens = clampf(float(cfg.get_value("gfx", "driving_lens", driving_lens)), 0.0, 1.0)
 		appearance = cfg.get_value("gfx", "appearance", appearance)
 		time_of_day = cfg.get_value("gfx", "time_of_day", time_of_day)
 		weather = cfg.get_value("gfx", "weather", weather)
@@ -113,6 +115,7 @@ func save() -> void:
 	cfg.set_value("gfx", "quality", quality)
 	cfg.set_value("gfx", "fps_60", fps_60)
 	cfg.set_value("gfx", "show_perf", show_perf)
+	cfg.set_value("gfx", "driving_lens", driving_lens)
 	cfg.set_value("gfx", "appearance", appearance)
 	cfg.set_value("gfx", "time_of_day", time_of_day)
 	cfg.set_value("gfx", "weather", weather)

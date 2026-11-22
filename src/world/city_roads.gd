@@ -358,7 +358,7 @@ func _emit(poly: PackedVector2Array, dist: String, area: float) -> void:
 ## read as asphalt), its half width (negative for boulevards/ring), the
 ## distance along it (mod 64 m) and the distance to the kerb of the nearest
 ## *other* road (< 0 inside a junction). Off the network: (100, 0, 0, 100).
-## Computed in horizontal stripes on the worker pool.
+## Rasterized from the segment grid during layout generation.
 var field := PackedFloat32Array()
 var field_rect := Rect2()
 var field_cell := 1.5
@@ -366,6 +366,7 @@ var field_w := 0
 var field_h := 0
 var _segs: Array = []   # [a, b, half, road id, along at a, avenue]
 var _seg_grid := {}     # Vector2i (32 m cells) -> segment indices
+const FIELD_CACHE_VERSION := 1
 const SEG_CELL := 32.0
 const BAND := 9.0       # m past the kerb the field reaches
 
@@ -439,15 +440,79 @@ func bake_field(cell := 1.5) -> void:
 					_add_seg([piece[0], piece[1], hw, int(r["id"]), along + a.distance_to(piece[0]), r["kind"] != "minor", sq])
 				along += a.distance_to(b)
 	_extend_ends()
-	var stripes := ceili(field_h / 16.0)
-	_stripe_out.clear()
-	_stripe_out.resize(stripes)
-	var task := WorkerThreadPool.add_group_task(_bake_stripe, stripes, -1, true)
-	WorkerThreadPool.wait_for_group_task_completion(task)
+	var cache_dir := OS.get_cache_dir()
+	var cache_path := ""
+	var signature := PackedByteArray()
+	if not cache_dir.is_empty():
+		cache_dir = cache_dir.path_join("worldstate-roads")
+		if DirAccess.make_dir_recursive_absolute(cache_dir) == OK:
+			# One replaceable entry per island. Hash the actual geometry so
+			# changed spurs, seeds or field resolution cannot reuse stale paint.
+			cache_path = cache_dir.path_join("westbank.bin" if landform == "westbank" else "island.bin")
+			var radii := {}
+			for id: int in _ring_c:
+				radii[id] = _ring_r(id)
+			signature = _digest(var_to_bytes([FIELD_CACHE_VERSION, field_rect, cell, field_w, field_h, SEG_CELL, BAND,
+				_segs, _ring_c, radii]))
+			if _read_field(cache_path, signature):
+				return
+	# Every texel starts off-network. Rasterize only the occupied spatial
+	# buckets, on the thread that owns the road data.
 	field = PackedFloat32Array()
-	for st in _stripe_out:
-		field.append_array(st)
-	_stripe_out.clear()
+	field.resize(field_w * field_h * 4)
+	for k in range(0, field.size(), 4):
+		field[k] = 100.0
+		field[k + 3] = 100.0
+	var kerbs := {}
+	for key: Vector2i in _seg_grid:
+		var lo := (Vector2(key) * SEG_CELL - field_rect.position) / cell - Vector2(0.5, 0.5)
+		var hi := ((Vector2(key) + Vector2.ONE) * SEG_CELL - field_rect.position) / cell - Vector2(0.5, 0.5)
+		var segments: PackedInt32Array = _seg_grid[key]
+		for j in range(maxi(0, ceili(lo.y)), mini(field_h, ceili(hi.y))):
+			var z := field_rect.position.y + (j + 0.5) * cell
+			for i in range(maxi(0, ceili(lo.x)), mini(field_w, ceili(hi.x))):
+				var v := _sample(Vector2(field_rect.position.x + (i + 0.5) * cell, z), segments, kerbs)
+				var k := (j * field_w + i) * 4
+				field[k] = v.x
+				field[k + 1] = v.y
+				field[k + 2] = v.z
+				field[k + 3] = v.w
+	if not cache_path.is_empty():
+		_cache_field(cache_path, signature)
+
+
+static func _digest(bytes: PackedByteArray) -> PackedByteArray:
+	var ctx := HashingContext.new()
+	ctx.start(HashingContext.HASH_SHA256)
+	ctx.update(bytes)
+	return ctx.finish()
+
+
+func _read_field(path: String, signature: PackedByteArray) -> bool:
+	if not FileAccess.file_exists(path):
+		return false
+	var f := FileAccess.open(path, FileAccess.READ)
+	var size := field_w * field_h * 16
+	if f == null or f.get_length() != size + 64 or f.get_buffer(32) != signature:
+		return false
+	var checksum := f.get_buffer(32)
+	var bytes := f.get_buffer(size)
+	if bytes.size() != size or _digest(bytes) != checksum:
+		return false
+	field = bytes.to_float32_array()
+	return true
+
+
+func _cache_field(path: String, signature: PackedByteArray) -> void:
+	var tmp := "%s.%d.%d.tmp" % [path, OS.get_process_id(), get_instance_id()]
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		return
+	var bytes := field.to_byte_array()
+	var ok := f.store_buffer(signature) and f.store_buffer(_digest(bytes)) and f.store_buffer(bytes)
+	f.close()
+	if not ok or DirAccess.rename_absolute(tmp, path) != OK:
+		DirAccess.remove_absolute(tmp)
 
 
 ## The parts of segment a–b outside every roundabout's ring (roads that
@@ -611,38 +676,14 @@ func _on_other(p: Vector2, rid: int, n: int) -> bool:
 	return false
 
 
-var _stripe_out: Array = []
-var _stripe_lock := Mutex.new()
-
-
-func _bake_stripe(si: int) -> void:
-	var out := PackedFloat32Array()
-	var j1 := mini(field_h, si * 16 + 16)
-	out.resize((j1 - si * 16) * field_w * 4)
-	var k := 0
-	for j in range(si * 16, j1):
-		var z := field_rect.position.y + (j + 0.5) * field_cell
-		for i in field_w:
-			var v := _sample(Vector2(field_rect.position.x + (i + 0.5) * field_cell, z))
-			out[k] = v.x
-			out[k + 1] = v.y
-			out[k + 2] = v.z
-			out[k + 3] = v.w
-			k += 4
-	_stripe_lock.lock()
-	_stripe_out[si] = out
-	_stripe_lock.unlock()
-
-
 ## (offset, ±half width, along mod 64, other road's kerb distance) at p.
-func _sample(p: Vector2) -> Vector4:
+func _sample(p: Vector2, segments: PackedInt32Array, kerbs: Dictionary) -> Vector4:
+	kerbs.clear()
 	var best := INF
 	var best_s: Array = []
 	var best_off := 0.0
 	var best_t := 0.0
-	var kerbs := {}   # road id -> nearest |off| - hw
-	var cell: PackedInt32Array = _seg_grid.get(Vector2i(floori(p.x / SEG_CELL), floori(p.y / SEG_CELL)), PackedInt32Array())
-	for idx in cell:
+	for idx in segments:
 		var s: Array = _segs[idx]
 		var a: Vector2 = s[0]
 		var b: Vector2 = s[1]

@@ -858,7 +858,9 @@ func _bind_skeleton() -> void:
 	a_pose["upper_arm_r"] = _rz(ARM_A)
 	a_pose["thigh_l"] = _rz(-LEG_A)
 	a_pose["thigh_r"] = _rz(LEG_A)
-	var pivots := _pivot_transforms(a_pose)
+	# The previous body may be seated or leaning when the wardrobe swaps it.
+	# Only the live pose should inherit that hip offset.
+	var pivots := _pivot_transforms(a_pose, BONES["hips"][1] + MODEL_OFFSET)
 	var off := skeleton.transform
 	for b in BONES:
 		var i := skeleton.find_bone("b_" + b)
@@ -901,11 +903,12 @@ func _fit_body_pivots() -> void:
 
 
 ## Rig-space transforms of every pivot for the given local rotations.
-func _pivot_transforms(rots: Dictionary) -> Dictionary:
+func _pivot_transforms(rots: Dictionary, hips_position: Vector3) -> Dictionary:
 	var out := {}
 	for b in BONES:  # parents come before children in BONES
 		var def: Array = BONES[b]
-		var local := Transform3D(Basis(rots[b] as Quaternion), (bones[b] as Node3D).position)
+		var origin := hips_position if b == "hips" else (bones[b] as Node3D).position
+		var local := Transform3D(Basis(rots[b] as Quaternion), origin)
 		out[b] = local if def[0] == "" else (out[def[0]] as Transform3D) * local
 	return out
 
@@ -917,7 +920,7 @@ func _sync_skeleton() -> void:
 	var rots := {}
 	for b in BONES:
 		rots[b] = (bones[b] as Node3D).quaternion
-	var piv := _pivot_transforms(rots)
+	var piv := _pivot_transforms(rots, (bones["hips"] as Node3D).position)
 	var inv_off := skeleton.transform.affine_inverse()
 	var glob := {}
 	for b in BONES:
@@ -1370,6 +1373,7 @@ func _process(dt: float) -> void:
 	dt = minf(dt, 1.0 / 20.0)
 	_time += dt
 	if wardrobe_preview:
+		position = Vector3.ZERO
 		var pose := {}
 		for bone in BONES:
 			pose[bone] = Quaternion.IDENTITY

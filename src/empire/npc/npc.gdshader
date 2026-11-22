@@ -20,6 +20,7 @@ instance uniform float apron = 0.0;
 
 varying vec3 v_col;
 varying float v_rough;
+varying vec3 v_surface;
 varying float v_front;
 varying flat int v_part;
 varying float v_near;   // 0 at the lens .. 1 from 1.8 m: dithered out up close
@@ -60,7 +61,8 @@ void vertex() {
 	} else {
 		v_col = srgb(vec3(0.06, 0.05, 0.05));
 	}
-	v_rough = part == 8 || part == 5 ? 0.3 : (part == 0 ? 0.45 : (part == 3 ? 0.55 : 0.78));
+	v_rough = person_surface_roughness(part);
+	v_surface = VERTEX;
 	v_front = VERTEX.z;
 	vec3 v = VERTEX;
 	vec3 n = NORMAL;
@@ -86,6 +88,7 @@ void fragment() {
 	if (v_part == 4 && apron > 0.5 && v_front < -0.06) {
 		c = vec3(0.12, 0.42, 0.33);  // staff apron (the studio's green)
 	}
-	ALBEDO = c;
+	ALBEDO = person_cloth(c, v_surface, 1.0 - smoothstep(7.0, 23.0, length(VERTEX)), v_part);
+	SPECULAR = v_part == 1 || v_part == 3 ? 0.32 : 0.24;
 	ROUGHNESS = v_rough;
 }

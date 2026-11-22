@@ -9,6 +9,8 @@ render_mode cull_back, diffuse_burley;
 
 varying vec3 v_col;
 varying float v_rough;
+varying vec3 v_surface;
+varying flat int v_part;
 varying float v_near;   // 0 at the lens .. 1 from 1.8 m: dithered out up close
 
 vec3 srgb(vec3 c) {
@@ -22,6 +24,7 @@ vec3 pal5(float s, vec3 a, vec3 b, vec3 c, vec3 d, vec3 e) {
 void vertex() {
 	float seed = INSTANCE_CUSTOM.y;
 	int part = person_part(UV);
+	v_part = part;
 	vec3 skin = srgb(pal5(fract(seed * 1.0), vec3(0.95, 0.78, 0.65), vec3(0.86, 0.66, 0.52), vec3(0.7, 0.5, 0.36),
 		vec3(0.52, 0.35, 0.25), vec3(0.34, 0.23, 0.17)));
 	if (part == 1) {
@@ -47,7 +50,8 @@ void vertex() {
 	} else {
 		v_col = srgb(vec3(0.06, 0.05, 0.05));
 	}
-	v_rough = part == 8 || part == 5 ? 0.3 : (part == 0 ? 0.45 : (part == 3 ? 0.55 : 0.78));
+	v_rough = person_surface_roughness(part);
+	v_surface = VERTEX;
 	vec3 v = VERTEX;
 	vec3 n = NORMAL;
 	person_pose_w(v, n, person_limb(UV), UV2.x, 1.0 - UV2.y, INSTANCE_CUSTOM.x / 0.72 * 3.14159, INSTANCE_CUSTOM.z, 0.0, INSTANCE_CUSTOM.w);
@@ -67,6 +71,7 @@ void fragment() {
 			discard;
 		}
 	}
-	ALBEDO = v_col;
+	ALBEDO = person_cloth(v_col, v_surface, 1.0 - smoothstep(7.0, 23.0, length(VERTEX)), v_part);
+	SPECULAR = v_part == 1 || v_part == 3 ? 0.32 : 0.24;
 	ROUGHNESS = v_rough;
 }

@@ -41,9 +41,10 @@ const float KIND_GLASS = 3.0;
 const float KIND_SIGN = 4.0;
 const float KIND_STONE = 6.0;  // BuildingMesher.KIND_STONE
 
+const float KIND_BRIDGE_ROAD = 7.0;
+
 varying flat float v_kind;
 varying vec3 v_world_normal;
-varying float v_dist;
 varying vec3 v_wpos;
 
 float hash12(vec2 p) {
@@ -89,7 +90,6 @@ void vertex() {
 	v_kind = floor(COLOR.a * 8.0 + 0.5);
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	v_wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	v_dist = length((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
 }
 
 // Returns window mask (1 = glass) and cell id, for a style.
@@ -135,11 +135,16 @@ void window_layout(float style, float seed, vec2 uv, out float glass, out vec2 c
 	cell = floor(uv / size);
 	vec2 f = fract(uv / size) - 0.5;
 	vec2 edge = abs(f) - win * 0.5;
-	float aa = fwidth(uv.x / size.x) * 1.5 + 0.001;
-	glass = 1.0 - smoothstep(-aa, aa, max(edge.x, edge.y));
+	vec2 footprint = max(fwidth(uv / size), vec2(0.001));
+	vec2 aa = footprint * 0.65;
+	vec2 pane = 1.0 - smoothstep(-aa, aa, edge);
+	// Once a pixel spans a bay, converge to that axis's mean glass coverage.
+	pane = mix(pane, win, smoothstep(vec2(0.4), vec2(1.0), footprint));
+	glass = pane.x * pane.y;
 	wpos = f * size;
 	whalf = win * size * 0.5;
-	frame = 1.0 - smoothstep(-aa * 2.0, aa, max(edge.x, edge.y) + 0.04);
+	vec2 surround = 1.0 - smoothstep(-aa * 2.0, aa, edge + 0.04);
+	frame = surround.x * surround.y;
 	csize = size;
 }
 
@@ -168,14 +173,14 @@ vec3 room(vec2 o, vec3 d, vec3 rsize, float rnd, float lit, vec3 lamp, float day
 		float pic = step(abs(h.x - (fract(rnd * 3.3) - 0.5) * rsize.x * 0.5), 0.45) * step(abs(h.y - 0.25), 0.3);
 		c = mix(c, vec3(0.15, 0.2, 0.28) + vec3(fract(rnd * 5.1), fract(rnd * 9.7), 0.3) * 0.3, pic * step(0.5, fract(rnd * 17.0)));
 	} else if (t == tf.y) {
-		c = d.y > 0.0 ? vec3(0.8, 0.79, 0.76) : (fract(rnd * 2.9) < 0.5 ? vec3(0.3, 0.22, 0.16) : vec3(0.32, 0.33, 0.35));
+		c = d.y > 0.0 ? wallc * 0.96 : mix(wallc * 0.64, vec3(0.26, 0.24, 0.21), 0.46);
 		if (d.y > 0.0) {
 			// Ceiling light panel.
 			float panel = step(abs(h.x), 0.5) * step(abs(h.z - rsize.z * 0.5), 0.6);
-			c += lamp * panel * lit * 3.0;
+			c += lamp * panel * lit * mix(0.32, 2.0, night);
 		}
 	} else {
-		c = wallc * 0.78;
+		c = wallc * 0.85;
 	}
 	float depth_k = mix(1.0, 0.45, h.z / rsize.z);
 	// Daylight falls off into the room; lamps light it evenly.
@@ -340,29 +345,8 @@ vec3 shop_room(vec2 o, vec3 d, vec3 rsize, float sid, vec3 lamp, float daylight)
 	return c * (vec3(daylight) * depth_k * 0.5 + lamp * 0.5 * lit);
 }
 
-// Reflection of the world in glass: sky above, a hazy band of city skyline
-// (with window specks, lit at night) round the horizon, the ground below.
-vec3 world_reflection(vec3 r) {
-	vec3 sky = mix(sky_horizon, sky_top, clamp(r.y * 1.6, 0.0, 1.0));
-	float az = atan(r.x, r.z) / 6.2832 + 0.5;
-	float col = floor(az * 70.0);
-	float hb = hash12(vec2(col, 7.0));
-	float hs = 0.02 + 0.22 * hb * hb * (0.5 + 0.5 * hash12(vec2(floor(az * 9.0), 3.0)));
-	float in_city = 1.0 - smoothstep(hs - 0.004, hs + 0.004, r.y);
-	vec3 bld = mix(vec3(0.2, 0.22, 0.25), sky_horizon * 0.75, 0.45 + 0.35 * clamp(r.y / max(hs, 0.01), 0.0, 1.0));
-	bld *= 0.8 + 0.4 * hash12(vec2(col, 2.0));
-	// Window rows in the reflected towers: soft bands, not per-pixel specks
-	// (those shimmer as the camera moves).
-	float rows = smoothstep(0.35, 0.5, abs(fract(r.y * 140.0) - 0.5));
-	float lit_w = step(0.7, hash12(vec2(floor(az * 260.0), floor(r.y * 140.0))));
-	bld *= 1.0 - 0.18 * rows;
-	bld += lit_w * (1.0 - rows) * mix(sky_horizon * 0.08, vec3(1.0, 0.75, 0.45) * 1.1, night);
-	vec3 ground = mix(vec3(0.16, 0.17, 0.18), sky_horizon * 0.3, 0.3);
-	vec3 c = mix(sky, bld, in_city);
-	return r.y < 0.0 ? mix(bld, ground, (1.0 - smoothstep(-0.15, 0.0, r.y))) : c;
-}
-
 void fragment() {
+	float camera_distance = length(VERTEX);
 	vec3 base = COLOR.rgb;
 	float style = floor(UV2.x);
 	float face_t = fract(UV2.x) / 0.999;
@@ -380,7 +364,7 @@ void fragment() {
 	vec4 brick_d = vec4(0.0);   // set on brick walls (pbr)
 	vec3 albedo = base;
 	vec3 emit = vec3(0.0);
-	float detail = 1.0 - smoothstep(detail_fade_start, detail_fade_end, v_dist);
+	float detail = 1.0 - smoothstep(detail_fade_start, detail_fade_end, camera_distance);
 	vec3 bend_n = vec3(0.0);  // world-space relief normal (reveals, sills), when relief > 0
 	float relief = 0.0;
 	float age = building_age(v_wpos.xz, seed);
@@ -477,7 +461,7 @@ void fragment() {
 			rough = mix(0.45, 0.8, rust);
 			metal = 0.35 * (1.0 - rust);
 		}
-	} else if (v_kind == KIND_TRIM) {
+	} else if (v_kind == KIND_TRIM || v_kind == KIND_BRIDGE_ROAD) {
 		albedo = base;
 		rough = 0.7;
 	} else if (v_kind == KIND_STONE) {
@@ -577,10 +561,14 @@ void fragment() {
 		vec3 tang = normalize(cross(vec3(0.0, 1.0, 0.0), n_w));
 		bool curtain = style == 2.0 || style == 6.0 || v_kind == KIND_GLASS;
 		vec2 jt = vec2(hash12(cell * 1.7 + seed * 5.0), hash12(cell * 2.3 + seed * 3.0)) - 0.5;
-		vec3 n_g = normalize(n_w + (tang * jt.x + vec3(0.0, 1.0, 0.0) * jt.y) * (curtain ? 0.05 : 0.02) * detail);
+		vec3 n_g = normalize(n_w + (tang * jt.x + vec3(0.0, 1.0, 0.0) * jt.y) * (curtain ? 0.014 : 0.010) * detail);
 		vec3 r = reflect(-view_w, n_g);
 		float fres = pow(1.0 - clamp(dot(view_w, n_w), 0.0, 1.0), 3.0);
-		vec3 refl = detail > 0.0 ? world_reflection(r) : mix(sky_horizon, sky_top, clamp(r.y * 1.6, 0.0, 1.0));
+		vec3 refl = mix(sky_horizon, sky_top, clamp(r.y * 1.6, 0.0, 1.0));
+		if (detail > 0.02) {
+			refl = mix(refl, city_reflection(r, v_wpos, sky_top, sky_horizon, sun_dir, night),
+				smoothstep(0.02, 0.4, detail));
+		}
 		float rnd = hash12(cell + seed * 113.0);
 		vec3 tint = style == 6.0 ? vec3(0.12, 0.16, 0.2) : (style == 2.0 ? vec3(0.2, 0.32, 0.38) : vec3(0.1, 0.11, 0.12));
 		// Curtain-wall towers pick a glass colour per building (teal, bronze,
@@ -596,7 +584,7 @@ void fragment() {
 		}
 		if (curtain) {
 			float lum = dot(refl, vec3(0.3, 0.55, 0.15));
-			refl = mix(refl, clamp(tint * 2.4, 0.0, 1.3) * lum * 1.6, 0.6);
+			refl = mix(refl, clamp(tint * 1.85, 0.0, 1.0) * lum * 1.35, 0.40);
 		}
 		// Blinds half-drawn in some windows (offices and flats, not shops).
 		float blind_h = step(0.86, hash12(cell * 2.7 + seed * 17.0)) * (shop ? 0.0 : 1.0);
@@ -606,7 +594,7 @@ void fragment() {
 		// tungsten, cool office white or the odd blue TV glow.
 		// (Offices keep plenty of lights on by day too; homes hardly any.)
 		bool office = style == 0.0 || style == 2.0 || style == 4.0 || style == 6.0 || style == 7.0;
-		float day_share = office ? 0.25 + 0.2 * fract(seed * 5.3) : lit_fraction;
+		float day_share = office ? 0.18 + 0.16 * fract(seed * 5.3) : lit_fraction;
 		// At night buildings differ a lot: some nearly dark, some busy
 		// (6-50 % of windows), and offices light whole floors (cleaners,
 		// late shifts) – bands of light instead of an even sprinkle.
@@ -631,13 +619,13 @@ void fragment() {
 			vec3 rm = room(o, dl, rs, rnd, lit, lamp_col * mix(0.7, lit_k, night), daylight);
 			// Seen through the glass's own tint (strongly for coated curtain walls).
 			rm *= curtain ? (tint * 2.2 + 0.15) : vec3(0.85, 0.88, 0.9);
-			interior = mix(interior, rm, detail);
+			interior = mix(interior, rm * 0.64, detail * 0.83);
 		}
-		vec3 gcol = mix(interior, refl, curtain ? 0.45 + 0.45 * fres : 0.12 + 0.6 * fres);
+		vec3 gcol = mix(interior, refl, curtain ? 0.26 + 0.60 * fres : 0.10 + 0.59 * fres);
 		// Blinds: a paler band in the glass's own colour, not a beige patch.
 		gcol = mix(gcol, mix(gcol, vec3(0.78, 0.76, 0.72), 0.45) * (0.85 + 0.15 * rnd), in_blind * 0.8 * detail);
-		gcol += lamp_col * lit * lit_k * 0.12 * (1.0 - detail * 0.7);
-		emit = (detail > 0.0 ? interior * 0.9 * lit : lamp_col * lit * lit_k * 0.5) * glass;
+		gcol += lamp_col * lit * lit_k * mix(0.04, 0.12, night) * (1.0 - detail * 0.7);
+		emit = mix(lamp_col * lit_k * 0.4, interior * 0.78, detail) * lit * glass * mix(0.24, 1.0, night);
 		// Night walls never go black: a faint city-glow bounce everywhere and
 		// warm light washing up from the street lamps over the lowest floors.
 		emit += wall * (1.0 - glass) * night * (0.026 + 0.15 * exp(-uv.y / 12.0)) * vec3(1.0, 0.84, 0.66);
@@ -739,8 +727,8 @@ void fragment() {
 			emit *= 1.0 - max(rd, post);
 			rough = mix(rough, 0.6, rd);
 		}
-		rough = mix(0.88, 0.08, glass);
-		metal = mix(0.0, 0.2, glass);
+		rough = mix(0.86, 0.19 + 0.07 * rnd, glass);
+		metal = mix(0.0, 0.04, glass);
 		// Real relief for the light: the inner 15 cm round a punched window is
 		// its reveal (wall facing into the opening), the sill below tilts up
 		// to catch the sun, the lintel tilts down – so as the sun moves round
@@ -987,34 +975,46 @@ void fragment() {
 	// get the streets' asphalt (ground.gdshader, 2026-11-21): darker, stone
 	// aggregate faded by pixel size, a broad tone drift.
 	float bl = dot(base, vec3(0.333));
-	if (v_kind == KIND_TRIM && v_world_normal.y > 0.8 && bl < 0.3 && abs(base.r - base.b) < 0.04) {  // (decks 0.2-0.26, stone 0.43)
+	if (v_kind == KIND_BRIDGE_ROAD || (v_kind == KIND_TRIM && v_world_normal.y > 0.8 && bl < 0.3 && abs(base.r - base.b) < 0.04)) {  // (decks 0.2-0.26, stone 0.43)
 		vec2 p = v_wpos.xz;
 		float fpx = fwidth(p.x) + fwidth(p.y);
 		float agg = (hash12(floor(p * 9.0)) - 0.5) * (1.0 - smoothstep(0.03, 0.12, fpx))
 			+ (hash12(floor(p * 23.0) + 5.0) - 0.5) * 0.7 * (1.0 - smoothstep(0.01, 0.05, fpx));
 		float drift = vnoise_b(p * 0.03 + 31.0) * 0.6 + vnoise_b(p * 0.12) * 0.4;
 		agg *= pbr_on ? 0.0 : 1.0;
-		albedo = base * 0.62 * (0.82 + 0.32 * drift) * (1.0 + 0.32 * agg);
+		albedo = vec3(0.092, 0.089, 0.084) * (0.82 + 0.36 * drift) * (1.0 + 0.32 * agg);
 		rough = 0.86 - 0.08 * agg;
 		if (pbr_on) {
-			float kd = pbr_fade(v_dist);
-			vec4 d = texture(asph_tex, p / 2.4);
+			float kd = pbr_fade(camera_distance);
+			vec4 d = texture(asph_tex, p / 1.9);
 			albedo *= mix(1.0, d.r * 2.0, 0.85 * kd);
 			rough = mix(rough, d.a, 0.55 * kd * (1.0 - wetness));
-			NORMAL = normalize((VIEW_MATRIX * vec4(pbr_flat_normal(d, vec3(0.0, 1.0, 0.0), 0.9 * kd), 0.0)).xyz);
+			NORMAL = normalize((VIEW_MATRIX * vec4(pbr_flat_normal(d, normalize(v_world_normal), 0.63 * kd), 0.0)).xyz);
+		}
+		if (v_kind == KIND_BRIDGE_ROAD) {
+			float across = abs(uv.y);
+			float aa = max(fwidth(uv.y), 0.005);
+			float centre = clamp((0.08 - abs(across - 0.25)) / aa + 0.5, 0.0, 1.0);
+			float edge = clamp((0.08 - abs(across - 7.5)) / aa + 0.5, 0.0, 1.0);
+			float dash = clamp((0.07 - abs(across - 3.8)) / aa + 0.5, 0.0, 1.0);
+			float dash_end = abs(mod(uv.x + 4.5, 9.0) - 4.5) - 1.5;
+			dash *= clamp(0.5 - dash_end / max(fwidth(uv.x), 0.01), 0.0, 1.0);
+			float coverage = min(1.0, 0.15 / aa) * smoothstep(UV2.y + 12.0, UV2.y + 20.0, uv.x);
+			albedo = mix(albedo, vec3(0.70, 0.55, 0.22), centre * coverage);
+			albedo = mix(albedo, vec3(0.75, 0.75, 0.70), max(edge, dash) * coverage);
 		}
 	}
 	}
 	// Photographic wall detail (CC0 concrete_wall_008): weathered render /
 	// concrete grain and relief on masonry (not glass: rough > 0.5), up close.
 	if (pbr_on && (v_kind == KIND_WALL || v_kind == KIND_STONE) && rough > 0.5 && abs(v_world_normal.y) < 0.5) {
-		float kw = pbr_fade(v_dist);
+		float kw = pbr_fade(camera_distance);
 		if (kw > 0.0) {
 			bool brick = brick_d.a > 0.0;
 			vec4 d = brick ? brick_d : texture(wall_tex, uv / 2.2);
 			albedo *= brick ? 1.0 : mix(1.0, d.r * 2.0, 0.55 * kw);   // (brick: already in tex)
 			rough = mix(rough, max(rough, d.a), 0.5 * kw);
-			vec3 nw = pbr_wall_normal(d, normalize(v_world_normal), 0.7 * kw);
+			vec3 nw = pbr_wall_normal(d, normalize(v_world_normal), 0.49 * kw);
 			NORMAL = normalize(mix(NORMAL, (VIEW_MATRIX * vec4(nw, 0.0)).xyz, kw));
 		}
 	}
@@ -1024,7 +1024,7 @@ void fragment() {
 	// mapped in world metres along the dominant axis, faded with distance.
 	bool deck = v_kind == KIND_TRIM && v_world_normal.y > 0.8 && dot(base, vec3(0.333)) < 0.3 && abs(base.r - base.b) < 0.04;
 	if (pbr_on && !deck && rough > 0.45 && ((v_kind == KIND_TRIM) || (v_kind == KIND_ROOF && metal < 0.05))) {
-		float ks = pbr_fade(v_dist);
+		float ks = pbr_fade(camera_distance);
 		if (ks > 0.0) {
 			vec3 an = abs(v_world_normal);
 			bool flat_s = an.y > max(an.x, an.z);
@@ -1041,25 +1041,9 @@ void fragment() {
 			}
 		}
 	}
-	// Fake city reflection in the glass (smooth surfaces): the skyline, sky
-	// and street across the road, strongest at grazing angles – the probe's
-	// look at none of its cost (2026-11-21).
-	float glassy = 1.0 - smoothstep(0.12, 0.45, rough);
-	if (glassy > 0.0 && abs(v_world_normal.y) < 0.5) {
-		vec3 vw = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
-		vec3 rw = reflect(-vw, normalize(v_world_normal));
-		vec3 env = city_reflection(rw, v_wpos, sky_top, sky_horizon, sun_dir, night);
-		float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-		// Panes, not a sheet: each pane its own tilt/tone, darker mullions.
-		vec2 pane = uv / vec2(1.5, 3.4);
-		vec2 pf = fract(pane);
-		float mull = step(0.06, pf.x) * step(0.06, pf.y);
-		float tone = 0.7 + 0.45 * hash12(floor(pane) + seed * 31.0);
-		emit += env * mix(0.12, 0.45, fres) * glassy * tone * mix(0.35, 1.0, mull) * (1.0 - 0.6 * night);
-	}
 	ALBEDO = albedo * (1.0 - 0.16 * wetness);
 	ROUGHNESS = mix(rough, min(rough, 0.32), wetness * 0.75);
 	METALLIC = metal;
-	SPECULAR = 0.5;
+	SPECULAR = mix(0.28, 0.48, 1.0 - smoothstep(0.2, 0.55, rough));
 	EMISSION = emit;
 }

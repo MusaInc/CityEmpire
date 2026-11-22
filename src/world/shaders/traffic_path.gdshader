@@ -1,13 +1,8 @@
 // Moving traffic (Traffic): cars follow lane polylines stored in lane_tex
 // (texel = x, y, z every Traffic.STEP m; the texel before a lane's first is
-// its header: point count, loop flag). The instance "transform" carries the
-// car's motion, not a transform (full precision on every renderer):
-//   row 0 = (first texel, s0, t0, v), row 1 = (stop m along the lane, its
-//   ease distance, -, -).
-// s = s0 + v (t - t0) (v < 0: pulling away from rest at |v|), eased to a
-// stop at `stop`. The traffic node sits at the origin, so MODEL_MATRIX is
-// that data; positions are computed here and output in view space.
-// Fragment as traffic.gdshader.
+// its header: point count, loop flag). Traffic stores motion in an
+// invertible upper-triangular MODEL_MATRIX with exact power-of-two scales.
+// All geometry is positioned in lane space and then written in view space.
 shader_type spatial;
 render_mode cull_back, diffuse_burley, skip_vertex_transform;
 
@@ -35,12 +30,12 @@ vec4 lane_px(sampler2D tex, int i) {
 }
 
 void vertex() {
-	float base_f = MODEL_MATRIX[0][0];
-	float s0 = MODEL_MATRIX[1][0];
-	float t0 = MODEL_MATRIX[2][0];
+	float base_f = MODEL_MATRIX[1][0] * 65536.0;
+	float s0 = MODEL_MATRIX[2][0] * 1024.0;
+	float t0 = MODEL_MATRIX[2][1] * 1024.0;
 	float v = MODEL_MATRIX[3][0];
-	float stop = MODEL_MATRIX[0][1];
-	float e = MODEL_MATRIX[1][1];
+	float stop = MODEL_MATRIX[3][1];
+	float e = MODEL_MATRIX[3][2];
 	float dt = max(traffic_time - t0, 0.0);
 	float s;
 	if (v >= 0.0) {
@@ -53,32 +48,39 @@ void vertex() {
 	if (u > 0.0) {
 		s = u < 2.0 * e ? stop - e + u - u * u / (4.0 * e) : stop;
 	}
-	int base = int(base_f + 0.5);
+	int capacity = textureSize(lane_tex, 0).y * TEX_W;
+	bool has_lane = base_f >= 1.0 && base_f < float(capacity - 1);
+	int base = has_lane ? int(base_f + 0.5) : 1;
 	vec4 hd = lane_px(lane_tex, base - 1);
-	float n = hd.x;
-	bool loop = hd.y > 0.5;
-	float f = s / STEP;
-	f = loop ? mod(f, n - 1.0) : clamp(f, 0.0, n - 1.001);
-	int i = int(floor(f));
-	float k = f - float(i);
-	int last = int(n + 0.5) - 1;
-	// (Loops repeat their first point at the end: indices wrap over n - 1.)
-	int im = loop ? (i == 0 ? last - 1 : i - 1) : max(i - 1, 0);
-	int i2 = loop ? (i + 2 > last ? i + 2 - last : i + 2) : min(i + 2, last);
-	vec3 p0 = lane_px(lane_tex, base + im).xyz;
-	vec3 p1 = lane_px(lane_tex, base + i).xyz;
-	vec3 p2 = lane_px(lane_tex, base + i + 1).xyz;
-	vec3 p3 = lane_px(lane_tex, base + i2).xyz;
-	vec3 pos = mix(p1, p2, k);
-	vec3 fw = mix(p2 - p0, p3 - p1, k);
-	fw = length(fw) > 1e-4 ? normalize(fw) : vec3(0.0, 0.0, -1.0);
-	vec3 zb = -fw;
-	vec3 xb = normalize(cross(vec3(0.0, 1.0, 0.0), zb));
-	vec3 yb = cross(zb, xb);
-	mat3 B = mat3(xb, yb, zb);
-	vec3 world = pos + B * VERTEX;
-	VERTEX = (VIEW_MATRIX * vec4(world, 1.0)).xyz;
-	NORMAL = normalize(mat3(VIEW_MATRIX) * (B * NORMAL));
+	if (has_lane && hd.x >= 2.0 && hd.x <= float(capacity - base)) {
+		float n = hd.x;
+		bool loop = hd.y > 0.5;
+		float f = s / STEP;
+		f = loop ? mod(f, n - 1.0) : clamp(f, 0.0, n - 1.001);
+		int i = int(floor(f));
+		float k = f - float(i);
+		int last = int(n + 0.5) - 1;
+		// (Loops repeat their first point at the end: indices wrap over n - 1.)
+		int im = loop ? (i == 0 ? last - 1 : i - 1) : max(i - 1, 0);
+		int i2 = loop ? (i + 2 > last ? i + 2 - last : i + 2) : min(i + 2, last);
+		vec3 p0 = lane_px(lane_tex, base + im).xyz;
+		vec3 p1 = lane_px(lane_tex, base + i).xyz;
+		vec3 p2 = lane_px(lane_tex, base + i + 1).xyz;
+		vec3 p3 = lane_px(lane_tex, base + i2).xyz;
+		vec3 pos = mix(p1, p2, k);
+		vec3 fw = mix(p2 - p0, p3 - p1, k);
+		fw = length(fw) > 1e-4 ? normalize(fw) : vec3(0.0, 0.0, -1.0);
+		vec3 zb = -fw;
+		vec3 xb = normalize(cross(vec3(0.0, 1.0, 0.0), zb));
+		vec3 yb = cross(zb, xb);
+		mat3 B = mat3(xb, yb, zb);
+		vec3 world = pos + B * VERTEX;
+		VERTEX = (VIEW_MATRIX * vec4(world, 1.0)).xyz;
+		NORMAL = normalize(mat3(VIEW_MATRIX) * (B * NORMAL));
+	} else {
+		// The instance has no complete lane; collapse it to one point.
+		VERTEX = vec3(0.0, 0.0, -1.0);
+	}
 }
 
 void fragment() {
@@ -88,18 +90,18 @@ void fragment() {
 	METALLIC = use_instance_color ? 0.35 : 0.0;
 	if (finish == 1) {
 		// Lacquered paint: a glossy clear coat over a slightly metallic base.
-		METALLIC = 0.45;
-		ROUGHNESS = mix(0.3, 0.18, wetness);
-		CLEARCOAT = 1.0;
-		CLEARCOAT_ROUGHNESS = 0.08;
+		METALLIC = 0.33;
+		ROUGHNESS = mix(0.36, 0.23, wetness);
+		CLEARCOAT = 0.58;
+		CLEARCOAT_ROUGHNESS = 0.18;
 	} else if (finish == 2) {
 		// Glass as on your own car (car_glass.gdshader): dark tint, smooth,
 		// the city reflected strongest at grazing angles (below). It was a
 		// near-mirror metal and read oddly next to the player's car.
-		ALBEDO = vec3(0.035, 0.045, 0.06);
-		METALLIC = 0.2;
-		ROUGHNESS = 0.08;
-		SPECULAR = 0.8;
+		ALBEDO = vec3(0.037, 0.043, 0.046);
+		METALLIC = 0.02;
+		ROUGHNESS = 0.18;
+		SPECULAR = 0.5;
 	} else if (finish == 3) {
 		METALLIC = 1.0;
 		ROUGHNESS = 0.16;
@@ -111,10 +113,12 @@ void fragment() {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 		vec3 vw = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 		vec3 rw = reflect(-vw, nw);
-		vec3 env = city_reflection(rw, (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz, sky_top, sky_horizon, sun_dir, night);
+		vec3 wp = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+		vec3 env = finish == 1 ? paint_reflection(rw, wp, sky_top, sky_horizon, sun_dir, night)
+			: city_reflection(rw, wp, sky_top, sky_horizon, sun_dir, night);
 		float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), finish == 2 ? 3.0 : 4.0);
-		float k = finish == 1 ? mix(0.08, 0.62, fres) : (finish == 2 ? mix(0.18, 0.9, fres) : 0.65);
-		float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 220.0 : 300.0) * (finish == 1 ? 3.2 : 8.0);
+		float k = finish == 1 ? mix(0.09, 0.36, fres) : (finish == 2 ? mix(0.11, 0.48, fres) : 0.65);
+		float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 220.0 : 300.0) * (finish == 1 ? 0.9 : 0.75);
 		EMISSION += (env * k + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night);
 	}
 }

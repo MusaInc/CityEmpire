@@ -7,6 +7,9 @@ extends CanvasLayer
 const BASE := 0.045
 const FAST := 0.05   # extra at full swing speed
 
+## WorldState assigns its chase rig before adding the layer to the tree.
+var chase_camera: ChaseCamera
+
 var _rect: ColorRect
 var _mat: ShaderMaterial
 var _speed := 0.0
@@ -23,7 +26,23 @@ func _ready() -> void:
 	add_child(_rect)
 	get_viewport().size_changed.connect(_on_size)
 	_on_size()
+	if chase_camera != null:
+		process_mode = Node.PROCESS_MODE_ALWAYS
+		visible = false
+	set_process(chase_camera != null)
 	_apply()
+
+
+func _process(dt: float) -> void:
+	var car := chase_camera.target
+	visible = Settings.driving_lens > 0.0 and not get_tree().paused and chase_camera.cam.is_current() \
+		and chase_camera.mode == "chase" and is_instance_valid(car)
+	if visible:
+		var velocity := car.linear_velocity
+		var speed := Vector2(velocity.x, velocity.z).length()
+		set_speed(smoothstep(3.0, 32.0, speed), dt)
+	else:
+		_speed = 0.0
 
 
 func _on_size() -> void:
@@ -38,4 +57,7 @@ func set_speed(amount: float, dt: float) -> void:
 
 
 func _apply() -> void:
-	_mat.set_shader_parameter("strength", BASE + FAST * _speed)
+	var strength := BASE + FAST * _speed
+	if chase_camera != null:
+		strength = Settings.driving_lens * (0.012 + 0.018 * _speed)
+	_mat.set_shader_parameter("strength", strength)

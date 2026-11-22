@@ -12,9 +12,9 @@ global uniform float night;
 
 void fragment() {
 	ALBEDO = tint;
-	METALLIC = 0.2;
-	ROUGHNESS = 0.08;
-	SPECULAR = 0.8;
+	METALLIC = 0.02;
+	ROUGHNESS = 0.18;
+	SPECULAR = 0.5;
 	vec3 n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 v = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 	vec3 r = reflect(-v, n);
@@ -22,7 +22,7 @@ void fragment() {
 	vec3 ground = vec3(0.03, 0.03, 0.035);
 	vec3 env = mix(ground, sky, smoothstep(-0.02, 0.04, r.y));
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	float glint = pow(max(dot(r, normalize(sun_dir)), 0.0), 300.0) * 8.0;
-	EMISSION = (env * mix(0.12, 0.85, fres) + vec3(glint)) * (1.0 - night * 0.8);
+	float glint = pow(max(dot(r, normalize(sun_dir)), 0.0), 180.0) * 0.75;
+	EMISSION = (env * mix(0.11, 0.48, fres) + vec3(glint)) * (1.0 - night * 0.65);
 	ALPHA = mix(0.42, 0.95, fres);
 }

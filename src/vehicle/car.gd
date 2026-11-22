@@ -60,6 +60,7 @@ var brake := 0.0      # 0..1
 var reverse_enabled := true
 var steer := 0.0      # -1 left .. +1 right
 var handbrake := false
+var power_slide := 0.0  # 0..1 progressive rear slip from the drive pad
 var nitro := false
 ## Kickdown: the gearbox drops a gear for full-throttle overtaking (City
 ## Empire's drive pad, slide up). More pull through the mid range, no boost
@@ -343,6 +344,7 @@ func _physics_process(dt: float) -> void:
 	var thr := 0.0 if disabled or in_water else throttle
 	var brk := 1.0 if disabled else brake
 	var str_in := 0.0 if disabled else steer
+	var slide := clampf(power_slide, 0.0, 1.0) if not disabled and not in_water and brk < 0.18 and forward_speed > 7.0 else 0.0
 	# Front-end damage pulls the steering (misalignment) – correctable.
 	var pull: float = (dmg["left"] - dmg["right"]) * 0.12 + dmg["front"] * 0.05 * sin(_time * 0.7)
 	var target_steer := clampf(str_in + pull, -1.0, 1.0) * max_steer_angle()
@@ -465,6 +467,8 @@ func _physics_process(dt: float) -> void:
 		var lat_mu: float = mu_w * minf(s_ratio, 1.0) if s_ratio <= 1.0 else lerpf(mu_w, slide_mu, clampf((s_ratio - 1.0) / 2.0, 0.0, 1.0))
 		if hb:
 			lat_mu = minf(lat_mu, slide_mu)
+		elif not front and slide > 0.0:
+			lat_mu = minf(lat_mu, mu_w * lerpf(1.0, 0.53, slide))
 		var f_lat: float = -signf(slip) * lat_mu * fz
 		# Low speed: kill creep sideways (parking-lot stability).
 		if absf(v_long) < 3.0 and absf(v_lat) < 2.0:
@@ -559,32 +563,12 @@ func _physics_process(dt: float) -> void:
 		var pivot := lerpf(1.0, LOW_SPEED_PIVOT, town)
 		var want := clampf(-forward_speed * tan(steer_angle) / wb * pivot, -grip_yaw * turn_k, grip_yaw * turn_k)
 		var assist: float = spec.get("yaw_assist", 0.35)
-		# A handbrake input starts a deliberate drift. Ordinary tyre slip
-		# under throttle gets the grip recovery below.
-		var drift_mode := handbrake and speed > 8.0
-		if drift_mode:
-			# Drift assist: steering sets the slide angle it holds; centred
-			# steering (or counter-steer) straightens it. The path itself
-			# curves with the steering, so the drift goes round the corner.
-			var max_a := deg_to_rad(spec.get("drift_max", 44.0))
-			var hold := str_in * deg_to_rad(spec.get("drift_hold", 30.0))
-			if handbrake:
-				hold = str_in * max_a if absf(str_in) > 0.1 else beta
-			var path := -str_in * grip_yaw * DRIFT_PATH
-			want = (path - clampf((hold - beta) * 3.0, -2.5, 2.5)) * fs
-			assist = spec.get("drift_assist", 0.55)
-			if absf(beta) > max_a:
-				# Past the limit: pull back toward it, hard.
-				want = (path + (beta - signf(beta) * max_a) * 5.0) * fs
-				assist = 1.0
-			# Keep momentum through a slide (arcade: drifting shouldn't kill speed).
-			if speed > 10.0 and thr > 0.2:
-				apply_central_force(vel.normalized() * mass * spec.get("drift_push", 1.6) * clampf(absf(beta), 0.0, 0.8))
+		var handbrake_drift := handbrake and speed > 8.0
 		# Centred steering while gripping: hold the heading firmly (planted
 		# on the straights; also cancels solver drift).
 		# (Blended in, so a touch of steering doesn't drop the car off a cliff
 		# from fully held to loose.)
-		if not drift_mode:
+		if not handbrake_drift:
 			assist = lerpf(1.0, assist, smoothstep(0.03, 0.35, absf(str_in)))
 			if drifting:
 				assist = maxf(assist, 0.9)  # an unwanted slide: catch it
@@ -604,7 +588,27 @@ func _physics_process(dt: float) -> void:
 			var lat := vel.dot(right)
 			if speed > 3.0:
 				var pf := -lat * mass * float(spec.get("path_follow", 3.0)) * (0.35 + 0.65 * absf(str_in))
-				apply_central_force(right * clampf(pf, -mass * GRAVITY * 0.9, mass * GRAVITY * 0.9))
+				apply_central_force(right * clampf(pf, -mass * GRAVITY * 0.9, mass * GRAVITY * 0.9) * (1.0 - 0.88 * slide))
+		var drift_mix := 1.0 if handbrake_drift else slide
+		if drift_mix > 0.0:
+			var max_a := deg_to_rad(spec.get("drift_max", 44.0))
+			var hold := str_in * max_a if absf(str_in) > 0.1 else beta
+			var path := -str_in * grip_yaw * DRIFT_PATH
+			var drift_assist: float = spec.get("drift_assist", 0.55)
+			if not handbrake_drift:
+				max_a = minf(max_a, deg_to_rad(32.0))
+				var countersteering := str_in * beta < 0.0 and absf(beta) > deg_to_rad(7.0)
+				hold = 0.0 if countersteering else str_in * max_a
+				path *= 0.75
+			var want_drift := (path - clampf((hold - beta) * 3.0, -2.5, 2.5)) * fs
+			if absf(beta) > max_a:
+				want_drift = (path + (beta - signf(beta) * max_a) * 5.0) * fs
+				drift_assist = 1.0
+			want = lerpf(want, want_drift, drift_mix)
+			assist = lerpf(assist, drift_assist, drift_mix)
+			if speed > 10.0 and thr > 0.2:
+				var push: float = spec.get("drift_push", 1.6) * (1.0 if handbrake_drift else 0.5 * slide)
+				apply_central_force(vel.normalized() * mass * push * clampf(absf(beta), 0.0, 0.8))
 		var dyaw := (want - yaw_rate)
 		apply_torque(up * clampf(dyaw, -3.0, 3.0) * inertia.y * assist * 10.0)
 		# Damp roll/pitch wobble.

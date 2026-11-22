@@ -586,6 +586,10 @@ func close_panel(resume := true) -> void:
 		Glass.set_dark(true)
 	if resume and game and game.rig and game.rig.wardrobe_preview:
 		_style_pose(false)
+		game.camera.cam.transform = _style_camera_transform
+		game.camera.cam.fov = _style_camera_fov
+		hud.visible = _style_had_hud
+		touch.visible = _style_had_touch
 		game.studio_light(false)
 	for c in _panel_root.get_children():
 		c.queue_free()
@@ -2111,6 +2115,10 @@ var _style_tab := "you"
 var _style_orbit := 0.0
 var _style_portrait := true
 var _style_first := false
+var _style_camera_transform := Transform3D.IDENTITY
+var _style_camera_fov := 0.0
+var _style_had_hud := false
+var _style_had_touch := false
 
 
 func open_style(first := false) -> void:
@@ -2120,6 +2128,15 @@ func open_style(first := false) -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var e := game.empire
 	var l := HeroLook.current(e.flags)
+	if not game.rig.wardrobe_preview:
+		_style_camera_transform = game.camera.cam.transform
+		_style_camera_fov = game.camera.cam.fov
+		_style_had_hud = hud.visible
+		_style_had_touch = touch.visible
+		hud.hide()
+		touch.hide()
+		game.rig.position = Vector3.ZERO
+		game.rig.set_facing(game.rig._facing)
 	_style_pose(true)
 	_style_frame()
 	var catcher := Control.new()  # (the left side stays clear: the hero is there)
@@ -2400,12 +2417,6 @@ func _close_style() -> void:
 	style_shop = ""
 	game.save_game()
 	close_panel(true)
-	# (The editor framed the hero by moving the Camera3D itself: its local
-	# offset stayed after closing – the camera hung off to one side, too
-	# close, at the editor's lens – until the rig was rebuilt.)
-	game.camera.cam.transform = Transform3D.IDENTITY
-	game.camera.cam.fov = game.camera.base_fov
-	game.camera.snap()
 
 
 # ---------------------------------------------------------- head office
@@ -2465,7 +2476,7 @@ static func _short(x: float) -> String:
 
 
 func _settings_panel() -> void:
-	var v := _open("Settings", 680, 520)
+	var v := _open("Settings", 680, 580)
 	var q := S.hbox(10)
 	q.add_child(S.label("Graphics", 18, S.MUTED))
 	for i in 3:
@@ -2475,6 +2486,15 @@ func _settings_panel() -> void:
 			Settings.save()
 			_settings_panel(), Settings.quality == i))
 	v.add_child(q)
+	var lens_row := S.hbox(10)
+	lens_row.add_child(S.label("Driving lens", 18, S.MUTED))
+	for choice in [["Off", 0.0], ["Subtle", 0.55], ["Stronger", 1.0]]:
+		var intensity := float(choice[1])
+		lens_row.add_child(S.button(choice[0], func():
+			Settings.driving_lens = intensity
+			Settings.save()
+			_settings_panel(), is_equal_approx(Settings.driving_lens, intensity)))
+	v.add_child(lens_row)
 	var ap := S.hbox(10)
 	ap.add_child(S.label("Phone appearance", 18, S.MUTED))
 	ap.add_child(Glass.segmented([["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]], Settings.appearance, func(k):

@@ -74,8 +74,13 @@ func _process(_dt: float) -> void:
 		_task = -1
 	if _next < _keys.size():
 		_instantiate()
-	for key in _nodes:
-		(_nodes[key] as Node3D).visible = not world._loaded.has(key)
+
+
+## Called by the streamed chunk owner at the same time as its scene changes.
+func set_streamed(key: Vector2i, streamed: bool) -> void:
+	var node := _nodes.get(key) as Node3D
+	if node:
+		node.visible = not streamed
 
 
 func _instantiate(all_now := false) -> void:

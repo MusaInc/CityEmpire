@@ -24,7 +24,6 @@ global uniform float rain;
 
 #include "res://src/world/shaders/rock.gdshaderinc"
 varying float v_up;
-varying float v_dist;
 varying vec3 v_world;
 varying vec3 v_wn;
 
@@ -91,7 +90,6 @@ vec4 road_sample(vec2 p) {
 
 void vertex() {
 	v_up = NORMAL.y;
-	v_dist = length((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_wn = (MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz;
 }
@@ -111,14 +109,16 @@ float street_age(vec2 p) {
 }
 
 void fragment() {
+	float camera_distance = length(VERTEX);
 	vec3 c = COLOR.rgb;
 	vec2 p = UV;
 	float n = vnoise(p * 0.35) * 0.6 + vnoise(p * 2.1) * 0.4;
-	float near = 1.0 - smoothstep(70.0, 240.0, v_dist);  // fine detail fades out (no shimmer)
+	float near = 1.0 - smoothstep(70.0, 240.0, camera_distance);  // fine detail fades out (no shimmer)
 	float aa = max(fwidth(p.x) + fwidth(p.y), 0.004) * 0.6;
 	vec3 albedo = c * (0.88 + 0.2 * n);
 	float rough = 0.92;
 	float track_sheen = 0.0;
+	float paint_coverage = 0.0;
 	bool flat_top = v_up > 0.5;
 	bool asphalt = c.r < 0.3 && c.g < 0.3;
 	bool grass = c.g > c.r + 0.08;
@@ -177,13 +177,12 @@ void fragment() {
 			// (resurfaced stretches, sun-bleached runs) and fine aggregate
 			// mottling up close, so shaded streets still read as a surface.
 			float drift = vnoise(p * 0.022 + 31.0) * 0.6 + vnoise(p * 0.09) * 0.4;
-			float grain = vnoise(p * 3.1) * near;
+			float grain = (vnoise(p * 3.1) - 0.5) * near;
 			// (2026-11-21 cinematic pass) Darker, real-asphalt albedo (~0.08-0.12
 			// linear: it read chalky in full sun) with a faint warm/cool drift,
 			// and aggregate: stones at two scales, faded with their pixel size so
 			// they never shimmer.
-			albedo = c * vec3(0.47, 0.465, 0.46) * (0.82 + 0.32 * drift) * (0.94 + 0.12 * grain);
-			albedo *= mix(vec3(1.0), vec3(1.04, 1.0, 0.95), vnoise(p * 0.05 + 77.0));
+			albedo = vec3(0.092, 0.089, 0.084) * (0.82 + 0.36 * drift) * (1.0 + 0.12 * grain);
 			float fpx = fwidth(p.x) + fwidth(p.y);
 			float st1 = hash12(floor(p * 9.0));
 			float st2 = hash12(floor(p * 23.0) + 5.0);
@@ -229,8 +228,8 @@ void fragment() {
 				// Tyre-polished: darker, smoother, a little oil (a sun sheen runs
 				// along the lanes like on a real road).
 				albedo *= 1.0 - 0.16 * tracks;
-				rough -= 0.3 * tracks;
-				track_sheen = tracks;
+				rough -= 0.11 * tracks;
+				track_sheen = tracks * 0.45;
 				// Gutter: grimy last 0.5 m along the kerb, drain grates every 16 m.
 				float gutter = smoothstep(hw - 0.7, hw - 0.3, a);
 				albedo *= 1.0 - 0.22 * gutter;
@@ -245,9 +244,9 @@ void fragment() {
 				albedo *= 1.0 - 0.35 * band(mh_r - 0.38, 0.04, aa) * mh_on * near;
 				// Paint: centre line (double yellow on boulevards, dashed white on
 				// streets), zebra crossings and stop lines at every junction mouth.
-				vec3 white = vec3(0.9, 0.9, 0.86);
-				vec3 yellow = vec3(0.92, 0.76, 0.25);
-				float wear = 0.82 + 0.18 * vnoise(p * 1.7);
+				vec3 white = vec3(0.69, 0.67, 0.61);
+				vec3 yellow = vec3(0.72, 0.52, 0.14);
+				float wear = 0.81 + 0.19 * vnoise(p * 1.7);
 				// Faded paint on older streets: it greys and breaks up.
 				wear *= mix(1.0, 0.55 + 0.45 * vnoise(p * 0.9 + 3.0), sa);
 				// One standard everywhere (traffic keeps right): boulevards a
@@ -290,7 +289,7 @@ void fragment() {
 				float zebra_u = fract((across + hw - 1.5) / 1.2);
 				float zebra = band(zebra_u - 0.5, 0.25, aa / 1.2) * step(from_j, z_lo + 3.0) * step(z_lo, from_j)
 					* step(a, hw - 1.0);
-				float stop = band(from_j - 4.8, 0.22, aa) * step(0.3, a) * step(a, hw - 0.3) * (1.0 - arm);
+				float stop = band(from_j - 4.8, 0.15, aa) * step(0.3, a) * step(a, hw - 0.3) * (1.0 - arm);
 				// Roundabout arms: a double dashed give-way line across the lanes
 				// entering the ring and a hatched ghost island between the entry
 				// and exit lanes up to the crossing.
@@ -325,12 +324,14 @@ void fragment() {
 				float bay_edge = band(a - (hw - 2.55), 0.05, aa) * bays;
 				float bay_tick = band(fract(along / 13.5) * 13.5 - 6.75, 0.05, aa) * step(hw - 2.55, a) * step(a, hw - 0.45) * bays;
 				albedo = mix(albedo, white * wear, max(bay_edge, bay_tick) * 0.9);
+				paint_coverage = max(max(max(centre, divider), max(edge, arrow)),
+					max(max(max(zebra, stop), max(giveway, ghost)), max(max(ring_edge, apron_line), max(bay_edge, bay_tick))));
 				rough = mix(rough, 0.7, max(max(centre, edge), max(max(zebra, stop), max(giveway, ring_edge))));
 			} else if (on) {
 				albedo *= 1.03;  // junctions: a touch lighter, worn smooth
 			}
 		} else if (pave) {
-			c *= vec3(0.8, 0.83, 0.88);
+			c *= vec3(0.76, 0.77, 0.77);
 			// Pavement the field calls carriageway (a junction box reaching over
 			// a block corner at a skewed or staggered junction): paving, not a
 			// slab of kerb stone – the kerb is only where the surface ends.
@@ -423,11 +424,10 @@ void fragment() {
 				albedo = mix(slabs, bricks, smoothstep(0.6, 0.68, zone));
 			}
 		} else if (grass) {
-			// Lawn: mowing stripes, soft colour drift, a gravel path round the edge.
-			float stripe = step(0.5, fract(p.x / 6.0));
-			albedo = grass_shade(c, v_world.xz, near, (fwidth(v_world.x) + fwidth(v_world.z)) * 0.5, 0.0) * (1.0 + 0.07 * (stripe - 0.5) * near);
-			float path = band(kerb - 4.8, 1.0, aa);
-			albedo = mix(albedo, vec3(0.62, 0.56, 0.45) * (0.92 + 0.12 * n), path);
+			float verge = 1.0 - smoothstep(0.1, 2.8, kerb + 0.9 * n);
+			albedo = grass_shade(c, v_world.xz, near, (fwidth(v_world.x) + fwidth(v_world.z)) * 0.5, verge * 0.58);
+			float path = band(kerb - 4.8 + 0.36 * (n - 0.5), 0.8, aa + 0.09);
+			albedo = mix(albedo, vec3(0.29, 0.24, 0.17) * (0.87 + 0.23 * n), path * 0.86);
 		}
 	} else if (pave && flat_top) {
 		vec2 f = fract(p / 1.8);
@@ -465,11 +465,12 @@ void fragment() {
 	}
 	// Photographic detail (2026-11-21): real asphalt / paving up close.
 	if (pbr_on && !shore && flat_top && (asphalt || pave)) {
-		float kd = pbr_fade(v_dist);
-		vec4 d = asphalt ? texture(asph_tex, p / 2.4) : texture(pave_tex, p / 2.0);
-		albedo *= mix(1.0, d.r * 2.0, (asphalt ? 0.85 : 0.65) * kd);
-		rough = mix(rough, d.a, 0.55 * kd * (1.0 - wetness));
-		vec3 nw = pbr_flat_normal(d, normalize(v_wn), (asphalt ? 0.9 : 0.6) * kd);
+		float kd = pbr_fade(camera_distance);
+		vec4 d = asphalt ? texture(asph_tex, p / 1.9) : texture(pave_tex, p / 1.8);
+		float substrate = kd * (1.0 - 0.75 * paint_coverage);
+		albedo *= mix(1.0, d.r * 2.0, (asphalt ? 0.86 : 0.73) * substrate);
+		rough = mix(rough, d.a, 0.48 * substrate * (1.0 - wetness));
+		vec3 nw = pbr_flat_normal(d, normalize(v_wn), (asphalt ? 0.63 : 0.47) * substrate);
 		NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	}
 	ALBEDO = albedo;

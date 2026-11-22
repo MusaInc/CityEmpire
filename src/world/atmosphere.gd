@@ -20,8 +20,8 @@ extends Node3D
 
 signal thunder(delay: float, strength: float)
 
-const ZENITH := Color(0.11, 0.32, 0.72)
-const HORIZON := Color(0.6, 0.75, 0.92)
+const ZENITH := Color(0.24, 0.44, 0.68)
+const HORIZON := Color(0.69, 0.78, 0.85)
 ## The default (captures, tools, first launch): late-afternoon golden hour.
 const DEFAULT_HOUR := 16.0
 const DAY_MINUTES := 16.0
@@ -105,13 +105,11 @@ func _ready() -> void:
 	env = Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
-	# Warm sun, cool sky fill: lit faces read gold, shaded faces read blue-violet.
+	# Blending the sky with neutral bounce keeps shadow materials readable.
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 0.62
-	env.ambient_light_color = Color(0.56, 0.66, 0.9)
-	# Half sky, half "bounce": shaded streets read as cool grey stone and
-	# asphalt lit by the sunlit facades around them, not a flat blue.
-	env.ambient_light_sky_contribution = 0.38
+	env.ambient_light_color = Color(0.78, 0.79, 0.80)
+	env.ambient_light_sky_contribution = 0.22
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_exposure = 1.0
@@ -127,16 +125,15 @@ func _ready() -> void:
 	env.glow_bloom = 0.035
 	env.glow_hdr_threshold = 1.0
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.12
-	env.adjustment_contrast = 1.14
-	env.adjustment_color_correction = grade_lut()
+	env.adjustment_saturation = 0.98
+	env.adjustment_contrast = 1.0
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
 	sun = DirectionalLight3D.new()
 	sun.name = "Sun"
-	sun.light_angular_distance = 0.85
+	sun.light_angular_distance = 1.0
 	sun.shadow_enabled = preset.get("shadows", true)
 	sun.shadow_bias = 0.1
 	sun.shadow_normal_bias = 0.8
@@ -144,8 +141,8 @@ func _ready() -> void:
 	sun.directional_shadow_max_distance = 220.0
 	# Reserve the near cascade for the hero and immediate street furniture.
 	# Keep roughly 12 m near the camera in the more detailed cascade.
-	sun.directional_shadow_split_1 = 0.055
-	sun.directional_shadow_blend_splits = false
+	sun.directional_shadow_split_1 = 0.09
+	sun.directional_shadow_blend_splits = true
 	add_child(sun)
 
 	rain_fx = RainFx.new()
@@ -270,8 +267,8 @@ func _apply(dt: float, instant: bool) -> void:
 	if el > -3.0:
 		sun.rotation_degrees = Vector3(-maxf(el, 1.5), ang.y, 0.0)
 		sun.light_color = _ramp(el, [[0.0, Color(1.0, 0.5, 0.26)], [8.0, Color(1.0, 0.72, 0.48)],
-			[25.0, Color(1.0, 0.8, 0.58)], [60.0, Color(1.0, 0.9, 0.76)]])
-		sun.light_energy = lerpf(0.0, 1.0, day_light) * _rampf(el, [[0.0, 1.3], [10.0, 1.8], [25.0, 2.1], [60.0, 2.25]])
+			[25.0, Color(1.0, 0.89, 0.76)], [60.0, Color(1.0, 0.97, 0.90)]])
+		sun.light_energy = day_light * _rampf(el, [[0.0, 1.3], [10.0, 1.65], [25.0, 1.85], [60.0, 1.95]])
 		sky_mat.set_shader_parameter("sun_glow", 1.0)
 		sky_mat.set_shader_parameter("disc_size", 0.9993)
 		sky_mat.set_shader_parameter("disc_k", 6.0)
@@ -293,13 +290,13 @@ func _apply(dt: float, instant: bool) -> void:
 	# water and burns off by mid-morning (less if it's windy and wet).
 	var dawn := smoothstep(4.0, 6.0, hour) * (1.0 - smoothstep(8.0, 10.5, hour))
 	var mist := maxf(float(w["mist"]), dawn * 0.75 * (1.0 - float(w["rain"])) * (1.0 - 0.7 * punch))
-	sun.shadow_opacity = 1.0 - 0.7 * overcast
+	sun.shadow_opacity = lerpf(1.0, 0.95, day_light) - 0.62 * overcast
 
 	# --- sky colours by sun height, greyed by cloud.
 	var zen := _ramp(el, [[-18.0, Color(0.012, 0.02, 0.05)], [-6.0, Color(0.07, 0.1, 0.25)],
-		[0.0, Color(0.15, 0.22, 0.45)], [8.0, Color(0.17, 0.32, 0.62)], [25.0, ZENITH], [60.0, Color(0.13, 0.37, 0.78)]])
+		[0.0, Color(0.15, 0.22, 0.45)], [8.0, Color(0.22, 0.36, 0.56)], [25.0, ZENITH], [60.0, Color(0.25, 0.47, 0.71)]])
 	var hor := _ramp(el, [[-18.0, Color(0.04, 0.06, 0.1)], [-6.0, Color(0.36, 0.3, 0.4)],
-		[0.0, Color(0.95, 0.6, 0.42)], [8.0, Color(0.88, 0.78, 0.72)], [25.0, HORIZON], [60.0, Color(0.6, 0.76, 0.93)]])
+		[0.0, Color(0.95, 0.6, 0.42)], [8.0, Color(0.88, 0.78, 0.72)], [25.0, HORIZON], [60.0, Color(0.66, 0.77, 0.87)]])
 	var haze := _ramp(el, [[-18.0, Color(0.05, 0.06, 0.1)], [-6.0, Color(0.5, 0.3, 0.32)],
 		[0.0, Color(1.0, 0.5, 0.25)], [8.0, Color(1.0, 0.62, 0.38)], [25.0, Color(1.0, 0.66, 0.42)],
 		[60.0, Color(0.95, 0.85, 0.75)]])
@@ -310,7 +307,7 @@ func _apply(dt: float, instant: bool) -> void:
 	haze = haze.lerp(grey_c, overcast * 0.85)
 	# Hard summer sun: a deeper blue overhead. Heat haze: a pale, milky sky,
 	# the horizon dusty gold-white.
-	zen = zen.lerp(Color(0.07, 0.25, 0.66), punch * 0.35 * day_light)
+	zen = zen.lerp(Color(0.16, 0.36, 0.65), punch * 0.22 * day_light)
 	hor = hor.lerp(Color(0.9, 0.86, 0.78), hz * warm * 0.45 * day_light)
 	zen = zen.lerp(hor, hz * 0.22 * day_light)
 	haze = haze.lerp(Color(1.0, 0.86, 0.66), hz * warm * 0.4 * day_light)
@@ -337,12 +334,12 @@ func _apply(dt: float, instant: bool) -> void:
 		sky_mat.set_shader_parameter("flash", fl)
 
 	# --- ambient, exposure, fog.
-	env.ambient_light_energy = _rampf(el, [[-15.0, 0.5], [-4.0, 0.5], [2.0, 0.5], [20.0, 0.56]]) \
-		* (1.0 + 0.25 * overcast) * (1.0 - 0.12 * punch * day_light) * (1.0 + 0.1 * hz * day_light) + fl * 2.0
+	env.ambient_light_energy = _rampf(el, [[-15.0, 0.46], [-4.0, 0.49], [2.0, 0.57], [20.0, 0.67]]) \
+		* (1.0 + 0.16 * overcast + 0.08 * hz * day_light) + fl * 2.0
 	# The non-sky share: light bounced off sunlit stone (warm-neutral by day,
 	# dusky at sunset, moonlit blue at night).
 	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
-		[15.0, Color(0.72, 0.73, 0.82)], [40.0, Color(0.72, 0.75, 0.85)]]).lerp(Color(0.74, 0.75, 0.78), overcast * 0.6)
+		[15.0, Color(0.78, 0.77, 0.76)], [40.0, Color(0.79, 0.81, 0.84)]]).lerp(Color(0.74, 0.75, 0.77), overcast * 0.6)
 	env.tonemap_exposure = lerpf(1.0, 1.5, night) * lerpf(1.0, 1.12, overcast) * (1.0 + 0.04 * hz * day_light)
 	# Depth fog only: a clear near field, subtle blue-grey middle distance,
 	# and skyline silhouettes merging with the horizon. Rooftop views get a
@@ -377,11 +374,10 @@ func _apply(dt: float, instant: bool) -> void:
 	# Soft bloom: by day only the brightest sunlit glass and sky blooms;
 	# hard summer sun blooms more (sunlit glass, white stone), haze softens it.
 	# (2026-11-20: a touch less by day – car glints and white stone bloomed.)
-	env.glow_intensity = lerpf(0.26 + 0.08 * punch + 0.06 * hz, 0.42, night)
-	env.glow_hdr_threshold = lerpf(1.2 - 0.1 * punch, 1.0, night)
-	# Hard sun: more contrast and colour; haze and fog wash both out.
-	env.adjustment_contrast = 1.14 + (0.06 * punch - 0.07 * hz) * day_light - 0.06 * fog
-	env.adjustment_saturation = 1.12 + (0.08 * punch - 0.1 * hz) * day_light - 0.12 * fog
+	env.glow_intensity = lerpf(0.18 + 0.04 * punch + 0.04 * hz, 0.40, night)
+	env.glow_hdr_threshold = lerpf(1.45, 1.0, night)
+	env.adjustment_contrast = 1.025 + (0.02 * punch - 0.025 * hz) * day_light - 0.035 * fog
+	env.adjustment_saturation = 1.01 + (0.02 * punch - 0.035 * hz) * day_light - 0.065 * fog
 
 	# --- shared shader inputs.
 	var top_l := zen.srgb_to_linear()
@@ -417,36 +413,3 @@ static func _rampf(x: float, keys: Array) -> float:
 			var t := (x - float(keys[i][0])) / (float(keys[i + 1][0]) - float(keys[i][0]))
 			return lerpf(keys[i][1], keys[i + 1][1], t)
 	return keys[-1][1]
-
-
-## CitySwing's grade, as a 3D LUT: cool, slightly lifted shadows, warm
-## highlights, a gentle S-curve and richer mid saturation. Built once (17³).
-static func grade_lut() -> ImageTexture3D:
-	const N := 17
-	var layers: Array[Image] = []
-	for b in N:
-		var img := Image.create(N, N, false, Image.FORMAT_RGB8)
-		for g in N:
-			for r in N:
-				img.set_pixel(r, g, grade(Color(r / (N - 1.0), g / (N - 1.0), b / (N - 1.0))))
-		layers.append(img)
-	var tex := ImageTexture3D.new()
-	tex.create(Image.FORMAT_RGB8, N, N, N, false, layers)
-	return tex
-
-
-static func grade(c: Color) -> Color:
-	var l := 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
-	# S-curve on luminance (smoothstep blended 35%), applied as a ratio.
-	var s := lerpf(l, l * l * (3.0 - 2.0 * l), 0.35)
-	var k := s / maxf(l, 0.0001)
-	var o := Color(c.r * k, c.g * k, c.b * k)
-	# Split tone: shadows towards blue-violet, highlights towards warm gold.
-	var sh := clampf(1.0 - s * 2.2, 0.0, 1.0)
-	var hi := clampf((s - 0.55) * 2.2, 0.0, 1.0)
-	o += Color(-0.01, 0.0, 0.022) * sh + Color(0.03, 0.012, -0.03) * hi
-	# Mid saturation boost (fades out in deep shadow and near-white).
-	var ol := 0.2126 * o.r + 0.7152 * o.g + 0.0722 * o.b
-	var sat := 1.0 + 0.12 * (1.0 - absf(ol * 2.0 - 1.0))
-	o = Color(ol + (o.r - ol) * sat, ol + (o.g - ol) * sat, ol + (o.b - ol) * sat)
-	return Color(clampf(o.r, 0.0, 1.0), clampf(o.g, 0.0, 1.0), clampf(o.b, 0.0, 1.0))

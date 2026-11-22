@@ -169,6 +169,10 @@ func _ready() -> void:
 	chase = ChaseCamera.new()
 	chase.name = "ChaseCamera"
 	add_child(chase)
+	var lens := LensFx.new()
+	lens.name = "DrivingLens"
+	lens.chase_camera = chase
+	add_child(lens)
 	camera.cam.make_current()
 	drive_input = DriveInput.new()
 	drive_input.name = "DriveInput"
@@ -2046,6 +2050,7 @@ func exit_vehicle() -> void:
 	c.throttle = 0.0
 	c.brake = 1.0
 	c.handbrake = true
+	c.power_slide = 0.0
 	c.occupied = false
 	driving = ""
 	car_audio.set_car(null)

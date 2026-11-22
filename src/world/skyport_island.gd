@@ -1667,13 +1667,14 @@ func _near(f: Callable) -> void:
 
 func _free_near() -> void:
 	_steps.clear()
+	if near_root:
+		remove_child(near_root)
+		near_root.queue_free()
+	near_root = null
 	for key in _groups():
 		var skyline := get_node_or_null("Skyline_" + key) as GeometryInstance3D
 		if skyline:
 			skyline.visibility_range_begin = 0.0
-	if near_root:
-		near_root.queue_free()
-	near_root = null
 	body = null
 
 

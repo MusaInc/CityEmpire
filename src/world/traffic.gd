@@ -1004,20 +1004,20 @@ func _cull() -> void:
 		_drawn[g] = ids
 
 
-## Instance data: the "transform" rows carry the motion (traffic_path.gdshader).
+## Keep the basis invertible for the rendering backend even though the shader
+## uses these rows as motion data. Powers of two preserve the packed precision.
 func _write(buf: PackedFloat32Array, j: int, id: int) -> void:
-	buf[j] = float(l_base[c_lane[id]]); buf[j + 1] = c_s0[id]; buf[j + 2] = c_t0[id]; buf[j + 3] = c_v[id]
-	buf[j + 4] = c_stop[id]; buf[j + 5] = c_ease[id]; buf[j + 6] = 0.0; buf[j + 7] = 0.0
-	buf[j + 8] = 0.0; buf[j + 9] = 0.0; buf[j + 10] = 0.0; buf[j + 11] = 0.0
+	buf[j] = 1.0; buf[j + 1] = float(l_base[c_lane[id]]) / 65536.0; buf[j + 2] = c_s0[id] / 1024.0; buf[j + 3] = c_v[id]
+	buf[j + 4] = 0.0; buf[j + 5] = 1.0; buf[j + 6] = c_t0[id] / 1024.0; buf[j + 7] = c_stop[id]
+	buf[j + 8] = 0.0; buf[j + 9] = 0.0; buf[j + 10] = 1.0; buf[j + 11] = c_ease[id]
 	var col: Color = c_col[id]
 	buf[j + 12] = col.r; buf[j + 13] = col.g; buf[j + 14] = col.b; buf[j + 15] = 1.0
 	buf[j + 16] = 0.0; buf[j + 17] = 0.0; buf[j + 18] = 0.0; buf[j + 19] = 0.0
 
 
 func _motion(id: int) -> Transform3D:
-	# Transform3D(x, y, z, origin) columns: row 0 = (x.x, y.x, z.x, o.x).
-	return Transform3D(Vector3(float(l_base[c_lane[id]]), c_stop[id], 0.0), Vector3(c_s0[id], c_ease[id], 0.0),
-		Vector3(c_t0[id], 0.0, 0.0), Vector3(c_v[id], 0.0, 0.0))
+	return Transform3D(Vector3.RIGHT, Vector3(float(l_base[c_lane[id]]) / 65536.0, 1.0, 0.0),
+		Vector3(c_s0[id] / 1024.0, c_t0[id] / 1024.0, 1.0), Vector3(c_v[id], c_stop[id], c_ease[id]))
 
 
 ## A drawn car's motion changed: update its instance now.

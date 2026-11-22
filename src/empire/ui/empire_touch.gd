@@ -12,8 +12,9 @@ extends Control
 ##      slide down a bit= lift off (coast, engine braking)
 ##      slide down more = brake, harder the further you pull (held at a
 ##                        standstill = reverse, as with the brake pedal)
-##    DRIFT is a separate handbrake button for cars.
+##      slide sideways  = steer, with a power slide at wider throw under gas
 ##      let go          = coast (the car's engine braking slows it)
+##    DRIFT is a separate handbrake button for cars.
 ##    A small tick (haptic) marks each zone change. A small round button
 ##    above the pad is the contextual action (OUT when slow enough, or what
 ##    the prompt says): there is no separate exit button.
@@ -36,6 +37,8 @@ const PAD_R := 112.0
 const LIFT_PX := 18.0        # below the landing point: lift off
 const BRAKE_PX := 38.0       # further down: brake, progressive to PAD_R
 const KICK_PX := 56.0        # up this far: full throttle + kickdown
+const SIDE_DEAD_PX := 21.0
+const SIDE_FULL_PX := 101.0
 const HOLD_THROTTLE := 0.68
 const DRIFT_SPEED := 9.0     # m/s (~20 mph): no handbrake turns while parking
 var _pad_id := -1
@@ -170,7 +173,11 @@ func _input(event: InputEvent) -> void:
 			# travel, so pulling back always responds at once.
 			var so := _pad_p - _pad_o
 			var lim := PAD_R * ui_k() * 1.35
-			if so.length() > lim:
+			if _car() is Car:
+				# A long sideways pull must keep the throttle/brake axis
+				# where the thumb left it, and vice versa.
+				_pad_o = _pad_p - so.clamp(Vector2(-lim, -lim), Vector2(lim, lim))
+			elif so.length() > lim:
 				_pad_o = _pad_p - so.normalized() * lim
 			_apply_pad()
 		elif d.index == _look_id:
@@ -197,6 +204,7 @@ func _apply_stick() -> void:
 	var driving := _driving()
 	if ui.game and ui.game.drive_input:
 		ui.game.drive_input.touch_steer = v.x if driving else 0.0
+		ui.game.drive_input.touch_active = _stick_id >= 0 or _pad_id >= 0
 	if driving or v.is_zero_approx():
 		return
 	Input.action_press("move_left" if v.x < 0.0 else "move_right", absf(v.x))
@@ -220,6 +228,11 @@ static func read_pad(o: Vector2, k: float) -> Dictionary:
 	return out
 
 
+static func read_pad_steer(offset: float, scale: float) -> float:
+	var travel := clampf((absf(offset) / scale - SIDE_DEAD_PX) / (SIDE_FULL_PX - SIDE_DEAD_PX), 0.0, 1.0)
+	return signf(offset) * travel * lerpf(0.24, 1.0, travel)
+
+
 func _apply_pad() -> void:
 	var di: DriveInput = ui.game.drive_input if ui.game else null
 	if di == null:
@@ -234,10 +247,11 @@ func _apply_pad() -> void:
 			if _pad_zone != "":
 				Settings.haptic(12, 0.35)
 			_pad_zone = pad["zone"]
-	di.touch_active = true
+	di.touch_active = _pad_id >= 0 or _stick_id >= 0
 	di.touch_gas = pad["gas"]
 	di.touch_brake = pad["brake"]
 	di.touch_kickdown = pad["kick"]
+	di.touch_pad_steer = read_pad_steer(_pad_p.x - _pad_o.x, ui_k()) if _pad_id >= 0 and car is Car else 0.0
 
 
 func _physics_process(_dt: float) -> void:
@@ -359,7 +373,8 @@ func _draw_pad(f: Font, k: float) -> void:
 		draw_arc(c, r - 7.0, PI * 0.5 - bd * 0.9, PI * 0.5 + bd * 0.9, 24, Color(EmpireStyle.RED, 0.7), 5.0, true)
 	var knob := c
 	if live:
-		knob.y += clampf(_pad_p.y - _pad_o.y, -r, r)
+		var offset := _pad_p - _pad_o
+		knob += offset.limit_length(r) if car is Car else Vector2(0, clampf(offset.y, -r, r))
 	var kr := 44.0 * k
 	var z := String(pad["zone"])
 	var kc := Color(1, 1, 1, 0.14)

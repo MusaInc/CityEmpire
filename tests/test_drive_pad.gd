@@ -1,5 +1,5 @@
 extends RefCounted
-## Right-pad throttle and braking, with steering and handbrake provided separately.
+## Right-pad throttle, braking and the left/right steering handoff.
 
 const K := 1.0   # phone scale
 
@@ -122,19 +122,60 @@ func test_brake_is_progressive_and_coast_is_gentle(t) -> void:
 	g.queue_free()
 
 
-func test_steering_and_drift_are_independent(t) -> void:
+func test_two_thumb_priority_and_power_slide(t) -> void:
 	var runner: SceneTree = t
 	var g := _ground(runner)
 	var c := _car(runner)
+	var input := DriveInput.new()
+	runner.root.add_child(input)
+	input.car = c
+	input.enabled = false
 	await runner.physics_frame
 	await _launch(runner, c, 19.0)
 	var yaw0 := c.global_basis.get_euler().y
-	await _hold(runner, c, Vector2(105, -10), 1.5)
-	t.near(c.global_basis.get_euler().y, yaw0, 0.025, "right thumb cannot rotate the car")
-	var grip: Array = await _hold(runner, c, Vector2.ZERO, 0.8, 0.7)
-	t.check(absf(wrapf(c.global_basis.get_euler().y - yaw0, -PI, PI)) > 0.12, "left control steers at speed")
+	input.enabled = true
+	input.touch_gas = EmpireTouch.HOLD_THROTTLE
+	input.touch_pad_steer = EmpireTouch.read_pad_steer(18.0, K)
+	for i in 30:
+		await runner.physics_frame
+	t.near(c.global_basis.get_euler().y, yaw0, 0.025, "vertical throttle tolerates sideways thumb jitter")
+	input.touch_pad_steer = EmpireTouch.read_pad_steer(40.0, K)
+	for i in 30:
+		await runner.physics_frame
+	t.check(c.steer > 0.02 and c.steer < 0.18 and c.power_slide == 0.0, "a small side pull steers without starting a slide")
+
+	input.enabled = false
 	await _launch(runner, c, 19.0)
-	var slide: Array = await _hold(runner, c, Vector2.ZERO, 0.8, 0.7, true)
-	t.check(float(slide[1]) > float(grip[1]) + deg_to_rad(5.0), "the handbrake initiates an independent slide")
+	input.enabled = true
+	input.touch_pad_steer = EmpireTouch.read_pad_steer(104.0, K)
+	var max_slip := 0.0
+	for i in 52:
+		await runner.physics_frame
+		max_slip = maxf(max_slip, absf(c.drift_angle))
+	t.note("right-pad peak slip %.1f°" % rad_to_deg(max_slip))
+	t.check(c.power_slide > 0.6 and max_slip > deg_to_rad(11.0) and max_slip < deg_to_rad(37.0),
+		"deliberate right-thumb travel produces a controlled drift")
+	t.check(not c.handbrake and c.throttle > 0.5, "right-thumb drifting preserves throttle and independent handbrake")
+
+	input.touch_steer = -0.52
+	for i in 4:
+		await runner.physics_frame
+	t.near(c.steer, -0.52, 0.01, "left countersteer has priority over a held right turn")
+	t.near(c.power_slide, 0.0, 0.01, "left input takes the right pad out of drift mode")
+	input.touch_steer = -0.09
+	await runner.physics_frame
+	await runner.physics_frame
+	t.near(c.steer, -0.09, 0.01, "a small intentional left turn still has priority")
+	input.touch_steer = 0.0
+	input.touch_pad_steer = 0.0
+	for i in 20:
+		await runner.physics_frame
+	t.near(c.steer, 0.0, 0.01, "releasing the right control returns steering to centre")
+	t.near(c.power_slide, 0.0, 0.01, "releasing the right control restores rear grip")
+	input.touch_handbrake = true
+	await runner.physics_frame
+	await runner.physics_frame
+	t.check(c.handbrake, "the dedicated handbrake still works with its own input")
+	input.queue_free()
 	c.queue_free()
 	g.queue_free()

@@ -49,13 +49,13 @@ vec3 pick(int part, float s, vec3 top) {
 
 void vertex() {
 	float spd = INSTANCE_CUSTOM.x;
-	float len = INSTANCE_CUSTOM.z;
+	float len = max(INSTANCE_CUSTOM.z, 0.01);
 	float d = mod(INSTANCE_CUSTOM.y + TIME * spd, len);
 	float seed = fract(INSTANCE_CUSTOM.y * 0.618 + spd * 3.7 + len * 0.137);
 	int part = person_part(UV);
 	int limb = person_limb(UV);
 	v_col = pick(part, fract(seed * (part == 2 ? 7.13 : (part == 3 ? 13.7 : (part == 6 ? 5.31 : (part == 0 ? 3.9 : 1.0))))), COLOR.rgb);
-	v_rough = part == 5 ? 0.3 : (part == 0 ? 0.45 : 0.8);
+	v_rough = person_surface_roughness(part);
 
 	// Reaction to the hero: how close (ground level only), which side, where.
 	vec3 wp = (MODEL_MATRIX * vec4(0.0, 0.0, -d, 1.0)).xyz;
