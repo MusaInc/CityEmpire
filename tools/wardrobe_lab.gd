@@ -16,14 +16,14 @@ var SETS := {
 	"hairback": _hair_set(),
 	"hairtheo": _hair_set("hero_theo"),
 	"hairtheoback": _hair_set("hero_theo"),
-	"hairhats": [{"face": "face_none", "hair": "hair_bob", "head": "head_cap"},
+	"hairhats": [{"face": "face_none", "hair": "hair_pixie", "head": "head_cap"},
 		{"face": "face_none", "hair": "hair_ponytail", "head": "head_cap", "hero": "hero_ade"},
 		{"face": "face_none", "hair": "hair_curls", "head": "head_phones"},
 		{"face": "face_none", "hair": "hair_bun", "head": "head_crown", "hero": "hero_theo"},
 		{"face": "face_shades", "hair": "hair_pixie", "hero": "hero_ren"},
 		{"face": "face_visor", "hair": "hair_fade", "hero": "hero_malik"}],
 	"empire": [{"top": "top_tee", "suit": "sky", "face": "face_none", "hero": "hero_ade"},
-		{"top": "top_polo", "suit": "graphite", "face": "face_none", "hero": "hero_ren", "hair": "hair_bob"},
+		{"top": "top_polo", "suit": "graphite", "face": "face_none", "hero": "hero_ren", "hair": "hair_pixie"},
 		{"top": "top_shirt", "suit": "mint", "face": "face_none", "hero": "hero_theo", "pants": "pants_khaki"},
 		{"top": "top_jumper", "suit": "tangerine", "face": "face_none", "hero": "hero_malik"},
 		{"top": "top_hoodie", "suit": "royal", "face": "face_none", "hero": "hero_kai", "hair": "hair_curls"},
@@ -43,7 +43,7 @@ static func _hair_set(only := "") -> Array:
 	var heroes := [only] if only != "" else ["hero_kai", "hero_ade", "hero_ren", "hero_theo", "hero_malik"]
 	var out := []
 	var k := 0
-	for st: String in ["buzz", "crop", "fade", "curls", "pixie", "bob", "ponytail", "bun"]:
+	for st: String in ["buzz", "crop", "fade", "curls", "pixie", "ponytail", "bun"]:
 		out.append({"face": "face_none", "hair": "hair_" + st, "hero": heroes[k % heroes.size()]})
 		k += 1
 	return out

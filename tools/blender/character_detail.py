@@ -90,7 +90,7 @@ LOCKS = [(0.000, .146), (.151, .225), (.232, .376), (.379, .514),
          (.527, .641), (.656, .752), (.754, .892), (.893, .999)]
 HAIR_CARDS = {
     'buzz': (20, .005, .0016), 'crop': (235, .037, .0048), 'fade': (235, .037, .005),
-    'curls': (235, .028, .008), 'pixie': (230, .045, .006), 'bob': (195, .062, .008),
+    'curls': (235, .028, .008), 'pixie': (230, .045, .006),
     'ponytail': (144, .043, .006), 'bun': (130, .036, .006),
 }
 
@@ -135,7 +135,7 @@ def groom_locks(hair, fid, style, margin, ecz, ecy, lock_material):
     for _ in range(count * 7):
         if len(polys) >= count * 8:
             break
-        z = rng.uniform(-.80 if style in ('bob', 'ponytail', 'bun') else -.38, 1.0)
+        z = rng.uniform(-.80 if style in ('ponytail', 'bun') else -.38, 1.0)
         a = rng.uniform(0, math.tau)
         radial = math.sqrt(1 - z * z)
         ray = Vector((math.cos(a) * radial, math.sin(a) * radial, z))
@@ -143,7 +143,7 @@ def groom_locks(hair, fid, style, margin, ecz, ecy, lock_material):
         if root is None or normal.dot(ray) < .25:
             continue
         edge = margin(root)
-        if edge < (.010 if style in ('buzz','crop','fade') else .004) and style != 'bob':
+        if edge < (.010 if style in ('buzz','crop','fade') else .004):
             continue
         if style in ('buzz','crop','fade') and root.z < top - .044:
             continue
@@ -156,10 +156,6 @@ def groom_locks(hair, fid, style, margin, ecz, ecy, lock_material):
             direction = Vector((.73, .58 + .23*math.cos(a), -.14))
         if style in ('ponytail', 'bun'):
             direction = Vector((-.35 * root.x / .08, -1, -.14))
-        elif style == 'bob':
-            direction = Vector((.43 if root.x > -.018 else -.6, .04, -.30 if root.z > top - .047 else -1))
-            if root.y > ecy - .03 and root.z < ecz + .046:
-                continue
         elif style == 'curls':
             direction = Vector((math.cos(a * 2), math.sin(a * 2), .38))
         elif style == 'pixie':
@@ -177,7 +173,7 @@ def groom_locks(hair, fid, style, margin, ecz, ecy, lock_material):
         lock = int(rng.choice([3, 6] if curl else [0, 1, 4, 5, 7]))
         u0, u1 = LOCKS[lock]
         lift = {'buzz': .0006, 'crop': .0015, 'fade': .0019, 'curls': .0038, 'pixie': .0024,
-                'bob': .0021, 'ponytail': .0016, 'bun': .0015}[style] * rng.uniform(.8, 1.18)
+                'ponytail': .0016, 'bun': .0015}[style] * rng.uniform(.8, 1.18)
         start = len(verts)
         card_points = []
         card_uvs = []
@@ -267,7 +263,13 @@ def sculpt_head(points, fid):
             p.x += math.copysign(.003*ear, x)
             p.y -= .0018*ear
         jaw = math.exp(-((z-eye.z+.076)/.021)**2-((y-eye.y+.021)/.037)**2)
-        p.x *= 1+(.063 if BODY=='a' else .023)*jaw
+        p.x *= 1+(.052 if BODY=='a' else -.029)*jaw
+        if BODY == 'b':
+            zygoma = math.exp(-((ax-.052)/.019)**2-((z-eye.z+.022)/.022)**2)
+            p.y += .0029*zygoma if y>eye.y-.027 else 0
+            gonion = math.exp(-((ax-.061)/.022)**2-((z-eye.z+.093)/.018)**2)
+            p.z += .0024*gonion
+            p.y += .0015*gonion
         chin = math.exp(-(x/.029)**2-((z-mouth.z+.026)/.013)**2)
         if y > mouth.y-.020:
             p.y += .0041*chin

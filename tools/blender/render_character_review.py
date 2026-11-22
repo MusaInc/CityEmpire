@@ -23,7 +23,7 @@ OUTFITS = {
     'polo_phones': dict(face='kai', hair='fade', top='polo', acc=['headphones'], top_col=(0.95, 0.95, 0.93), pants=(0.12, 0.18, 0.29)),
     'blazer': dict(face='malik', hair='crop', top='blazer', acc=['shades'], top_col=(0.1, 0.11, 0.13), pants=(0.1, 0.11, 0.13)),
     'rio_tee': dict(face='rio', hair='curls', top='tee', acc=[], top_col=(0.79, 0.43, 0.57), pants=(0.12, 0.18, 0.29)),
-    'sam_blazer': dict(face='sam', hair='bob', top='blazer', acc=[], top_col=(.23, .25, .27), pants=(.15, .19, .29)),
+    'sam_blazer': dict(face='sam', hair='pixie', top='blazer', acc=[], top_col=(.23, .25, .27), pants=(.15, .19, .29)),
 }
 SKIN = {'ade': (0.32, 0.2, 0.14), 'theo': (0.78, 0.6, 0.5), 'kai': (0.6, 0.43, 0.32), 'malik': (0.42, 0.27, 0.18), 'ren': (0.72, 0.55, 0.42),
         'rio': (0.36, 0.22, 0.15), 'sam': (0.9, 0.74, 0.64)}

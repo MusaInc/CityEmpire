@@ -23,6 +23,7 @@ extends RefCounted
 const ANKLE_H := 0.05
 const LEG_LEN := 0.89
 const BALL := 0.13
+const HEEL := 0.066
 const SETTLE_DIST := 0.15
 const SETTLE_TIME := 0.3
 const START_SPEED := 0.35   # m/s: below this (both feet down) the body stands
@@ -233,9 +234,9 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 		return
 
 	# --- clock -----------------------------------------------------------
-	var steps := cadence(maxf(speed, 0.8)) * (lerpf(1.035, 1.16, run) if everyday else 1.0)
+	var steps := cadence(maxf(speed, 0.8)) * (lerpf(1.19, 1.35, run) if everyday else 1.0)
 	freq = steps * 0.5
-	var want_duty := lerpf(0.64 if everyday else 0.62, 0.40 if everyday else 0.38, run) - 0.1 * sprint
+	var want_duty := lerpf(0.62, 0.43 if everyday else 0.38, run) - 0.1 * sprint
 	# Ground covered while a foot is down must fit the legs' reach.
 	var cover_max := reach_f + reach_b
 	duty = minf(want_duty, cover_max * freq / maxf(speed, 0.01))
@@ -244,8 +245,8 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 	var cover := speed * duty / freq  # m travelled during one stance
 	# Walking lands well ahead (heel strike); running lands closer under the
 	# hips and pushes off further behind – no reaching, braking overstride.
-	var ahead := cover * lerpf(reach_f / cover_max, 0.29 if everyday else 0.36, run)
-	var width := lerpf(0.079, 0.063, run) if everyday else lerpf(0.095, 0.035, run)
+	var ahead := cover * lerpf(0.43 if everyday else reach_f / cover_max, 0.245 if everyday else 0.36, run)
+	var width := lerpf(0.083, 0.072, run) if everyday else lerpf(0.095, 0.035, run)
 
 	for sd in ["l", "r"]:
 		var f: Foot = feet[sd]
@@ -262,6 +263,10 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			while f.toe < toe_max + 0.2 and a.distance_to(hip) > LEG_LEN - 0.01:
 				f.toe += 0.04
 				a = _roll(f.pos, f.heading, f.normal, f.toe)
+			# Track the ankle around the planted shoe heel during loading.
+			if everyday and f.heel > 0.0:
+				a += f.normal * (HEEL * sin(f.heel) + ANKLE_H * (cos(f.heel) - 1.0))
+				a -= f.heading * (ANKLE_H * sin(f.heel) + HEEL * (1.0 - cos(f.heel)))
 			f.cur = a
 			_pivot(f, facing)
 			# Lift: the clock says so, or the body has run away from the foot
@@ -329,7 +334,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			# kick out front, with the hips sinking to reach it. Near-steady
 			# instead: the leg swings through under the body.)
 			e = lerpf(e, f.w, 0.85 * sprint + (0.13 * run if everyday else 0.0))
-			var paw := (0.035 if everyday else 0.08) * run * smoothstep(0.55, 0.82, f.w) * (1.0 - smoothstep(0.82, 1.0, f.w))
+			var paw := (0.018 if everyday else 0.08) * run * smoothstep(0.55, 0.82, f.w) * (1.0 - smoothstep(0.82, 1.0, f.w))
 			var p := f.from.lerp(f.target, e) + dir * paw
 			# Height: an early heel kick at a run (the foot folds up behind),
 			# a low clearance arc walking; step up early, step down late.
@@ -338,7 +343,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			p.y = f.from.y + up * ey
 			# (A sprint's heel comes up behind, but not tucked against the seat
 			# for half the stride: that read as running sitting down.)
-			var lift_h := lerpf(0.075 if everyday else 0.1, 0.26 + 0.05 * sprint, run) * clampf(speed / 1.2, 0.35, 1.0)
+			var lift_h := lerpf(0.078 if everyday else 0.1, (0.29 if everyday else 0.26) + 0.05 * sprint, run) * clampf(speed / 1.2, 0.35, 1.0)
 			# (Peak skewed early running – the heel kicks up behind – with zero
 			# vertical speed at lift and touchdown: no pops.)
 			var wk := f.w + 0.15 * f.w * (1.0 - f.w)
@@ -353,8 +358,9 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			# foot that gets ahead of its hip waits at full reach and comes
 			# down a little short instead of the leg stretching.
 			var rel := p - hip
-			if rel.length() > LEG_LEN - 0.012:
-				p = hip + rel.normalized() * (LEG_LEN - 0.012)
+			var swing_reach := LEG_LEN - (lerpf(0.024, 0.049, run) if everyday else 0.012)
+			if rel.length() > swing_reach:
+				p = hip + rel.normalized() * swing_reach
 			# ...and never closer than a fully folded leg allows: at a sprint the
 			# heel kick carried the ankle right up through the hip joint, where
 			# the leg's direction is undefined and the thigh spun ~100° in a

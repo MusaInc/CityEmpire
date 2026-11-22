@@ -44,12 +44,16 @@ def hand_grips(hand, vertex_ids):
 
 def bend_corrective(ob, kind):
     """Add a localized volume-and-fold correction at each limb bend."""
-    ob.shape_key_add(name='Basis')
+    if ob.data.shape_keys is None:
+        ob.shape_key_add(name='Basis')
     for side in ('l','r'):
         name = 'Bend_' + kind + '_' + side
         key = ob.shape_key_add(name=name)
-        pivot = J[('shin_' if kind=='Knee' else 'forearm_')+side]
-        axis = (pivot-J[('thigh_' if kind=='Knee' else 'upper_arm_')+side]).normalized()
+        joints = {'Knee': ('shin_','thigh_'), 'Elbow': ('forearm_','upper_arm_'),
+                  'Shoulder': ('upper_arm_','clavicle_')}
+        pivot_name, parent_name = joints[kind]
+        pivot = J[pivot_name+side]
+        axis = (pivot-J[parent_name+side]).normalized()
         for vert in ob.data.vertices:
             pos = vert.co
             if (pos.x<0)!=(side=='l'):
@@ -64,4 +68,7 @@ def bend_corrective(ob, kind):
             crease = math.exp(-((along+.022)/.012)**2)
             back = max(0.0,min(1.0,-radial.y/.047))
             fullness = .0045*mask+.0038*mask*outside-.0023*back*crease
+            if kind=='Shoulder':
+                # The cap walks around the humeral head as the arm advances.
+                fullness = (.0038*outside-.0018*back)*mask
             key.data[vert.index].co += radial.normalized()*fullness

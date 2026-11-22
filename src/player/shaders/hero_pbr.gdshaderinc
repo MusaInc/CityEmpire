@@ -10,6 +10,7 @@ uniform sampler2D ao_map : filter_linear_mipmap, hint_default_white;
 uniform sampler2D roughness_map : filter_linear_mipmap, hint_default_white;
 uniform float roughness = 0.8;
 uniform float hair_fibres = 0.0;
+uniform float surface_definition = 0.0;
 #ifdef HAIR_SCALP
 uniform vec3 scalp_tint = vec3(0.09, 0.035, 0.02);
 #endif
@@ -58,11 +59,19 @@ void fragment() {
 #endif
     ALBEDO = sample_color.rgb * base_color.rgb * outfit_tint;
 #ifdef HAIR_SCALP
+#ifdef HAIR_FADE
+    // Blend the short roots over the real scalp. The opaque crown writes
+    // depth in the prepass, while the thin fade uses one blended surface.
+    float coverage = clamp((mask - 0.018) / 0.925, 0.0, 1.0);
+    ALPHA = coverage;
+    ALBEDO = mix(ALBEDO, scalp_tint * vec3(0.94, 0.90, 0.86), (1.0 - coverage) * 0.20);
+#else
     ALBEDO = mix(scalp_tint * vec3(0.94, 0.90, 0.86), ALBEDO, smoothstep(0.025, 0.57, mask));
 #endif
+#endif
 #ifdef HAIR_CARDS
-    ALPHA = sample_color.a;
-    ALPHA_SCISSOR_THRESHOLD = 0.35;
+    ALPHA = sample_color.a * mask;
+    ALPHA_SCISSOR_THRESHOLD = mix(0.35, 0.26, surface_definition);
 #else
     if (!FRONT_FACING) {
         ALBEDO *= inside_shade;  // the inside of the cloth, in its own shadow
@@ -73,9 +82,9 @@ void fragment() {
     EMISSION = surface_emission;
 #if defined(SKIN)
     // Diffuse wrap and a low skin-coloured bounce keep detail in shadow.
-    SPECULAR = 0.23;
+    SPECULAR = mix(0.23, 0.30, surface_definition);
     ALBEDO *= vec3(1.04, 1.0, 0.97);
-    EMISSION += ALBEDO * mix(0.082, 0.023, night);
+    EMISSION += ALBEDO * mix(mix(0.082, 0.029, surface_definition), 0.023, night);
 #elif defined(EYE)
     SPECULAR = 0.32;
     RIM = 0.0;
@@ -85,6 +94,8 @@ void fragment() {
     EMISSION += ALBEDO * 0.035;
     ANISOTROPY = 0.55;
     ANISOTROPY_FLOW = vec2(0.0, 1.0);
+#elif defined(HAIR_SCALP)
+    SPECULAR = 0.27;
 #else
     SPECULAR = 0.32;
 #endif
@@ -98,7 +109,7 @@ void fragment() {
     }
 #ifdef SKIN
     AO = mix(0.42, 1.0, texture(ao_map, UV).r);
-    AO_LIGHT_AFFECT = 0.05;
+    AO_LIGHT_AFFECT = mix(0.05, 0.24, surface_definition);
 #elif !defined(HAIR_CARDS)
     AO = FRONT_FACING ? mix(0.18, 1.0, texture(ao_map, UV).r) : 0.55;
     AO_LIGHT_AFFECT = 0.12;
@@ -107,7 +118,7 @@ void fragment() {
     vec3 n = texture(normal_map, UV).rgb * 2.0 - 1.0;
     n.xy *= normal_strength;
 #ifdef HAIR_SCALP
-    n.xy *= mix(0.18, 0.86, smoothstep(0.0, 0.78, mask));
+    n.xy *= mix(0.18, mix(0.86, 1.04, surface_definition), smoothstep(0.0, 0.78, mask));
 #endif
     if (detail_strength > 0.0) {
         vec2 d = texture(detail_normal_map, UV * detail_scale).rg * 2.0 - 1.0;

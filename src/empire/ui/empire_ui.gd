@@ -2172,12 +2172,25 @@ func open_style(first := false) -> void:
 			_style_choices(body, "HAIRCUT", HeroLook.HAIRS, l, "hair", 3)
 			_style_colours(body, "HAIR COLOUR", HeroLook.HAIR, l, "hair_col", fc["hair"])
 		"clothes":
-			_style_choices(body, "TOP", _style_list(HeroLook.TOPS, first), l, "top", 3)
-			_style_colours(body, "TOP COLOUR", HeroLook.CLOTH, l, "top_col")
-			_style_choices(body, "BOTTOMS", HeroLook.LOWER_CUTS, l, "trousers", 3)
-			_style_colours(body, "BOTTOM COLOUR", HeroLook.TROUSERS, l, "pants_col")
+			var build_b := String(l["body"]) == "b"
+			if build_b and shop == "":
+				body.add_child(S.label("OUTFIT PRESETS", 14, S.AMBER, "black"))
+				var presets := GridContainer.new()
+				presets.columns = 3
+				for outfit in HeroLook.FASHION_LOOKS:
+					presets.add_child(S.button(outfit[0], func(): _style_set(outfit[1]), false, (_style_inner - 16.0) / 3.0))
+				body.add_child(presets)
+				_style_choices(body, "DRESSES", HeroLook.DRESSES, l, "top", 2)
+			var tops := HeroLook.TOPS + HeroLook.FASHION_TOPS if build_b else HeroLook.TOPS
+			_style_choices(body, "TOP", _style_list(tops, first), l, "top", 3)
+			_style_colours(body, "GARMENT COLOUR", HeroLook.CLOTH, l, "top_col")
+			if not HeroLook.is_dress(l["top"]):
+				_style_choices(body, "BOTTOMS", HeroLook.bottoms_for(l["body"]), l, "trousers", 3)
+				_style_colours(body, "BOTTOM COLOUR", HeroLook.TROUSERS, l, "pants_col")
 		"extras":
-			_style_choices(body, "SHOES", _style_list(HeroLook.SHOES, first), l, "shoes", 3)
+			if l["body"] == "b" and shop == "":
+				_style_choices(body, "FOOTWEAR", HeroLook.FOOTWEAR, l, "footwear", 2)
+			_style_choices(body, "SHOE COLOUR", _style_list(HeroLook.SHOES, first), l, "shoes", 3)
 			_style_choices(body, "HAT", _style_list(HeroLook.HATS, first), l, "head", 4)
 			_style_choices(body, "EYEWEAR", _style_list(HeroLook.EYEWEAR, first), l, "eyewear", 4)
 		"outfits":
@@ -2187,9 +2200,9 @@ func open_style(first := false) -> void:
 				body.add_child(S.label("Dress up, then save the look here to wear it again in one tap.", 16, S.MUTED))
 			for o in outs:
 				var od: Dictionary = o
-				body.add_child(_row([_fixed("%s · %s" % [HeroLook.label(HeroLook.TOPS, String(od.get("top", ""))),
+				body.add_child(_row([_fixed("%s · %s" % [HeroLook.label(HeroLook.tops_for("b"), String(od.get("top", ""))),
 					HeroLook.label(HeroLook.SHOES, String(od.get("shoes", "")))], 300, 17, S.PAPER, "bold"), S.spacer(),
-					S.button("Wear", func(): _style_set({"trousers": "auto"}.merged(od, true)), true, 110)]))
+					S.button("Wear", func(): _style_set({"trousers": "auto", "footwear": "trainers"}.merged(od, true)), true, 110)]))
 			body.add_child(S.button("Save what I'm wearing", func():
 				Wardrobe.save_outfit(e.flags, HeroLook.current(e.flags))
 				open_style(false), false, 300))
@@ -2214,7 +2227,7 @@ func open_style(first := false) -> void:
 		rng.randomize()
 		var r := {}
 		r["body"] = String(HeroLook.BODIES[rng.randi() % HeroLook.BODIES.size()][0]) if HeroLook.BODY_B_ENABLED else "a"
-		for pair in [["face", HeroLook.faces_for(r["body"])], ["hair", HeroLook.HAIRS], ["top", HeroLook.TOPS], ["trousers", HeroLook.LOWER_CUTS], ["shoes", HeroLook.SHOES]]:
+		for pair in [["face", HeroLook.faces_for(r["body"])], ["hair", HeroLook.HAIRS], ["top", HeroLook.tops_for(r["body"])], ["trousers", HeroLook.bottoms_for(r["body"])], ["shoes", HeroLook.SHOES]]:
 			var lst: Array = pair[1]
 			r[pair[0]] = lst[rng.randi() % lst.size()][0]
 		r["top_col"] = HeroLook.CLOTH[rng.randi() % HeroLook.CLOTH.size()]

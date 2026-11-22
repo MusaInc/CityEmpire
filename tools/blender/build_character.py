@@ -11,6 +11,14 @@ from pathlib import Path
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
 import numpy as np
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_b_fit import finish_build_b_nape, fit_build_b, fit_build_b_neck
+from build_b_detail import match_build_b_face_style, refine_build_b
+from build_b_footwear import fit_build_b_footwear
+from hero_groom import groom_hero
+from wardrobe_quality import (HEADPHONE_HAIRS, SKIRTS, adjust_basis, fit_camisole_straps,
+                              fit_denim_jacket, fit_headphone_band, fit_skirt_correctives,
+                              fit_sandals, fit_tucked_waists, shorten_build_b_neck)
 ROOT=Path(__file__).resolve().parents[2]
 SRC=ROOT/'art/hero/sources'
 OUT=Path(sys.argv[sys.argv.index('--')+1]) if '--' in sys.argv else ROOT/'assets/models'
@@ -53,12 +61,18 @@ P={'hips':None,'spine':'hips','chest':'spine','neck':'chest','head':'neck'}
 for side,sx in [('l',-1),('r',1)]:
     a=Vector((sx*math.sin(math.radians(42)),0,-math.cos(math.radians(42))))
     l=Vector((sx*math.sin(math.radians(5)),0,-math.cos(math.radians(5))))
-    # (build B's shoulders are narrower: its arms pushed out to the 20 cm
-    # pivots stretched the deltoids into pads. The game binds each bone to its
-    # pivot (CharacterRig._bind_skeleton), so a joint a little inboard is fine.)
-    J['upper_arm_'+side]=Vector((sx*(.2 if BODY=='a' else .186),0,1.50))
-    J['forearm_'+side]=J['upper_arm_'+side]+a*.29
-    J['hand_'+side]=J['forearm_'+side]+a*.26
+    if BODY == 'b':
+        # The acromion descends from the sternoclavicular joint. These are
+        # anatomical pivots in the skinned mesh and its exported rest rig.
+        J['clavicle_'+side] = Vector((sx*.041,.006,1.532))
+        P['clavicle_'+side] = 'chest'
+        J['upper_arm_'+side] = Vector((sx*.163,-.004,1.463))
+        J['forearm_'+side] = J['upper_arm_'+side] + a*.270
+        J['hand_'+side] = J['forearm_'+side] + a*.247
+    else:
+        J['upper_arm_'+side] = Vector((sx*.193,0,1.490))
+        J['forearm_'+side] = J['upper_arm_'+side] + a*.284
+        J['hand_'+side] = J['forearm_'+side] + a*.253
     J['thigh_'+side]=Vector((sx*.1,0,.94))
     J['shin_'+side]=J['thigh_'+side]+l*.45
     J['foot_'+side]=J['shin_'+side]+l*.44
@@ -75,6 +89,8 @@ def mapped(n):
     if n.startswith('neck'):return 'neck'
     if n.startswith(('pelvis','root','spine05')):return 'hips'
     if n.startswith(('spine03','spine04')):return 'spine'
+    if BODY == 'b' and n.startswith(('clavicle','shoulder')):
+        return 'clavicle_'+side
     if n.startswith(('spine','clavicle','shoulder','breast')):return 'chest'
     return 'head'
 weights=np.zeros((len(base),len(names)))
@@ -119,65 +135,85 @@ def _torso_keys():
     return out
 TK=_torso_keys()
 def torso(v):
-    x,y,z=v
-    # The rig's torso (hip joint .94 -> shoulder joint 1.50) is 22% longer
-    # than the MakeHuman one. The ribcage keeps near-natural proportions and
-    # the abdomen takes the extra length (a straight, uniformly stretched
-    # torso read as a mannequin). Width follows the anatomy: a slight taper
-    # at the waist and only as much shoulder width as reaches the rig's
-    # shoulder pivots (the old flat 5% widening inflated the whole chest).
-    h=np.interp(y,TK,[0,.94,1.218,1.358,1.50,1.59,1.68,1.84])
-    if BODY=='a':
-        kx=np.interp(y,[1.0,3.1,4.35,5.3,5.75,6.6],[1.0,.975,1.0,1.045,1.06,1.0])
-        kz=np.interp(y,[1.0,3.1,4.35,6.6],[1.02,1.0,1.03,1.0])
+    x, y, z = v
+    levels = ([0,.94,1.200,1.339,1.491,1.584,1.68,1.84] if BODY=='a'
+              else [0,.94,1.179,1.321,1.459,1.555,1.675,1.834])
+    h = float(np.interp(y,TK,levels))
+    px, depth = x*.1, z*.1
+    ax = abs(px)
+    waist = math.exp(-((h-1.105)/.103)**2)
+    ribs = math.exp(-((h-1.352)/.105)**2)
+    crest = math.exp(-((h-1.487)/.084)**2)
+    # Neck-to-acromion slope is sculpted across the actual trapezius, with
+    # the neck base and clavicle heads remaining full medial volumes.
+    shoulder = min(1.0,max(0.0,(ax-.049)/.121))
+    shoulder = shoulder*shoulder*(3-2*shoulder)
+    if BODY == 'b':
+        hips = math.exp(-((h-.985)/.149)**2)
+        seat = math.exp(-((h-.980)/.117)**2-((ax-.081)/.083)**2)
+        bust = math.exp(-((h-1.355)/.084)**2-((ax-.075)/.058)**2)
+        px *= 1 + .069*hips - .023*waist - .075*shoulder*crest
+        depth -= .037*seat*max(0,min(1,-z/.76))
+        depth += .008*bust*max(0,min(1,z/.94))
+        h -= .026*shoulder*crest
     else:
-        kx=np.interp(y,[TK[1],TK[2],TK[3],(TK[3]+TK[4])/2+.3,TK[4]+.14,TK[5]-.05],[1.0,.975,1.0,1.045,1.06,1.0])
-        kz=np.interp(y,[TK[1],TK[2],TK[3],TK[5]-.05],[1.02,1.0,1.03,1.0])
-    # Shape the waist and lateral ribcage before fitting garments. Keep full
-    # chest depth and add a slight forward curve at the upper spine.
-    waist = math.exp(-((h-1.108)/.12)**2)
-    ribs = math.exp(-((h-1.365)/.11)**2)
-    kx *= 1.0 - (.035 if BODY=='a' else .048)*waist + .021*ribs
-    posture = -.009*ribs + .006*waist
-    return Vector((x*.1*kx,z*.1*kz+posture,h))
+        px *= 1 + .030*math.exp(-((h-1.00)/.125)**2) - .026*waist - .027*crest*shoulder
+        h -= .010*shoulder*crest
+    depth += .005*waist - .008*ribs
+    return Vector((px,depth,h))
+
+
 def retarget(v,w):
-    result=Vector((0,0,0));p=coord(v)
+    result = Vector()
+    p = coord(v)
+    core = torso(v)
     for n,i in ni.items():
-        if w[i]<1e-6:continue
+        if w[i] < 1e-6:
+            continue
+        t = core
         if n in trans:
-            o,q,s=trans[n];r=p-o
-            t=J[n]+(q@r if q else r)*s
-        else:t=torso(v)
-        result+=t*float(w[i])
+            origin, rotation, scale = trans[n]
+            offset = p-origin
+            t = J[n]+(rotation@offset if rotation else offset)*scale
+            if n.startswith('upper_arm') and BODY == 'b':
+                side = n[-1]
+                axis = (J['forearm_'+side]-J[n]).normalized()
+                rel = t-J[n]
+                along = rel.dot(axis)
+                cap = math.exp(-((along-.022)/.112)**2)
+                t -= (rel-axis*along)*(.105*cap)
+            if n.startswith('thigh') and BODY == 'b':
+                seat_blend = math.exp(-((t.z-.932)/.104)**2-((abs(t.x)-.086)/.084)**2)
+                t.y -= .017*seat_blend*max(0,min(1,-v[2]/.73))
+        result += t*float(w[i])
     return result
 
-# Shoulder re-weighting. The rig has no clavicle: when the arm drops from the
-# 42 degree bind pose to its idle hang, every vertex above the shoulder pivot
-# that follows the arm swings outward (the old padded, inflated shoulders).
-# The chest keeps the acromion and trapezius; the arm takes over smoothly
-# from 2 cm above the pivot to 8 cm down the arm.
+# The clavicle and chest hold the seam of the shoulder as the arm swings.
 def _shoulder_weights():
     for side in ('l','r'):
-        ua=ni['upper_arm_'+side];ch=ni['chest']
-        a=J['upper_arm_'+side];ax=(J['forearm_'+side]-a).normalized()
-        for j in range(len(base)):
-            if weights[j,ua]<1e-4:continue
-            p=retarget(base[j],weights[j])
-            if (p.x<0)!=(side=='l') or abs(p.x)<.08 or p.z<(1.25 if BODY=='a' else 1.18):continue
-            t=(p-a).dot(ax)
-            # (build B: the bust's side and the armpit sit further along the
-            # arm - on the arm bone they swung out as a pad when the arm hung)
-            reach=.08 if BODY=='a' else .13
-            if t>=reach:continue
-            k=max(0.0,min(1.0,(t+.02)/(reach+.02)));k=k*k*(3-2*k)
-            if BODY!='a':
-                # under the arm (toward the body's side): stays with the chest longer
-                side_k=max(0.0,min(1.0,(abs(p.x)-(abs(a.x)-.06))/.06))
-                k*=.35+.65*side_k
-            want=(weights[j,ua]+weights[j,ch])*k
-            if weights[j,ua]>want:
-                weights[j,ch]+=weights[j,ua]-want;weights[j,ua]=want
+        ua, chest = ni['upper_arm_'+side], ni['chest']
+        clavicle = ni.get('clavicle_'+side,chest)
+        pivot = J['upper_arm_'+side]
+        axis = (J['forearm_'+side]-pivot).normalized()
+        for j, w in enumerate(weights):
+            if w[ua] < 1e-4:
+                continue
+            p = retarget(base[j],w)
+            if (p.x<0)!=(side=='l') or abs(p.x)<.065 or p.z<1.19:
+                continue
+            t = (p-pivot).dot(axis)
+            reach = .110 if BODY=='b' else .085
+            k = max(0,min(1,(t+.014)/(reach+.014)))
+            k = k*k*(3-2*k)
+            shoulder_tip = max(0,min(1,(abs(p.x)-abs(pivot.x)+.044)/.056))
+            arm_target = (w[ua]+w[chest])*k*(.60+.40*shoulder_tip)
+            transferred = max(0,w[ua]-arm_target)
+            split = .68*shoulder_tip if BODY=='b' else 0.0
+            w[ua] -= transferred
+            w[chest] += transferred*(1-split)
+            w[clavicle] += transferred*split
 _shoulder_weights()
+
 
 def mesh(name,verts,uv,faces,faceuv):
     me=bpy.data.meshes.new(name);me.from_pydata(verts,[],faces);me.update()
@@ -559,7 +595,7 @@ FACES=[
 # default hairstyle of its own.
 FACES_B=[
     ('rio',{'african':.6,'asian':-.3,'caucasian':-.3},{'cheek_l-cheek-bones-incr':.45,'cheek_r-cheek-bones-incr':.45,'mouth_mouth-upperlip-volume-incr':.3,'mouth_mouth-lowerlip-volume-incr':.3,'nose_nose-point-width-decr':.25,'head_head-oval':.35,'chin_chin-width-decr':.3,'head_head-age-decr':.2},'curls'),
-    ('sam',{'african':-.3,'asian':-.3,'caucasian':.6},{'head_head-oval':.4,'nose_nose-scale-horiz-decr':.3,'nose_nose-point-width-decr':.3,'mouth_mouth-upperlip-volume-incr':.2,'chin_chin-width-decr':.35,'cheek_l-cheek-bones-incr':.3,'cheek_r-cheek-bones-incr':.3,'eyebrows_eyebrows-trans-up':.2},'bob'),
+    ('sam',{'african':-.3,'asian':-.3,'caucasian':.6},{'head_head-oval':.4,'nose_nose-scale-horiz-decr':.3,'nose_nose-point-width-decr':.3,'mouth_mouth-upperlip-volume-incr':.2,'chin_chin-width-decr':.35,'cheek_l-cheek-bones-incr':.3,'cheek_r-cheek-bones-incr':.3,'eyebrows_eyebrows-trans-up':.2},'pixie'),
     ('noa',{'african':-.3,'asian':.6,'caucasian':-.3},{'head_head-round':.25,'cheek_l-cheek-inner-incr':.3,'cheek_r-cheek-inner-incr':.3,'nose_nose-scale-vert-decr':.25,'mouth_mouth-lowerlip-volume-incr':.25,'chin_chin-height-decr':.2,'head_head-age-decr':.25},'ponytail'),
     ('remy',{'african':.25,'asian':-.15,'caucasian':-.1},{'head_head-diamond':.3,'cheek_l-cheek-bones-incr':.55,'cheek_r-cheek-bones-incr':.55,'nose_nose-curve-convex':.2,'mouth_mouth-upperlip-volume-incr':.3,'chin_chin-prominent-incr':.15},'pixie'),
     ('jules',{'african':-.15,'asian':.1,'caucasian':.05},{'head_head-oval':.3,'nose_nose-hump-decr':.3,'nose_nose-scale-horiz-decr':.2,'mouth_mouth-scale-horiz-decr':.15,'mouth_mouth-lowerlip-volume-incr':.3,'chin_chin-width-decr':.3,'eyebrows_eyebrows-angle-up':.2},'bun'),
@@ -627,7 +663,7 @@ face_faces=head_faces+[i for i in body if i not in _hfs and all(RB[j].z>1.46 and
 face_meshes={}
 hairmat=material('hero_hair',(.05,.04,.035),.75)
 browmat=material('hero_brow',(.1,.075,.06),.7)   # (near-black read as painted bars)
-HAIR_STYLES=['buzz','crop','fade','curls','pixie','bob','ponytail','bun']
+HAIR_STYLES=['buzz','crop','fade','curls','pixie','ponytail','bun']
 exec(compile((ROOT/'tools/blender/accessories.py').read_text(),'accessories.py','exec'))
 # Garment kit helpers (UV raster bakes) are needed for hair textures here;
 # empire_wardrobe.py loads the kit again for the garments.
@@ -663,7 +699,6 @@ def hair_material(style,hair_ob,ecz,ecy):
     return m
 def make_hair(fid,style,pos,ecz,ecy):
     """One hairstyle on one face's scalp (see the FACES loop)."""
-    long_=style=='bob'
     short_=style in ('buzz','crop','fade','curls')
     def margin(q):
         hl=.035 if style=='pixie' else .045   # forehead hairline above the eyes
@@ -672,26 +707,17 @@ def make_hair(fid,style,pos,ecz,ecy):
             hl+=.008*min(1.0,max(0.0,abs(q.x)-.022)/.035)**2+.0009*math.sin(q.x*95+.7)
             # (crop/fade: a softly uneven front line - small peaks and dips, not a ruler edge)
             if style in ('crop','fade'):hl+=.0014*math.sin(q.x*157+1.9)+.0005*math.sin(q.x*311+.4)
-        if long_:
-            # Side part and the longer sweep across one temple.
-            hl = .053 + .019*math.exp(-((q.x+.026)/.029)**2) - .011*math.exp(-((q.x-.043)/.024)**2)
         top=q.z-(ecz+hl)
         k=.005 if style not in ('crop','fade') else .011   # rounding of the hairline's corners (temples, sideburns, nape)
         smin=lambda *a:-k*math.log(sum(math.exp(-x/k) for x in a))
         smax=lambda *a:k*math.log(sum(math.exp(x/k) for x in a))
-        # (crop/fade: the back stops above the nape - the skin's stubble
-        # shading carries the fade below it; down to the nape it read as a cap)
-        back=smin(ecy-.085-q.y,q.z-(ecz-(.115 if long_ else (.048 if style in ('crop','fade') else .07))))
-        if long_:
-            temple=smin(abs(q.x)-.055,ecy-.035-q.y,q.z-(ecz-.09))
-        else:
-            temple=smin(abs(q.x)-.055,ecy-.03-q.y,q.z-(ecz+(-.012 if style=='pixie' else .012)))
+        # Short cuts turn into the nape above the collar.
+        back=smin(ecy-.085-q.y,q.z-(ecz-(.048 if style in ('crop','fade') else .07)))
+        temple=smin(abs(q.x)-.055,ecy-.03-q.y,q.z-(ecz+(-.012 if style=='pixie' else .012)))
         extent = smax(top,back,temple)
-        if not long_:
-            # Cut around the actual auricle rather than across its surface.
-            ear = math.sqrt(((q.y-(ecy-.059))/.034)**2 + ((q.z-(ecz-.019))/.035)**2)
-            if abs(q.x) > .059:
-                extent = min(extent, (ear - 1.0) * .028)
+        ear = math.sqrt(((q.y-(ecy-.059))/.034)**2 + ((q.z-(ecz-.019))/.035)**2)
+        if abs(q.x) > .059:
+            extent = min(extent, (ear - 1.0) * .028)
         return extent
     hf=[i for i in head_faces if any(margin(pos[j])>-.012 for j in bf[i])]
     hair,_=part('Hair_%s_%s'%(style,fid),hf,pos,weights)
@@ -710,14 +736,7 @@ def make_hair(fid,style,pos,ecz,ecy):
     bmesh.ops.delete(bm,geom=[v for v in bm.verts if vals.get(v,margin(v.co))<-1e-7],context='VERTS')
     bm.normal_update()
     top=max(v.co.z for v in bm.verts)
-    # The head's outline at eye height: the widest ring the bob falls from.
     hc=Vector((0,sum(v.co.y for v in bm.verts)/len(bm.verts),0))
-    ring_r=[0.0]*48
-    for j in {j for i in head_faces for j in bf[i]}:
-        q=pos[j]
-        if abs(q.z-(ecz+.01))<.03:
-            d=Vector((q.x,q.y-hc.y,0));k=int((math.atan2(d.x,d.y)/math.tau+.5)*48)%48
-            ring_r[k]=max(ring_r[k],d.length)
     for v in bm.verts:
         # (crop/fade: the thickness grows over 3 cm in from the edge - over
         # 1 cm the front edge stood off the forehead like a visor)
@@ -728,7 +747,7 @@ def make_hair(fid,style,pos,ecz,ecy):
         # Sides and back hug the scalp (short, faded); the volume is on top.
         side=max(0.0,min(1.0,(v.co.z-(ecz+.035))/.045))
         lift={'buzz':.0009,'crop':.00065+.0011*side+.0037*up,'fade':.00052+.010*up_f**1.65,'curls':.004+.012*up,
-              'pixie':.0023+.0065*up,'bob':.004+.006*up,'ponytail':.0035,'bun':.0035}[style]
+              'pixie':.0023+.0065*up,'ponytail':.0035,'bun':.0035}[style]
         if style=='curls':
             p_=v.co*170.0
             lift+=.0045*(math.sin(p_.x)*math.sin(p_.y+1.3)*math.sin(p_.z+.7)+.4)
@@ -749,20 +768,9 @@ def make_hair(fid,style,pos,ecz,ecy):
                 lift += .0029*up*edge_*max(0,math.sin(swept*220+math.sin(fw*92)*.8))**2
                 lift += .0006*up*math.sin(v.co.x*610+fw*330)*math.sin(fw*540-v.co.x*200)
         v.co+=v.normal*(.00006+lift*fadein)
-        if long_ and v.co.z<ecz+.03:
-            # Below the temples the bob hangs straight down from the head's
-            # widest ring instead of following the jaw and neck in.
-            d=Vector((v.co.x,v.co.y-hc.y,0))
-            if d.length>1e-4:
-                k=int((math.atan2(d.x,d.y)/math.tau+.5)*48)%48
-                rr=max(ring_r[k],ring_r[(k+1)%48],ring_r[k-1])+.014
-                t=max(0.0,min(1.0,(ecz+.03-v.co.z)/.05))
-                want=max(d.length,d.length+(rr-d.length)*t)
-                d2=d.normalized()*want
-                v.co.x=d2.x;v.co.y=hc.y+d2.y
     bm.to_mesh(hair.data);bm.free();hair.data.update()
     simplify_surface(hair, .61)
-    so=hair.modifiers.new('Edge','SOLIDIFY');so.thickness=.0007 if style!='bob' else .0018;so.offset=-1;so.use_rim_only=True;apply(hair,so)
+    so=hair.modifiers.new('Edge','SOLIDIFY');so.thickness=.0007;so.offset=-1;so.use_rim_only=True;apply(hair,so)
     hair.data.materials.append(hair_material(style,hair,ecz,ecy))
     cards = groom_locks(hair, fid, style, margin, ecz, ecy, LOCK_MATERIAL)
     # Per-corner density lets scalp shading transition gradually into the roots.
@@ -886,15 +894,6 @@ for fid,eth,tg,style in FACES:
     # a soft highlight along the upper lip's top (volume, a Cupid's bow)
     hl_=np.clip(1-((X/.017)**2+((Z-(mc.z+.0055))/.0024)**2),0,1)*np.clip((Y-(mc.y+.008))/.004,0,1)
     col*=(1+.07*hl_)[:,None]
-    m_=np.maximum.reduce([Z-(_ez+.045),np.minimum(_ey-.085-Y,Z-(_ez-.07)),np.minimum.reduce([np.abs(X)-.055,_ey-.03-Y,Z-(_ez+.012)])])
-    k_=np.clip((m_+.005)/.009,0,1)
-    col*=(1-.24*k_)[:,None]
-    # The fade: short stubble under the hair edge on the sides and back,
-    # thinning out over ~2.5 cm (not on the forehead or face).
-    sides_=np.clip(((_ez+.035)-Z)/.02,0,1)+np.clip(((_ey-.06)-Y)/.02,0,1)
-    st_=np.clip(1+m_/.026,0,1)*(m_<0)*np.clip(sides_,0,1)*np.clip((Z-(_ez-.075))/.02,0,1)
-    st_*=.85+.15*np.sin(X*1900)*np.sin(Z*2100+Y*700)   # (stubble grain)
-    col*=(1-.22*st_**1.4)[:,None]
     for side_ in ('l','r'):
         _e=[pos[j] for i in GROUP_FACES['helper-%s-eye'%side_] for j in bf[i]];_ec=sum(_e,Vector())/len(_e)
         _,bl,bw=brow_curve(_ec)
@@ -1137,6 +1136,10 @@ for cut in ('Jumper', 'Hoodie', 'Bomber', 'Blazer', 'Long'):
     copy.name = 'Skin_Arms_' + cut
     bpy.context.collection.objects.link(copy)
     skin_arms.append(copy)
+exec(compile((ROOT/'tools/blender/fashion_wardrobe.py').read_text(),'fashion_wardrobe.py','exec'))
+refit_vest()
+if BODY=='b':
+    build_fashion()
 all_meshes=[top_long,top_tq,top_short,top_vest,collar]+skin_arms+[pants,shoes,gloves]+[o for ps in face_meshes.values() for o in ps]+masks+wardrobe
 for ob in [pants]:
     solid=ob.modifiers.new('Bound cloth edges','SOLIDIFY');solid.thickness=.0025;solid.offset=-1;solid.use_rim_only=True;apply(ob,solid)
@@ -1147,10 +1150,41 @@ for side in ('l','r'):
         all_meshes.append(pocket)
 
 for ob in all_meshes:
-    if ob.name in ('Courier_Cargo','Courier_Chinos','Lower_jeans','Lower_joggers'):
+    if ob.name in ('Courier_Cargo','Courier_Chinos','Lower_jeans','Lower_joggers','Lower_fitjeans','Lower_leggings'):
         bend_corrective(ob,'Knee')
     elif ob.name in ('Top_Shirt','Top_Hoodie','Top_Bomber','Top_Jumper','Top_Blazer'):
         bend_corrective(ob,'Elbow')
+    if BODY=='b' and (ob.name in ('Top_Vest','Skin_Arms_Vest','Top_Hoodie','Top_Bomber','Top_Blazer',
+                                  'Top_Tee','Top_Shirt','Top_Jumper','Topx_Hoodie_Fold','Top_Polo','Fashion_Torso_Skin',
+                                  'Fashion_Crop_Skin')
+                      or ob.name.startswith(('Top_Fashion_','Topx_Fashion_')) and 'Skirt' not in ob.name):
+        bend_corrective(ob,'Shoulder')
+
+fit_tucked_waists(bpy.data.objects)
+for fid in face_meshes:
+    fit_headphone_band(bpy.data.objects['Acc_headphones_' + fid], face_meshes[fid][0],
+                       {style: bpy.data.objects['Hair_%s_%s' % (style, fid)] for style in HEADPHONE_HAIRS})
+if BODY == 'b':
+    fit_sandals(bpy.data.objects['Footwear_sandals'], bpy.data.objects['Fashion_Feet'],
+                bpy.data.objects['Fashion_Barefoot_Legs'])
+    fit_denim_jacket(bpy.data.objects['Top_Fashion_Jacket'])
+    fit_camisole_straps(bpy.data.objects['Topx_Fashion_Camisole_Straps'],
+                       bpy.data.objects['Top_Fashion_Camisole'], bpy.data.objects['Fashion_Crop_Skin'])
+    for cut, hem in SKIRTS.items():
+        fit_skirt_correctives(bpy.data.objects[cut], J, hem,
+                             [bpy.data.objects[name] for name in ('Fashion_Legs', 'Fashion_Slip')])
+    for ob in all_meshes:
+        if any(v.co.z > 1.485 for v in ob.data.vertices):
+            adjust_basis(ob, shorten_build_b_neck)
+    for neck_joint in ('neck', 'head'):
+        J[neck_joint] += shorten_build_b_neck(J[neck_joint])
+    fit_build_b(all_meshes, J)
+    all_meshes.append(refine_build_b(all_meshes, J, TEX))
+    match_build_b_face_style(all_meshes, TEX)
+    fit_build_b_neck(all_meshes, J)
+    finish_build_b_nape(all_meshes)
+    fit_build_b_footwear(all_meshes, J)
+groom_hero(all_meshes, TEX, BODY)
 
 # Rig: same rest joints and names as CharacterRig; gameplay animation remains
 # the source of truth. Four normalized influences per vertex, no bone heat.
@@ -1158,7 +1192,8 @@ arm=bpy.data.armatures.new('CourierSkeleton');rig=bpy.data.objects.new('CourierR
 for n in names:
     b=arm.edit_bones.new('b_'+n);b.head=J[n]
     children=[c for c,p in P.items() if p==n]
-    if n.startswith('hand'):b.tail=J[n]+(J[n]-J[P[n]]).normalized()*.12
+    if n.startswith('clavicle'):b.tail=J['upper_arm_'+n[-1]]
+    elif n.startswith('hand'):b.tail=J[n]+(J[n]-J[P[n]]).normalized()*.12
     elif n.startswith('foot'):b.tail=J[n]+Vector((0,.16,0))
     elif children:b.tail=J[children[0]]
     else:b.tail=J[n]+Vector((0,0,.15))
@@ -1172,7 +1207,8 @@ for ob in all_meshes:
     mod=ob.modifiers.new('Gameplay skin','ARMATURE');mod.object=rig;ob.parent=rig
     # UV2.x is cloth freedom, UV2.y carries the outsole or groom density mask.
     density = ob.data.uv_layers.get('GroomDensity')
-    uv2 = density or ob.data.uv_layers.new(name='ClothFreedom')
+    groom_motion = ob.data.uv_layers.get('GroomMotion')
+    uv2 = density or groom_motion or ob.data.uv_layers.get('ClothFreedom') or ob.data.uv_layers.new(name='ClothFreedom')
     for face in ob.data.polygons:
         for li in face.loop_indices:
             p=ob.data.vertices[ob.data.loops[li].vertex_index].co
@@ -1181,8 +1217,11 @@ for ob in all_meshes:
             sole=1-max(0,min(1,(p.z-.027)/.012)) if ob==shoes else 0
             if density is not None:
                 sole = density.data[li].uv.y
-                if ob.name.startswith('Hair_ponytail') and p.z < 1.68 and p.y < -.025:
-                    freedom = min(.08, (1.68 - p.z) * .36)
+                if ob.name.startswith(('Hair_ponytail', 'Hair_bun')):
+                    freedom = density.data[li].uv.x
+            if groom_motion is not None:
+                freedom = groom_motion.data[li].uv.x
+                sole = groom_motion.data[li].uv.y
             uv2.data[li].uv=(freedom,sole)
     # Some authored meshes have no UVs (signature/pockets); unwrap those.
     if len(ob.data.uv_layers)==1:

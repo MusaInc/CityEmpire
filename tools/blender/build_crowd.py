@@ -34,7 +34,7 @@ VARIANTS = {
     "a": [(0, "ade", "crop", "polo"), (2, "malik", "fade", "blazer"),
           (4, "theo", "curls", "hoodie"), (6, "kai", "buzz", "shirt")],
     "b": [(1, "rio", "ponytail", "tee"), (3, "sam", "bun", "jumper"),
-          (5, "noa", "pixie", "polo"), (7, "jules", "bob", "blazer")],
+          (5, "noa", "pixie", "polo"), (7, "jules", "pixie", "blazer")],
 }
 
 PART = {"hero_skin": 1, "hero_skin_body": 1, "hero_glove": 1, "hero_lips": 9, "hero_sclera": 8, "hero_iris": 5,
@@ -131,6 +131,7 @@ def build(arm, v, face, hair, cut):
     dec.ratio = min(1.0, TARGET / max(tris, 1))
     bpy.ops.object.modifier_apply(modifier=dec.name)
     me = ob.data
+    me.validate(clean_customdata=False)
     # Per-vertex limb and weights from the skin.
     gname = {g.index: g.name for g in ob.vertex_groups}
     vdata = []

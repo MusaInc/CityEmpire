@@ -74,7 +74,10 @@ static func buy(e: Empire, items: Array, store: String) -> String:
 
 static func save_outfit(flags: Dictionary, look: Dictionary) -> void:
 	var outs: Array = flags.get("outfits", [])
-	var keep := {"trousers": look.get("trousers", "auto")}
+	var keep := {"trousers": look.get("trousers", "auto"), "footwear": look.get("footwear", "trainers")}
+	if String(look.get("top", "")).begins_with("top_fashion_") or String(keep["footwear"]) != "trainers" \
+			or HeroLook.FASHION_BOTTOMS.any(func(entry): return entry[0] == keep["trousers"]):
+		keep["body"] = "b"
 	for k in ["top", "top_col", "pants_col", "shoes", "head", "eyewear"]:
 		keep[k] = look.get(k, "")
 	outs.push_front(keep)

@@ -117,10 +117,12 @@ func test_rig_wears_the_look(t) -> void:
 		return on
 	rig.apply_look(Shop.look({"hero": "hero_theo", "face": "face_none"}))
 	t.check(hair_shown.call() == ["Hair_buzz_theo"], "natural hair is the face's own cut (%s)" % [hair_shown.call()])
-	for st: String in ["buzz", "crop", "fade", "curls", "pixie", "bob", "ponytail", "bun"]:
+	for st: String in ["buzz", "crop", "fade", "curls", "pixie", "ponytail", "bun"]:
 		rig.apply_look(Shop.look({"hero": "hero_ren", "face": "face_none", "hair": "hair_" + st}))
 		t.check(hair_shown.call() == ["Hair_%s_ren" % st], "%s fits Ren (%s)" % [st, hair_shown.call()])
-	rig.apply_look(Shop.look({"hero": "hero_ren", "face": "mask_balaclava", "hair": "hair_bob"}))
+	t.check(Shop.item("hair_bob").is_empty() and Shop.look({"hair": "hair_bob"})["hair_style"] == "pixie",
+		"retired bob selections resolve to Pixie")
+	rig.apply_look(Shop.look({"hero": "hero_ren", "face": "mask_balaclava", "hair": "hair_pixie"}))
 	t.check(hair_shown.call().is_empty(), "the balaclava hides the hair")
 	# Trying a cut on in the shop takes off what would hide it.
 	t.check(Shop.try_on("hair", "hair_bun")["mask"] == "" and Shop.try_on("top", "top_vest")["mask"] == "courier",

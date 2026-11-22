@@ -8,7 +8,8 @@ extends Node
 ##     --resolution 800x1000 --fixed-fps 30 res://tools/character_lab.tscn -- <outdir> [outfits] [poses]
 ##
 ## outfits: comma list of OUTFITS keys (default: all), or catalog for both builds' tops
-## poses:   comma list of idle,walk,run,drive,reach,bent,collar (default: all but collar)
+##          "audit" reads a JSON map of outfit names to look overrides in argument 6.
+## poses:   comma list of idle,walk,run,sit,drive,reach,bent,collar,neck_turn
 ## light:   "game" (the game's atmosphere, default) or "neutral" (flat grey
 ##          studio: soft key from the camera side, strong ambient, so no
 ##          shadow can hide a defect; files get a __neutral suffix)
@@ -19,6 +20,10 @@ extends Node
 ## draw surfaces, visible meshes, frame-time from the renderer).
 
 const OUTFITS := {
+	"b_shoulders": {"body": "b", "face": "hero_noa", "hair": "hair_bun", "top": "top_vest", "top_col": "#6f6570",
+		"trousers": "jeans", "pants_col": "#34465d", "shoes": "shoes_classic"},
+	"a_shoulders": {"face": "hero_theo", "hair": "hair_crop", "top": "top_vest", "top_col": "#6f6570",
+		"trousers": "jeans", "pants_col": "#34465d", "shoes": "shoes_classic"},
 	# The baseline in-game outfit (screenshot 2026-11-17): orange shirt, shades.
 	"orange_shirt": {"face": "hero_ade", "hair": "hair_crop", "top": "top_shirt", "top_col": "#d9822b",
 		"pants_col": "#3d4530", "shoes": "shoes_classic", "head": "head_bare", "eyewear": "face_shades"},
@@ -38,7 +43,7 @@ const OUTFITS := {
 		"pants_col": "#1f2d4a", "shoes": "shoes_classic", "head": "head_bare", "eyewear": "face_none"},
 	"rio_bare": {"body": "b", "face": "hero_rio", "hair": "hair_natural", "top": "top_tee", "top_col": "#c96f92",
 		"pants_col": "#1f2d4a", "shoes": "shoes_classic", "head": "head_bare", "eyewear": "face_none"},
-	"sam_blazer": {"body": "b", "face": "hero_sam", "hair": "hair_bob", "top": "top_blazer", "top_col": "#3b3f46",
+	"sam_blazer": {"body": "b", "face": "hero_sam", "hair": "hair_pixie", "top": "top_blazer", "top_col": "#3b3f46",
 		"pants_col": "#25304a", "shoes": "shoes_blackout", "head": "head_bare", "eyewear": "face_none"},
 	"noa_hood": {"body": "b", "face": "hero_noa", "hair": "hair_ponytail", "top": "top_hoodie", "top_col": "#c9c4b8",
 		"pants_col": "#3b3f46", "shoes": "shoes_gum", "head": "head_bare", "eyewear": "face_none"},
@@ -73,8 +78,13 @@ const FULL := {
 	"three_quarter": [Vector3(2.6, 0.25, 2.9), "pelvis", 30.0],
 	"side": [Vector3(3.9, 0.05, 0), "pelvis", 30.0],
 	"rear": [Vector3(0, 0.15, -3.9), "pelvis", 30.0],
+	"opposite": [Vector3(-2.6, 0.25, 2.9), "pelvis", 30.0],
 }
 const CLOSE := {
+	"upper_front": [Vector3(0.0, 0.06, 1.42), "upper", 31.0],
+	"upper_side": [Vector3(1.42, 0.06, 0), "upper", 31.0],
+	"upper_rear": [Vector3(0.0, 0.06, -1.42), "upper", 31.0],
+	"upper_three_quarter": [Vector3(0.94, 0.06, 1.07), "upper", 31.0],
 	"face": [Vector3(0.18, 0.04, 0.95), "face", 24.0],
 	"face_side": [Vector3(0.95, 0.04, 0.12), "face", 24.0],
 	"face_34": [Vector3(0.62, 0.06, 0.72), "face", 24.0],
@@ -91,20 +101,27 @@ const CLOSE := {
 	"hem_front": [Vector3(0.25, 0.1, 1.0), "hem", 32.0],
 	"lower": [Vector3(0.12, 0.04, 1.58), "lower", 33.0],
 	"shoes": [Vector3(0.44, 0.25, 0.77), "feet", 31.0],
+	"shoe_back": [Vector3(0.49, 0.22, -0.71), "feet", 31.0],
 	"hair_back": [Vector3(0.39, 0.13, -0.75), "face", 27.0],
+	"head_left": [Vector3(-0.95, 0.04, 0.12), "face", 24.0],
+	"hair_front": [Vector3(0, 0.035, 0.94), "hair_fit", 27.0],
+	"hair_side": [Vector3(0.94, 0.035, 0), "hair_fit", 27.0],
+	"hair_rear": [Vector3(0, 0.035, -0.94), "hair_fit", 27.0],
 }
 const POSE_VIEWS := {
-	"idle": ["front", "three_quarter", "side", "rear", "face", "face_side", "collar", "chest", "shoulder", "cuff", "back_collar", "hem_back", "hem_front", "lower", "shoes", "hair_back"],
+	"idle": ["upper_front", "upper_side", "upper_rear", "upper_three_quarter", "front", "three_quarter", "side", "rear", "face", "face_side", "collar", "chest", "shoulder", "cuff", "back_collar", "hem_back", "hem_front", "lower", "shoes", "hair_back"],
 	"collar": ["collar", "collar_34", "collar_side", "back_collar", "chest", "shoulder"],
 	"head": ["brows", "brows_34", "face", "face_side"],
 	"portrait": ["face", "face_side", "face_34"],
-	"walk": ["three_quarter", "side"],
-	"run": ["three_quarter", "side"],
+	"walk": ["three_quarter", "side", "upper_side", "upper_three_quarter"],
+	"run": ["three_quarter", "side", "upper_side", "upper_three_quarter"],
 	"walk_pass": ["front", "side"],
 	"run_pass": ["front", "side"],
-	"drive": ["three_quarter", "side", "shoulder"],
+	"drive": ["front", "three_quarter", "side", "rear", "shoulder"],
+	"sit": ["front", "three_quarter", "side", "rear"],
 	"reach": ["front", "three_quarter", "shoulder"],
 	"bent": ["front", "three_quarter", "shoulder", "cuff"],
+	"neck_turn": ["hair_front", "hair_side"],
 }
 
 @onready var root := get_tree().root
@@ -116,6 +133,7 @@ var stats := {}
 var neutral := false
 var key: DirectionalLight3D
 var view_filter := PackedStringArray()
+var audit_look: Dictionary
 
 
 class Bot:
@@ -134,12 +152,21 @@ func _go() -> void:
 	var args := OS.get_cmdline_user_args()
 	out = args[0] if args.size() > 0 else "art/character_review/scratch"
 	var outfits: Array = Array(args[1].split(",")) if args.size() > 1 and args[1] != "all" else OUTFITS.keys()
+	if outfits == ["audit"]:
+		var file := FileAccess.open(args[5], FileAccess.READ) if args.size() > 5 else null
+		var data = JSON.parse_string(file.get_as_text()) if file != null else null
+		if not data is Dictionary or data.is_empty():
+			push_error("Expected a JSON object mapping wardrobe audit outfits to look dictionaries")
+			get_tree().quit(1)
+			return
+		audit_look = data
+		outfits = audit_look.keys()
 	if outfits == ["catalog"]:
 		outfits.clear()
 		for body in ["a", "b"]:
 			for top in HeroLook.TOPS:
 				outfits.append(body + "_" + top[0])
-	var poses: Array = Array(args[2].split(",")) if args.size() > 2 and args[2] != "all" else POSE_VIEWS.keys().filter(func(k): return k != "collar" and k != "head" and k != "portrait")
+	var poses: Array = Array(args[2].split(",")) if args.size() > 2 and args[2] != "all" else POSE_VIEWS.keys().filter(func(k): return k not in ["collar", "head", "portrait", "neck_turn"])
 	neutral = args.size() > 3 and args[3] == "neutral"
 	if args.size() > 4:
 		view_filter = args[4].split(",")
@@ -198,6 +225,29 @@ func _go() -> void:
 
 func _look(o: String) -> Dictionary:
 	var l: Dictionary = HeroLook.DEFAULT.duplicate()
+	if audit_look.has(o):
+		return l.merged(audit_look[o], true)
+	if o.begins_with("b_fashion_"):
+		l["body"] = "b"
+		l["face"] = "hero_noa"
+		l["hair"] = "hair_bun"
+		var style := o.trim_prefix("b_fashion_").capitalize()
+		if style == "Street":
+			style = "Streetwear"
+		for outfit in HeroLook.FASHION_LOOKS:
+			if outfit[0] == style:
+				return l.merged(outfit[1], true)
+		if style == "Midi":
+			return l.merged({"top": "top_fashion_cardigan", "trousers": "midiskirt", "footwear": "boots",
+				"top_col": "#775c63", "pants_col": "#414951", "shoes": "shoes_blackout"}, true)
+		if style == "Vest":
+			return l.merged({"top": "top_fashion_vest", "trousers": "tailoredshorts", "footwear": "boots",
+				"top_col": "#bfa88b", "pants_col": "#686657", "shoes": "shoes_gum"}, true)
+		if style == "Bodysuit":
+			return l.merged({"top": "top_fashion_bodysuit", "trousers": "leggings", "footwear": "streettrainers",
+				"top_col": "#67748e", "pants_col": "#343440", "shoes": "shoes_classic"}, true)
+		return l.merged({"top": "top_fashion_crop", "trousers": "miniskirt", "footwear": "streettrainers",
+			"top_col": "#e2c4c2", "pants_col": "#374d6c"}, true)
 	if o.get_slice("_", 1) == "top":
 		l["body"] = o.left(1)
 		l["face"] = "hero_rio" if l["body"] == "b" else "hero_ade"
@@ -281,16 +331,16 @@ func _pose(o: String, p: String) -> void:
 			for i in 50:
 				await get_tree().process_frame
 	_freeze(true)
-	if p in ["drive", "reach", "bent"]:
+	if p in ["drive", "sit", "reach", "bent", "neck_turn"]:
 		_set_pose(p)
 	RenderingServer.render_loop_enabled = true
 	await get_tree().process_frame
-	var views: Array = POSE_VIEWS[p]
+	var views: Array = Array(view_filter) if audit_look.has(o) and not view_filter.is_empty() else POSE_VIEWS[p]
 	for v: String in views:
 		if not view_filter.is_empty() and v not in view_filter:
 			continue
 		_aim(v)
-		for i in 3:
+		for i in (2 if audit_look.has(o) else 3):
 			await get_tree().process_frame
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png("%s/%s__%s__%s%s.png" % [out, o, p, v, "__neutral" if neutral else ""])
@@ -305,6 +355,9 @@ func _set_pose(p: String) -> void:
 	for b in CharacterRig.BONES:
 		q[b] = Quaternion.IDENTITY
 	match p:
+		"neck_turn":
+			q["neck"] = CharacterRig._ry(deg_to_rad(12.0)) * CharacterRig._rx(deg_to_rad(-4.0))
+			q["head"] = CharacterRig._ry(deg_to_rad(25.0)) * CharacterRig._rx(deg_to_rad(-6.0))
 		"drive":  # seated at a wheel: thighs level, shins down, hands at 10-and-2
 			for sd in ["l", "r"]:
 				var sx := -1.0 if sd == "l" else 1.0
@@ -313,6 +366,14 @@ func _set_pose(p: String) -> void:
 				q["upper_arm_" + sd] = CharacterRig._rx(deg_to_rad(42.0)) * CharacterRig._rz(sx * deg_to_rad(12.0))
 				q["forearm_" + sd] = CharacterRig._rx(deg_to_rad(48.0))
 			q["spine"] = CharacterRig._rx(deg_to_rad(-6.0))
+			rig.bones["hips"].position = CharacterRig.BONES["hips"][1] - Vector3(0, 0.9 + 0.42, 0)
+		"sit":
+			for sd in ["l", "r"]:
+				var sx := -1.0 if sd == "l" else 1.0
+				q["thigh_" + sd] = CharacterRig._rx(deg_to_rad(91.0)) * CharacterRig._rz(sx * deg_to_rad(3.0))
+				q["shin_" + sd] = CharacterRig._rx(deg_to_rad(-90.0))
+				q["upper_arm_" + sd] = CharacterRig._rx(deg_to_rad(19.0)) * CharacterRig._rz(sx * deg_to_rad(8.0))
+				q["forearm_" + sd] = CharacterRig._rx(deg_to_rad(58.0))
 			rig.bones["hips"].position = CharacterRig.BONES["hips"][1] - Vector3(0, 0.9 + 0.42, 0)
 		"reach":  # left arm straight out to the side, right arm reaching forward
 			q["upper_arm_l"] = CharacterRig._rz(deg_to_rad(-88.0))
@@ -337,8 +398,12 @@ func _aim(v: String) -> void:
 	var right := fwd.cross(Vector3.UP)
 	var target: Vector3
 	match spec[1]:
+		"upper":
+			target = (j["chest"] as Vector3).lerp(j["neck"], 0.22)
 		"face":
 			target = (j["neck"] as Vector3).lerp(j["head"], 0.5) + fwd * 0.05
+		"hair_fit":
+			target = (j["neck"] as Vector3).lerp(j["head"], 0.48) + fwd * 0.027
 		"collar":
 			target = (j["neck"] as Vector3) + Vector3(0, -0.03, 0)
 		"chest_mid":
@@ -353,10 +418,13 @@ func _aim(v: String) -> void:
 			target = (j["an_l"] as Vector3).lerp(j["an_r"], 0.5) + fwd * 0.08
 		"pelvis":
 			# Full-body views frame the whole figure: aim at mid-height.
-			target = Vector3((j["pelvis"] as Vector3).x, player.global_position.y, (j["pelvis"] as Vector3).z)
+			target = Vector3((j["pelvis"] as Vector3).x, lerpf(player.global_position.y, (j["pelvis"] as Vector3).y, 0.5), (j["pelvis"] as Vector3).z)
 		_:
 			target = j[spec[1]]
 	var off: Vector3 = spec[0]
+	if spec[1] == "feet":
+		var spread := (j["an_l"] as Vector3).distance_to(j["an_r"])
+		off *= 1.0 + clampf((spread - 0.28) * 1.8, 0.0, 0.95)
 	cam.fov = spec[2]
 	cam.global_position = target + right * off.x + Vector3.UP * off.y + fwd * off.z
 	cam.look_at(target, Vector3.UP)

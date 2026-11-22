@@ -50,7 +50,7 @@ const OTHER_ITEMS := [
 	# Body type B's faces (character_b.glb).
 	{"id": "hero_rio", "slot": "hero", "name": "Rio", "face": "rio", "style": "curls", "body": "b", "skin": Color(0.36, 0.22, 0.15),
 		"hair": Color(0.07, 0.055, 0.045), "eyes": Color(0.17, 0.1, 0.05), "price": 0},
-	{"id": "hero_sam", "slot": "hero", "name": "Sam", "face": "sam", "style": "bob", "body": "b", "skin": Color(0.9, 0.74, 0.64),
+	{"id": "hero_sam", "slot": "hero", "name": "Sam", "face": "sam", "style": "pixie", "body": "b", "skin": Color(0.9, 0.74, 0.64),
 		"hair": Color(0.42, 0.27, 0.15), "eyes": Color(0.3, 0.42, 0.5), "price": 0},
 	{"id": "hero_noa", "slot": "hero", "name": "Noa", "face": "noa", "style": "ponytail", "body": "b", "skin": Color(0.86, 0.68, 0.54),
 		"hair": Color(0.05, 0.04, 0.04), "eyes": Color(0.2, 0.12, 0.06), "price": 0},
@@ -67,7 +67,6 @@ const OTHER_ITEMS := [
 	{"id": "hair_fade", "slot": "hair", "name": "High Fade", "style": "fade", "price": 300},
 	{"id": "hair_curls", "slot": "hair", "name": "Curls", "style": "curls", "price": 400},
 	{"id": "hair_pixie", "slot": "hair", "name": "Pixie", "style": "pixie", "price": 300},
-	{"id": "hair_bob", "slot": "hair", "name": "Bob", "style": "bob", "price": 400},
 	{"id": "hair_ponytail", "slot": "hair", "name": "Ponytail", "style": "ponytail", "price": 400},
 	{"id": "hair_bun", "slot": "hair", "name": "Bun", "style": "bun", "price": 400},
 	# Tops: skin-tight compression, the colour comes from the Colours slot.
@@ -83,6 +82,16 @@ const OTHER_ITEMS := [
 	{"id": "top_hoodie", "slot": "top", "name": "Hoodie", "cut": "hoodie", "price": 0},
 	{"id": "top_blazer", "slot": "top", "name": "Blazer & Tie", "cut": "blazer", "price": 0},
 	{"id": "top_bomber", "slot": "top", "name": "Bomber Jacket", "cut": "bomber", "price": 0},
+	{"id": "top_fashion_crop", "slot": "top", "name": "Crop Top", "cut": "fashion_crop", "price": 0},
+	{"id": "top_fashion_tank", "slot": "top", "name": "Rib Tank", "cut": "fashion_tank", "price": 0},
+	{"id": "top_fashion_vest", "slot": "top", "name": "Tailored Vest", "cut": "fashion_vest", "price": 0},
+	{"id": "top_fashion_camisole", "slot": "top", "name": "Camisole", "cut": "fashion_camisole", "price": 0},
+	{"id": "top_fashion_blouse", "slot": "top", "name": "Blouse", "cut": "fashion_blouse", "price": 0},
+	{"id": "top_fashion_bodysuit", "slot": "top", "name": "Bodysuit", "cut": "fashion_bodysuit", "price": 0},
+	{"id": "top_fashion_cardigan", "slot": "top", "name": "Cardigan", "cut": "fashion_cardigan", "price": 0},
+	{"id": "top_fashion_jacket", "slot": "top", "name": "Denim Jacket", "cut": "fashion_jacket", "price": 0},
+	{"id": "top_fashion_fitteddress", "slot": "top", "name": "Fitted Dress", "cut": "fashion_fitteddress", "price": 0},
+	{"id": "top_fashion_loosedress", "slot": "top", "name": "Loose Dress", "cut": "fashion_loosedress", "price": 0},
 	# Trousers
 	{"id": "pants_navy", "slot": "pants", "name": "Graphite", "color": Color(0.24, 0.26, 0.28), "price": 0},
 	{"id": "pants_black", "slot": "pants", "name": "Black", "color": Color(0.05, 0.05, 0.06), "price": 150},
@@ -177,6 +186,10 @@ static func in_slot(slot: String) -> Array:
 	return items().filter(func(it): return it["slot"] == slot)
 
 
+static func hair_id(id: String) -> String:
+	return "hair_pixie" if id == "hair_bob" else id
+
+
 static func _save() -> Node:
 	return Engine.get_main_loop().root.get_node("/root/SaveData")
 
@@ -193,7 +206,8 @@ static func owns(id: String) -> bool:
 		return Progress.unlocked(it)
 	if it["price"] == 0:
 		return true
-	return id in _save().data.get("owned", [])
+	var owned: Array = _save().data.get("owned", [])
+	return id in owned or (id == "hair_pixie" and "hair_bob" in owned)
 
 
 ## Earned (progression) items can't be bought.
@@ -232,6 +246,8 @@ static func equip(id: String) -> bool:
 static func equipped(slot: String) -> String:
 	var d: Dictionary = _save().data
 	var id: String = d.get("suit", DEFAULTS["suit"]) if slot == "suit" else d.get("outfit", {}).get(slot, DEFAULTS[slot])
+	if slot == "hair":
+		id = hair_id(id)
 	return id if owns(id) and item(id)["slot"] == slot else DEFAULTS[slot]
 
 
@@ -241,7 +257,8 @@ static func look(preview := {}) -> Dictionary:
 	var pick := {}
 	for s in SLOTS:
 		var slot: String = s[0]
-		pick[slot] = item(preview.get(slot, equipped(slot)))
+		var id: String = preview.get(slot, equipped(slot))
+		pick[slot] = item(hair_id(id) if slot == "hair" else id)
 		if pick[slot].is_empty():
 			pick[slot] = item(DEFAULTS[slot])
 	var suit: Color = pick["suit"]["color"]

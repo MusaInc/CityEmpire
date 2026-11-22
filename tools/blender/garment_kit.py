@@ -810,7 +810,7 @@ def pore_normal(name='skin_pore_normal', n=256):
     return _save(name, nrm * .5 + .5, False)
 
 
-def raster_uv(ob, size, uv_name=None):
+def raster_uv(ob, size, uv_name=None, material_index=None):
     """Rasterises the mesh into its UV space: per texel the 3D position,
     normal and a valid mask (for baking 3D seam definitions into textures)."""
     me = ob.data
@@ -822,6 +822,8 @@ def raster_uv(ob, size, uv_name=None):
     co = np.array([v.co[:] for v in me.vertices], np.float32)
     me_normals = np.array([v.normal[:] for v in me.vertices], np.float32)
     for tri in me.loop_triangles:
+        if material_index is not None and me.polygons[tri.polygon_index].material_index != material_index:
+            continue
         uv = np.array([uvl.data[l].uv[:] for l in tri.loops], np.float32) * size
         vi = list(tri.vertices)
         x0, y0 = np.floor(uv.min(0)).astype(int)

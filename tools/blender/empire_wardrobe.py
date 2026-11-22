@@ -363,7 +363,7 @@ def tailored_top(name, hem, neck, neck_drop, oval, layer, sleeve_end=None, cuff=
     m.uv_smooth = 'PRESERVE_BOUNDARIES'
     apply(ob, m)
     tailor(ob, layer, cuff=cuff, **kw)
-    drape_top(ob, {'shirt': .0025, 'knit': .0042, 'jacket': .0028}[layer], hem)
+    drape_top(ob, {'shirt': .0025, 'knit': .0042, 'jacket': .0028, 'skin': .0008}[layer], hem)
     bm = bmesh.new()
     bm.from_mesh(ob.data)
     if neck_curve is None:
@@ -464,7 +464,7 @@ STAND_Z0 = _periodic([1.598 - .03 * max(0.0, math.cos(a)) ** 1.5 for a in _NK_A]
 STAND_H = _periodic([.026 - .003 * max(0.0, math.cos(a)) for a in _NK_A])
 neck_r = lambda a, z: STAND_R(a) - .0065
 COLLAR_EASE = (.0065, .0045)
-SHIRT_NECK = 1.598
+SHIRT_NECK = 1.584 if BODY=='b' else 1.595
 SHIRT_OVAL = (STAND_R(math.pi / 2), STAND_R(0), STAND_R(math.pi))
 SHIRT_NECK_DROP = .03 / STAND_R(0)
 print('NECK centre y', round(NECK_CY, 4), 'stand radii side/front/back', [round(x, 4) for x in SHIRT_OVAL], flush=True)
@@ -1251,75 +1251,110 @@ for _side in ('l', 'r'):
 add(join_as('Topx_Jumper_Cuffs', jparts), False)
 
 # ---------------------------------------------------------------- hoodie
-def fleece_hoodie():
-    # Start from the fitted authored zip and hood, then cut the sleeve seam
-    # against the same arm frame as the other long-sleeved tops.
-    hood = garment('elvs_hooded_sweat_jacket1', 'Top_Hoodie')
-    subdiv(hood, 1)
-    for vertex in hood.data.vertices:
-        c = vertex.co
-        af = frames()[1]['l' if c.x<0 else 'r']
-        t, a, r = af.polar(c)
-        if abs(c.x)>.15 and 0<t<.97 and r<.118:
-            shoulder = math.exp(-((t-.15)/.25)**2)
-            forearm = math.exp(-((t-.72)/.25)**2)
-            want = max(af.sample(af.hull,t,a)+.006,
-                       r-.010*shoulder-.0048*forearm)
-            c[:] = af.point(t,a,min(r,want))
-        if c.z>1.47 and abs(c.x)<.174:
-            neck = max(0, min(1,(c.z-1.47)/.10))
-            at_back = max(0,min(1,(NECK_CY+.050-c.y)/.09))
-            wing = min(1, max(0, (abs(c.x)-.059)/.088))
-            c.z -= neck*(.028 + .018*wing + .007*at_back)
-            c.y -= neck*(.011*at_back + .006*wing)
-            c.x *= 1-.115*neck
-    hood.data.update()
-    simplify = hood.modifiers.new('Fleece mobile topology', 'DECIMATE')
-    simplify.ratio = .216
-    apply(hood, simplify)
-    enforce_skin_clearance(hood, lambda co: co.z < 1.56, .0055, .026)
+def open_hoodie_zip(hood):
+    """Open a continuous V between the collar and the top of the zipper."""
     bm = bmesh.new()
     bm.from_mesh(hood.data)
-    cuff_start = .918
-    for side, af in frames()[1].items():
-        pt = af.a + af.ax * af.L * cuff_start
-        _bisect(bm, tuple(pt), tuple(af.ax),
-                lambda co, af=af: af.polar(co)[0] > cuff_start + .00002 and af.polar(co)[2] < .11)
+
+    def opening(co):
+        width = max(0.0,min(.052,(co.z-1.412)*.445))
+        return max(abs(co.x)-width,.006-(co.y-NECK_CY)*FRONT)
+
+    iso_cut(bm,opening)
     bm.to_mesh(hood.data)
     bm.free()
     hood.data.update()
+
+
+def settle_hood_fold(fold, shell):
+    """Bring the hanging outer hood panel back onto the shoulder blades."""
+    hull = tree_of(shell)
+    for vertex in fold.data.vertices:
+        p = vertex.co
+        rear = max(0.0,min(1.0,((NECK_CY-p.y)*FRONT-.074)/.080))
+        if rear == 0:
+            continue
+        origin = Vector((p.x,NECK_CY-FRONT*.38,p.z))
+        hit,_,_,_ = hull.ray_cast(origin,Vector((0,FRONT,0)))
+        if hit is None or (NECK_CY-hit.y)*FRONT < .021:
+            continue
+        dy = (hit.y - FRONT*.018 - p.y)*(.80*rear)
+        p.y += dy
+        if fold.data.shape_keys:
+            for target in fold.data.shape_keys.key_blocks:
+                target.data[vertex.index].co.y += dy
+    fold.data.update()
+
+
+def folded_hood(shell, neck_radius, neck_height):
+    """Two sewn hood panels folded onto the upper back, with a turned lip."""
+    rows, uv = [], []
+    for row in range(9):
+        t = row/8
+        points, texcoords = [], []
+        for col in range(57):
+            u = col/56
+            a = .62+(math.tau-1.24)*u
+            back = max(0,-math.cos(a))
+            fade = math.sin(math.pi*u)**.68
+            width = (.026 + .063*back)*fade
+            r = neck_radius(a)+width*t
+            z = neck_height(a) - .003
+            z += (.009+.024*back)*math.sin(math.pi*t)*fade
+            z -= (.029+.101*back)*t*t*fade
+            y = NECK_CY+FRONT*math.cos(a)*r-.018*back*t
+            points.append(Vector((math.sin(a)*r,y,z)))
+            texcoords.append((u*1.65,.763+.220*t))
+        rows.append(points)
+        uv.append(texcoords)
+    hood = grid_mesh('Topx_Hoodie_Fold',rows,uv)
+    face_out(hood,lambda c: Vector((c.x,(c.y-NECK_CY)*.6,.32)))
+    settle_hood_fold(hood,shell)
+    weights_from(hood,shell)
+    fleece = material('hero_hood_fold',(.14,.15,.17),.89,TRIM_A,TRIM_N)
+    finish(hood,[fleece],rim=.0038)
+    return hood
+
+
+def fleece_hoodie():
+    hem = PANTS_TOP-.037
+    cuff_start = .927
+    neck_r, neck_z = neck_ring_fit(1.581,1.542,.010)
+    hood = tailored_top('Top_Hoodie',hem,1.581,1.0,
+        (neck_r(math.pi/2),neck_r(0),neck_r(math.pi)),'knit',
+        sleeve_end=cuff_start,cuff=(.80,cuff_start,lambda sd,a: cuff_radius(sd,a)+.001),
+        neck_cy=NECK_CY,neck_curve=neck_z,taper_front=.09,taper_side=.21,
+        sleeve_ease=(.011,.014) if BODY=='b' else (.015,.016),
+        sleeve_taper=.115,shoulder_ease=.0037)
+    snap_neckline(hood,R=neck_r,Z0=neck_z,reach=.037)
+    shirttail(hood,hem,.048,.045,rows=4,flare=.005)
+    weights_below(hood,hem)
+    clear_layer(hood,pants,.010,zmax=PANTS_TOP+.034)
+    open_hoodie_zip(hood)
     pack_uvs(hood)
-    sewn = seams_fn(lambda a: .925)
+    sewn = seams_fn(lambda _: hem-.046)
 
-    def fleece_height(P, N):
-        x, y, z = P.T
-        c = np.clip((1.52-z) / .15, 0, 1) * np.clip((y-.031) / .045, 0, 1)
-        zipper = seam_height(x-.006, z, groove=.00015, stitch_off=.006, stitch_len=.003)
-        texture = .00011*np.sin(x*433 + z*323) * np.sin(y*691 - z*347)
-        return sewn(P, N) + zipper*c + texture
+    def fleece_height(P,N):
+        x,y,z = P.T
+        mask = np.clip((1.42-z)/.04,0,1)*np.clip((y-.034)/.045,0,1)
+        return sewn(P,N)+mask*seam_height(x-.005,z,groove=.00018,stitch_off=.006,stitch_len=.003)
 
-    nrm, alb = bake_detail(hood, 'fleece_shell', 1024, fleece_height, plain_albedo)
-    fleece = wmat('hero_fleece', (.16, .17, .19), .86, alb, nrm)
-    fleece.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = .70
-    finish(hood, [fleece], rim=.0035)
+    nrm, alb = bake_detail(hood,'fleece_shell',1024,fleece_height,plain_albedo)
+    fleece = wmat('hero_fleece',(.16,.17,.19),.87,alb,nrm)
+    fleece.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = .73
+    finish(hood,[fleece],rim=.0036)
     add(hood)
+    add(folded_hood(hood,neck_r,neck_z),False)
     cuffs = []
-    hull = tree_of(hood)
-    for side, arm in frames()[1].items():
-        def opening(_, angle, arm=arm):
-            inner = arm.point(cuff_start-.006, angle, 0.0)
-            outer = arm.point(cuff_start-.006, angle, .16)
-            hit, _, _, _ = hull.ray_cast(outer, (inner - outer).normalized())
-            if hit is not None:
-                return max(cuff_radius(arm.side, angle), arm.polar(hit)[2] - .002)
-            return cuff_radius(arm.side, angle)
-        cuff, _ = shirt_cuff(side, cuff_start-.008, 1.015, mat=rib_trim, radius=opening,
-                             trim_row='rib', btn=False, name='HoodCuff_')
-        weights_from(cuff, hood, lambda co, arm=arm: 1.0 - max(0.0, (arm.polar(co)[0] - cuff_start) / .12))
+    for side in ('l','r'):
+        cuff,_ = shirt_cuff(side,cuff_start-.013,1.005,mat=rib_trim,
+            radius=lambda sd,a: cuff_radius(sd,a)+.001,trim_row='rib',btn=False,name='HoodCuff_')
+        weights_from(cuff,hood)
         cuffs.append(cuff)
-    add(join_as('Topx_Hoodie_Cuffs', cuffs), False)
-    add(hoodie_lining(tee,hood), False)
-    zipper_trim(hood, 'Hoodie', 1.410, .999, .011)
+    add(join_as('Topx_Hoodie_Cuffs',cuffs),False)
+    add(hoodie_lining(tee,hood),False)
+    zipper_trim(hood,'Hoodie',1.418,hem-.038,.009)
+    simplify_surface(hood,.68)
 
 def zipper_trim(shell, cut, top, bottom, width):
     tape = bpy.data.materials.get('hero_zipper')

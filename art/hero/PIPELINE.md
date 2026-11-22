@@ -1,7 +1,7 @@
 # WorldState character & clothing pipeline
 
 Blender exports both WorldState builds from `tools/blender/build_character.py`.
-Each build contains five faces, eight hairstyles, the wardrobe and fitted
+Each build contains five faces, seven hairstyles, the wardrobe and fitted
 accessories around the same 17-bone gameplay skeleton. The editable projects
 are `art/hero/courier.blend` and `art/hero/courier_b.blend`, with the matching
 GLBs in `assets/models/`. Godot shows the worn variants through `CharacterRig`
@@ -14,17 +14,21 @@ python3 tools/character_review/review.py capture <milestone> --quick   # Godot +
 
 ## Conventions
 
-**Skeleton.** Never changes: bone names `b_<name>` = `CharacterRig.BONES`, bind
+**Skeleton.** Gameplay bone names are `b_<name>` from `CharacterRig.BONES`.
+Build B adds two clavicle deform bones. Godot reads shoulder pivots and arm
+lengths from the imported rest pose and rotates the clavicles with arm swing.
+Both builds use the same bind
 pose with arms 42 degrees out (`ARM_A`), legs 5 degrees (`LEG_A`). The
 gameplay rig drives world-space foot contact. Its blend shapes close the
 sculpted lids, flex the individual fingers, and restore fabric volume at the
 elbows and knees from the active joint rotation. Fingers retain the source hand's joint weights in the
 Blender bake and use the existing two hand blend shapes in Godot.
 
-**Body.** MakeHuman hm08 (CC0), lean young-adult morph, retargeted onto the rig
-(`torso()` maps the anatomy's heights onto the rig's joints). Weights: MakeHuman's,
-with two corrections everything inherits - the shoulder (chest keeps the acromion;
-no clavicle bone) and the base of the neck (follows the chest).
+**Body.** MakeHuman hm08 (CC0), retargeted and sculpted around the exported
+joints. Build B uses a lower acromion and a continuous slope from the neck,
+shorter upper arms, and a fuller pelvis and seat. Body, garment and trim
+meshes use the same shoulder weights and proportional fit. Shoulder
+correctives maintain the deltoid as the arm advances.
 
 **Garments** (`tools/blender/garment_kit.py`, used by `empire_wardrobe.py`):
 1. Cut the garment's region from the body (same vertices, same weights: it
@@ -100,3 +104,18 @@ capturing the city.
 ```sh
 godot --rendering-method mobile --fixed-fps 30 res://tools/character_lab.tscn -- screenshots/character-review catalog idle neutral three_quarter,collar
 ```
+
+
+## Build B wardrobe
+
+`fashion_wardrobe.py` cuts the tops and dresses from the fitted torso. It
+adds the separate camisole straps, fastenings, jacket and cardigan linings,
+six bottom cuts, and four footwear lasts. Garments carry packed UVs, baked
+seams, and their own material roughness. The original wardrobe colours, save
+slots and five face choices are used for the collection.
+
+Skirts and dresses blend from pelvis weights at the waist into the thigh
+weights along each side. Hem shape keys react to the forward and rear leg
+envelopes independently. The long skirts open at the front below the fitted
+hip panel and include fitted slip shorts. Each dress uses its own lower
+panel and occupies the outfit's bottom slot.
