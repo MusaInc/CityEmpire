@@ -20,6 +20,7 @@ var _pool: Array = []
 var _pool_i := 0
 var _kind := ""
 var _gear := 1
+var _impact_haptic_cooldown := 0.0
 
 
 func _ready() -> void:
@@ -101,6 +102,9 @@ func set_car(c: Car, model := {}) -> void:
 
 
 func _on_impact(strength: float, _at: Vector3, _n: Vector3, _other: Object) -> void:
+	if strength >= 5.0 and _impact_haptic_cooldown <= 0.0:
+		_impact_haptic_cooldown = 0.25
+		Settings.haptic(22, lerpf(0.18, 0.45, smoothstep(5.0, 18.0, strength)))
 	if strength > 12.0:
 		play("crash_heavy_%d" % (randi() % 3), linear_to_db(clampf(strength / 30.0, 0.5, 1.0)), randf_range(0.9, 1.05))
 		if strength > 20.0:
@@ -116,6 +120,7 @@ func _set_loop(k: String, db: float, s: float, pitch := 1.0) -> void:
 
 
 func _process(dt: float) -> void:
+	_impact_haptic_cooldown = maxf(_impact_haptic_cooldown - dt, 0.0)
 	if car == null or not is_instance_valid(car):
 		return
 	var paused := get_tree().paused

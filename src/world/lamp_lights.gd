@@ -13,16 +13,19 @@ extends Node3D
 const COUNT := 8
 const RANGE := 70.0
 const EVERY := 0.3
+const WET_ROAD_LIGHTS := 4
 
 var worlds: Array = []      # CityWorld (the island and the mainland)
 var camera_fn: Callable
 var _lights: Array = []
 var _t := 0.0
+var _wet_road_lights := PackedVector4Array()
 
 
 func setup(p_worlds: Array, p_camera_fn: Callable) -> void:
 	worlds = p_worlds.filter(func(w): return w != null)
 	camera_fn = p_camera_fn
+	_wet_road_lights.resize(WET_ROAD_LIGHTS)
 	for i in COUNT:
 		var l := SpotLight3D.new()
 		l.name = "Lamp%d" % i
@@ -74,6 +77,14 @@ func _process(dt: float) -> void:
 					if d < RANGE * RANGE:
 						cand.append([d, head])
 	cand.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+	for i in WET_ROAD_LIGHTS:
+		_wet_road_lights[i] = Vector4.ZERO
+		if i < cand.size():
+			var head: Vector3 = cand[i][1]
+			_wet_road_lights[i] = Vector4(head.x, head.y, head.z, 1.0)
+	for world: CityWorld in worlds:
+		if world.ground_mat:
+			world.ground_mat.set_shader_parameter("wet_road_lamps", _wet_road_lights)
 	for i in COUNT:
 		var l: SpotLight3D = _lights[i]
 		if i < cand.size():

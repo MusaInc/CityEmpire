@@ -7,6 +7,7 @@ shader_type spatial;
 render_mode unshaded, blend_add, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
 
 global uniform float night;
+global uniform float signal_time;
 uniform int mode = 1;   // (halo variant: additive)
 const float CYCLE = 26.0;
 
@@ -14,8 +15,8 @@ varying flat float v_lit;
 varying flat float v_aspect;
 
 float state(float off) {
-	float t = fract(TIME / CYCLE + off);
-	return t < 0.38 ? 2.0 : (t < 0.5 ? 1.0 : 0.0);   // green 10 s, amber 3 s, red 13 s
+	float t = fract(signal_time / CYCLE + off);
+	return t < 0.38 ? 2.0 : (t < 0.46 ? 1.0 : 0.0);   // short red clearance before the other approach
 }
 
 void vertex() {

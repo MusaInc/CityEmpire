@@ -99,6 +99,7 @@ func generate(p_seed: int, p_district: Callable, p_bounds: Rect2, p_reserved: Ar
 		roads[i]["id"] = i
 		if roads[i].has("name"):
 			by_name[roads[i]["name"]] = roads[i]
+	district_of = Callable()  # Generation is done. Release the layout callback.
 	return self
 
 

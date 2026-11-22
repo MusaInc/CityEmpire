@@ -196,6 +196,8 @@ func _fp(f: Dictionary, u: float, out: float, y: float) -> Vector3:
 ## Checks a screen rect on a face (u0..u1 along, y0..y1 up). Returns the
 ## standoff it needs (proud of any feature it covers) or -1 if it can't go.
 func _check(b: Dictionary, f: Dictionary, u0: float, u1: float, y0: float, y1: float, key: String) -> float:
+	if b.has("street_use") and y0 < float(b["apt"]["y1"]) + 1.1:
+		return -1.0
 	if u0 < 0.3 or u1 > float(f["w"]) - 0.3 or y1 - y0 < 1.0:
 		return -1.0
 	for r: Rect2 in _occupied.get(key, []):
@@ -248,7 +250,7 @@ func _bid(b: Dictionary) -> int:
 
 
 func _usable(b: Dictionary) -> bool:
-	return b["kind"] == "normal" and not b.has("apt") and not b.has("shape") and (b["tiers"] as Array).size() > 0
+	return b["kind"] == "normal" and (not b.has("apt") or b.has("street_use")) and not b.has("shape") and (b["tiers"] as Array).size() > 0
 
 
 # ------------------------------------------------------------ Lumen Circus

@@ -22,6 +22,9 @@ const SAVE_PATH := "user://cityempire_save.json"
 var save_path := SAVE_PATH
 const STREAM_IN := 150.0
 const STREAM_OUT := 210.0
+const FRONT_CELL := 72.0
+const FRONT_IN := 72.0
+const FRONT_OUT := 92.0
 const REACH := 1.6
 
 var args := {}
@@ -53,7 +56,9 @@ var props: Destructibles
 var car_audio: CarAudio
 var units: Array = []
 var unit_by_id := {}
-var interiors := {}      # unit id -> ShopInterior
+var interiors := {}
+var _front_cells := {}
+var _front_rooms := {}      # unit id -> ShopInterior
 var floor: ShopFloor
 var floor_unit := ""
 var cars := {}           # vehicle id -> Car
@@ -70,6 +75,7 @@ var _dry_t := 0.0             # safe-position sampling clock
 var safe: SafeGround          # every water recovery asks this where to go
 var _car_safe := {}           # vehicle id -> last safe Transform3D on dry land
 const HERO_BOX := Vector3(0.8, 1.8, 0.8)
+var _pending_vehicle_deliveries := {}
 var _last_car_pos := Vector3.ZERO
 var _km_acc := 0.0
 var _clean_t := 0.0
@@ -109,6 +115,7 @@ func _ready() -> void:
 	Landforms.enabled = true       # (headlands, beaches and a harbour along the strait)
 	world = CityWorld.new()
 	world.name = "World"
+	world.street_interiors_enabled = true
 	add_child(world)
 	layout = world.layout
 	# Skyport Island (the third island: airport, logistics, high-rise, marina).
@@ -136,6 +143,14 @@ func _ready() -> void:
 			for u in P.units:
 				units.append(u)
 				unit_by_id[u["id"]] = u
+	for u: Dictionary in world.street_units + skyport.street_units:
+		var key := _front_key(Vector2(u["pos"][0], u["pos"][2]))
+		if not _front_cells.has(key):
+			_front_cells[key] = []
+		_front_cells[key].append(u)
+		unit_by_id[u["id"]] = u
+		if u.get("flagship", false):
+			units.append(u)
 	print("City Empire world: %d ms, %d units" % [Time.get_ticks_msec() - t0, units.size()])
 
 	player = Player.new()
@@ -739,7 +754,7 @@ func new_game() -> void:
 func _market() -> Array:
 	var m: Array = []
 	for u in units:
-		if u["kind"] == "shop":
+		if u["kind"] == "shop" and not u.get("flagship", false):
 			m.append(Premises.record(u))
 	return m
 
@@ -974,6 +989,8 @@ func _teleport(p: Vector3, yaw: float) -> void:
 	if venues:
 		venues.load_near_now(p)
 	world.build_all_near(p, 300.0)
+	if empire:
+		_stream_street_rooms(p, 24.0, 4)
 	# A save made in (or over) the sea used to reload you there and remember
 	# that spot as dry ground: the wading check then sent you back to it for
 	# ever. Somewhere safe instead.
@@ -1028,7 +1045,7 @@ func _process(dt: float) -> void:
 		floor.hero_at = floor.room.to_local(player.global_position) if driving == "" else Vector3.INF
 	_update_carry_visual()
 	if driving != "":
-		_track_driving()
+		_track_driving(dt)
 	elif skyport_play and skyport_play.piloting != "":
 		skyport_play.track(dt)
 	else:
@@ -1113,6 +1130,8 @@ func toggle_fast() -> void:
 func _stream_interiors() -> void:
 	var focus := player.global_position if driving == "" else (cars[driving] as Node3D).global_position
 	for u in units:
+		if u.has("street_use"):
+			continue
 		var d := Vector2(focus.x, focus.z).distance_to(Vector2(float(u["pos"][0]), float(u["pos"][2])))
 		var id: String = u["id"]
 		if d < STREAM_IN and not interiors.has(id):
@@ -1121,15 +1140,54 @@ func _stream_interiors() -> void:
 			interiors[id].queue_free()
 			interiors.erase(id)
 
+	_stream_street_rooms(focus, FRONT_IN, 3)
+
+
+static func _front_key(at: Vector2) -> Vector2i:
+	return Vector2i((at / FRONT_CELL).floor())
+
+
+func _stream_street_rooms(focus: Vector3, radius: float, budget: int) -> void:
+	var xy := Vector2(focus.x, focus.z)
+	for id: String in _front_rooms.keys():
+		if id == floor_unit:
+			continue
+		var u: Dictionary = unit_by_id[id]
+		if xy.distance_squared_to(Vector2(u["pos"][0], u["pos"][2])) > FRONT_OUT * FRONT_OUT:
+			interiors[id].queue_free()
+			interiors.erase(id)
+			_front_rooms.erase(id)
+	var nearby: Array = []
+	var lo := _front_key(xy - Vector2.ONE * radius)
+	var hi := _front_key(xy + Vector2.ONE * radius)
+	for x in range(lo.x, hi.x + 1):
+		for z in range(lo.y, hi.y + 1):
+			for u: Dictionary in _front_cells.get(Vector2i(x, z), []):
+				if interiors.has(u["id"]):
+					continue
+				var dist := xy.distance_squared_to(Vector2(u["pos"][0], u["pos"][2]))
+				if dist < radius * radius and absf(focus.y - float(u["pos"][1])) < 25.0:
+					nearby.append([dist, u])
+	nearby.sort_custom(func(a, b): return a[0] < b[0])
+	for i in mini(budget, nearby.size()):
+		_build_interior(nearby[i][1])
+
 
 func _build_interior(u: Dictionary) -> ShopInterior:
 	var si := ShopInterior.new()
 	if u["kind"] == "office":
 		si.office = Offices.at(empire, u["id"])
 	var b := empire.business_at(u["id"])
-	si.setup(u, b, layout.ground_y, occupier(u["id"]) if b == null else {})
+	var ground := layout.ground_y
+	if u.get("island", "") == "skyport":
+		ground = func(x: float, z: float) -> float:
+			var p := SkyportIsland.l(Vector3(x, 0.0, z))
+			return SkyportIsland.ground_y_local(p.x, p.z)
+	si.setup(u, b, ground, occupier(u["id"]) if b == null and not u.has("street_use") else {})
 	add_child(si)
 	interiors[u["id"]] = si
+	if u.has("street_use"):
+		_front_rooms[u["id"]] = true
 	if u["kind"] == "wholesale":
 		si.refresh_goods(_pallet(u["id"]))
 	_refresh_signs(u["id"])
@@ -1155,7 +1213,7 @@ func _refresh_signs(unit_id: String) -> void:
 		var h := empire.hour()
 		si.update_signs(h >= 7.0 and h < (22.0 if si.rival.get("firm", false) else 23.0), h < 6.5 or h >= 21.5)
 		return
-	si.update_signs(b != null and b.open and b.within_hours(empire.hour()))
+	si.update_signs((si.unit.has("street_use") and b == null) or (b != null and b.open and b.within_hours(empire.hour())))
 
 
 func _pallet(unit_id: String) -> Stock:
@@ -1255,12 +1313,14 @@ func _update_indoors() -> void:
 		var p := player.global_position
 		for id in interiors:
 			var si: ShopInterior = interiors[id]
-			if si.global_transform.origin.distance_squared_to(p) < 2500.0 and si.contains(p):
+			if si.global_transform.origin.distance_squared_to(p) < 6400.0 and si.contains(p):
 				ceiling = si.global_transform.origin.y + si.H
 				break
 		if ceiling == INF and venues:
 			ceiling = venues.ceiling_at(p)
 	player.indoors = ceiling < INF
+	if audio:
+		audio.shelter = 1.0 if player.indoors else (0.6 if driving != "" else 0.0)
 	camera.indoor_ceiling = ceiling
 	if atmosphere.rain_fx:
 		atmosphere.rain_fx.sheltered = ceiling < INF
@@ -1355,7 +1415,7 @@ func _update_spot() -> void:
 		var p := player.global_position
 		for id in interiors:
 			var si: ShopInterior = interiors[id]
-			if si.global_transform.origin.distance_to(p) > 60.0:
+			if si.global_transform.origin.distance_to(p) > 80.0:
 				continue
 			for s in si.world_spots():
 				var d := Vector2(p.x, p.z).distance_to(Vector2(s["world"].x, s["world"].z))
@@ -1544,6 +1604,10 @@ func spot_prompt() -> Array:
 			if b.cleanliness > 0.9:
 				return ["", false]
 			return ["CLEAN FLOOR (%d%%)" % int(b.cleanliness * 100.0), true]
+		"street_reception":
+			return ["RECEPTION · " + String(si.unit["name"]).to_upper(), true]
+		"retail_checkout":
+			return ["BROWSE · " + String(si.unit.get("name", "CHECKOUT")).to_upper(), true]
 		"trade":
 			return ["BUY STOCK", true]
 		"hq_desk":
@@ -1562,6 +1626,8 @@ func spot_prompt() -> Array:
 			return ["PICK UP (%d case%s waiting)" % [pal.cases_used(), "" if pal.cases_used() == 1 else "s"], true]
 		"letboard":
 			var u: Dictionary = unit_by_id[spot["unit"]]
+			if u.get("flagship", false):
+				return ["BUSINESS PREMISES · " + String(u["name"]).to_upper(), true]
 			var rv := CityLife.rival_at(empire, u["id"])
 			if not rv.is_empty():
 				return ["%s · BUY OUT %s" % [String(CityLife.rival_cfg().get("name", "QuikSave")).to_upper(), EmpireData.money(CityLife.rival_price(rv))], true]
@@ -1697,6 +1763,17 @@ func act() -> void:
 			b.cleanliness = minf(b.cleanliness + 0.34, 1.0)
 			Sfx.play("pickup", -10.0, 1.6)
 			si.refresh_goods()
+		"street_reception":
+			var use := String(si.unit["street_use"])
+			if use == "furniture":
+				ui.open_property(si.unit)
+			else:
+				ui.open_phone({"bank": "finances", "garage": "garage", "warehouse": "businesses"}.get(use, "property"))
+		"retail_checkout":
+			if String(si.unit.get("street_use", "")) in ["clothing", "department"]:
+				ui.open_store("clothes_premium", String(si.unit["name"]))
+			else:
+				ui.open_public_checkout(si)
 		"trade":
 			ui.open_wholesale(si.unit)
 		"hq_desk":
@@ -2066,7 +2143,7 @@ func exit_vehicle() -> void:
 		skyport_play.end_test(String(v["id"]))
 
 
-func _track_driving() -> void:
+func _track_driving(dt: float) -> void:
 	var c: Car = cars.get(driving)
 	if c == null:
 		return
@@ -2076,6 +2153,7 @@ func _track_driving() -> void:
 	if _km_acc > 0.05:
 		empire.drive(empire.vehicle(driving), _km_acc)
 		_km_acc = 0.0
+	vfx.wet_tyre_spray(c, atmosphere.wetness, dt, _spray_on_pavement)
 	# Keep the hero with the car (streaming, interaction distances).
 	player.global_position = p + Vector3.UP * 1.5
 	if c.in_water and c.water_t > 2.0:
@@ -2084,6 +2162,27 @@ func _track_driving() -> void:
 		_right_car(c)
 	else:
 		_sample_car_safe(driving, c, get_process_delta_time())
+
+
+func _spray_on_pavement(at: Vector3) -> bool:
+	var p := Vector2(at.x, at.z)
+	var land := layout.mainland if layout.mainland and at.x < CityLayout.FAR_SHORE else layout
+	var roads := land.roads
+	if roads.field_rect.has_point(p) and roads.on_road(p) and absf(at.y - land.ground_y(at.x, at.z)) < 0.24:
+		return true
+	# The city road fields stop at the shore. Check the suspended deck
+	# and viaduct at their actual height, even where there is land below.
+	if at.x >= CityLayout.APPROACH_END and at.x <= CityLayout.RIVER_EDGE + 26.0 \
+			and absf(at.z - CityLayout.BRIDGE_Z) < 8.7 and absf(at.y - CityLayout.approach_y(at.x)) < 0.45:
+		return true
+	if SkyportIsland.enabled:
+		var bridge := SkyportIsland.bridge_road_y(layout, at.x, at.z)
+		if not is_nan(bridge) and absf(at.y - bridge) < 0.4:
+			return true
+		var site := SkyportIsland.l(at)
+		if absf(site.y - SkyportIsland.LAND_Y) < 0.25 and SkyportIsland.contains_local(site.x, site.z):
+			return SkyportIsland.road_clearance(SkyportIsland.plan(layout), Vector2(site.x, site.z)) < 0.0
+	return false
 
 
 ## The car's last safe place (wheels down on dry land, upright, slow
@@ -2193,10 +2292,13 @@ func delivery_quote(vid: String) -> Dictionary:
 	if c == null:
 		out["why"] = "Not found"
 		return out
+	if _pending_vehicle_deliveries.has(vid):
+		out["why"] = "Delivery in progress"
+		return out
 	if driving != "":
 		out["why"] = "Get out of the car first"
 		return out
-	if player.indoors or floor_unit != "":
+	if player.indoors:
 		out["why"] = "Step outside onto a street first"
 		return out
 	var me := player.global_position
@@ -2283,12 +2385,16 @@ func deliver_vehicle(vid: String) -> String:
 	var q := delivery_quote(vid)
 	if not q["ok"]:
 		return String(q["why"])
-	if not empire.pay(float(q["fee"]), "vehicle", "Vehicle delivered to you"):
-		return "Not enough money"
 	var c: Car = cars[vid]
 	var xf: Transform3D = q["at"]
+	var fee := float(q["fee"])
+	_pending_vehicle_deliveries[vid] = true
 	get_tree().create_timer(2.5, false).timeout.connect(func():
-		if not is_instance_valid(c) or driving == vid:
+		_pending_vehicle_deliveries.erase(vid)
+		if not is_instance_valid(c) or cars.get(vid) != c or driving == vid:
+			return
+		if not empire.pay(fee, "vehicle", "Vehicle delivered to you"):
+			ui.toast("Delivery cancelled · not enough money", "warn")
 			return
 		c.linear_velocity = Vector3.ZERO
 		c.angular_velocity = Vector3.ZERO
@@ -2310,6 +2416,7 @@ func buy_vehicle(model: String) -> String:
 	if v.is_empty():
 		return "Not enough money"
 	_spawn_car(v)
+	Settings.haptic(28, 0.36)
 	return ""
 
 
@@ -2344,6 +2451,7 @@ func buy_firm(u: Dictionary, fee := 0.0) -> String:
 	_sync_rivals()
 	rebuild_interior(u["id"])
 	Sfx.play("cash", -2.0)
+	Settings.haptic(28, 0.36)
 	MapKit.invalidate()
 	save_game()
 	return ""
@@ -2362,6 +2470,7 @@ func buy_out_rival(u: Dictionary, fee := 0.0) -> String:
 	_sync_rivals()
 	rebuild_interior(u["id"])
 	Sfx.play("cash", -2.0)
+	Settings.haptic(28, 0.36)
 	MapKit.invalidate()
 	save_game()
 	return ""
@@ -2384,6 +2493,7 @@ func rent_unit(u: Dictionary, buy := false, type_id := "convenience", fee := 0.0
 		if not kinds.is_empty():
 			b.name = "%s %s" % [String(u.get("shop_name", "Corner")).get_slice(" ", 0), kinds[0]]
 	rebuild_interior(u["id"])
+	Settings.haptic(28, 0.36)
 	save_game()
 	return ""
 

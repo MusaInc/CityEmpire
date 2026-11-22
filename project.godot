@@ -98,6 +98,10 @@ rain={
 "type": "float",
 "value": 0.0
 }
+signal_time={
+"type": "float",
+"value": 0.0
+}
 traffic_time={
 "type": "float",
 "value": 0.0

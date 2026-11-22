@@ -85,6 +85,8 @@ const CAR_COLORS := [Color(0.85, 0.85, 0.83), Color(0.1, 0.1, 0.11), Color(0.62,
 	Color(0.55, 0.57, 0.6), Color(0.9, 0.72, 0.15), Color(0.2, 0.35, 0.3)]
 
 var layout: CityLayout
+var street_interiors_enabled := false
+var street_units: Array = []
 var viewer: Node3D
 var detail_range := 380.0
 ## Fire escapes, fins, portals, chimneys: small detail, drawn nearer than the
@@ -177,6 +179,10 @@ func _ready() -> void:
 	var t0 := Time.get_ticks_msec()
 	if layout == null:
 		layout = CityLayout.new().generate()
+	if street_interiors_enabled:
+		street_units = layout.premises.cover_streets(layout)
+		if layout.mainland:
+			street_units.append_array(layout.mainland.premises.cover_streets(layout.mainland))
 	if SkyportIsland.enabled:
 		# (Before the ground is built: the sea-wall railing opens for its bridge.)
 		var sp := SkyportIsland.plan(layout)
@@ -205,7 +211,7 @@ func _ready() -> void:
 	_by_chunk = layout.buildings_by_chunk()
 	_props_by_chunk = layout.props_by_chunk()
 	for g: Vector3 in layout.public_gardens:
-		_planter_spots[Vector2i(roundi(g.x * 4.0), roundi(g.z * 4.0))] = true
+		_planter_spots[_tree_position_key(g)] = true
 	var settings := get_node_or_null("/root/Settings")
 	if settings:
 		var p: Dictionary = settings.preset()
@@ -218,6 +224,20 @@ func _ready() -> void:
 		detail_range = minf(380.0, view_distance * 0.45)
 	_materials()
 	_load_props()
+	if traffic_density > 0.0 and not car_meshes.is_empty():
+		traffic = Traffic.new()
+		traffic.name = "Traffic"
+		traffic.near_range = CAR_NEAR
+		traffic.mid_range = CAR_MID
+		traffic.far_range = CAR_FAR
+		add_child(traffic)
+		traffic.setup(layout, car_meshes, car_far_meshes, traffic_density, car_mid_meshes)
+		for pole in traffic.signal_poles:
+			var p: Vector3 = (pole[1] as Transform3D).origin
+			var key := CityLayout.chunk_of(Vector2(p.x, p.z))
+			if not _props_by_chunk.has(key):
+				_props_by_chunk[key] = []
+			_props_by_chunk[key].append(pole)
 	var land := layout.island.grow(130.0)  # (the shore apron reaches past the coast)
 	var kx := Vector2i(floori(land.position.x / CHUNK) - 1, ceili(land.end.x / CHUNK))
 	var kz := Vector2i(floori(land.position.y / CHUNK), ceili(land.end.y / CHUNK))
@@ -245,14 +265,6 @@ func _ready() -> void:
 		ads.name = "Ads"
 		add_child(ads)
 		ads.build(layout)
-	if traffic_density > 0.0 and not car_meshes.is_empty():
-		traffic = Traffic.new()
-		traffic.name = "Traffic"
-		traffic.near_range = CAR_NEAR
-		traffic.mid_range = CAR_MID
-		traffic.far_range = CAR_FAR
-		add_child(traffic)
-		traffic.setup(layout, car_meshes, car_far_meshes, traffic_density, car_mid_meshes)
 	trains = Trains.new()
 	trains.name = "Trains"
 	add_child(trains)
@@ -1758,6 +1770,9 @@ func _bake_street_maps() -> void:
 
 # ------------------------------------------------------------- streaming
 func _process(dt: float) -> void:
+	if not secondary:
+		Traffic.signal_time = fposmod(Traffic.signal_time + dt, Traffic.SIGNAL_CYCLE)
+		RenderingServer.global_shader_parameter_set(&"signal_time", Traffic.signal_time)
 	if viewer == null:
 		return
 	var p := viewer.global_position
@@ -2099,44 +2114,48 @@ const TREE_CELL := 12.0
 const TREE_SCALE := 1.45
 
 
-static func _tree_rank(o: Vector3) -> int:
-	return hash(Vector2i(roundi(o.x * 4.0), roundi(o.z * 4.0)))
+static func _tree_position_key(p: Vector3) -> Vector2i:
+	return Vector2i(roundi(p.x * 4.0), roundi(p.z * 4.0))
+
+
+static func _tree_cell(p: Vector3) -> Vector2i:
+	return Vector2i(floori(p.x / TREE_CELL), floori(p.z / TREE_CELL))
 
 
 func chunk_props(key: Vector2i) -> Array:
 	var out: Array = []
 	var i := 0
-	# The tree that holds each cell in this chunk.
+	var verge_keep := 2 if prop_density >= 0.75 else 1
+	# A planted tree reserves its cell. Otherwise pick one verge tree per cell.
 	var holder := {}
 	for p in _props_by_chunk.get(key, []):
 		if p[0] == "tree" or p[0] == "tree_tall":
 			var o: Vector3 = (p[1] as Transform3D).origin
-			var cell := Vector2i(floori(o.x / TREE_CELL), floori(o.z / TREE_CELL))
-			var r := _tree_rank(o)
-			if not holder.has(cell) or r < int(holder[cell]):
-				holder[cell] = r
+			var cell := _tree_cell(o)
+			var spot := _tree_position_key(o)
+			var rank := -1 if _planter_spots.has(spot) else hash(spot)
+			if not holder.has(cell) or rank < holder[cell]:
+				holder[cell] = rank
 	for p in _props_by_chunk.get(key, []):
 		i += 1
-		if prop_density < 1.0 and p[0] in ["streetlight", "tree", "ac_unit", "traffic_light"] \
-				and fmod(i * 0.618, 1.0) > prop_density:
-			var o: Vector3 = (p[1] as Transform3D).origin
-			if not (p[0] == "tree" and _planter_spots.has(Vector2i(roundi(o.x * 4.0), roundi(o.z * 4.0)))):
-				continue
 		var kind: String = p[0]
 		var xf: Transform3D = p[1]
+		var thinned := prop_density < 1.0 and fmod(i * 0.618, 1.0) > prop_density
 		if kind == "tree" or kind == "tree_tall":
-			var to := xf.origin
-			var planted := _planter_spots.has(Vector2i(roundi(to.x * 4.0), roundi(to.z * 4.0)))
-			if not planted and int(holder.get(Vector2i(floori(to.x / TREE_CELL), floori(to.z / TREE_CELL)), -1)) != _tree_rank(to):
-				continue
-			# A TreeKit species (mostly one per street), its own height,
-			# width, lean and turn (looks only: positions don't change).
-			if hash(Vector3i(roundi(to.x * 4.0), roundi(to.z * 4.0), 43)) % 3 != 0:
-				continue
-			var vary := 0.88 + 0.24 * float(_tree_rank(to) % 1000) / 1000.0
+			var spot := _tree_position_key(xf.origin)
+			var planted := _planter_spots.has(spot)
+			var rank := hash(spot)
+			if not planted:
+				if (thinned and kind == "tree") or holder[_tree_cell(xf.origin)] != rank:
+					continue
+				if hash(Vector3i(spot.x, spot.y, 43)) % 3 >= verge_keep:
+					continue
+			var vary := 0.88 + 0.24 * float(rank % 1000) / 1000.0
 			var sc := xf.basis.get_scale().y * (1.15 if planted else TREE_SCALE * vary)
 			kind = "tree_" + TreeKit.pick(xf.origin)
 			xf.basis = TreeKit.shape(xf.origin, sc)
+		elif thinned and kind in ["streetlight", "ac_unit"]:
+			continue
 		if not broken.is_empty() and broken.has(item_key(xf.origin)):
 			continue
 		out.append([kind, xf])
@@ -2197,7 +2216,10 @@ func _add_props(root: Node3D, key: Vector2i, pools: Variant = null) -> void:
 			continue
 		var list: Array = by_kind[kind]
 		if kind.begins_with("tree_"):
-			TreeKit.instance_batch(root, kind.trim_prefix("tree_"), list, 320.0)
+			var trees := Node3D.new()
+			trees.name = "Props_" + kind
+			root.add_child(trees)
+			TreeKit.instance_batch(trees, kind.trim_prefix("tree_"), list, 320.0)
 			continue
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -2246,11 +2268,7 @@ func _add_signal_glow(root: Node3D, lights: Array) -> void:
 		mm.instance_count = n
 		var i := 0
 		for xf: Transform3D in lights:
-			var o := xf.origin
-			var junction := Vector2i(roundi(o.x / 30.0), roundi(o.z / 30.0))
-			var face := xf.basis.z
-			var axis := 0.5 if absf(face.x) > absf(face.z) else 0.0
-			var off := fmod(float(absi(hash(junction)) % 1000) / 1000.0 + axis, 1.0)
+			var off := float(traffic.signal_phases.get(xf.origin, Traffic.signal_offset(xf))) if traffic else Traffic.signal_offset(xf)
 			for hx in SIGNAL_HEADS:
 				for a in 3:
 					var local := Transform3D(Basis(), Vector3(hx, SIGNAL_Y[a], -0.135 if which == 0 else -0.2))
@@ -2625,16 +2643,19 @@ func _add_occluder(root: Node3D, key: Vector2i) -> void:
 		var x1: float = t[2] - 0.5
 		var z1: float = t[3] - 0.5
 		var y1: float = t[5] - 0.5
-		if b.has("apt"):
+		var y0: float = t[4] + 0.5
+		if b.has("street_use"):
+			# Preserve the tower occluder above the accessible ground floor.
+			y0 = maxf(y0, float(b["apt"]["y1"]) + 0.5)
+		elif b.has("apt"):
 			# A home is cut into this tower: an occluder round the room would
 			# hide the whole city from inside it (the view is the point), so
 			# it stops below the room's floor.
 			y1 = minf(y1, float(b["apt"]["y0"]) - 0.5)
-			if y1 - t[4] < 20.0:
-				continue
+		if y1 - y0 < 19.0:
+			continue
 		var base := v.size()
 		var X := CityLayout.bxf(b)
-		var y0 := float(t[4]) + 0.5
 		for q: Vector3 in [Vector3(x0, y0, z0), Vector3(x1, y0, z0), Vector3(x1, y0, z1), Vector3(x0, y0, z1),
 				Vector3(x0, y1, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1), Vector3(x0, y1, z1)]:
 			v.append(X * q)

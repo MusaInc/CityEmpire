@@ -4,7 +4,9 @@ shader_type spatial;
 // UV2, the colour/strength in COLOR and the way the lamp points in NORMAL.
 // Billboarded here; only shows in the dark (global `night`), and fades
 // when seen from behind the lamp. No CPU cost per frame.
-render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled, skip_vertex_transform;
+// Fog would add its own colour to the entire billboard, including the
+// black pixels that should contribute nothing to this additive pass.
+render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled, skip_vertex_transform, fog_disabled;
 
 uniform float size = 1.0;
 global uniform float night;

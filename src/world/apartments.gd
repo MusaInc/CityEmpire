@@ -70,6 +70,7 @@ static func place(layout: CityLayout) -> Apartments:
 		b["apt"] = facade_home
 		b.erase("_features")  # (re-derived clear of the window)
 		A.homes.append(best)
+	A._layout = null
 	return A
 
 

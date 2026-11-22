@@ -30,11 +30,15 @@ const IRON_GREEN := Color(0.2, 0.33, 0.28)
 const CONTAINER_COLORS := [Color(0.72, 0.18, 0.12), Color(0.12, 0.32, 0.55), Color(0.85, 0.6, 0.12),
 	Color(0.2, 0.45, 0.3), Color(0.82, 0.82, 0.8), Color(0.45, 0.22, 0.4), Color(0.9, 0.4, 0.12)]
 
-var L: CityLayout
+# CityLayout owns this helper. A strong reference back would keep both alive.
+var _layout_ref: WeakRef
+var L: CityLayout:
+	get:
+		return _layout_ref.get_ref() as CityLayout
 
 
 func _init(layout: CityLayout) -> void:
-	L = layout
+	_layout_ref = weakref(layout)
 
 
 ## Where each set piece stands (axis-aligned, world): the road network keeps

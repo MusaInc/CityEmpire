@@ -62,6 +62,7 @@ func test_airport_roads_and_buildings(t) -> void:
 				if Vector2(point.x - mid.x, point.z - mid.z).length() < 30.0:
 					crossed = true
 			t.check(crossed, "%s route uses its actual span" % bridge["name"])
+	gps.free()
 	var signatures := {}
 	for road: Array in p["roads"]:
 		var pts: PackedVector3Array = road[1]
@@ -77,3 +78,12 @@ func test_airport_roads_and_buildings(t) -> void:
 			var b: Array = p["buildings"][j]["tiers"][0]
 			t.check(not rect.intersects(Rect2(Vector2(b[0], b[1]), Vector2(b[2] - b[0], b[3] - b[1]))), "buildings %d and %d do not overlap" % [i, j])
 	SkyportIsland.enabled = was
+
+
+func test_generated_layout_releases_both_islands(t) -> void:
+	var layout := CityLayout.new().generate(1)
+	var island: WeakRef = weakref(layout)
+	var westbank: WeakRef = weakref(layout.mainland)
+	layout = null
+	t.check(island.get_ref() == null and westbank.get_ref() == null,
+		"generated layouts release their road, architecture and property helpers")

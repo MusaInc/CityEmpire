@@ -1099,6 +1099,9 @@ func _span_clear(grid: Dictionary, a: Vector2, b: Vector2, y: float, h: float, w
 ## Two lanes on every road (one each way, 3.2 m off the centre line), four
 ## on the boulevards; simplified into straight segments for the GPU traffic.
 ## Traffic lights where side streets meet the road they end on.
+var signal_centres := {}  # original pole position -> side street endpoint
+
+
 func _traffic() -> void:
 	for r in roads.roads:
 		var pts := CityRoads._simplify(r["pts"], 0.8)
@@ -1130,6 +1133,7 @@ func _traffic() -> void:
 			at.y = ground_y(p.x, p.y)
 			if block_at(p.x, p.y) >= 0 and blocks[block_at(p.x, p.y)]["kind"] in ["block", "plaza"]:
 				props.append(["traffic_light", Transform3D(Basis(Vector3.UP, yaw), at)])
+				signal_centres[at] = Vector3(end.x, ground_y(end.x, end.y), end.y)
 
 
 ## A polyline shifted sideways by `o` (+ = right of travel), mitred.

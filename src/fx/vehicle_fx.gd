@@ -2,7 +2,7 @@ class_name VehicleFx
 extends Node3D
 ## All vehicle effects, pooled and drawn in a handful of MultiMeshes (so 30
 ## cars cost the same draw calls as one):
-##   smoke    tyre smoke from sliding wheels; engine smoke from damaged cars
+##   smoke    tyre smoke, engine smoke and spray from wet roads
 ##   sparks   impacts, metal scraping walls, rims on shredded tyres
 ##   fire     a badly damaged engine (health < 20 %)
 ##   skids    dark tyre marks laid on the road (ring buffer)
@@ -129,6 +129,8 @@ var _debris: Array = []        # [RigidBody3D, age]
 var _debris_mesh: BoxMesh
 var _t := 0.0
 var _rng := RandomNumberGenerator.new()
+var _spray_rng := RandomNumberGenerator.new()
+var _spray_interval := 0.0
 
 
 func _ready() -> void:
@@ -220,6 +222,55 @@ func _process(dt: float) -> void:
 		else:
 			keep.append(d)
 	_debris = keep
+
+
+## Reuse the smoke batch for short, cool-coloured tyre mist. The caller
+## supplies a paved-surface check because suspension also hits grass,
+## roofs and the seabed.
+func wet_tyre_spray(c: Car, wetness: float, dt: float, paved_at: Callable) -> void:
+	var velocity := c.linear_velocity.slide(Vector3.UP)
+	var strength := smoothstep(0.18, 0.83, wetness) * smoothstep(5.0, 24.0, velocity.length())
+	if strength < 0.025 or c.in_water or c.wheels_on_ground < 1 or c.global_basis.y.y < 0.55:
+		_spray_interval = 0.0
+		return
+	var frame_time := minf(dt, 0.10)
+	_spray_interval -= frame_time
+	if _spray_interval > 0.0:
+		return
+	var interval := lerpf(0.115, 0.033, strength)
+	var lag := minf(-_spray_interval, frame_time)
+	var bursts := mini(3, floori(lag / interval) + 1)
+	_spray_interval = maxf(interval * bursts - lag, 0.0)
+	var reversing := c.global_basis.z.dot(velocity) > 0.0
+	var axle := 0 if reversing else 2
+	for side in 2:
+		var wheel := axle + side
+		if not c.wheel_contact(wheel):
+			continue
+		var contact := c.wheel_contact_point(wheel)
+		if contact.distance_squared_to(c.global_position) > 36.0 or not paved_at.call(contact):
+			continue
+		var outward := c.global_basis.x * (-1.0 if side == 0 else 1.0)
+		for burst in bursts:
+			# Spread low-frame-rate emissions along the wheel's travel
+			# instead of stacking several quads at the latest contact.
+			var offset := lag - float(burst) * interval
+			_emit_tyre_spray(contact - velocity * offset, velocity, outward, strength)
+
+
+func _emit_tyre_spray(contact: Vector3, velocity: Vector3, outward: Vector3, strength: float) -> void:
+	var at := contact + outward * 0.10 + Vector3.UP * 0.10
+	var drift := velocity * 0.63 + outward * _spray_rng.randf_range(0.36, 0.96)
+	drift.y = _spray_rng.randf_range(0.49, 1.01) * (0.73 + 0.27 * strength)
+	var mist := Color(0.64, 0.71, 0.75, lerpf(0.16, 0.44, strength))
+	smoke.emit(at, drift, _spray_rng.randf_range(0.34, 0.56), 0.23,
+		_spray_rng.randf_range(0.64, 0.92) * (0.75 + 0.25 * strength), mist)
+	if strength > 0.4:
+		# A shorter, tighter stream at the edge of the main plume.
+		var drops := drift * 0.74 + outward * 0.38
+		drops.y *= 0.59
+		smoke.emit(at + outward * 0.09, drops, 0.25, 0.10, 0.22,
+			Color(0.74, 0.80, 0.82, 0.4 * strength))
 
 
 func _car_fx(c: Car, dt: float) -> void:

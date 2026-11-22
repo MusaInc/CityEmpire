@@ -25,7 +25,10 @@ const BRIDGE_RED := Color(0.66, 0.17, 0.12)
 ## Shop awnings at street level (brand-friendly, slightly muted).
 const AWNING_COLORS := [Color(0.72, 0.16, 0.14), Color(0.13, 0.36, 0.3), Color(0.15, 0.22, 0.42),
 	Color(0.85, 0.62, 0.18), Color(0.86, 0.82, 0.72), Color(0.42, 0.18, 0.36)]
-const LEDGE_EVERY := 14.4   # m: a stone ledge every four floors on masonry facades
+# Match the face grid in building.gdshader. Storey boundaries are used
+# for real slabs, fire escapes and façade trims.
+const FACADE_BAYS := [Vector2(3.0, 3.6), Vector2(3.2, 3.0), Vector2(1.6, 3.8),
+	Vector2(4.0, 4.4), Vector2(2.6, 3.6), Vector2(3.6, 4.2), Vector2(1.5, 3.7), Vector2(2.2, 3.6)]
 const KERB := 0.15        # m: pavement blocks stand this far above the road
 const PARAPET := 0.3       # m: roof-edge lip; under Player.STEP_MAX, so a run steps onto it
 const PARAPET_T := 0.3     # m: its thickness
@@ -364,10 +367,14 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 		var y1: float = t[5]
 		var apt: Dictionary = b.get("apt", {})
 		var has_apt := not apt.is_empty() and int(apt["t"]) == i
-		if has_apt:
-			walls(x0, z0, x1, z1, y0, y1, col, wall_kind, style, seed, y0 - base, apt)
-		else:
-			walls(x0, z0, x1, z1, y0, y1, col, wall_kind, style, seed, y0 - base)
+		var street_front := i == 0 and b.has("street_use")
+		var shell_style := style
+		if i == 0 and apt.get("ground", false):
+			shell_style += 60.0 if apt.get("flagship", false) else 20.0
+		var opening := apt if has_apt and (detailed or not street_front) else {}
+		_facade_tier(t, col, wall_kind, shell_style, seed, base, opening)
+		if street_front and detailed:
+			_street_front_proxy(t, apt, col, seed)
 		if b["kind"] == "bridge" or _overhangs(tiers, i) or not _on_ground(b, t) and i == 0:
 			# Underside: sky bridges, cantilevered tiers, towers' first tier
 			# (hidden on their podium, but they never show a hole).
@@ -384,17 +391,83 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 					_ledges(x0, z0, x1, z1, y0, y1, trim, style, seed, base)
 			# Ground-floor plinth band on the base tier.
 			if _has_plinth(b, i):
-				var po := PLINTH_OUT
-				var ph := base + PLINTH_H
-				walls(x0 - po, z0 - po, x1 + po, z1 + po, base, ph, col.darkened(0.3), KIND_TRIM, style, seed)
-				top(x0 - po, z0 - po, x1 + po, z0, ph, col.darkened(0.3), KIND_TRIM, style, seed)
-				top(x0 - po, z1, x1 + po, z1 + po, ph, col.darkened(0.3), KIND_TRIM, style, seed)
-				top(x0 - po, z0, x0, z1, ph, col.darkened(0.3), KIND_TRIM, style, seed)
-				top(x1, z0, x1 + po, z1, ph, col.darkened(0.3), KIND_TRIM, style, seed)
+				var plinth_color := col.darkened(0.3)
+				for section in _plinth_sections(b):
+					var p := section.position
+					var e := section.end
+					walls(p.x, p.z, e.x, e.z, p.y, e.y, plinth_color, KIND_TRIM, style, seed)
+					top(p.x, p.z, e.x, e.z, e.y, plinth_color, KIND_TRIM, style, seed)
 				for aw in awning_runs(b):
 					_awning(aw[0], aw[1], aw[2], aw[3], (aw[3] as Color).darkened(0.15))
 		else:
 			roof_top(x0, z0, x1, z1, y1, roof, seed, style)
+
+
+static func _facade_seed(seed: float) -> float:
+	return floorf(clampf(seed, 0.0, 0.999999) * 256.0) / 256.0
+
+
+static func facade_storey(style: int, seed: float) -> float:
+	var bay: Vector2 = FACADE_BAYS[style]
+	return bay.y * lerpf(0.94, 1.1, fposmod(_facade_seed(seed) * 13.71 + 0.43, 1.0))
+
+
+## x = corner clearance, y = fitted pitch, z = number of whole bays.
+static func facade_bays(style: int, width: float, seed: float) -> Vector3:
+	var q := _facade_seed(seed)
+	var bay: Vector2 = FACADE_BAYS[style]
+	var glazed := style in [CityLayout.Style.GLASS, CityLayout.Style.DARK_GLASS]
+	# The shader reads width in quarter metres. Fit the same count in
+	# those units, then convert the joints back to mesh-space metres.
+	var packed_width := maxf(floorf(width * 4.0) * 0.25, 0.25)
+	var stretch := width / packed_width
+	var corner := minf(packed_width * 0.16, 0.36 if glazed else 0.85)
+	var span := packed_width - 2.0 * corner
+	var h1 := fposmod(q * 7.13 + 0.17, 1.0)
+	var desired := bay.x * (lerpf(0.9, 2.1, h1) if glazed else lerpf(0.82, 1.32, h1))
+	if style == CityLayout.Style.BRICK and fposmod(q * 41.93 + 0.29, 1.0) < 0.3:
+		desired *= 1.45
+	var count := maxi(1, floori(span / desired + 0.5))
+	return Vector3(corner * stretch, span * stretch / count, float(count))
+
+
+static func _window_band(y0: float, y1: float, base: float, style: int, seed: float) -> Vector2:
+	var storey := facade_storey(style, seed)
+	var low := y0
+	var high := y1
+	# A tier that starts or ends partway through a floor gets an opaque
+	# base or cornice belt where a pane would otherwise be cut in half.
+	if y0 > base + 0.1 and fposmod(y0 - base, storey) > storey * 0.12:
+		low = minf(y1, base + ceilf((y0 - base) / storey) * storey)
+	var last := base + floorf((y1 - base) / storey) * storey
+	if y1 - last < storey * 0.94:
+		high = maxf(low, last)
+	return Vector2(low, high)
+
+
+func _facade_tier(t: Array, col: Color, kind: float, style: float, seed: float, base: float, opening: Dictionary) -> void:
+	var span := _window_band(t[4], t[5], base, int(style) % 20, seed)
+	var solid_style := fposmod(style, 20.0) + 40.0
+	if span.x > float(t[4]) + 0.001:
+		walls(t[0], t[1], t[2], t[3], t[4], span.x, col, kind, solid_style, seed, float(t[4]) - base, opening)
+	if span.y > span.x + 0.001:
+		walls(t[0], t[1], t[2], t[3], span.x, span.y, col, kind, style, seed, span.x - base, opening)
+	if float(t[5]) > span.y + 0.001:
+		walls(t[0], t[1], t[2], t[3], span.y, t[5], col, kind, solid_style, seed, span.y - base, opening)
+
+
+func _street_front_proxy(t: Array, opening: Dictionary, col: Color, seed: float) -> void:
+	var face := _face(t, int(opening["face"]))
+	var left := float(opening["oa0"]) + 0.07
+	var right := float(opening["oa1"]) - 0.07
+	var lo := float(opening["oy0"]) + 0.025
+	var hi := float(opening["oy1"]) - 0.045
+	var u := right - left
+	var h := hi - lo
+	quad(_fpt(face, left, -0.035, hi), _fpt(face, right, -0.035, hi),
+		_fpt(face, right, -0.035, lo), _fpt(face, left, -0.035, lo), face[2],
+		Vector2(0.0, h), Vector2(u, h), Vector2(u, 0.0), Vector2.ZERO, col, KIND_GLASS, 30.5, seed)
+
 
 
 ## Architectural features (features()) as their own mesh: CityWorld draws it
@@ -525,6 +598,26 @@ static func _has_plinth(b: Dictionary, tier: int) -> bool:
 	return tier == 0 and _on_ground(b, b["tiers"][0]) and not _glassy(b) and b["kind"] != "bridge"
 
 
+static func _plinth_sections(b: Dictionary) -> Array[AABB]:
+	var tier: Array = b["tiers"][0]
+	var base := base_of(b)
+	var sections: Array[AABB] = []
+	var clear_entrances := int(b["style"]) != CityLayout.Style.WAREHOUSE and not ground_shops(b)
+	for side in 4:
+		var face := _face(tier, side)
+		var length: float = face[3]
+		var corner := PLINTH_OUT if side % 2 == 0 else 0.0
+		if clear_entrances and length > 7.25:
+			# Leave the face-centred doorway (building.gdshader) visible
+			# all the way to its threshold.
+			var middle := length * 0.5
+			var half_gap := 0.91
+			sections.append(_fbox(face, -corner, middle - half_gap, 0.0, PLINTH_OUT, base, base + PLINTH_H))
+			sections.append(_fbox(face, middle + half_gap, length + corner, 0.0, PLINTH_OUT, base, base + PLINTH_H))
+		else:
+			sections.append(_fbox(face, -corner, length + corner, 0.0, PLINTH_OUT, base, base + PLINTH_H))
+	return sections
+
 ## Height of the walkable roof of the top tier as drawn in the detailed LOD
 ## (props stand on it, collision matches it).
 static func roof_y(b: Dictionary) -> float:
@@ -610,8 +703,7 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 		if kind != "bridge":
 			_ring(out, t[0] - o, t[1] - o, t[2] + o, t[3] + o, y1 + ch * 0.5, y1 + ch * 0.5 + PARAPET, PARAPET_T)
 		if _has_plinth(b, i):
-			out.append(_aabb(t[0] - PLINTH_OUT, t[1] - PLINTH_OUT, t[2] + PLINTH_OUT, t[3] + PLINTH_OUT, base_of(b),
-				base_of(b) + PLINTH_H))
+			out.append_array(_plinth_sections(b))
 	for aw in awning_runs(b):
 		var a: Vector3 = aw[0]
 		var e: Vector3 = aw[1]
@@ -720,7 +812,7 @@ static func _features(b: Dictionary) -> Dictionary:
 		var first := rng.randi() % 4
 		for i in n:
 			var k := (first + i * 2) % 4
-			_fire_escape(out, _face(t0, k), style, h0, iron, rng, base)
+			_fire_escape(out, _face(t0, k), style, float(b["seed"]), h0, iron, rng, base)
 	# Balconies on blocks of flats: stacks in front of every other window
 	# bay up the longest face (and its opposite if long), slab + railing,
 	# from the first floor over the shops to below the cornice.
@@ -753,13 +845,11 @@ static func _features(b: Dictionary) -> Dictionary:
 			var y1: float = float(t[5]) - cornice_h(b) * 0.5
 			for k in 4:
 				var f := _face(t, k)
-				var L: float = f[3]
-				var u0: float = f[4]
-				var m := ceili((u0 + 0.9) / 3.2)
-				while m * 3.2 - u0 < L - 0.9:
-					var a := m * 3.2 - u0
-					out["draw"].append([_fbox(f, a - 0.07, a + 0.07, 0.0, FIN_OUT, y0, y1), fin_col, f[2]])
-					m += 1
+				var grid := facade_bays(style, float(f[3]), float(b["seed"]))
+				for bay in range(1, int(grid.z), 3):
+					var a := grid.x + float(bay) * grid.y
+					var half_width := grid.y * 0.019
+					out["draw"].append([_fbox(f, a - half_width, a + half_width, 0.0, FIN_OUT, y0, y1), fin_col, f[2]])
 			out["col"].append(_aabb(t[0] - FIN_OUT, t[1] - FIN_OUT, t[2] + FIN_OUT, t[3] + FIN_OUT, y0, y1))
 	var tt: Array = b["tiers"][-1]
 	var ry := roof_y(b) - crown_h(b)  # (the tier's own roof)
@@ -824,19 +914,17 @@ static func _features(b: Dictionary) -> Dictionary:
 	# Facade depth follows the architectural family: paired slender bronze
 	# blades on office towers; stone piers on tall masonry. Shared collision
 	# and opening filtering keep apartments and climbing geometry aligned.
-	if h0 > 85.0:
+	if h0 > 85.0 and style in [CityLayout.Style.STONE, CityLayout.Style.BRICK, CityLayout.Style.SANDSTONE, CityLayout.Style.DECO]:
 		for tier: Array in b["tiers"]:
 			for k in 4:
 				var face := _face(tier, k)
-				var length: float = face[3]
-				var count := maxi(2, int(length / 7.0))
-				for i in range(1, count):
-					var a := length * float(i) / count
-					var depth := 0.34 if _glassy(b) else 0.22
-					var width := 0.18 if _glassy(b) else 0.42
-					var rib := _fbox(face, a - width, a + width, -0.08, depth,
+				var grid := facade_bays(style, float(face[3]), float(b["seed"]))
+				for i in range(2, int(grid.z), 3):
+					var a := grid.x + grid.y * i
+					var width := minf(0.25, grid.y * 0.09)
+					var rib := _fbox(face, a - width, a + width, -0.08, 0.22,
 						float(tier[4]) + 1.2, float(tier[5]) - 0.8)
-					out["draw"].append([rib, Color(0.32, 0.29, 0.23) if _glassy(b) else trim])
+					out["draw"].append([rib, trim])
 					out["col_human"].append(rib)
 	return out
 
@@ -848,7 +936,7 @@ static func _features(b: Dictionary) -> Dictionary:
 ## (low planters inside the parapet, trees, a pergola) – all kept to the
 ## edges so the middle of the roof stays clear to land on.
 static func _roof_crowns(out: Dictionary, b: Dictionary, tt: Array, ry: float, style: int, trim: Color) -> void:
-	if crown_h(b) > 0.0 or b.has("apt"):
+	if crown_h(b) > 0.0 or (b.has("apt") and not b.has("street_use")):
 		return
 	var crng := RandomNumberGenerator.new()
 	crng.seed = int(float(b["seed"]) * 2753.0 * 1000.0) ^ 0xc70
@@ -962,17 +1050,13 @@ static func _raise_into(out: Dictionary, part: Dictionary, dy: float) -> void:
 		out["col"].append(AABB(bx.position + up, bx.size))
 
 
-const BALCONY_CELLS := {CityLayout.Style.BRICK: Vector2(3.2, 3.0), CityLayout.Style.MODERN: Vector2(2.6, 3.6),
-	CityLayout.Style.SANDSTONE: Vector2(3.6, 4.2)}
-
-
 static func _balconies(out: Dictionary, b: Dictionary, t0: Array, style: int, h0: float, base: float,
 		rng: RandomNumberGenerator) -> void:
-	var cell: Vector2 = BALCONY_CELLS[style]
+	var storey := facade_storey(style, float(b["seed"]))
 	var depth := 1.25 if style == CityLayout.Style.MODERN else 1.05
 	var slab_c := Color(0.68, 0.67, 0.64) if style != CityLayout.Style.BRICK else Color(0.6, 0.58, 0.55)
 	var rail_c := Color(0.32, 0.38, 0.42) if style == CityLayout.Style.MODERN else Color(0.14, 0.15, 0.16)
-	var first_floor := ceilf(5.0 / cell.y)
+	var first_floor := ceili(5.0 / storey)
 	var top := h0 - cornice_h(b) - 1.4
 	var best := 0
 	for k in 4:
@@ -982,43 +1066,32 @@ static func _balconies(out: Dictionary, b: Dictionary, t0: Array, style: int, h0
 	if float(_face(t0, (best + 2) % 4)[3]) > 24.0 and rng.randf() < 0.6:
 		faces.append((best + 2) % 4)
 	var phase := rng.randi() % 2
-	var wb := cell.x * 0.86
 	for k in faces:
 		var f := _face(t0, k)
-		var L: float = f[3]
-		var u0: float = f[4]
-		var m := ceili(u0 / cell.x)
-		while m * cell.x - u0 < L:
-			var a := (m + 0.5) * cell.x - u0  # a window bay's centre on this face
-			if (m + phase) % 2 == 0 and a - wb * 0.5 > 1.2 and a + wb * 0.5 < L - 1.2:
-				var fl := first_floor
-				var y_first := -1.0
-				var y_last := -1.0
-				while fl * cell.y + 1.2 < top:
-					var y := base + fl * cell.y
-					out["draw"].append([_fbox(f, a - wb * 0.5, a + wb * 0.5, 0.0, depth, y - 0.16, y), slab_c])
-					out["draw"].append([_fbox(f, a - wb * 0.5, a + wb * 0.5, depth - 0.06, depth, y, y + 1.05), rail_c])
-					if y_first < 0.0:
-						y_first = y
-					y_last = y
-					fl += 1.0
-				if y_first > 0.0:
-					out["col_human"].append(_fbox(f, a - wb * 0.5, a + wb * 0.5, 0.0, depth, y_first - 0.16, y_last + 1.05))
-			m += 1
+		var grid := facade_bays(style, float(f[3]), float(b["seed"]))
+		var wb := grid.y * 0.77
+		for bay in range(phase, int(grid.z), 2):
+			var a := grid.x + (float(bay) + 0.5) * grid.y
+			for fl in range(first_floor, ceili(top / storey)):
+				var y := base + (float(fl) + 0.23) * storey - 0.10
+				if y + 1.05 > base + top:
+					break
+				out["draw"].append([_fbox(f, a - wb * 0.5, a + wb * 0.5, 0.0, depth, y - 0.16, y), slab_c])
+				out["draw"].append([_fbox(f, a - wb * 0.5, a + wb * 0.5, depth - 0.06, depth, y, y + 1.05), rail_c])
+				out["col_human"].append(_fbox(f, a - wb * 0.5, a + wb * 0.5, 0.0, depth, y - 0.16, y + 1.05))
 
-
-static func _fire_escape(out: Dictionary, f: Array, style: int, h: float, iron: Color,
+static func _fire_escape(out: Dictionary, f: Array, style: int, seed: float, h: float, iron: Color,
 		rng: RandomNumberGenerator, base := 0.0) -> void:
 	var L: float = f[3]
-	var u0: float = f[4]
 	if L < 12.0:
 		return
-	var col_w := 4.0 if style == CityLayout.Style.WAREHOUSE else 3.2
-	var floor_h := 4.4 if style == CityLayout.Style.WAREHOUSE else 3.0
-	var sill := 1.0 if style == CityLayout.Style.WAREHOUSE else 0.6
-	# Centred on a window-column boundary, so it spans two windows.
-	var c := roundf((u0 + rng.randf_range(4.0, L - 4.0)) / col_w) * col_w - u0
-	var hw := col_w + 0.2
+	var grid := facade_bays(style, L, seed)
+	var floor_h := facade_storey(style, seed)
+	var sill := 0.23 * floor_h - 0.10
+	# Centre the structure on a pier between two full window bays.
+	var bay := clampi(roundi((rng.randf_range(4.0, L - 4.0) - grid.x) / grid.y), 1, int(grid.z) - 1)
+	var c := grid.x + float(bay) * grid.y
+	var hw := grid.y - 0.18
 	if c - hw < 1.2 or c + hw > L - 1.2:
 		return
 	var d := ESCAPE_DEPTH
@@ -1152,13 +1225,14 @@ func _parapet(x0: float, z0: float, x1: float, z1: float, y: float, col: Color) 
 ## Projecting stone courses every few floors (relief the shader can't fake).
 func _ledges(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col: Color, style: float,
 		seed: float, base := 0.0) -> void:
-	var y := base + (floorf((y0 - base) / LEDGE_EVERY) + 1.0) * LEDGE_EVERY
+	var repeat_height := 4.0 * facade_storey(int(style), seed)
+	var y := base + (floorf((y0 - base) / repeat_height) + 1.0) * repeat_height
 	while y < y1 - 4.0:
 		var o := LEDGE_OUT
 		walls(x0 - o, z0 - o, x1 + o, z1 + o, y, y + 0.32, col, KIND_TRIM, style, seed)
 		bottom(x0 - o, z0 - o, x1 + o, z1 + o, y, col.darkened(0.25), KIND_TRIM, style, seed)
 		top(x0 - o, z0 - o, x1 + o, z1 + o, y + 0.32, col.lightened(0.1), KIND_TRIM, style, seed)
-		y += LEDGE_EVERY
+		y += repeat_height
 
 
 ## Does the building shader draw shopfronts along this building's ground
@@ -1177,41 +1251,36 @@ static func awning_runs(b: Dictionary) -> Array:
 			CityLayout.Style.STONE, CityLayout.Style.SANDSTONE, CityLayout.Style.DECO]:
 		return out_runs
 	var t: Array = b["tiers"][0]
-	var x0: float = t[0]
-	var z0: float = t[1]
-	var x1: float = t[2]
-	var z1: float = t[3]
-	var avoid: Array = []  # entrance portals take the ground floor where they stand
+	var y := base_of(b) + AWNING_Y
+	var avoid: Array[AABB] = []  # portals and projecting architectural details
 	for bx: AABB in features(b)["col"]:
-		if bx.position.y < base_of(b) + AWNING_Y + 1.0:
+		if bx.position.y < y + 2.0:
 			avoid.append(bx.grow(0.6))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(float(b["seed"]) * 1000003.0) ^ 0xa3
-	var out := AWNING_OUT
-	var y := base_of(b) + AWNING_Y
+	# Match the facade shader's six-metre shop bays. Skip partial bays
+	# at corners so canopies never end across a pilaster or turn a corner.
 	for side in 4:
-		var along_x := side % 2 == 0
-		var a := x0 if along_x else z0
-		var bb := x1 if along_x else z1
-		var d := a + 1.5
-		while d + 4.0 < bb - 1.5:
-			var w := rng.randf_range(3.5, 6.0)
-			if rng.randf() < 0.55 and d + w < bb - 1.5:
-				var col: Color = AWNING_COLORS[rng.randi() % AWNING_COLORS.size()]
-				var e := d + w
-				var span: AABB
-				match side:
-					0, 2: span = _aabb(d, (z0 if side == 0 else z1) - out, e, (z0 if side == 0 else z1) + out, y - 0.75, y + 0.75)
-					_: span = _aabb((x1 if side == 1 else x0) - out, d, (x1 if side == 1 else x0) + out, e, y - 0.75, y + 0.75)
-				if avoid.any(func(a2: AABB) -> bool: return a2.intersects(span)):
-					d += w + rng.randf_range(0.6, 2.5)
-					continue
-				match side:
-					0: out_runs.append([Vector3(d, y, z0), Vector3(e, y, z0), Vector3.FORWARD * out, col])
-					1: out_runs.append([Vector3(x1, y, d), Vector3(x1, y, e), Vector3.RIGHT * out, col])
-					2: out_runs.append([Vector3(e, y, z1), Vector3(d, y, z1), Vector3.BACK * out, col])
-					3: out_runs.append([Vector3(x0, y, e), Vector3(x0, y, d), Vector3.LEFT * out, col])
-			d += w + rng.randf_range(0.6, 2.5)
+		var face := _face(t, side)
+		var length: float = face[3]
+		var origin: float = face[4]
+		var first := ceili(origin / 6.0)
+		var last := floori((origin + length) / 6.0)
+		for bay in range(first, last):
+			var centre := bay * 6.0 + 3.0 - origin
+			if rng.randf() >= 0.43:
+				continue
+			var half_width := rng.randf_range(2.15, 2.52)
+			var span := _fbox(face, centre - half_width, centre + half_width, 0.0, AWNING_OUT, y - 0.38, y + 0.18)
+			if avoid.any(func(obstacle: AABB) -> bool: return obstacle.intersects(span)):
+				continue
+			var col: Color = AWNING_COLORS[rng.randi_range(0, AWNING_COLORS.size() - 1)]
+			out_runs.append([
+				_fpt(face, centre + half_width, 0.0, y),
+				_fpt(face, centre - half_width, 0.0, y),
+				(face[2] as Vector3) * AWNING_OUT,
+				col,
+			])
 	return out_runs
 
 
@@ -2432,7 +2501,13 @@ func _add_shaped(b: Dictionary, detailed: bool, style: float, seed: float, col: 
 		var y0: float = t[4]
 		var y1: float = t[5]
 		var fp := footprint(b, t)
-		walls_poly(fp, y0, y1, col, wall_kind, style, seed, y0 - base)
+		var span := _window_band(y0, y1, base, int(style), seed)
+		if span.x > y0 + 0.001:
+			walls_poly(fp, y0, span.x, col, wall_kind, style + 40.0, seed, y0 - base)
+		if span.y > span.x + 0.001:
+			walls_poly(fp, span.x, span.y, col, wall_kind, style, seed, span.x - base)
+		if y1 > span.y + 0.001:
+			walls_poly(fp, span.y, y1, col, wall_kind, style + 40.0, seed, span.y - base)
 		if _overhangs(tiers, i) or not _on_ground(b, t) and i == 0:
 			cap_poly(fp, y0, col.darkened(0.25), KIND_TRIM, style, seed, false)
 		if not detailed:
@@ -2451,13 +2526,14 @@ func _add_shaped(b: Dictionary, detailed: bool, style: float, seed: float, col: 
 		walls_poly(inner, ry, ry + PARAPET, trim.darkened(0.15), KIND_TRIM, 0, 0, -1.0, true)
 		ring_poly(co, inner, ry + PARAPET, trim)
 		if not glassy and not light:
-			var ly := base + (floorf((y0 - base) / LEDGE_EVERY) + 1.0) * LEDGE_EVERY
+			var repeat_height := 4.0 * facade_storey(int(style), seed)
+			var ly := base + (floorf((y0 - base) / repeat_height) + 1.0) * repeat_height
 			var lo := offset_poly(fp, LEDGE_OUT)
 			while ly < y1 - 4.0:
 				walls_poly(lo, ly, ly + 0.32, trim, KIND_TRIM, style, seed)
 				ring_poly(lo, fp, ly, trim.darkened(0.25), false)
 				ring_poly(lo, fp, ly + 0.32, trim.lightened(0.1))
-				ly += LEDGE_EVERY
+				ly += repeat_height
 		if _has_plinth(b, i):
 			var pp := offset_poly(fp, PLINTH_OUT)
 			walls_poly(pp, base, base + PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)

@@ -954,6 +954,31 @@ func _cart_add(pid: String, d: int) -> void:
 var _rent_type := "convenience"
 
 
+func open_public_checkout(room: ShopInterior) -> void:
+	if not is_instance_valid(room) or not room.public_display:
+		return
+	var v := _open(String(room.unit["name"]), 830, 595)
+	var list := VBoxContainer.new()
+	var e := game.empire
+	var products := room.biz.stocked_products()
+	products.sort_custom(func(a, b): return String(EmpireData.product(a)["name"]) < String(EmpireData.product(b)["name"]))
+	for pid: String in products:
+		var item := EmpireData.product(pid)
+		var cost := room.biz.price(pid)
+		var button := S.button("BUY · %s" % EmpireData.money(cost, true), func():
+			var err := e.buy_retail(String(room.unit["name"]), pid, cost)
+			if not err.is_empty():
+				toast(err, "warn")
+				return
+			Sfx.play("cash", -5.0)
+			toast("Bought %s" % item["name"], "good")
+			open_public_checkout(room), true, 173)
+		list.add_child(_row([_fixed(String(item["name"]), 450, 17), button]))
+	v.add_child(_scroll(list, 400))
+	if room.unit.get("flagship", false):
+		v.add_child(S.button("Premises and business ownership", func(): open_property(room.unit), false, 325))
+
+
 ## A shop unit to let. `remote`: inspected from the phone – renting or
 ## buying then goes through the letting agent (a stated fee); at the
 ## door it's free.
@@ -973,7 +998,7 @@ func open_property(u: Dictionary, remote := false) -> void:
 			["Shoppers", "%s · about %d an hour at peak" % [_level(float(d.get("footfall", 8)), [7, 11, 16]), int(float(d.get("footfall", 8)) * 1.4)]],
 			["Spending", _level(float(d.get("affluence", 1.0)), [0.95, 1.08, 1.2])],
 			["They buy", _top_mix(d)],
-			["Island", "Commercial Island" if u["island"] == "east" else "Westbank (industrial & residential)"]]:
+			["Island", {"east": "Commercial Island", "west": "Westbank", "skyport": "Skyport Island"}.get(u["island"], "")]]:
 		g.add_child(S.label(pair[0], 17, S.MUTED))
 		g.add_child(S.label(pair[1], 18, S.PAPER, "bold"))
 	v.add_child(g)
@@ -1214,6 +1239,8 @@ func _m_overview(v: VBoxContainer, b: Business) -> void:
 		b.open = not b.open
 		game._refresh_signs(b.premises["id"])
 		open_manage(b, "overview")))
+	var hours := b.hours()
+	h.add_child(S.button("%02d:00–%02d:00" % [int(hours.x), int(hours.y)], func(): _manage_hours(b)))
 	if not b.owned:
 		h.add_child(S.button("Buy the freehold · %s" % EmpireData.money(float(b.premises.get("price", 0))), func():
 			if e.buy_premises(b.premises) == null:
@@ -1222,6 +1249,47 @@ func _m_overview(v: VBoxContainer, b: Business) -> void:
 	h.add_child(S.spacer())
 	h.add_child(S.button("Sell the shop" if b.owned else "End the lease", func(): _confirm_close(b), false, 200))
 	v.add_child(h)
+
+
+func _manage_hours(b: Business) -> void:
+	var v := _open("Opening hours", 600, 350)
+	var row := S.hbox(12)
+	var start := SpinBox.new()
+	var finish := SpinBox.new()
+	var hours := b.hours()
+	for spec in [[start, "Open", 0, 23, hours.x], [finish, "Close", 1, 24, hours.y]]:
+		var field: SpinBox = spec[0]
+		field.min_value = spec[2]
+		field.max_value = spec[3]
+		field.value = spec[4]
+		field.suffix = ":00"
+		field.custom_minimum_size = Vector2(112, 48)
+		row.add_child(S.label(spec[1], 18, S.MUTED))
+		row.add_child(field)
+	v.add_child(row)
+	var estimate := Glass.para("", "callout")
+	v.add_child(estimate)
+	var apply := S.button("Save hours", func():
+		if b.set_hours(int(start.value), int(finish.value)):
+			game._refresh_signs(b.premises["id"])
+			game.save_game()
+			open_manage(b, "overview"), true)
+	var update := func(_value: float) -> void:
+		var length := finish.value - start.value
+		apply.disabled = length <= 0.0
+		estimate.text = "Estimated wages per day · %s" % EmpireData.money(length * b.wages_per_hour(), true) \
+			if length > 0.0 else "Closing time must be after opening time."
+	start.value_changed.connect(update)
+	finish.value_changed.connect(update)
+	update.call(0.0)
+	var actions := S.hbox(12)
+	actions.add_child(S.button("Use standard hours", func():
+		b.reset_hours()
+		game._refresh_signs(b.premises["id"])
+		game.save_game()
+		open_manage(b, "overview")))
+	actions.add_child(apply)
+	v.add_child(actions)
 
 
 ## Closing a business for good: what you'd get back, then confirm.
@@ -1739,11 +1807,8 @@ func legacy_tab(tab: String, v: VBoxContainer, focus := {}) -> void:
 			g.add_child(_stat("Stock value", EmpireData.money(e.stock_value())))
 			g.add_child(_stat("Net worth", EmpireData.money(e.net_worth()), S.GREEN))
 			v.add_child(g)
-			if e.day_reports.size() >= 2:
-				var chart := _NetChart.new()
-				chart.reports = e.day_reports
-				chart.custom_minimum_size = Vector2(940, 110)
-				v.add_child(chart)
+			var history := S.button("Financial history", _finance_history_panel, false, 210)
+			v.add_child(history)
 			# Fixed steps you can afford, and "all" (an odd balance like £650
 			# could only ever be moved in hundreds, the rest stuck).
 			var h := S.hbox(10)
@@ -2157,7 +2222,13 @@ func open_style(first := false) -> void:
 	_panel.add_child(v)
 	var head := S.hbox(10)
 	var shop := style_shop
-	head.add_child(S.label("Make your character" if first else ((Wardrobe.boutique_name if shop == "clothes_boutique" else String(Wardrobe.STORES[shop]["name"])) if shop != "" else "Your wardrobe"), 28, S.PAPER, "black"))
+	var title := "Your wardrobe"
+	if first:
+		title = "Make your character"
+	elif shop != "":
+		title = _style_store_name if not _style_store_name.is_empty() else (
+			Wardrobe.boutique_name if shop == "clothes_boutique" else String(Wardrobe.STORES[shop]["name"]))
+	head.add_child(S.label(title, 28, S.PAPER, "black"))
 	head.add_child(S.spacer())
 	if not first:
 		head.add_child(S.button("✕", _close_style, false, 52))
@@ -2279,6 +2350,7 @@ func open_style(first := false) -> void:
 ## The Style screen as a store (`style_shop` = a Wardrobe.STORES key) or
 ## your wardrobe. Look on entering a store (put back if you leave unpaid).
 var style_shop := ""
+var _style_store_name := ""
 var _style_entry := {}
 var _style_inner := 540.0  # usable width inside the Style panel
 
@@ -2312,8 +2384,9 @@ func _style_list(list: Array, first: bool) -> Array:
 	return out
 
 
-func open_store(store: String) -> void:
+func open_store(store: String, display_name := "") -> void:
 	style_shop = store
+	_style_store_name = display_name
 	_style_entry = HeroLook.current(game.empire.flags).duplicate()
 	_style_tab = "clothes"
 	_style_portrait = false
@@ -2415,6 +2488,7 @@ func _close_style() -> void:
 		e.flags["look"] = back
 		game.apply_hero_look()
 	style_shop = ""
+	_style_store_name = ""
 	game.save_game()
 	close_panel(true)
 
@@ -2475,6 +2549,60 @@ static func _short(x: float) -> String:
 	return str(int(x))
 
 
+func _finance_history_panel() -> void:
+	var v := _open("Financial history", 720, 440)
+	var chart_area := S.vbox(10)
+	var choices := [["Net worth", "net_worth"], ["Profit", "profit"], ["Cash flow", "cash_flow"],
+		["Assets", "assets"], ["Debt", "debt"]]
+	var refresh := func(key: String) -> void:
+		for child in chart_area.get_children():
+			chart_area.remove_child(child)
+			child.queue_free()
+		var values := game.empire.financial_history(key)
+		if values.is_empty():
+			chart_area.add_child(Glass.para("This chart fills in as days close.", "callout"))
+			return
+		var last := float(values[-1])
+		chart_area.add_child(Glass.text(EmpireData.money(last, true), "title2"))
+		chart_area.add_child(Glass.para("Latest close · %d daily %s" % [values.size(), "record" if values.size() == 1 else "records"], "footnote"))
+		if values.size() >= 2:
+			var chart := PhonePages.Chart.new(values, Vector2(0, 120))
+			if key == "debt":
+				chart.col = Glass.RED if last > float(values[0]) else Glass.GREEN
+			chart_area.add_child(chart)
+		if key == "cash_flow":
+			chart_area.add_child(Glass.para("Change in savings and company cash combined. Includes stock purchases, investments and borrowing.", "footnote"))
+	var picker := OptionButton.new()
+	picker.custom_minimum_size.y = 48
+	for choice in choices:
+		picker.add_item(choice[0])
+	picker.item_selected.connect(func(i: int): refresh.call(choices[i][1]))
+	v.add_child(picker)
+	v.add_child(chart_area)
+	refresh.call("net_worth")
+
+
+func _touch_settings_panel() -> void:
+	var v := _open("Touch controls", 650, 400)
+	for group in [
+		["Size", "touch_size", [["Small", 0.85], ["Standard", 1.0], ["Large", 1.12]]],
+		["Opacity", "touch_opacity", [["45%", 0.45], ["70%", 0.7], ["100%", 1.0]]],
+		["Position", "touch_inset", [["Near edges", 0.0], ["Further in", 24.0], ["Inward", 48.0]]],
+		["Steering response", "touch_steering", [["Gentle", 0.75], ["Standard", 1.0], ["Quick", 1.25]]],
+	]:
+		var key := String(group[1])
+		var row := S.hbox(10)
+		row.add_child(_fixed(group[0], 166, 18, S.MUTED))
+		for choice in group[2]:
+			var value := float(choice[1])
+			row.add_child(S.button(choice[0], func():
+				Settings.set(key, value)
+				Settings.save()
+				_touch_settings_panel(), is_equal_approx(Settings.get(key), value)))
+		v.add_child(row)
+	v.add_child(S.button("Back to Settings", _settings_panel, false, 190))
+
+
 func _settings_panel() -> void:
 	var v := _open("Settings", 680, 580)
 	var q := S.hbox(10)
@@ -2513,6 +2641,7 @@ func _settings_panel() -> void:
 			Settings.look_sensitivity = k
 			Settings.save()
 			_settings_panel(), is_equal_approx(Settings.look_sensitivity, k)))
+	s.add_child(S.button("Touch controls", _touch_settings_panel, false, 152))
 	v.add_child(s)
 	var hp := S.hbox(10)
 	hp.add_child(S.label("Vibration", 18, S.MUTED))
@@ -2755,48 +2884,6 @@ func victory() -> void:
 	v.add_child(g)
 	v.add_child(S.label("The city keeps running: play on as long as you like.", 16, S.MUTED))
 	v.add_child(S.button("KEEP PLAYING", close_panel.bind(true), true, 260))
-
-
-## Net worth over the last days (Bank tab).
-class _NetChart extends Control:
-	var reports: Array = []
-
-	func _draw() -> void:
-		var n := reports.size()
-		if n < 2:
-			return
-		var lo := INF
-		var hi := -INF
-		for r in reports:
-			lo = minf(lo, float(r.get("net_worth", 0.0)))
-			hi = maxf(hi, float(r.get("net_worth", 0.0)))
-		if hi - lo < 1.0:
-			hi = lo + 1.0
-		var w := size.x
-		var h := size.y
-		draw_rect(Rect2(Vector2.ZERO, size), Color(1, 1, 1, 0.04))
-		var pts := PackedVector2Array()
-		for i in n:
-			var x := 10.0 + (w - 20.0) * float(i) / float(n - 1)
-			var y := h - 18.0 - (h - 36.0) * (float(reports[i].get("net_worth", 0.0)) - lo) / (hi - lo)
-			pts.append(Vector2(x, y))
-		var fill := pts.duplicate()
-		fill.append(Vector2(pts[-1].x, h - 18.0))
-		fill.append(Vector2(pts[0].x, h - 18.0))
-		draw_colored_polygon(fill, Color("#39c27f", 0.14))
-		draw_polyline(pts, Color("#39c27f"), 2.5, true)
-		var f := ThemeDB.fallback_font
-		draw_string(f, Vector2(10, 14), "Net worth, last %d days: %s → %s" % [n, EmpireData.money(float(reports[0].get("net_worth", 0.0))),
-			EmpireData.money(float(reports[-1].get("net_worth", 0.0)))], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#9fb0ba"))
-		# Profit bars along the bottom.
-		var pm := 1.0
-		for r in reports:
-			pm = maxf(pm, absf(float(r.get("profit", 0.0))))
-		for i in n:
-			var p := float(reports[i].get("profit", 0.0))
-			var x2 := 10.0 + (w - 20.0) * float(i) / float(n - 1)
-			var bh := 12.0 * absf(p) / pm
-			draw_rect(Rect2(x2 - 2.0, h - 6.0 - (bh if p > 0 else 0.0), 4.0, maxf(bh, 1.0)), Color("#39c27f") if p >= 0 else Color("#ec5a4a"))
 
 
 # ================================================================ phone 2

@@ -499,6 +499,19 @@ func buy_wholesale(wholesaler: String, order: Dictionary, price_k := 1.0) -> Str
 	return ""
 
 
+## Buys a retail line and puts it directly into the player's hands.
+func buy_retail(store: String, pid: String, cost: float) -> String:
+	if not EmpireData.product_ids().has(pid) or cost <= 0.0:
+		return "This item is unavailable"
+	if carried.room_for(pid) < 1:
+		return "Your hands are full"
+	if not pay(cost, "stock", "%s · %s" % [store, EmpireData.product(pid)["name"]]):
+		return "Not enough money"
+	_receive(carried, pid, 1, cost)
+	changed.emit()
+	return ""
+
+
 ## Today's wholesale price of one case (deals and shortages from CityLife).
 func case_price(pid: String) -> float:
 	return float(EmpireData.product(pid).get("case_cost", 0.0)) * CityLife.price_k(self, pid) * hq_wholesale_k()
@@ -894,9 +907,7 @@ func service_vehicle(v: Dictionary) -> String:
 # --------------------------------------------------------------- loans
 func loan_limit() -> float:
 	var l: Dictionary = EmpireData.economy().get("loan", {})
-	var owed := 0.0
-	for x in loans:
-		owed += float(x["principal"])
+	var owed := loan_principal()
 	return maxf(maxf(float(l.get("min_offer", 1500)), net_worth() * float(l.get("max_factor", 0.8))) - owed, 0.0)
 
 
@@ -1037,14 +1048,18 @@ func end_day() -> void:
 		var od := -company_cash * 0.01
 		company_cash -= od
 		_book("company", -od, "interest", "Overdraft interest")
+		report["profit"] = float(report["profit"]) - od
 		_note("Company account overdrawn: %s. Move savings in or take a loan." % EmpireData.money(company_cash), "bad", {"kind": "tab", "id": "bank"})
 	if not businesses.is_empty() and float(report["profit"]) > 0.0:
 		stats["profitable_days"] = int(stats["profitable_days"]) + 1
 	stats["days"] = int(stats["days"]) + 1
 	if float(report["profit"]) > float(stats.get("best_day", 0.0)):
 		stats["best_day"] = float(report["profit"])
+	var assets := asset_value()
+	var liabilities := debt_value()
 	day_reports.append({"day": day, "revenue": report["revenue"], "profit": report["profit"],
-		"company": company_cash, "personal": personal_cash, "net_worth": net_worth()})
+		"company": company_cash, "personal": personal_cash, "net_worth": assets - liabilities,
+		"assets": assets, "debt": liabilities})
 	if day_reports.size() > 30:
 		day_reports = day_reports.slice(day_reports.size() - 30)
 	day += 1
@@ -1109,15 +1124,43 @@ func sell_vehicle(x: Dictionary) -> float:
 	return val
 
 
-func net_worth() -> float:
+func loan_principal() -> float:
 	var debt := 0.0
 	for l in loans:
 		debt += float(l["principal"])
+	return debt
+
+
+func debt_value() -> float:
+	return loan_principal() + maxf(-company_cash, 0.0) + maxf(-personal_cash, 0.0)
+
+
+func asset_value() -> float:
 	var props := 0.0
 	for q in properties:
 		props += float(q.get("price", 0.0))
-	return personal_cash + company_cash + stock_value() + premises_value() + vehicles_value() + props \
-		+ float(hq.get("paid", 0.0)) + Club.value(self) + Ventures.assets_value(self) - debt
+	return maxf(personal_cash, 0.0) + maxf(company_cash, 0.0) + stock_value() + premises_value() + vehicles_value() + props \
+		+ float(hq.get("paid", 0.0)) + Club.value(self) + Ventures.assets_value(self)
+
+
+func net_worth() -> float:
+	return asset_value() - debt_value()
+
+
+## Daily cash flow is the change in cash across both accounts. Money moved
+## between your own accounts cancels out. Legacy reports still contain balances.
+func financial_history(metric: String) -> Array:
+	var result := []
+	for i in day_reports.size():
+		var record: Dictionary = day_reports[i]
+		if metric == "cash_flow":
+			if i == 0:
+				continue
+			var prev: Dictionary = day_reports[i - 1]
+			result.append(float(record["company"]) + float(record["personal"]) - float(prev["company"]) - float(prev["personal"]))
+		elif record.has(metric):
+			result.append(float(record[metric]))
+	return result
 
 
 # -------------------------------------------------------------- career

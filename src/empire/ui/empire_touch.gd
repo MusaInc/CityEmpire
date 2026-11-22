@@ -67,7 +67,7 @@ func _safe() -> Rect2:
 ## controls (and thumb travel) back toward phone size there.
 func ui_k() -> float:
 	var vp := get_viewport_rect().size
-	return clampf(lerpf(1.0, 0.82, clampf((vp.x / maxf(vp.y, 1.0) - 2.0) / -0.6, 0.0, 1.0)), 0.8, 1.0)
+	return clampf(lerpf(1.0, 0.82, clampf((vp.x / maxf(vp.y, 1.0) - 2.0) / -0.6, 0.0, 1.0)), 0.8, 1.0) * Settings.touch_size
 
 
 func _driving() -> bool:
@@ -98,7 +98,7 @@ func profile() -> Dictionary:
 func pad_home() -> Vector2:
 	var s := _safe().end
 	var k := ui_k()
-	return s - Vector2(PAD_R + 58.0, PAD_R + 46.0) * k
+	return s - Vector2((PAD_R + 58.0) * k + Settings.touch_inset, (PAD_R + 46.0) * k)
 
 
 func _buttons() -> Dictionary:
@@ -164,7 +164,7 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventScreenDrag:
 		var d := event as InputEventScreenDrag
 		if d.index == _stick_id:
-			_stick_v = ((d.position - _stick_o) / R).limit_length(1.0)
+			_stick_v = ((d.position - _stick_o) / (R * Settings.touch_size)).limit_length(1.0)
 			_apply_stick()
 			queue_redraw()
 		elif d.index == _pad_id:
@@ -203,7 +203,7 @@ func _apply_stick() -> void:
 		Input.action_release(action)
 	var driving := _driving()
 	if ui.game and ui.game.drive_input:
-		ui.game.drive_input.touch_steer = v.x if driving else 0.0
+		ui.game.drive_input.touch_steer = clampf(v.x * Settings.touch_steering, -1.0, 1.0) if driving else 0.0
 		ui.game.drive_input.touch_active = _stick_id >= 0 or _pad_id >= 0
 	if driving or v.is_zero_approx():
 		return
@@ -285,6 +285,7 @@ func _process(_dt: float) -> void:
 	if not _driving() and (_pad_id >= 0 or _held.values().has("drift")):
 		release_all()
 	if visible:
+		self_modulate.a = Settings.touch_opacity
 		queue_redraw()
 
 
@@ -294,15 +295,16 @@ func _draw() -> void:
 	var f := EmpireStyle.font("black")
 	var k := ui_k()
 	var sr := _safe()
+	var radius := R * Settings.touch_size
 	if _stick_id >= 0:
-		draw_circle(_stick_o, R, Color(1, 1, 1, 0.08))
-		draw_arc(_stick_o, R, 0, TAU, 48, Color(1, 1, 1, 0.3), 2.0, true)
-		draw_circle(_stick_o + _stick_v * R, 30, Color(1, 1, 1, 0.45))
+		draw_circle(_stick_o, radius, Color(1, 1, 1, 0.08))
+		draw_arc(_stick_o, radius, 0, TAU, 48, Color(1, 1, 1, 0.3), 2.0, true)
+		draw_circle(_stick_o + _stick_v * radius, 30 * Settings.touch_size, Color(1, 1, 1, 0.45))
 	else:
-		var home := Vector2(sr.position.x + 150, sr.end.y - 150)
-		draw_arc(home, R, 0, TAU, 48, Color(1, 1, 1, 0.12), 2.0, true)
+		var home := Vector2(sr.position.x + 150 * Settings.touch_size + Settings.touch_inset, sr.end.y - 150 * Settings.touch_size)
+		draw_arc(home, radius, 0, TAU, 48, Color(1, 1, 1, 0.12), 2.0, true)
 		if _driving():
-			_label(f, home + Vector2(0, R + 22), "STEER", 13, Color(1, 1, 1, 0.4))
+			_label(f, home + Vector2(0, radius + 22), "STEER", 13, Color(1, 1, 1, 0.4))
 	if _driving():
 		_draw_pad(f, k)
 	var bs := _buttons()

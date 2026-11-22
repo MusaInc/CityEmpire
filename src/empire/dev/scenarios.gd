@@ -633,6 +633,8 @@ func scenario_xn() -> void:
 ## plans a road route from the city to the airport across it.
 func scenario_xd() -> void:
 	print("--- XD: Skyport bridges and GPS")
+	if game.ui.panel_open():
+		game.ui.close_panel(true)
 	var P: Dictionary = game.skyport.plan_data
 	var B: Dictionary = P["bridges"][0]
 	var L: float = B["L"]
@@ -1437,9 +1439,14 @@ func scenario_d() -> void:
 		if u["island"] == "west" and d > 350.0 and d < 900.0:
 			far = u
 			break
-	await stand(door_out(far))
+	# Start on the public road, not inside a neighbouring shop.
+	var near := game.gps.net.nearest(Premises.door_point(far), Vector3.ZERO, 40.0, -1, true)
+	check(not near.is_empty(), "found a public lane near the destination")
+	if near.is_empty():
+		return
+	await stand(game.gps.net.lane_point(near["lane"], near["s"]))
 	var q := game.delivery_quote(vid)
-	check(not q["ok"] or q["fee"] > 0.0, "a delivery quote (%s)" % (EmpireData.money(float(q["fee"])) if q["ok"] else q["why"]))
+	check(q["ok"] and q["fee"] > 0.0, "a delivery quote (%s)" % (EmpireData.money(float(q["fee"])) if q["ok"] else q["why"]))
 	game.ui.open_phone("vehicles")
 	await frames(2)
 	game.ui.find_vehicle(vid)
@@ -1452,6 +1459,8 @@ func scenario_d() -> void:
 	var cash := e.personal_cash + e.company_cash
 	var err := game.deliver_vehicle(vid)
 	check(err == "", "delivery booked (%s)" % err)
+	check(game.deliver_vehicle(vid) == "Delivery in progress", "a duplicate delivery is refused")
+	check(is_equal_approx(e.personal_cash + e.company_cash, cash), "charged on arrival")
 	var here0 := game.player.global_position
 	await until(func(): return game.vehicle_position(vid).distance_to(here0) < 40.0, 30.0)
 	var here := game.player.global_position

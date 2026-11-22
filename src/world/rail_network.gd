@@ -52,11 +52,15 @@ const STATION_LEN := 78.0            # four cars (72 m) and a little
 const PLATFORM_GAP := 1.6
 
 var lines: Array = []
-var L: CityLayout
+# CityLayout owns this helper. A strong reference back would keep both alive.
+var _layout_ref: WeakRef
+var L: CityLayout:
+	get:
+		return _layout_ref.get_ref() as CityLayout
 
 
 func _init(layout: CityLayout) -> void:
-	L = layout
+	_layout_ref = weakref(layout)
 
 
 # ------------------------------------------------------------ the City Loop

@@ -156,6 +156,7 @@ static func place(layout: CityLayout) -> Premises:
 		u["rent"] = roundf(float(u["size"]) * 0.22 * k)
 		u["price"] = roundf(float(u["rent"]) * 240.0 / 50.0) * 50.0
 		n += 1
+	P._layout = null
 	return P
 
 
@@ -165,12 +166,16 @@ func _index() -> void:
 			continue
 		for t in b["tiers"]:
 			var box := CityLayout.tier_aabb(b, t)
-			for cx in range(floori(box.position.x / 25.0), floori(box.end.x / 25.0) + 1):
-				for cz in range(floori(box.position.z / 25.0), floori(box.end.z / 25.0) + 1):
-					var k := Vector2i(cx, cz)
-					if not _grid.has(k):
-						_grid[k] = []
-					_grid[k].append(box)
+			_index_box(box)
+
+
+func _index_box(box: AABB) -> void:
+	for cx in range(floori(box.position.x / 25.0), floori(box.end.x / 25.0) + 1):
+		for cz in range(floori(box.position.z / 25.0), floori(box.end.z / 25.0) + 1):
+			var k := Vector2i(cx, cz)
+			if not _grid.has(k):
+				_grid[k] = []
+			_grid[k].append(box)
 
 
 func _blocked(p: Vector3) -> bool:
@@ -350,7 +355,194 @@ static func opening_x(c: Dictionary) -> Vector2:
 ## Record without the building reference (for Business.premises / saves).
 static func record(c: Dictionary) -> Dictionary:
 	var r := {}
-	for k in ["id", "kind", "name", "shop_name", "district", "island", "size", "rent", "price", "pos", "est"]:
+	for k in ["id", "kind", "name", "shop_name", "district", "island", "size", "rent", "price", "pos", "est", "street_use", "flagship"]:
 		if c.has(k):
 			r[k] = c[k]
 	return r
+
+
+## Survey the final building plan once. These records are small; the room is
+## built only by the game's nearby-interior streamer.
+func cover_streets(layout: CityLayout) -> Array:
+	_layout = layout
+	_grid.clear()
+	_index()
+	var island := "west" if layout.is_mainland else "east"
+	var result := _cover_buildings(layout.buildings, island, layout.ground_y,
+		func(p: Vector2) -> float:
+			if not layout.roads.field_rect.has_point(p) or layout.roads.field.is_empty():
+				return INF
+			var road := layout.roads.field_at(p)
+			return absf(road.x) - absf(road.y),
+		func(p: Vector2) -> String: return district_key(p.x, p.y))
+	_layout = null
+	_grid.clear()
+	return result
+
+
+static func cover_skyport(plan: Dictionary) -> Array:
+	var survey := Premises.new()
+	for b: Dictionary in plan["buildings"]:
+		for tier: Array in b["tiers"]:
+			survey._index_box(CityLayout.tier_aabb(b, tier))
+	var local := survey._cover_buildings(plan["buildings"], "skyport",
+		func(x: float, z: float) -> float: return SkyportIsland.ground_y_local(x, z) if SkyportIsland.contains_local(x, z) else NAN,
+		func(p: Vector2) -> float: return SkyportIsland.road_clearance(plan, p),
+		func(_p: Vector2) -> String: return "east:waterfront")
+	var world_units: Array = []
+	for u: Dictionary in local:
+		var room := u.duplicate()
+		room["b"] = SkyportIsland.wbuilding(u["b"])
+		room["face"] = (int(u["face"]) + 3) % 4
+		var door := door_point(room)
+		room["pos"] = [door.x, door.y, door.z]
+		world_units.append(room)
+	return world_units
+
+
+func _cover_buildings(buildings: Array, island: String, ground: Callable, kerb: Callable, district: Callable) -> Array:
+	var result: Array = []
+	var candidates: Array = []
+	for b: Dictionary in buildings:
+		if b["kind"] != "normal" or b.has("apt") or BuildingMesher.shaped(b) or not b.get("mesh", true) \
+				or b.get("hollow", false) or b.get("venue_shell", false):
+			continue
+		var tier: Array = b["tiers"][0]
+		var base := BuildingMesher.base_of(b)
+		if absf(tier[4] - base) > 0.05 or float(tier[5]) - base < 4.0:
+			continue
+		var best := {}
+		var best_score := -INF
+		for side in 4:
+			var f := BuildingMesher._face(tier, side)
+			var length: float = f[3]
+			var depth := float(tier[3] - tier[1] if side % 2 == 0 else tier[2] - tier[0])
+			if length < 6.7 or depth < 6.2:
+				continue
+			var xf := CityLayout.bxf(b)
+			for share: float in [0.5, 0.32, 0.68]:
+				var centre := length * share
+				var mouth := xf * BuildingMesher._fpt(f, centre, 0.0, base)
+				var approach := xf * BuildingMesher._fpt(f, centre, 2.2, base)
+				var gy := float(ground.call(approach.x, approach.z))
+				if is_nan(gy) or gy < base - 1.0 or gy > base + 0.3:
+					continue
+				if _blocked(approach + Vector3.UP) or _blocked(xf * BuildingMesher._fpt(f, centre, 4.0, gy + 1.0)):
+					continue
+				var gap := float(kerb.call(Vector2(approach.x, approach.z)))
+				if gap > 21.0 or gap < -3.0:
+					continue
+				var score := -absf(gap - 2.0) * 2.4 - absf(gy - base) * 12.0 - absf(share - 0.5) * 7.0
+				if score <= best_score:
+					continue
+				best_score = score
+				best = {"b": b, "t": 0, "face": side, "centre": centre, "length": length, "lot_depth": depth,
+					"y0": base, "score": score, "street_drop": base - gy, "pos": [mouth.x, mouth.y, mouth.z],
+					"island": island, "district": district.call(Vector2(mouth.x, mouth.z))}
+		if not best.is_empty():
+			candidates.append(best)
+	# Reserve the best large floors for flagship retail before distributing
+	# the smaller rooms. Existing businesses and homes were excluded above.
+	var flagships := ["supermarket", "electronics", "clothing", "furniture"] if island == "east" else ["supermarket", "department"]
+	var large := candidates.filter(func(c):
+		return c["length"] >= 20.0 and c["lot_depth"] >= 17.0 \
+			and absf(c["centre"] - c["length"] * 0.5) < 0.1 and c["street_drop"] < 0.55 \
+			and float(c["b"]["tiers"][0][5]) - float(c["y0"]) >= 6.0)
+	large.sort_custom(func(a, b): return _flagship_score(a) > _flagship_score(b))
+	var selected := {}
+	var last: Array[Vector2] = []
+	for use: String in flagships:
+		for c: Dictionary in large:
+			var p := Vector2(c["pos"][0], c["pos"][2])
+			if selected.has(p) or last.any(func(prev: Vector2) -> bool: return prev.distance_to(p) < 78.0):
+				continue
+			selected[p] = use
+			last.append(p)
+			break
+	for c: Dictionary in candidates:
+		var p := Vector2(c["pos"][0], c["pos"][2])
+		var use := String(selected.get(p, ""))
+		var flagship := not use.is_empty()
+		if not flagship:
+			use = _street_use(c)
+		_finish_street_unit(c, use, flagship)
+		_claim_street_unit(c)
+		result.append(c)
+	return result
+
+
+static func _flagship_score(c: Dictionary) -> float:
+	var area := minf(c["length"], 49.0) * minf(c["lot_depth"], 38.0)
+	return area * 0.01 + c["score"] + (7.0 if c["district"] in ["east:cbd", "east:midtown", "west:midtown"] else 0.0)
+
+
+static func _street_use(c: Dictionary) -> String:
+	var b: Dictionary = c["b"]
+	var district := String(c["district"])
+	var variant := absi(hash(c["pos"])) % 10
+	if b["style"] == CityLayout.Style.WAREHOUSE:
+		return "garage" if variant < 3 else "warehouse"
+	if "suburb" in district:
+		return ["residential", "residential", "residential", "residential", "residential",
+			"residential", "cafe", "restaurant", "fitness", "convenience"][variant]
+	if b["style"] in [CityLayout.Style.GLASS, CityLayout.Style.DARK_GLASS, CityLayout.Style.DECO]:
+		return ["office", "office", "office", "hotel", "office", "bank", "cafe", "restaurant", "fitness", "residential"][variant]
+	return ["residential", "residential", "cafe", "restaurant", "convenience",
+		"residential", "office", "garage", "residential", "fitness"][variant]
+
+
+const STREET_TRADE := {"supermarket": "convenience", "department": "clothing", "electronics": "phones",
+	"clothing": "clothing", "furniture": "convenience", "convenience": "convenience", "cafe": "cafe",
+	"restaurant": "takeaway"}
+const STREET_TITLES := {"residential": "Residences", "office": "Offices", "hotel": "Hotel",
+	"bank": "Bank", "cafe": "Coffee House", "restaurant": "Kitchen", "fitness": "Fitness Club",
+	"garage": "Motor Works", "warehouse": "Distribution", "convenience": "Local Market",
+	"supermarket": "Food Hall", "electronics": "Electronics", "clothing": "Clothing",
+	"furniture": "Interiors", "department": "Department Store"}
+const STREET_NAMES := ["Alder", "Bramley", "Cedar", "Dunlin", "Elm", "Fenwick", "Granary", "Harbour",
+	"Hawthorn", "Juniper", "Kingsley", "Larch", "Mill", "Northgate", "Orchard", "Parkside"]
+
+
+static func _finish_street_unit(c: Dictionary, use: String, flagship: bool) -> void:
+	var tier: Array = c["b"]["tiers"][0]
+	var inset := minf(float(c["centre"]), float(c["length"]) - float(c["centre"]))
+	var width := minf(inset * 2.0 - 0.64, (49.0 if flagship else (13.8 if use != "warehouse" else 17.0)))
+	var depth := minf(float(c["lot_depth"]) - 0.42, (38.0 if flagship else (11.5 if use != "warehouse" else 15.0)))
+	var height := minf(float(tier[5]) - float(c["y0"]) - 0.65, 5.35 if flagship else 4.25)
+	var opening := width - (1.24 if flagship else 1.0)
+	var door_number := "%d %d" % [roundi(float(c["pos"][0])), roundi(float(c["pos"][2]))]
+	var seed := absi(door_number.hash())
+	var prefix: String = STREET_NAMES[seed % STREET_NAMES.size()]
+	var title := "%s %s" % [prefix, STREET_TITLES[use]]
+	if not flagship:
+		title = "%s %d" % [title, 1 + seed % 89]
+	c["id"] = "ground_%s_%s" % [c["island"], door_number.replace(" ", "_")]
+	c["kind"] = "shop" if flagship else "street"
+	c["street_use"] = use
+	c["flagship"] = flagship
+	c["name"] = title
+	c["shop_name"] = title
+	c["size"] = roundf(width * depth)
+	c["rent"] = roundf(float(c["size"]) * 0.19 * float(EmpireData.district(c["district"]).get("rent_k", 1.0)))
+	c["price"] = float(c["rent"]) * 240.0
+	c["a0"] = float(c["centre"]) - width * 0.5
+	c["a1"] = float(c["centre"]) + width * 0.5
+	c["oa0"] = float(c["centre"]) - opening * 0.5
+	c["oa1"] = float(c["centre"]) + opening * 0.5
+	c["y1"] = float(c["y0"]) + height
+	c["oy0"] = c["y0"]
+	c["oy1"] = float(c["y1"]) - 0.48
+	c["depth"] = depth
+	c["ground"] = true
+	c["wins"] = []
+	for temporary in ["centre", "length", "lot_depth", "score", "street_drop"]:
+		c.erase(temporary)
+
+
+func _claim_street_unit(c: Dictionary) -> void:
+	var b: Dictionary = c["b"]
+	var opening := c.duplicate()
+	opening["b"] = b.duplicate()
+	b["street_use"] = c["street_use"]
+	b["apt"] = opening
+	b.erase("_features")

@@ -418,25 +418,11 @@ func enable_headlights(_shadows := false) -> void:
 	main.light_specular = 0.35
 	main.position = Vector3(0.0, mid.y + 0.12, mid.z - 0.8)
 	main.rotation = Vector3(deg_to_rad(-4.5), 0.0, 0.0)
-	var spill := SpotLight3D.new()
-	spill.name = "HeadSpill"
-	spill.light_color = Color(1.0, 0.94, 0.84)
-	spill.spot_range = 16.0
-	spill.spot_angle = 68.0
-	spill.spot_angle_attenuation = 1.6
-	spill.spot_attenuation = 1.2
-	spill.light_specular = 0.15
-	spill.position = Vector3(0.0, mid.y + 0.25, mid.z - 0.6)
-	spill.rotation = Vector3(deg_to_rad(-22.0), 0.0, 0.0)
-	# (No near spill any more: its wide cone, aimed down from behind the lamps,
-	# lit the road round and under the nose – from the chase camera it read as
-	# a light under the car at night, 2026-11-21.)
-	for l: SpotLight3D in [main]:
-		l.light_energy = 0.0
-		l.shadow_enabled = false
-		l.visible = false
-		add_child(l)
-		head_lights.append(l)
+	main.light_energy = 0.0
+	main.shadow_enabled = false
+	main.visible = false
+	add_child(main)
+	head_lights.append(main)
 
 
 func set_siren(on: bool) -> void:

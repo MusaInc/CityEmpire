@@ -145,11 +145,18 @@ func play(name: String, db := 0.0, pitch := 1.0) -> void:
 	p.play()
 
 
+## WorldState supplies shelter from its live cabin and interior state.
+var shelter := 0.0
+var _shelter_blend := 0.0
+
+
 func _process(dt: float) -> void:
 	if player == null:
 		return
 	var spd := player.speed()
 	var k := 1.0 - exp(-6.0 * dt)
+	_shelter_blend = lerpf(_shelter_blend, shelter, 1.0 - exp(-3.5 * dt))
+	var outside_gain := lerpf(1.0, 0.27, _shelter_blend)
 	var wind: AudioStreamPlayer = _loops.get("wind_loop")
 	if wind:
 		var w := smoothstep(3.0, 50.0, spd)
@@ -164,22 +171,22 @@ func _process(dt: float) -> void:
 	if amb:
 		# The street hum fades as you climb above the rooftops.
 		var height := clampf(player.height_above_ground() / 120.0, 0.0, 1.0)
-		amb.volume_db = lerpf(amb.volume_db, linear_to_db(0.55 - 0.35 * height), k)
+		amb.volume_db = lerpf(amb.volume_db, linear_to_db((0.55 - 0.35 * height) * outside_gain), k)
 	var traffic: AudioStreamPlayer = _loops.get("traffic_loop")
 	if traffic:
 		# Street-level traffic: loud on the pavement, gone above the rooftops.
 		var low := 1.0 - clampf(player.height_above_ground() / 60.0, 0.0, 1.0)
-		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4, 0.002)), k)
+		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4 * outside_gain, 0.002)), k)
 	var rain: AudioStreamPlayer = _loops.get("rain_loop")
 	if rain:
 		var r: float = atmosphere.w["rain"] if atmosphere else 0.0
-		rain.volume_db = lerpf(rain.volume_db, linear_to_db(maxf(r * 0.5, 0.001)), k)
+		rain.volume_db = lerpf(rain.volume_db, linear_to_db(maxf(r * 0.5 * outside_gain, 0.001)), k)
 	_horn_in -= dt
 	if _horn_in <= 0.0:
 		_horn_in = randf_range(8.0, 24.0)
 		var above := player.height_above_ground()
 		if above < 50.0:
-			play("horn", linear_to_db(0.12 + 0.18 * (1.0 - above / 50.0)), randf_range(0.9, 1.12))
+			play("horn", linear_to_db((0.12 + 0.18 * (1.0 - above / 50.0)) * outside_gain), randf_range(0.9, 1.12))
 	_footsteps(dt)
 	var music: AudioStreamPlayer = _loops.get("music_loop")
 	if music:

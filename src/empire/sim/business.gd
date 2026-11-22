@@ -82,6 +82,14 @@ func setup_new(p_premises: Dictionary, day: int) -> void:
 	var t := type_def()
 	fixtures = (t.get("base_fixtures", {}) as Dictionary).duplicate()
 	backroom.case_capacity = int(t.get("backroom_cases", 20))
+	if premises.get("flagship", false):
+		var area := float(premises.get("size", 360.0))
+		var scale_factor := clampi(roundi(area / 92.0), 3, 14)
+		for key in fixtures:
+			if key != "till":
+				fixtures[key] = int(fixtures[key]) * (mini(scale_factor, 9) if key == "fridge" else scale_factor)
+		fixtures["till"] = 3
+		backroom.case_capacity *= scale_factor
 	reputation = EmpireData.rep_param("start")
 	for pid in EmpireData.product_ids():
 		prices[pid] = EmpireData.rrp(pid)
@@ -352,7 +360,23 @@ func wages_per_hour() -> float:
 
 
 # ------------------------------------------------------------- hours
+var _custom_hours := Vector2i(-1, -1)
+
+
+func set_hours(opens: int, closes: int) -> bool:
+	if opens < 0 or closes > 24 or opens >= closes:
+		return false
+	_custom_hours = Vector2i(opens, closes)
+	return true
+
+
+func reset_hours() -> void:
+	_custom_hours = Vector2i(-1, -1)
+
+
 func hours() -> Vector2:
+	if _custom_hours.x >= 0:
+		return Vector2(_custom_hours)
 	var t := type_def()
 	return Vector2(float(t.get("open", 7)), float(t.get("close", 22)))
 
@@ -432,7 +456,7 @@ func to_dict() -> Dictionary:
 		"upgrades": upgrades.duplicate(), "backroom": backroom.to_dict(), "floor_pile": floor_pile.to_dict(), "reputation": reputation,
 		"cleanliness": cleanliness, "staff": staff.duplicate(true), "today": today.duplicate(true),
 		"history": history.duplicate(true), "lifetime": lifetime.duplicate(), "orders": orders.duplicate(true),
-		"opened_day": opened_day}
+		"opened_day": opened_day, "open_hour": _custom_hours.x, "close_hour": _custom_hours.y}
 
 
 static func from_dict(d: Dictionary) -> Business:
@@ -441,6 +465,7 @@ static func from_dict(d: Dictionary) -> Business:
 	b.premises = d.get("premises", {})
 	b.owned = bool(d.get("owned", false))
 	b.open = bool(d.get("open", true))
+	b.set_hours(int(d.get("open_hour", -1)), int(d.get("close_hour", -1)))
 	for pid in d.get("prices", {}):
 		b.prices[String(pid)] = float(d["prices"][pid])
 	for pid in EmpireData.product_ids():

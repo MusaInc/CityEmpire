@@ -35,7 +35,13 @@ const PATH_AO_SHADER := preload("res://src/world/shaders/traffic_path_ao.gdshade
 const LANE_V := {"ring": 13.0, "major": 12.0, "minor": 9.0, "roundabout": 8.0}
 const SPACING := 140.0     # m of lane per car at density 1 (was 72: quieter roads for the detailed civilian cars)
 
-enum { EV_NONE, EV_EXIT, EV_DECIDE, EV_END, EV_JOIN, EV_LOOP, EV_FOLLOW }
+const SIGNAL_CYCLE := 26.0
+const SIGNAL_GREEN := 0.38
+const STOP_MARGIN := 11.0     # room for the crossing and the front overhang
+const SIGNAL_LOOK := 24.0     # brake earlier when the junction has a crossing
+static var signal_time := 0.0
+
+enum { EV_NONE, EV_EXIT, EV_DECIDE, EV_END, EV_JOIN, EV_LOOP, EV_FOLLOW, EV_SIGNAL }
 
 var layout: CityLayout
 var density := 1.0
@@ -55,6 +61,13 @@ var l_piece := PackedInt32Array()     # road piece (lanes of one piece don't con
 var l_exits: Array = []               # [[s, connector], ...] by s
 var l_ends: Array = []                # connectors from an open lane's end
 var l_feeds: Array = []               # connectors that join this lane
+var through_signals := {}            # lane -> ordered [junction distance, phase]
+var signal_poles: Array = []
+var pedestrian_crossings: Array = []
+var pedestrian_obstacles := PackedVector3Array()
+var signal_phases := {}              # pole position -> shared phase
+var _next_signal := {}               # car -> index into its lane's through signals
+var l_signals := {}                  # approaching lane -> phase offset
 var l_cars: Array = []                # car ids on the lane, rear to front (by s)
 var pts := PackedVector3Array()       # every lane's points, texel order
 
@@ -301,6 +314,236 @@ func _near(p: Vector3) -> Dictionary:
 	return out
 
 
+static func signal_offset(pole: Transform3D) -> float:
+	var p := pole.origin
+	var cell := Vector2i(roundi(p.x / 30.0), roundi(p.z / 30.0))
+	var heading := pole.basis.z
+	var axis := 0.5 if absf(heading.x) > absf(heading.z) else 0.0
+	return fposmod(float(absi(hash(cell)) % 1000) / 1000.0 + axis, 1.0)
+
+
+static func signal_allows_entry(time: float, offset: float) -> bool:
+	return fposmod(time / SIGNAL_CYCLE + offset, 1.0) < SIGNAL_GREEN
+
+
+## Match an existing signal only to lanes ending beside it in the direction
+## it faces, never to passing traffic on the cross street or elevated decks.
+func _match_signals(base_count: int) -> void:
+	l_signals.clear()
+	signal_poles.clear()
+	signal_phases.clear()
+	through_signals.clear()
+	pedestrian_crossings.clear()
+	var sites := {}
+	var best := {}
+	for prop in layout.props:
+		if prop[0] != "traffic_light":
+			continue
+		var pole: Transform3D = prop[1]
+		for li: int in _near(pole.origin):
+			if li >= base_count or l_loop[li] or l_ends[li].is_empty():
+				continue
+			var end: Vector3 = _lane_pts[li][-1]
+			var delta := pole.origin - end
+			var forward := lane_dir(li, l_len[li] - 1.5)
+			var along := delta.dot(forward)
+			var side := delta.dot(Vector3(-forward.z, 0.0, forward.x))
+			if forward.dot(pole.basis.z) < 0.85 or along < -6.0 or along > 3.0 or side < 0.5 or side > 10.0:
+				continue
+			var score := absf(along + 2.0) + side * 0.15
+			if score < float(best.get(li, INF)):
+				best[li] = score
+				l_signals[li] = signal_offset(pole)
+				sites[li] = pole
+	_add_through_signals(sites)
+	_add_pedestrian_crossings()
+
+
+## Install a controlled junction only when continuous lanes and a curbside
+## signal position can be found on both directions of the crossing road.
+func _add_through_signals(sites: Dictionary) -> void:
+	var finished := {}
+	for approach: int in sites:
+		var side_pole: Transform3D = sites[approach]
+		if not layout.signal_centres.has(side_pole.origin) or finished.has(side_pole.origin):
+			continue
+		var side_centre: Vector3 = layout.signal_centres[side_pole.origin]
+		var side_dir := side_pole.basis.z
+		var nearby := _near(side_centre)
+		var cross_dir := Vector3(-side_dir.z, 0.0, side_dir.x)
+		var best := [INF, INF]
+		var axes := [Vector3.ZERO, Vector3.ZERO]
+		var source_piece := [-1, -1]
+		var groups := [[], []]
+		for li: int in nearby:
+			var hit: Array = nearby[li]
+			var at := float(hit[1])
+			if l_loop[li] or at < SIGNAL_LOOK or at > l_len[li] - 21.0 or hit[0] > 19.0:
+				continue
+			var direction := lane_dir(li, at)
+			var alignment := direction.dot(cross_dir)
+			if absf(alignment) < 0.83:
+				continue
+			var axis := 0 if alignment > 0.0 else 1
+			groups[axis].append([li, at])
+			if float(hit[0]) < best[axis]:
+				best[axis] = hit[0]
+				axes[axis] = direction
+				source_piece[axis] = l_piece[li]
+		if source_piece[0] != source_piece[1]:
+			continue
+		for axis in 2:
+			groups[axis] = groups[axis].filter(func(row): return l_piece[row[0]] == source_piece[axis])
+		if groups[0].is_empty() or groups[1].is_empty():
+			continue
+		var poles: Array[Transform3D] = []
+		for axis in 2:
+			var dir: Vector3 = axes[axis]
+			var right := Vector3(-dir.z, 0.0, dir.x)
+			var edge := -INF
+			var at := Vector3.ZERO
+			for row in groups[axis]:
+				var lane := int(row[0])
+				for existing in through_signals.get(lane, []):
+					if absf(float(existing[0]) - float(row[1])) <= 35.0:
+						at = Vector3.INF
+						break
+				if at == Vector3.INF:
+					edge = -INF
+					break
+				var point := lane_point(lane, float(row[1]) - 8.0)
+				var side := point.dot(right)
+				if side > edge:
+					edge = side
+					at = point
+			if edge == -INF:
+				break
+			# Move out from the outside lane to the first place off asphalt.
+			var found := false
+			for inset: float in [3.0, 4.5, 6.0, 7.5]:
+				var p := at + right * inset
+				var q := Vector2(p.x, p.z)
+				var field := layout.roads.field_at(q)
+				var block := layout.block_at(p.x, p.z)
+				if block < 0 or absf(field.x) < absf(field.y) + 0.5 or field.w < 0.5:
+					continue
+				if SkyportIsland.enabled and SkyportIsland.under_bridge(p.x, p.z):
+					continue
+				p.y = layout.ground_y(p.x, p.z)
+				poles.append(Transform3D(Basis(Vector3.UP, atan2(dir.x, dir.z)), p))
+				found = true
+				break
+			if not found:
+				break
+		if poles.size() != 2:
+			continue
+		var phase := signal_offset(side_pole)
+		var through_phase := fposmod(phase + 0.5, 1.0)
+		for key: int in sites:
+			var pole: Transform3D = sites[key]
+			var centre: Vector3 = layout.signal_centres.get(pole.origin, pole.origin)
+			if centre.distance_to(side_centre) < 22.0 and absf(pole.basis.z.dot(side_dir)) > 0.85:
+				l_signals[key] = phase
+				signal_phases[pole.origin] = phase
+				finished[pole.origin] = true
+		for axis in 2:
+			var pole: Transform3D = poles[axis]
+			signal_poles.append(["traffic_light", pole])
+			signal_phases[pole.origin] = through_phase
+			for row in groups[axis]:
+				var li := int(row[0])
+				if not through_signals.has(li):
+					through_signals[li] = []
+				through_signals[li].append([row[1], through_phase])
+	for li in through_signals:
+		through_signals[li].sort_custom(func(a, b): return a[0] < b[0])
+
+
+## The ground shader places a zebra 1–4 m from the junction edge. Find that
+## band in the same road field, then use its width to reach both pavements.
+func _add_pedestrian_crossings() -> void:
+	for prop in layout.props:
+		if prop[0] != "traffic_light":
+			continue
+		var xf: Transform3D = prop[1]
+		var pole := xf.origin
+		if not signal_phases.has(pole) or not layout.signal_centres.has(pole):
+			continue
+		var end: Vector3 = layout.signal_centres[pole]
+		var delta := pole - end
+		var heading := xf.basis.z
+		var across := Vector3(-heading.z, 0.0, heading.x)
+		var centre := Vector3.ZERO
+		var half_width := 0.0
+		var error := INF
+		for metres in range(2, 9):
+			var point := end - heading * float(metres)
+			var field := layout.roads.field_at(Vector2(point.x, point.z))
+			var width := absf(field.y)
+			if field.w < 1.0 or field.w > 4.0 or absf(field.x) > 1.5 or width < 3.0 or width > 9.0:
+				continue
+			if absf(width + 1.0 - delta.dot(across)) > 2.5:
+				continue
+			var score := absf(field.w - 2.5)
+			if score < error:
+				error = score
+				centre = point
+				half_width = width
+		if half_width <= 0.0:
+			continue
+		centre.y = layout.ground_y(centre.x, centre.z)
+		var a := centre - across * (half_width + 1.7)
+		var b := centre + across * (half_width + 1.7)
+		var nearby := _near(centre)
+		var lanes := {}
+		for li: int in nearby:
+			if nearby[li][0] <= half_width + 4.0:
+				lanes[li] = nearby[li][1]
+				# Incoming turns are not in the pre-connector spatial index.
+				for conn in l_feeds[li]:
+					lanes[conn] = l_len[conn]
+		pedestrian_crossings.append({"a": a, "b": b, "away": -heading, "phase": signal_phases[pole], "lanes": lanes})
+
+
+static func pedestrian_phase_open(time: float, phase: float) -> bool:
+	# Give the last vehicle that entered on green time to clear the zebra.
+	var cycle := fposmod(time / SIGNAL_CYCLE + phase, 1.0)
+	return cycle >= 0.57 and cycle < 0.89
+
+
+func pedestrian_crossing_clear(crossing: Dictionary, player: Vector3) -> bool:
+	if not pedestrian_phase_open(signal_time, float(crossing["phase"])):
+		return false
+	var a: Vector3 = crossing["a"]
+	var b: Vector3 = crossing["b"]
+	var start := Vector2(a.x, a.z)
+	var end := Vector2(b.x, b.z)
+	var me := Vector2(player.x, player.z)
+	if absf(player.y - a.y) < 3.0 and Geometry2D.get_closest_point_to_segment(me, start, end).distance_to(me) < 3.2:
+		return false
+	var lanes: Dictionary = crossing["lanes"]
+	for li: int in lanes:
+		var at := float(lanes[li])
+		for id: int in l_cars[li]:
+			if knocked.has(id):
+				continue
+			var s := car_s(id, now)
+			if not l_loop[li] and absf(s - at) > 32.0:
+				continue
+			var pos := car_position(id)
+			var here := Vector2(pos.x, pos.z)
+			if Geometry2D.get_closest_point_to_segment(here, start, end).distance_to(here) < 3.1:
+				return false
+			var speed := car_speed(id)
+			if speed < 0.5:
+				continue
+			var d := lane_dir(li, s)
+			var ahead := here + Vector2(d.x, d.z) * (4.0 + speed * 1.6)
+			if Geometry2D.segment_intersects_segment(here, ahead, start, end) != null:
+				return false
+	return true
+
+
 func _connect() -> void:
 	var base_count := l_base.size()
 	_seg_grid.clear()
@@ -378,6 +621,7 @@ func _connect() -> void:
 			l_ends[li].append(c)
 	for li in base_count:
 		(l_exits[li] as Array).sort_custom(func(a, b): return a[0] < b[0])
+	_match_signals(base_count)
 	_seg_grid.clear()
 
 
@@ -503,6 +747,7 @@ func _spawn_cars(meshes: Array) -> void:
 			while xi < ex.size() and float(ex[xi][0]) <= s:
 				xi += 1
 			c_xi[id] = xi
+			_reset_signal(id, s)
 	for id in c_lane.size():
 		_schedule(id)
 
@@ -599,6 +844,17 @@ func _follower(id: int) -> int:
 	return cs[i - 1] if i > 0 else -1
 
 
+func _reset_signal(id: int, s: float) -> void:
+	var index := 0
+	var stops: Array = through_signals.get(c_lane[id], [])
+	while index < stops.size() and float(stops[index][0]) - STOP_MARGIN < s + MIN_EASE:
+		index += 1
+	if stops.is_empty():
+		_next_signal.erase(id)
+	else:
+		_next_signal[id] = index
+
+
 ## Next event from the car's current motion.
 func _schedule(id: int) -> void:
 	var li := c_lane[id]
@@ -609,6 +865,15 @@ func _schedule(id: int) -> void:
 		return
 	var ex: Array = l_exits[li]
 	var xi := c_xi[id]
+	if _next_signal.has(id):
+		var stops: Array = through_signals[li]
+		var index := int(_next_signal[id])
+		if index < stops.size():
+			var decision := float(stops[index][0]) - SIGNAL_LOOK
+			if xi >= ex.size() or decision <= float(ex[xi][0]):
+				c_ek[id] = EV_SIGNAL
+				c_ev[id] = maxf(now, _t_lin(id, decision))
+				return
 	if xi < ex.size():
 		c_ek[id] = EV_EXIT
 		c_ev[id] = _t_lin(id, float(ex[xi][0]))
@@ -622,7 +887,8 @@ func _schedule(id: int) -> void:
 		c_ev[id] = _t_lin(id, l_len[li])
 		return
 	c_ek[id] = EV_DECIDE
-	c_ev[id] = maxf(now, _t_lin(id, l_len[li] - LOOK)) if s < l_len[li] - LOOK else now
+	var decision_at := l_len[li] - (SIGNAL_LOOK if l_signals.has(li) else LOOK)
+	c_ev[id] = maxf(now, _t_lin(id, decision_at)) if s < decision_at else now
 
 
 func _process(dt: float) -> void:
@@ -646,6 +912,7 @@ func _event(id: int) -> void:
 		EV_LOOP:
 			c_s0[id] -= l_len[li]
 			c_xi[id] = 0
+			_reset_signal(id, car_s(id, now))
 			_dirty(id)
 			_schedule(id)
 		EV_EXIT:
@@ -659,6 +926,8 @@ func _event(id: int) -> void:
 				_schedule(id)
 		EV_DECIDE:
 			_decide(id)
+		EV_SIGNAL:
+			_through_signal(id)
 		EV_END:
 			if car_s(id, now) < l_len[li] - 0.6:
 				c_ev[id] = now + 0.1  # (still easing in)
@@ -670,10 +939,50 @@ func _event(id: int) -> void:
 			c_ev[id] = INF
 
 
+## Travel time if this car releases the brake now, using the lane's same
+## acceleration curve. Checking a green window must not alter a waiting car.
+func _through_travel_time(id: int, at: float) -> float:
+	if c_stop[id] >= NO_STOP:
+		return maxf(_t_lin(id, at) - now, 0.0)
+	var v := l_v[c_lane[id]]
+	var distance := maxf(at - car_s(id, now), 0.0)
+	var x := 2.0 * EASE * clampf(car_speed(id) / v, 0.0, 1.0)
+	var target := distance + x * x / (4.0 * EASE)
+	return (sqrt(4.0 * EASE * target) - x if target <= EASE else target + EASE - x) / v
+
+
+func _through_signal(id: int) -> void:
+	var stop: Array = through_signals[c_lane[id]][_next_signal[id]]
+	var leader := _leader(id)
+	if leader >= 0 and c_stop[leader] < NO_STOP:
+		_queue_behind(id, leader)
+		return
+	var junction := float(stop[0])
+	var phase := float(stop[1])
+	if signal_allows_entry(signal_time, phase) and signal_allows_entry(signal_time + _through_travel_time(id, junction), phase):
+		if c_stop[id] < NO_STOP:
+			_rebase(id)
+		_next_signal[id] += 1
+		var following := _follower(id)
+		if following >= 0 and c_ek[following] == EV_FOLLOW:
+			c_ev[following] = minf(c_ev[following], now + 0.7)
+		_schedule(id)
+		return
+	var line := junction - STOP_MARGIN
+	if c_stop[id] >= NO_STOP or (_at_rest(id) and car_s(id, now) < line - 1.5):
+		_rebase(id, false, line)
+		var following := _follower(id)
+		if following >= 0:
+			_queue_behind(following, id)
+	c_ev[id] = now + 0.3
+
+
 ## At a street's end: pick a way on with a gap, else stop at the line and
 ## look again shortly.
 func _decide(id: int) -> void:
 	var li := c_lane[id]
+	var phase := float(l_signals.get(li, -1.0))
+	var stop_at := l_len[li] - STOP_MARGIN if phase >= 0.0 else l_len[li]
 	var lead := _leader(id)
 	if lead >= 0:
 		if c_stop[lead] < NO_STOP:
@@ -682,7 +991,7 @@ func _decide(id: int) -> void:
 			return
 		# The car ahead is turning off: brake for the line meanwhile.
 		if c_stop[id] >= NO_STOP:
-			_rebase(id, false, l_len[li])
+			_rebase(id, false, stop_at)
 			var f0 := _follower(id)
 			if f0 >= 0:
 				_queue_behind(f0, id)
@@ -702,10 +1011,12 @@ func _decide(id: int) -> void:
 		_rebase(id)
 	var t_line := maxf(now, _t_lin(id, l_len[li]))
 	var v_in := clampf((car_s(id, t_line) - car_s(id, t_line - 0.05)) / 0.05, 0.0, l_v[li])
-	for c in ends:
-		if _free(c, t_line, v_in):
-			pick = c
-			break
+	var green := phase < 0.0 or signal_allows_entry(signal_time + t_line - now, phase)
+	if green:
+		for c in ends:
+			if _free(c, t_line, v_in):
+				pick = c
+				break
 	if pick < 0 or saved[3] >= NO_STOP:
 		c_s0[id] = saved[0]
 		c_t0[id] = saved[1]
@@ -713,7 +1024,7 @@ func _decide(id: int) -> void:
 		c_stop[id] = saved[3]
 		c_ease[id] = saved[4]
 		_dirty(id)
-	if pick < 0 and waited:
+	if pick < 0 and waited and green:
 		# Waited long enough: take any gap that's merely tight.
 		for c in ends:
 			if _free(c, t_line, v_in, true):
@@ -722,15 +1033,15 @@ func _decide(id: int) -> void:
 	if pick < 0:
 		# Stop at the line (or keep waiting there).
 		if c_stop[id] >= NO_STOP:
-			_rebase(id, false, l_len[li])
+			_rebase(id, false, stop_at)
 			c_wait[id] = now
 			var f := _follower(id)
 			if f >= 0:
 				_queue_behind(f, id)
-		elif _at_rest(id) and car_s(id, now) < l_len[li] - 1.5:
+		elif _at_rest(id) and car_s(id, now) < stop_at - 1.5:
 			# Parked short of the line (it was queued behind a car that has
 			# since turned off): creep up to the line instead of sitting there.
-			_rebase(id, true, l_len[li])
+			_rebase(id, true, stop_at)
 			var f2 := _follower(id)
 			if f2 >= 0:
 				c_ek[f2] = EV_FOLLOW
@@ -833,6 +1144,7 @@ func _move_to(id: int, to: int, s: float, from_rest: bool) -> void:
 	while xi < ex.size() and float(ex[xi][0]) <= s + 0.5:
 		xi += 1
 	c_xi[id] = xi
+	_reset_signal(id, s)
 	# Behind a queue already there.
 	var lead := _leader(id)
 	if lead >= 0 and c_stop[lead] < NO_STOP:
@@ -1065,6 +1377,7 @@ func release(id: int) -> void:
 func yield_to(p0: Vector3, ids: Array) -> void:
 	var still := {}
 	var pts: Array = ([p0] if p0.x < INF else []) + obstacles
+	pts.append_array(Array(pedestrian_obstacles))
 	for p: Vector3 in pts:
 		for id: int in ids:
 			if id < 0 or id >= c_lane.size():
@@ -1085,7 +1398,8 @@ func yield_to(p0: Vector3, ids: Array) -> void:
 			still[id] = true
 			var stop := s + ahead - 6.5
 			if not _held.has(id) or (not _at_rest(id) and c_stop[id] > stop + 0.5):
-				_rebase(id, _at_rest(id), stop)
+				if c_stop[id] > stop + 0.5:
+					_rebase(id, _at_rest(id), stop)
 				c_ek[id] = EV_FOLLOW
 				c_ev[id] = INF
 				var f := _follower(id)

@@ -29,6 +29,10 @@ var haptics := true
 var show_perf := false
 var look_sensitivity := 1.0
 var driving_lens := 0.55
+var touch_size := 1.0
+var touch_opacity := 1.0
+var touch_inset := 0.0
+var touch_steering := 1.0
 ## Driving (Never Stop's DriveInput): pedal response and auto-accelerate.
 var steer_sensitivity := 1.0
 var accelerate := "pedal"
@@ -60,6 +64,10 @@ func _ready() -> void:
 		weather = cfg.get_value("gfx", "weather", weather)
 		haptics = cfg.get_value("input", "haptics", haptics)
 		look_sensitivity = cfg.get_value("input", "look_sensitivity", look_sensitivity)
+		touch_size = clampf(float(cfg.get_value("input", "touch_size", touch_size)), 0.85, 1.12)
+		touch_opacity = clampf(float(cfg.get_value("input", "touch_opacity", touch_opacity)), 0.45, 1.0)
+		touch_inset = clampf(float(cfg.get_value("input", "touch_inset", touch_inset)), 0.0, 48.0)
+		touch_steering = clampf(float(cfg.get_value("input", "touch_steering", touch_steering)), 0.75, 1.25)
 		invert_y = cfg.get_value("input", "invert_y", invert_y)
 		aim_mode = cfg.get_value("input", "aim_mode", aim_mode)
 		music_volume = cfg.get_value("audio", "music", music_volume)
@@ -121,6 +129,10 @@ func save() -> void:
 	cfg.set_value("gfx", "weather", weather)
 	cfg.set_value("input", "haptics", haptics)
 	cfg.set_value("input", "look_sensitivity", look_sensitivity)
+	cfg.set_value("input", "touch_size", touch_size)
+	cfg.set_value("input", "touch_opacity", touch_opacity)
+	cfg.set_value("input", "touch_inset", touch_inset)
+	cfg.set_value("input", "touch_steering", touch_steering)
 	cfg.set_value("input", "invert_y", invert_y)
 	cfg.set_value("input", "aim_mode", aim_mode)
 	cfg.set_value("audio", "music", music_volume)

@@ -21,6 +21,7 @@ var _rng := RandomNumberGenerator.new()
 var world: Node
 ## Your vehicle (TrafficBodies sets it): cars brake for it in their lane.
 var blocker := Vector3(INF, 0, INF)
+var crossing_people := PackedVector3Array()
 
 
 func setup(layout: CityLayout, p_world: Node) -> void:
@@ -90,6 +91,28 @@ func _sample(L: Dictionary, s: float) -> Array:
 	return [p, d.normalized() if d.length() > 0.001 else Vector3.FORWARD]
 
 
+## Permit a crossing once there is room. An approaching vehicle with enough
+## distance to brake yields once a pedestrian has stepped into the crossing.
+func crossing_blocked(a: Vector2, b: Vector2) -> bool:
+	if blocker.x < INF:
+		var player_car := Vector2(blocker.x, blocker.z)
+		if Geometry2D.get_closest_point_to_segment(player_car, a, b).distance_to(player_car) < 3.5:
+			return true
+	for c in cars:
+		if float(c["wait"]) > 0.0:
+			continue
+		var sample := _sample(lanes[c["lane"]], float(c["s"]))
+		var p: Vector3 = sample[0]
+		var dir: Vector3 = sample[1]
+		var here := Vector2(p.x, p.z)
+		if Geometry2D.get_closest_point_to_segment(here, a, b).distance_to(here) < 3.5:
+			return true
+		var ahead := here + Vector2(dir.x, dir.z) * (4.0 + float(c["v"]) * 1.6)
+		if Geometry2D.segment_intersects_segment(here, ahead, a, b) != null:
+			return true
+	return false
+
+
 func _process(dt: float) -> void:
 	if _mm.is_empty():
 		return
@@ -119,6 +142,14 @@ func _process(dt: float) -> void:
 				var ahead := to.dot(sp0[1] as Vector3)
 				if ahead > 0.0 and ahead < 30.0 and (to - (sp0[1] as Vector3) * ahead).length() < 2.6:
 					want = minf(want, maxf((ahead - LEN - 2.5) * 0.8, 0.0))
+			if not crossing_people.is_empty():
+				var sp := _sample(L, float(c["s"]))
+				var dir: Vector3 = sp[1]
+				for person in crossing_people:
+					var delta: Vector3 = person - sp[0]
+					var ahead := delta.dot(dir)
+					if ahead > 0.0 and ahead < 30.0 and (delta - dir * ahead).length() < 3.0:
+						want = minf(want, maxf((ahead - LEN - 2.5) * 0.8, 0.0))
 			var rem := float(L["len"]) - float(c["s"])
 			if rem < 25.0 and not L["city_end"]:
 				want = minf(want, maxf(rem * 0.5, 4.0))   # (slow into the junction)

@@ -1,5 +1,41 @@
 # Status (2026-11-19, WORLDSTATE final overhaul; branch final-overhaul → 0.8.0)
 
+
+## Master plan implementation status (2026-11-22)
+
+The benchmark's eight matched views were captured in Godot Mobile on desktop. TestFlight 0.10.0 build 36 includes the bridge, glazing, character rig and driving lens work. The night lighting, financial history, delivery and touch changes below are in the working tree.
+
+| Area | Implemented or verified | Work still open |
+| --- | --- | --- |
+| A. Rendering | Corrected bridge paint overlap, square lamp artefacts in fog and vehicle window materials. Removed the reference cycles behind seven resources retained on basic scene exit. Added road-field cache with seed and geometry validation. | Intermittent grey wall in motion, Mobile renderer shutdown after a driving session, and an all-district audit of overlapping and floating geometry. |
+| B. Architecture | Added 564 enterable ground floors across all three islands, including purpose-specific public rooms and eight flagships. Openings, glazed fronts and collision use the same building record. | Extend access to shaped, steep and special-purpose buildings. Review the remaining façades and rooflines. |
+| C. Roads | Textured asphalt and paving, junction paint and continuous bridge markings. Drove both joints of the suspension bridge and the Skyport Harbour Bridge. Cars on matched approaches use the same clock as the displayed signal. Added paired through-road signal heads and queueing at 35 compatible junctions in the default map. | Remaining road joins, pavement continuity, and junctions where both approaches lack space for signal heads. |
+| D. Lighting | Night exposure, softer façade spill and asphalt fill checked in matched CBD and Westbank views. Wet roads now distinguish damp aggregate from standing water and reflect nearby lamps. Sash frames, partial blinds and shaded window edges add depth after dark. | Review dusk transitions, billboard brightness, Skyport wet surfaces and physical iOS performance. |
+| E. Vehicles | Corrected sealed fleet glazing and distant traffic glass. Tested the dual-stick driving setup and delivery from the Garage. | Cabin and inspection quality across the catalogue, damage presentation and tyre feedback by surface. |
+| F. Environment | Existing planter and square trees survive density settings. Commercial Island and Westbank retain more of their planned verge trees on medium and high settings. Oak, birch and pine have shaded lower crowns and varied tones, with local detail batches in the city and Skyport. Scenic forests use the light mesh. | Check foliage detail transitions and frame pacing on iPhones and iPads. Inspect coast and mountain transitions at gameplay distances. |
+| G. Characters | Wardrobe restores the gameplay view. Both body switches retain the correct bind pose. Matched jacket and jeans across standing, running and seated poses. | Full outfit matrix, including skirts, dresses, shoes and accessories in gameplay motion. |
+| H. Living city | Traffic queues and observes matched signals. Nearby pedestrians and in-store shoppers are simulated. On Skyport, walkers wait for clear crossings and traffic slows for pedestrians already crossing. On Commercial Island and Westbank, 38 routes use existing zebra markings and wait for a clear side-street red phase. | Add crossings where pavement links are missing, delivery events and other street activity. |
+| I. Economy | Starter lease, stock guidance, live shops, staffing, ownership and City500 work through normal gameplay. Added opening schedules with wage estimates, and history for profit, cash flow, assets, debt and net worth. | Complete start-to-profit playthrough with the starting budget on device, plus premium asset balance and competitor activity. |
+| J. Islands | The existing 1.8 km runway and Harbour Bridge passed the selected collision and navigation scenarios. | Full route and docking pass, terminal and waterfront detailing, and presentation of stadium events. |
+| K. Interface | Configurable chase lens, touch size, spacing, opacity and steering response. Captured the new settings and finance UI. | Physical phone and tablet reach and readability across shops, map and driving. |
+| L. Audio and feedback | Restored engine loops on re-entering the same model, added haptics for impacts and key purchases, and softened outdoor audio under cover. Wet-road tyre spray uses the existing vehicle particle batch. | On-device haptic review plus surface audio and district ambience. |
+| M. Performance | Mobile quality presets, dynamic resolution, staged streaming and local LOD groups are active. | Record frame pacing, memory and thermal behaviour on physical iPhone and iPad, including a rapid island crossing. |
+
+
+## Façade and glazing alignment
+
+Retail, reception and office glazing now uses one surface per framed pane. Window heads follow the actual shell opening and the distant storefront proxy sits on a separate plane. Façade shader variants leave the stone foundation material and opacity intact. Flagship canopies sit above the glazing and carry their lettering on the street-facing edge. The upper façade grid fits complete bays between corner piers and adds opaque belts at partial storeys. Ledges, balcony slabs, fire escapes and tower fins use the same storey and bay spacing. Matched Mobile renderer views cover Harbour Food Hall, a reception, Westbank and the CBD. Masonry now picks up short mineral streaks below the fitted sills and darker, irregular splash marks near the pavement. The street shader adds lane-aligned asphalt repairs, tar seams, oil near stopping points, gutter sediment and drain runoff, with a lighter treatment in newer districts.
+
+
+## Enterable ground floors
+
+The default map now has 564 additional enterable ground floors with street entrances. Commercial Island has 263, Westbank 276 and Skyport 25. This total includes eight larger stores selected by floor size and street access. The largest is Skyport's Parkside Food Hall, with a 49 × 38 m sales and stockroom footprint. Existing premises retain their IDs and save references.
+
+- Ground-floor profiles include residential and office lobbies, hotels, banks, cafés, restaurants, local markets, gyms, garages and warehouses. Real glazing and signage align with the room opening. Detailed rooms stream by distance through a spatial index and use a per-update creation budget. Distant façades use a lightweight rendering proxy.
+- Larger stores use several aisles, three checkouts, stockrooms and existing business ownership. The department-store and clothing templates have a walkable mezzanine. Public checkout uses the existing stock and account records, while clothing checkout opens the wardrobe catalogue. The furniture showroom displays reusable Blender furniture. Its freehold supports conversion into an existing business type. Flagships are named destinations in Explore with street-door GPS targets.
+- Outstanding coverage includes shaped footprints, entrances that need significant terrain work, and special infrastructure or landmark shells. Dedicated shopping centres, specialist gym, hotel and furniture transactions, and physical iPhone/iPad frame pacing remain open.
+
+
 ## Release push (2026-11-20, after the three-game audit; TestFlight 0.9.1)
 - Wardrobe fits 4:3 iPad and wide phones (viewport/safe-area sized panel, wrapping tabs, grids by real width); opened from the light phone it is no longer dark-on-dark (close_panel switches the palette synchronously); studio light on the preview (WS-01/02).
 - Saves: shared SafeSave (src/core/safe_save.gd) – checked atomic write, schema-checked load (older saves without newer fields still load), damaged save → backup with a notice, unusable → new game with the files kept as .broken; `--save=<path>` works. Desktop save from the old "City Empire" app-data folder is copied over once (WS-07). tests/test_saves.gd.

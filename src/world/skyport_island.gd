@@ -260,6 +260,7 @@ static var _outline := PackedVector2Array()
 static var _bbox := Rect2()
 
 var plan_data := {}   # the plan, LOCAL coordinates (this file builds from it)
+var street_units: Array = []
 var wplan := {}       # the same for games, WORLD coordinates (world_plan())
 var world_ref: Node   # CityWorld (materials)
 var body: StaticBody3D          # detail collision (near content)
@@ -1501,8 +1502,10 @@ var _layout: CityLayout
 func build(layout: CityLayout, world: Node) -> void:
 	world_ref = world
 	_layout = layout
-	plan_data = plan(layout)
+	plan_data = plan(layout).duplicate(true)
 	_carve_venues(plan_data)
+	if world is CityWorld and (world as CityWorld).street_interiors_enabled:
+		street_units = Premises.cover_skyport(plan_data)
 	wplan = world_plan(plan_data)
 	transform = xform()   # (local → world: see "placement")
 	street = StaticBody3D.new()
@@ -1572,9 +1575,11 @@ static func _carve_venues(P: Dictionary) -> void:
 		for pc: Array in pieces:
 			var nb := b.duplicate(true)
 			nb["tiers"] = [pc]
+			nb["venue_shell"] = true
 			out.append(nb)
 		if y1 - (y0 + h) > 0.6:
 			var slab := b.duplicate(true)
+			slab["venue_shell"] = true
 			slab["tiers"] = [[r.position.x, r.position.y, r.end.x, r.end.y, y0 + h, y1]]
 			out.append(slab)
 		var hollow := b.duplicate(true)

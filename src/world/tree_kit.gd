@@ -2,6 +2,7 @@ class_name TreeKit
 ## Mobile LODs baked from the WorldState oak, birch and pine Blender study.
 const SPECIES := ["oak", "birch", "pine"]
 const CANOPY := preload("res://src/world/shaders/tree_canopy.gdshader")
+const LOD_CELL := 56.0
 static var _meshes := {}
 
 
@@ -64,14 +65,33 @@ static func shape(p: Vector3, base_scale: float) -> Basis:
 
 
 static func instance_batch(parent: Node3D, species: String, placements: Array, ends_at: float, detail := true) -> void:
-	var far := _instance_lod(parent, placements, mesh(species))
+	var far_mesh := mesh(species)
+	if not detail:
+		_add_lods(parent, placements, far_mesh, null, ends_at)
+		return
+	# Visibility ranges use the centre of the whole MultiMesh. Group local
+	# crowns so the end of a long street doesn't decide LOD for the near end.
+	var near := near_mesh(species)
+	var cells := {}
+	for xf: Transform3D in placements:
+		var p := xf.origin
+		var cell := Vector2i(floori(p.x / LOD_CELL), floori(p.z / LOD_CELL))
+		if not cells.has(cell):
+			cells[cell] = []
+		cells[cell].append(xf)
+	for batch: Array in cells.values():
+		_add_lods(parent, batch, far_mesh, near, ends_at)
+
+
+static func _add_lods(parent: Node3D, placements: Array, far_mesh: Mesh, near_mesh_resource: Mesh, ends_at: float) -> void:
+	var far := _instance_lod(parent, placements, far_mesh)
 	far.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	far.visibility_range_end = ends_at
 	far.visibility_range_end_margin = 16.0
-	if detail:
+	if near_mesh_resource != null:
 		far.visibility_range_begin = 105.0
 		far.visibility_range_begin_margin = 8.0
-		var near := _instance_lod(parent, placements, near_mesh(species))
+		var near := _instance_lod(parent, placements, near_mesh_resource)
 		near.visibility_parent = near.get_path_to(far)
 
 

@@ -74,6 +74,13 @@ static func places(g: EmpireGame) -> Array:
 	# Empty units to let (the nearest are listed; all are on the map).
 	for u4 in g.units:
 		if u4["kind"] == "shop" and g.occupier(u4["id"]).is_empty() and e.business_at(u4["id"]) == null:
+			if u4.get("flagship", false):
+				var use := String(u4["street_use"])
+				var category := "fashion" if use in ["clothing", "department"] else "shops"
+				out.append({"key": "unit:" + String(u4["id"]), "name": String(u4["name"]),
+					"cat": category, "what": "%s · %d m²" % [Premises.STREET_TITLES[use], int(u4["size"])],
+					"pos": Premises.door_point(u4), "ref": {"kind": "unit", "id": u4["id"]}, "unit": u4})
+				continue
 			out.append({"key": "unit:" + String(u4["id"]), "name": "%s unit" % EmpireData.district(u4["district"]).get("name", "Shop"),
 				"cat": "opportunity", "what": "To let · %s/day · %d m²" % [EmpireData.money(float(u4["rent"])), int(u4.get("size", 0))],
 				"pos": Premises.door_point(u4), "ref": {"kind": "unit", "id": u4["id"]}, "unit": u4, "vacant": true})

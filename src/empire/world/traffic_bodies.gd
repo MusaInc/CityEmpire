@@ -136,7 +136,7 @@ func _physics_process(dt: float) -> void:
 			var vn := game.vehicle_node()
 			var ids: Array = []
 			for x in cand:
-				if int(x[1]) == source and float(x[0]) < 40.0 * 40.0:
+				if int(x[1]) == source and (float(x[0]) < 40.0 * 40.0 or not tr.pedestrian_obstacles.is_empty()):
 					ids.append(int(x[2]))
 			tr.yield_to(vn.global_position if vn else game.player.global_position, ids)   # (people crossing too)
 	for i in POOL:

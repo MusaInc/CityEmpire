@@ -277,7 +277,7 @@ func _apply(dt: float, instant: bool) -> void:
 		# Moon: high in the south-east, cool and dim.
 		sun.rotation_degrees = Vector3(-42.0, 150.0, 0.0)
 		sun.light_color = Color(0.7, 0.76, 0.95)
-		sun.light_energy = 0.45 * smoothstep(-3.0, -12.0, el)
+		sun.light_energy = 0.45 * (1.0 - smoothstep(-12.0, -3.0, el))
 		sky_mat.set_shader_parameter("sun_glow", 0.25)
 		sky_mat.set_shader_parameter("disc_size", 0.99955)
 		sky_mat.set_shader_parameter("disc_k", 2.2)
@@ -340,7 +340,7 @@ func _apply(dt: float, instant: bool) -> void:
 	# dusky at sunset, moonlit blue at night).
 	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
 		[15.0, Color(0.78, 0.77, 0.76)], [40.0, Color(0.79, 0.81, 0.84)]]).lerp(Color(0.74, 0.75, 0.77), overcast * 0.6)
-	env.tonemap_exposure = lerpf(1.0, 1.5, night) * lerpf(1.0, 1.12, overcast) * (1.0 + 0.04 * hz * day_light)
+	env.tonemap_exposure = lerpf(1.0, 1.28, night) * lerpf(1.0, 1.12, overcast) * (1.0 + 0.04 * hz * day_light)
 	# Depth fog only: a clear near field, subtle blue-grey middle distance,
 	# and skyline silhouettes merging with the horizon. Rooftop views get a
 	# modest visibility lift; no volume textures, raymarching or extra lights.

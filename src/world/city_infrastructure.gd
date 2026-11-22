@@ -168,12 +168,14 @@ static func garden(l: CityLayout, p: Vector3, size: Vector2, tree: bool) -> void
 	var z := size.y * 0.5
 	l._ksolid(k, p.x - x, p.z - z, p.x + x, p.z + z, p.y - 0.1, p.y + 0.35, Color(0.34, 0.36, 0.32))
 	l._ksolid(k, p.x - x + 0.2, p.z - z + 0.2, p.x + x - 0.2, p.z + z - 0.2, p.y + 0.35, p.y + 0.39, Color(0.23, 0.32, 0.20), false)
-	l.public_gardens.append(p)
 	if tree:
+		l.public_gardens.append(p)
 		l.props.append(["tree", Transform3D(Basis().scaled(Vector3.ONE * 0.85), p + Vector3.UP * 0.39)])
 	else:
 		for dz: float in [-2.0, 2.0]:
-			l.props.append(["tree", Transform3D(Basis().scaled(Vector3.ONE * 0.48), p + Vector3(0, 0.39, dz))])
+			var t := p + Vector3(0, 0.39, dz)
+			l.public_gardens.append(t)
+			l.props.append(["tree", Transform3D(Basis().scaled(Vector3.ONE * 0.48), t)])
 
 ## A lawn bed in a big square (2026-11-20 visual pass: squares were acres of
 ## bare paving): a low stone kerb round a grass rectangle turned to the

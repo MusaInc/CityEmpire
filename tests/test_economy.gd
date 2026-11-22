@@ -627,3 +627,37 @@ func test_city500_next_step_is_reachable(t) -> void:
 	t.check(String(n["tip"]).contains("first shop"), "points at the first shop")
 	t.check(not n["ranked"] and (n["near"] as Array).size() == 3 and int(n["near"][-1]["rank"]) == 500, "shows the bottom rung, not the leaders")
 	t.check(float(n["per10"]) > 9000.0, "£10/day of profit is worth ~£11k (%.0f)" % float(n["per10"]))
+
+
+func test_financial_history_survives_old_saves_and_reconciles_balances(t) -> void:
+	var e := _game()
+	e.day_reports.append({"day": 1, "company": 0.0, "personal": e.personal_cash, "net_worth": e.net_worth(), "profit": 0.0})
+	e.day = 2
+	var opening_cash := e.personal_cash
+	t.check(e.transfer_to_company(100.0), "move cash between accounts")
+	t.check(e.take_loan(300.0), "borrow into the company")
+	e.end_day()
+	var saved := Empire.from_dict(e.to_dict())
+	var cash := saved.financial_history("cash_flow")
+	t.check(cash.size() == 1 and is_equal_approx(float(cash[0]), saved.personal_cash + saved.company_cash - opening_cash),
+		"cash flow reconciles both accounts and excludes transfers between them")
+	t.check(saved.financial_history("debt") == [300.0], "legacy days have no fabricated debt records")
+	t.check(saved.financial_history("assets").size() == 1 and saved.financial_history("profit").size() == 2,
+		"new asset history coexists with legacy profit records")
+	t.check(is_equal_approx(saved.asset_value() - saved.debt_value(), saved.net_worth()), "assets minus liabilities reconcile")
+
+
+func test_custom_shop_hours_control_trade_shifts_and_survive_save(t) -> void:
+	var e := _game()
+	var b := e.rent_premises(STARTER)
+	t.check(b != null and b.hours() == Vector2(7, 22), "older and new shops use the standard schedule by default")
+	t.check(b.set_hours(9, 11) and not b.set_hours(23, 8), "a valid schedule replaces the default")
+	t.check(e.hire(b, e.best_candidate("cashier")), "hire a worker for the scheduled shift")
+	var e2 := Empire.from_dict(e.to_dict())
+	b = e2.businesses[0]
+	t.check(b.hours() == Vector2(9, 11) and b.trading(9.0) and not b.trading(11.0), "opening time includes the first minute, closing time ends trade")
+	e2.minute = 8.0 * 60.0
+	e2.advance(4.0 * 60.0)
+	t.check(is_equal_approx(float(b.today["wages"]), b.wages_per_hour() * 2.0), "wages cover only scheduled hours")
+	b.reset_hours()
+	t.check(b.hours() == Vector2(7, 22), "reset restores the business type schedule")

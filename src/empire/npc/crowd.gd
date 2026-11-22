@@ -38,6 +38,7 @@ var _rng := RandomNumberGenerator.new()
 var _acc := 0.0
 var _first := true
 var _ground: Callable
+var _island_traffic: IslandTraffic
 
 
 func setup(p_game: EmpireGame) -> void:
@@ -56,6 +57,9 @@ func setup(p_game: EmpireGame) -> void:
 				if ring.is_empty() or (ring[0] as PackedVector2Array).size() < 3:
 					continue
 				_add_loop(ring[0], 1 if li == 0 else -1)
+	for city: CityWorld in [game.world, game.world.mainland]:
+		if city != null and city.traffic != null:
+			_add_city_crossings(city.traffic)
 	# Skyport Island: a pavement each side of every road (walked along one
 	# side and back along the other, so nobody reaches an end and vanishes).
 	if SkyportIsland.enabled and game.skyport:
@@ -87,7 +91,7 @@ func setup(p_game: EmpireGame) -> void:
 			# along the carriageway. A loop that does that is left out.
 			if _loop_on_carriageway(ring, all_roads, rd):
 				continue
-			_add_loop(ring, 1)
+			_add_loop(ring, 1, [rp.size() - 1, ring.size() - 1])
 	for u in game.units:
 		if u["kind"] == "shop":
 			_doors.append([Premises.door_point(u), Premises.outward(u), u["id"]])
@@ -130,6 +134,37 @@ func setup(p_game: EmpireGame) -> void:
 	add_child(_blobs)
 
 
+func _add_city_crossings(traffic: Traffic) -> void:
+	for crossing: Dictionary in traffic.pedestrian_crossings:
+		var a: Vector3 = crossing["a"]
+		var b: Vector3 = crossing["b"]
+		var away: Vector3 = crossing["away"]
+		var ends := [Vector2(a.x, a.z), Vector2(b.x, b.z)]
+		var tails := PackedVector2Array()
+		for p: Vector3 in [a, b]:
+			var target := p + away * 8.0
+			var tail := Vector2(target.x, target.z)
+			var nearest := INF
+			var snap := Vector2.INF
+			for index in _loops_near(target, 5.0):
+				var loop: Dictionary = _loops[index]
+				if not loop.get("city_crossing", {}).is_empty():
+					continue
+				var poly: PackedVector2Array = loop["pts"]
+				for i in poly.size():
+					var q := Geometry2D.get_closest_point_to_segment(tail, poly[i], poly[(i + 1) % poly.size()])
+					var distance := q.distance_to(tail)
+					if distance < nearest:
+						nearest = distance
+						snap = q
+			if nearest < 3.0:
+				tails.append(snap)
+		if tails.size() != 2:
+			continue
+		var ring := PackedVector2Array([ends[0], ends[1], tails[1], ends[1], ends[0], tails[0]])
+		_add_loop(ring, 1, [0, 3], {"traffic": traffic, "site": crossing})
+
+
 ## True when a pavement loop (sampled every 4 m along each side, its
 ## crossings at the ends left out) runs over another road's carriageway for
 ## more than 30 m - longer than any side road's mouth it crosses.
@@ -159,7 +194,7 @@ static func _loop_on_carriageway(ring: PackedVector2Array, roads: Array, own: Ar
 	return false
 
 
-func _add_loop(pts: PackedVector2Array, dir: int) -> void:
+func _add_loop(pts: PackedVector2Array, dir: int, crossings := [], city_crossing := {}) -> void:
 	var cum := PackedFloat32Array([0.0])
 	for i in pts.size():
 		cum.append(cum[i] + pts[i].distance_to(pts[(i + 1) % pts.size()]))
@@ -170,7 +205,7 @@ func _add_loop(pts: PackedVector2Array, dir: int) -> void:
 	for p in pts:
 		r = r.expand(p)
 	var idx := _loops.size()
-	_loops.append({"pts": pts, "cum": cum, "len": length, "dir": dir, "rect": r})
+	_loops.append({"pts": pts, "cum": cum, "len": length, "dir": dir, "rect": r, "crossings": crossings, "city_crossing": city_crossing})
 	for cx in range(floori(r.position.x / 100.0), floori(r.end.x / 100.0) + 1):
 		for cz in range(floori(r.position.y / 100.0), floori(r.end.y / 100.0) + 1):
 			var k := Vector2i(cx, cz)
@@ -195,7 +230,7 @@ func _sample(l: Dictionary, s: float) -> Array:
 	var a := pts[lo]
 	var b := pts[(lo + 1) % pts.size()]
 	var seg := maxf(cum[lo + 1] - cum[lo], 0.001)
-	return [a.lerp(b, (s - cum[lo]) / seg), (b - a) / seg]
+	return [a.lerp(b, (s - cum[lo]) / seg), (b - a) / seg, lo]
 
 
 func _focus() -> Vector3:
@@ -239,6 +274,13 @@ func _populate(focus: Vector3) -> void:
 	for li in _loops_near(focus, NEAR):
 		var l: Dictionary = _loops[li]
 		var step := SPACING / maxf(density, 0.05)
+		var city: Dictionary = l["city_crossing"]
+		if not city.is_empty():
+			var site: Dictionary = city["site"]
+			var kerb: Vector3 = site["a"]
+			if focus.distance_squared_to(kerb) < 58.0 * 58.0 and not _people.any(func(pr): return pr["loop"] == li):
+				want.append([li, float(l["cum"][2])])
+			continue
 		var s := fposmod(float(li) * 7.3, step)
 		while s < float(l["len"]):
 			var sp: Array = _sample(l, s)
@@ -250,8 +292,14 @@ func _populate(focus: Vector3) -> void:
 		return
 	for i in mini(missing, 30 if _first else 4):
 		var w: Array = want[_rng.randi() % want.size()]
-		var s2: float = float(w[1]) + _rng.randf_range(-4.0, 4.0)
+		var city_route: bool = not _loops[w[0]]["city_crossing"].is_empty()
+		if city_route and _people.any(func(pr): return pr["loop"] == w[0]):
+			continue
+		var jitter := 1.0 if city_route else 4.0
+		var s2: float = float(w[1]) + _rng.randf_range(-jitter, jitter)
 		var sp2: Array = _sample(_loops[w[0]], s2)
+		if sp2[2] in _loops[w[0]]["crossings"]:
+			continue
 		var p := Vector3(sp2[0].x, focus.y, sp2[0].y)
 		if not _first and not _unseen(p, 70.0):
 			continue
@@ -276,8 +324,14 @@ func _process(dt: float) -> void:
 	var me := game.player.global_position
 	var cam := get_viewport().get_camera_3d()
 	var eye := cam.global_position if cam else me
+	_island_traffic = get_tree().get_first_node_in_group("island_traffic") as IslandTraffic
 	_queue_up()
 	var keep: Array = []
+	var crossing_people := PackedVector3Array()
+	var occupied := {}
+	for city: CityWorld in [game.world, game.world.mainland]:
+		if city != null and city.traffic != null:
+			city.traffic.pedestrian_obstacles.clear()
 	for pr in _people:
 		_step(pr, dt, me, eye)
 		var p: Vector3 = pr["pos"]
@@ -288,6 +342,23 @@ func _process(dt: float) -> void:
 		if dd > DROP or dd > KEEP and _unseen(p, 70.0):
 			continue
 		keep.append(pr)
+		if pr.get("crossing", false):
+			var city: Dictionary = _loops[pr["loop"]]["city_crossing"]
+			if city.is_empty():
+				crossing_people.append(p)
+			else:
+				var traffic: Traffic = city["traffic"]
+				var site: Dictionary = city["site"]
+				var a: Vector3 = site["a"]
+				var b: Vector3 = site["b"]
+				if not occupied.has(a):
+					occupied[a] = true
+					# Hold every lane until the last pedestrian reaches the curb.
+					var points := ceili(a.distance_to(b) / 3.2)
+					for i in range(1, points):
+						traffic.pedestrian_obstacles.append(a.lerp(b, float(i) / points))
+	if _island_traffic != null:
+		_island_traffic.crossing_people = crossing_people
 	_people = keep
 	_draw_people()
 
@@ -321,6 +392,22 @@ func _queue_up() -> void:
 					a["pace"] = minf(float(a["pace"]), lerpf(p, 1.0, clampf((gap - 0.9) / 0.7, 0.0, 1.0)))
 
 
+func _crossing_clear(loop: Dictionary, index: int) -> bool:
+	var city: Dictionary = loop["city_crossing"]
+	if not city.is_empty():
+		var site: Dictionary = city["site"]
+		var midpoint := (site["a"] as Vector3).lerp(site["b"], 0.5)
+		if _focus().distance_squared_to(midpoint) > 60.0 * 60.0:
+			return false
+		var vehicle := game.vehicle_node()
+		return (city["traffic"] as Traffic).pedestrian_crossing_clear(site,
+			vehicle.global_position if vehicle else Vector3.INF)
+	if _island_traffic == null:
+		return true
+	var points: PackedVector2Array = loop["pts"]
+	return not _island_traffic.crossing_blocked(points[index], points[(index + 1) % points.size()])
+
+
 func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 	var l: Dictionary = _loops[pr["loop"]]
 	var state: String = pr["state"]
@@ -330,17 +417,29 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 	match state:
 		"walk":
 			var v := float(pr["speed"]) * float(pr["pace"])
-			pr["s"] = float(pr["s"]) + float(pr["dir"]) * v * dt
-			var sp: Array = _sample(l, pr["s"])
+			var distance := v * dt
+			var next := float(pr["s"]) + float(pr["dir"]) * distance
+			var sp := _sample(l, next)
+			var crossings: Array = l["crossings"]
+			if sp[2] in crossings and not pr.get("crossing", false):
+				if not _crossing_clear(l, int(sp[2])):
+					next = float(pr["s"])
+					sp = _sample(l, next)
+					distance = 0.0
+			pr["s"] = next
+			pr["crossing"] = sp[2] in crossings
+			pr["stride"] = float(pr["stride"]) + distance
+			target_walk = clampf(float(pr["pace"]) * 1.15, 0.0, 1.0) if distance > 0.0 else 0.0
 			var d: Vector2 = (sp[1] as Vector2) * float(pr["dir"])
 			var side := Vector2(-d.y, d.x)
 			var base: Vector2 = sp[0] + side * float(pr["lane"])
-			pr["dodge"] = move_toward(float(pr["dodge"]), _dodge_for(base, d, side, me, eye, float(pr["dodge"])), dt * 1.1)
+			var dodge := 0.0 if pr["crossing"] else _dodge_for(base, d, side, me, eye, float(pr["dodge"]))
+			pr["dodge"] = move_toward(float(pr["dodge"]), dodge, dt * 1.1)
 			var q: Vector2 = base + side * float(pr["dodge"])
 			p = Vector3(q.x, 0.0, q.y)
 			fwd = d
 			# A shop door at hand: look in the window, or go in.
-			if not pr["browsed"]:
+			if not pr["browsed"] and not pr["crossing"]:
 				for dr in _doors:
 					var dp: Vector3 = dr[0]
 					if Vector2(dp.x, dp.z).distance_to(q) < 2.2 and game.empire.business_at(String(dr[2])) == null:
@@ -376,10 +475,6 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 			var mv := fwd * minf(float(pr["speed"]) * dt, to.length())
 			p += Vector3(mv.x, 0.0, mv.y)
 			pr["stride"] = float(pr["stride"]) + mv.length()
-	if state == "walk":
-		# (Stride follows the distance actually walked: no skating feet.)
-		pr["stride"] = float(pr["stride"]) + float(pr["speed"]) * float(pr["pace"]) * dt
-		target_walk = clampf(float(pr["pace"]) * 1.15, 0.0, 1.0)
 	# Step round you; glance at you as you pass.
 	var rel := Vector2(me.x - p.x, me.z - p.z)
 	var dist := rel.length()

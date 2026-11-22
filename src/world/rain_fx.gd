@@ -4,7 +4,7 @@ extends MultiMeshInstance3D
 ## centred on the camera, all animated in the vertex shader (no CPU work per
 ## drop, no particles – works the same on the web build). Hidden when dry.
 
-const BOX := Vector3(46.0, 30.0, 46.0)
+const BOX := Vector3(42.0, 22.0, 42.0)
 
 var _mat: ShaderMaterial
 

@@ -800,7 +800,7 @@ static func garage(ph: Phone, body: VBoxContainer) -> void:
 	acts.add_child(fb)
 	if cls == "car":
 		var q := g.delivery_quote(vid)
-		var db := G.button("Deliver · %s" % EmpireData.money(float(q["fee"])) if q["ok"] else "Deliver", func():
+		var db := G.button("Deliver · %s" % EmpireData.money(float(q["fee"])) if q["ok"] else String(q["why"]), func():
 			var err := g.deliver_vehicle(vid)
 			ui.toast(err if err != "" else "A driver is bringing it round", "bad" if err != "" else "good")
 			ph.refresh(), "gray", "regular", null, "truck")
