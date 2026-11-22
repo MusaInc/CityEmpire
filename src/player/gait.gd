@@ -123,6 +123,9 @@ func begin(ankles: Dictionary, facing: Vector3, ground: Callable, vel: Vector3) 
 	phase = 0.0 if lead == "l" else 0.5
 	speed = vh.length()
 	_style(speed)
+	_prev_speed = speed
+	_jolt = 0.0
+	_stand_t = 0.0
 	moving = speed > START_SPEED
 	for sd in ["l", "r"]:
 		var f: Foot = feet[sd]
@@ -174,7 +177,7 @@ func _style(s: float) -> void:
 
 
 func _plant_at(f: Foot, a: Vector3, ground: Callable) -> void:
-	var hit := _sole_hit(ground, a, f.heading)
+	var hit := _sole_hit(ground, a, f.heading, everyday)
 	f.planted = true
 	f.pos = Vector3(a.x, (hit.position as Vector3).y + ANKLE_H, a.z) if not hit.is_empty() else a
 	f.normal = hit.normal if not hit.is_empty() else Vector3.UP
@@ -234,7 +237,9 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 		return
 
 	# --- clock -----------------------------------------------------------
-	var steps := cadence(maxf(speed, 0.8)) * (lerpf(1.19, 1.35, run) if everyday else 1.0)
+	var steps := cadence(maxf(speed, 0.8))
+	if everyday:
+		steps = lerpf(1.62, 2.21, smoothstep(0.25, 2.0, speed)) + 1.83 * smoothstep(1.9, 6.4, speed)
 	freq = steps * 0.5
 	var want_duty := lerpf(0.62, 0.43 if everyday else 0.38, run) - 0.1 * sprint
 	# Ground covered while a foot is down must fit the legs' reach.
@@ -260,7 +265,10 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			f.toe = smoothstep(0.55, 1.0, f.stance_u) * toe_max * smoothstep(0.4, 1.6, speed)  # (none when coming to a stop)
 			# The heel also comes up early if the flat foot is out of reach.
 			var a := _roll(f.pos, f.heading, f.normal, f.toe)
-			while f.toe < toe_max + 0.2 and a.distance_to(hip) > LEG_LEN - 0.01:
+			# Over a walking stance the knee takes the load. Preserve the
+			# sole before toe-off and let the rig lower the pelvis to reach it.
+			var flat_support := everyday and run < 0.47 and f.stance_u < 0.63
+			while not flat_support and f.toe < toe_max + 0.2 and a.distance_to(hip) > LEG_LEN - 0.01:
 				f.toe += 0.04
 				a = _roll(f.pos, f.heading, f.normal, f.toe)
 			# Track the ankle around the planted shoe heel during loading.
@@ -268,13 +276,15 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				a += f.normal * (HEEL * sin(f.heel) + ANKLE_H * (cos(f.heel) - 1.0))
 				a -= f.heading * (ANKLE_H * sin(f.heel) + HEEL * (1.0 - cos(f.heel)))
 			f.cur = a
-			_pivot(f, facing)
+			if not everyday or absf(f.heading.signed_angle_to(facing, Vector3.UP)) > 0.72:
+				_pivot(f, facing)
 			# Lift: the clock says so, or the body has run away from the foot
 			# (a sharp cut, a stop dead): then it's a step, never a skate or a
 			# leg hyper-extended behind the hip.
 			var rel := a - hip
 			var back := -Vector2(rel.x, rel.z).dot(Vector2(facing.x, facing.z))
-			var lost := a.distance_to(hip) > LEG_LEN + 0.01 or atan2(back, maxf(-rel.y, 0.05)) > 0.6 \
+			var reach_limit := LEG_LEN + (0.043 if flat_support else 0.01)
+			var lost := a.distance_to(hip) > reach_limit or atan2(back, maxf(-rel.y, 0.05)) > 0.6 \
 				or Vector2(rel.x, rel.z).length() > LEG_LEN * 0.9
 			if u >= duty or lost:
 				f.planted = false
@@ -312,7 +322,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			# one level (on the step going up, clear of the edge going down).
 			var hit := {}
 			for i in 4:
-				hit = _sole_hit(ground, land + Vector3.UP * 0.3, dir)
+				hit = _sole_hit(ground, land + Vector3.UP * 0.3, dir, everyday)
 				var mid: Dictionary = ground.call(land + Vector3.UP * 0.3)
 				if hit.is_empty() or mid.is_empty() or (hit.position as Vector3).y - (mid.position as Vector3).y < 0.03:
 					break
@@ -368,7 +378,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			var rh := Vector2(rel.x, rel.z).length()
 			if rh < FOLD_MIN:
 				p.y = minf(p.y, hip.y - sqrt(FOLD_MIN * FOLD_MIN - rh * rh))
-			var g := _sole_hit(ground, p, f.heading)
+			var g := _sole_hit(ground, p, f.heading, everyday)
 			if not g.is_empty():
 				p.y = maxf(p.y, (g.position as Vector3).y + ANKLE_H + 0.01 * sin(PI * f.w))
 			f.cur = p
@@ -402,7 +412,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				if f.target != Vector3.ZERO and Vector2(f.cur.x - f.target.x, f.cur.z - f.target.z).length() < 0.06:
 					f.pos.y = f.target.y
 				else:
-					var h := _sole_hit(ground, f.cur + Vector3.UP * 0.3, f.heading)
+					var h := _sole_hit(ground, f.cur + Vector3.UP * 0.3, f.heading, everyday)
 					if not h.is_empty():
 						f.pos.y = (h.position as Vector3).y + ANKLE_H
 						f.normal = h.normal
@@ -474,7 +484,9 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 			var rest := _standing_spot(centre, facing, right, f)
 			var off := Vector2(f.pos.x - rest.x, f.pos.z - rest.z).length()
 			var twist := absf(f.heading.signed_angle_to(facing, Vector3.UP))
-			if off > far or twist > 0.9:
+			if everyday:
+				off += maxf(twist - 0.23, 0.0) * 0.23
+			if off > far or (not everyday and twist > 0.9):
 				far = maxf(off, far)
 				worst = sd
 		if worst != "":
@@ -497,7 +509,8 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 		f.w = minf(f.w + dt / (0.1 if f.quick else SETTLE_TIME), 1.0)
 		var rest := _standing_spot(centre, facing, right, f)
 		rest.y = f.from.y
-		var hit: Dictionary = ground.call(rest + Vector3.UP * 0.3)
+		var hit: Dictionary = _sole_hit(ground, rest + Vector3.UP * 0.3, facing, true) if everyday \
+				else ground.call(rest + Vector3.UP * 0.3)
 		if not hit.is_empty():
 			rest.y = (hit.position as Vector3).y + ANKLE_H
 		var e := smoothstep(0.0, 1.0, f.w)
@@ -567,11 +580,17 @@ static func _yaw_to(a: Vector3, b: Vector3, t: float) -> Vector3:
 
 ## Highest ground under the whole sole (heel, ankle, ball): a foot over a
 ## kerb or step edge rests on the higher side instead of sinking into it.
-static func _sole_hit(ground: Callable, at: Vector3, heading: Vector3) -> Dictionary:
+static func _sole_hit(ground: Callable, at: Vector3, heading: Vector3, width := false) -> Dictionary:
 	var hd := Vector3(heading.x, 0.0, heading.z).normalized()
 	var best: Dictionary = ground.call(at)
 	for off: float in [0.13, -0.07]:
 		var h: Dictionary = ground.call(at + hd * off)
 		if not h.is_empty() and (best.is_empty() or (h.position as Vector3).y > (best.position as Vector3).y + 0.005):
 			best = h
+	if width:
+		var side := hd.cross(Vector3.UP)
+		for off: float in [-0.045, 0.045]:
+			var h: Dictionary = ground.call(at + side * off)
+			if not h.is_empty() and (best.is_empty() or (h.position as Vector3).y > (best.position as Vector3).y + 0.018):
+				best = h
 	return best

@@ -79,6 +79,16 @@ var _headers: Array = []     # shelf header Label3Ds (meta "fixture" = [kind, un
 var _dirt: MeshInstance3D
 var _sign: Label3D
 var _sign_light: OmniLight3D
+var _sales_lights: Array[Light3D] = []
+var _trade_glow: MeshInstance3D
+var _trade_board: Label3D
+var _front_seed := 0
+var _lighting_open := true
+var _delivery_worker: ShopPerson
+var _delivery_truck: Node3D
+var _delivery_phase := 0
+var _delivery_wait := 0.0
+var _delivery_start := Vector3.ZERO
 var _open_sign: Label3D
 var _col: StaticBody3D
 var _cases_mm: MultiMeshInstance3D
@@ -101,6 +111,7 @@ var office := {}
 func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival := {}) -> void:
 	_ground_fn = ground_fn
 	unit = p_unit
+	_front_seed = absi(String(unit.get("id", "")).hash())
 	biz = p_biz
 	kind = String(unit.get("kind", "shop"))
 	rival = p_rival
@@ -115,6 +126,10 @@ func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival
 		biz = rival_display(unit, String(unit["name"]), Premises.STREET_TRADE[unit["street_use"]])
 	type_id = biz.type_id if biz else "convenience"
 	look = ShopStyle.look(type_id)
+	look["wall"] = (look["wall"] as Color).lerp(
+		[Color(0.75, 0.76, 0.77), Color(0.83, 0.78, 0.68), Color(0.69, 0.74, 0.70)][_front_seed % 3], 0.22)
+	look["floor"] = (look["floor"] as Color).lerp(
+		[Color(0.67, 0.64, 0.60), Color(0.53, 0.54, 0.55), Color(0.75, 0.73, 0.66)][(_front_seed / 7) % 3], 0.21)
 	if biz:
 		ident = ShopStyle.brand(biz.name, type_id, not rival.is_empty() and not rival.get("firm", false))
 		if not public_display and rival.is_empty() and String(ShopStyle.house.get("name", "")) != "":
@@ -193,6 +208,7 @@ func rebuild() -> void:
 	for c in get_children():
 		c.queue_free()
 	placed.clear()
+	_fitting_clear = Rect2()
 	_headers.clear()
 	spots.clear()
 	slot_pick.clear()
@@ -200,6 +216,9 @@ func rebuild() -> void:
 	till_customer.clear()
 	till_staff.clear()
 	queue.clear()
+	_sales_lights.clear()
+	_trade_glow = null
+	_trade_board = null
 	_static = Node3D.new()
 	_static.name = "Static"
 	add_child(_static)
@@ -223,6 +242,8 @@ func rebuild() -> void:
 		_build_street(st)
 	else:
 		_build_shop(st)
+	_fit_wall_bays()
+	_furniture_contact()
 	var mi := MeshInstance3D.new()
 	mi.name = "Shell"
 	mi.mesh = st.commit()
@@ -244,6 +265,7 @@ func rebuild() -> void:
 		gi.material_override = _mat("glow")
 		gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_static.add_child(gi)
+		_trade_glow = gi
 		_glow = null
 	if kind != "street" or public_display:
 		_build_walk_grid()
@@ -290,20 +312,24 @@ func _build_shop(st: _Batch) -> void:
 	_wall_box(st, dw1, W, part_d, part_d + 0.14, 0.0, H, wall.darkened(0.04))
 	_wall_box(st, dw0, dw1, part_d, part_d + 0.14, 2.3, H, wall.darkened(0.04))
 	_stock_door(st, part_d, dw0, dw1, trim)
+	var feature_wall := wall.lerp(brand, 0.42) if type_id == "clothing" else wall.darkened(0.08)
+	_wall_finish(R(dw0 * 0.5, part_d - 0.007, H * 0.5), 0.0, Vector2(dw0 - 0.034, H - 0.015),
+		feature_wall, 7 if type_id == "clothing" else 5)
 	# Shopfront: glass either side of the door, frame, fascia.
 	_shopfront(st, trim)
 	# Counter + tills on the right.
 	var tills := biz.tills() if biz else 1
 	var cx0 := W - 2.45
 	var cx1 := W - 1.75
-	var cd0 := 1.3
-	var cd1 := 1.3 + 1.25 * tills + 0.4
+	var cd0 := 1.55 if cx0 - 0.06 >= door.y + ENTRY_SIDE else ENTRY_CLEAR + 0.10
+	var pitch := clampf((part_d - cd0 - 1.15) / float(tills), 0.62, 1.25)
+	var cd1 := cd0 + pitch * tills + 0.24
 	st.box(R(cx0, cd0, 0.0), R(cx1, cd1, 0.98), Color(0.32, 0.22, 0.15))
 	st.box(R(cx0 - 0.02, cd0 + 0.08, 0.12), R(cx0, cd1 - 0.08, 0.86), brand)  # branded counter front
 	st.box(R(cx0 - 0.05, cd0 - 0.05, 0.98), R(cx1 + 0.05, cd1 + 0.05, 1.04), Color(0.9, 0.89, 0.86))
 	_solid(R(cx0, cd0, 0.0), R(cx1, cd1, 1.04))
 	for i in tills:
-		var td := cd0 + 0.6 + 1.25 * i
+		var td := cd0 + pitch * (float(i) + 0.5)
 		st.box(R(cx0 + 0.15, td - 0.22, 1.04), R(cx0 + 0.55, td + 0.22, 1.12), Color(0.12, 0.12, 0.13))  # register base
 		st.box(R(cx0 + 0.28, td - 0.18, 1.12), R(cx0 + 0.32, td + 0.18, 1.42), Color(0.08, 0.09, 0.1))   # screen
 		_glow_quad(R(cx0 + 0.27, td - 0.15, 1.15), R(cx0 + 0.27, td + 0.15, 1.39), Color(0.35, 0.8, 0.9))
@@ -313,14 +339,16 @@ func _build_shop(st: _Batch) -> void:
 			spots.append({"kind": "retail_checkout", "pos": till_customer[-1]})
 		elif not public_display:
 			spots.append({"kind": "till", "pos": till_staff[-1], "till": i, "label": "SERVE"})
-	# Queue: back from the first till along the counter.
-	for k in 6:
-		queue.append(R(cx0 - 0.55, cd1 + 0.5 + 0.8 * k, 0.0))
+	# Fit the queue to the floor before the stockroom partition.
+	var queue_last := part_d - 0.58
+	var queue_first := minf(cd1 + 0.40, queue_last)
+	for k in range(1 + mini(5, floori((queue_last - queue_first) / 0.8))):
+		queue.append(R(cx0 - 0.58, queue_first + 0.8 * k, 0.0))
 	# Queue markings on the floor: a spot per place in the line and a
 	# "please queue here" strip at its head (floor paint only: the walk
 	# grid is unchanged).
-	for k2 in 4:
-		var qd := cd1 + 0.5 + 0.8 * k2
+	for k2 in mini(queue.size(), 4):
+		var qd := queue_first + 0.8 * k2
 		st.box(R(cx0 - 0.72, qd - 0.12, 0.014), R(cx0 - 0.38, qd + 0.12, 0.019), brand.lightened(0.15) if k2 > 0 else accent_col())
 	st.box(R(cx0 - 0.95, cd1 + 0.08, 0.014), R(cx0 - 0.15, cd1 + 0.16, 0.019), Color(0.95, 0.85, 0.2))
 	var ql := Label3D.new()
@@ -332,14 +360,15 @@ func _build_shop(st: _Batch) -> void:
 	ql.double_sided = false
 	ql.outline_size = 0
 	ql.modulate = Color(0.12, 0.12, 0.14)
-	ql.position = R(cx0 - 0.55, cd1 + 0.3, 0.022)
+	ql.position = R(cx0 - 0.55, queue_first - 0.15, 0.022)
 	# Flat on the floor, reading across the line for someone queueing
 	# (facing the till).
 	ql.rotation = Vector3(-PI * 0.5, PI, 0.0)
 	_static.add_child(ql)
 	# Cigarette-style back display behind the counter (decor) + till staff area.
 	st.box(R(W - 0.4, cd0, 0.9), R(W - 0.05, cd1, 2.2), Color(0.25, 0.27, 0.3))
-	# Fixtures.
+	# Fitting rooms reserve their footprint before products are allocated.
+	var fit := _fitting_room(st, part_d) if type_id == "clothing" else Rect2()
 	_place_fixtures(st, part_d)
 	if _has_mezzanine():
 		_build_mezzanine(st, part_d)
@@ -349,9 +378,9 @@ func _build_shop(st: _Batch) -> void:
 	door_in = R((door.x + door.y) * 0.5, 0.9, 0.0)
 	door_out = R((door.x + door.y) * 0.5, -1.6, 0.0)
 	spots.append({"kind": "door", "pos": R((door.x + door.y) * 0.5, 0.55, 0.0), "label": "OPEN / CLOSE"})
-	# The floor pile: just inside, left of the door, in front of the window.
-	pile_pos = R(clampf(door.x - 1.0, 0.7, W * 0.5), 1.05, 0.0)
-	spots.append({"kind": "pile", "pos": pile_pos, "label": "FLOOR"})
+	# Stage loose cases in the stockroom away from the customer entrance.
+	pile_pos = R(1.45, part_d + 0.43, 0.0)
+	spots.append({"kind": "pile", "pos": pile_pos, "label": "STAGING AREA"})
 	# Ceiling lights (their kind follows the shop's).
 	var bright := 1.25 if biz and biz.has_upgrade("lighting") else 0.85
 	var tint: Color = look.get("tint", Color(1.0, 0.97, 0.92))
@@ -359,6 +388,7 @@ func _build_shop(st: _Batch) -> void:
 		tint = tint.lerp(Color(1.0, 0.9, 0.78), 0.4)
 	if unit.get("flagship", false):
 		_flagship_lights(st, part_d, tint)
+		_flagship_feature(st, part_d, tint)
 	else:
 		_ceiling_lights(st, part_d, tint)
 		_light(R(W * 0.35, part_d * 0.4, H - 0.4), tint, bright, maxf(W, D) * 0.9)
@@ -374,6 +404,121 @@ func _build_shop(st: _Batch) -> void:
 	_dirt.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_static.add_child(_dirt)
 	spots.append({"kind": "clean", "pos": R(W * 0.4, part_d * 0.55, 0.0), "label": "CLEAN"})
+	if fit.has_area():
+		st.box(R(fit.position.x - 0.025, -fit.end.y, 0.001),
+			R(fit.end.x + 0.025, -fit.end.y + 0.84, 0.016), Color(0.19, 0.17, 0.15))
+
+
+var _fitting_clear := Rect2()
+
+
+func _fitting_room(st: _Batch, depth: float) -> Rect2:
+	if W < 8.8 or depth < 5.8:
+		return Rect2()
+	var d0 := depth - 1.8
+	var x0 := 0.14
+	var width := 1.62
+	var count := 2 if W > 17.0 else 1
+	var end := x0 + width * count
+	var panel := Color(0.46, 0.36, 0.27).lerp(brand, 0.24)
+	var curtain := Color(0.27, 0.21, 0.20).lerp(brand, 0.30)
+	_fitting_clear = Rect2(x0, -depth, end - x0, depth - d0 + 0.92)
+	for divider in count + 1:
+		var x := x0 + width * divider
+		_wall_box(st, x - 0.031, x + 0.031, d0, depth, 0.0, 2.42, panel)
+		if divider == count:
+			_wall_finish(R(x + 0.036, (d0 + depth) * 0.5, 1.21), PI * 0.5, Vector2(depth - d0, 2.40), panel, 1)
+	for i in count:
+		var x := x0 + width * i
+		st.box(R(x + 0.075, d0 - 0.08, 2.35), R(x + width - 0.075, d0, 2.60), panel.darkened(0.26))
+		_glow_quad(R(x + width * 0.3, d0 + 0.23, 2.346), R(x + width * 0.7, d0 + 0.34, 2.346), Color(1.0, 0.94, 0.84), true)
+		st.box(R(x + 0.02, d0 - 0.015, 2.30), R(x + width - 0.02, d0 + 0.052, 2.38), panel.lightened(0.18))
+		for fold in 7:
+			var px := x + 0.065 + fold * 0.071
+			var front := d0 + cos(float(fold) * 2.0) * 0.026
+			st.box(R(px, front, 0.075), R(px + 0.078, front + 0.022, 2.29), curtain.lightened(0.04 * float(fold % 3)))
+		_solid(R(x + 0.065, d0 - 0.026, 0.075), R(x + 0.572, d0 + 0.048, 2.29))
+		st.box(R(x + 0.33, depth - 0.083, 0.30), R(x + width - 0.26, depth - 0.019, 2.21), panel.darkened(0.32))
+		var mirror := MeshInstance3D.new()
+		var glass := QuadMesh.new()
+		glass.size = Vector2(width - 0.66, 1.76)
+		mirror.mesh = glass
+		mirror.material_override = InteriorKit.fitting_glass()
+		mirror.position = R(x + width * 0.5 + 0.03, depth - 0.086, 1.26)
+		mirror.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_static.add_child(mirror)
+	_street_label("FITTING ROOMS", R(x0 + width * 0.5, d0 - 0.088, 2.475), width - 0.20, Color(0.93, 0.87, 0.74))
+	_spot_light(R((x0 + end) * 0.5, d0 + 0.52, H - 0.15), Color(1.0, 0.9, 0.8), 1.45, H + 0.3, 33.0)
+	return Rect2(x0, -depth, end - x0, depth - d0)
+
+
+func _fit_wall_bays() -> void:
+	if kind == "shop" and biz == null:
+		return
+	var blocked: Array[Rect2] = []
+	for box: CollisionShape3D in _col.get_children():
+		var size := (box.shape as BoxShape3D).size
+		var base := box.position - size * 0.5
+		if base.y > 2.35 or base.y + size.y < 0.23:
+			continue
+		# Ignore the perimeter shell itself.
+		var area := Rect2(Vector2(base.x, base.z), Vector2(size.x, size.z)).intersection(Rect2(0.042, -D + 0.043, W - 0.084, D - 0.08))
+		if area.has_area():
+			blocked.append(area.grow(0.06))
+	for spot: Dictionary in spots:
+		var p: Vector3 = spot["pos"]
+		blocked.append(Rect2(Vector2(p.x - 0.46, p.z - 0.46), Vector2.ONE * 0.92))
+	for p: Vector3 in till_customer + till_staff + queue:
+		blocked.append(Rect2(p.x - 0.66, p.z - 0.66, 1.32, 1.32))
+	if _fitting_clear.has_area():
+		blocked.append(_fitting_clear)
+	var depth := D - BACKROOM - 0.14 if kind == "shop" else D
+	if kind == "shop":
+		var stockroom_door := _door_at.x
+		blocked.append(Rect2(stockroom_door - 1.53, -depth, 3.06, 1.15))
+	var use := String(unit.get("street_use", kind))
+	if kind == "shop" and not public_display:
+		use = type_id
+	elif kind == "wholesale":
+		use = "warehouse"
+	if kind in ["office", "hq"]:
+		# Leave the main brand panel and wall-mounted reception displays visible.
+		blocked.append(Rect2(W * 0.5 - 3.5, -D, 7.0, 0.75))
+	if kind == "street" or (public_display and use == "furniture"):
+		var mid := (door.x + door.y) * 0.5
+		var title_span := minf(W - 1.5, 6.8)
+		# Keep the wall lettering and service counter's back shelf visible.
+		blocked.append(Rect2(mid - title_span * 0.43, -D, title_span * 0.86, 0.65))
+	var bays := InteriorKit.plan(W, depth, H, blocked, ENTRY_CLEAR, 0.033)
+	if _has_mezzanine():
+		# Keep displays clear of the stair and overhanging gallery.
+		bays = bays.filter(func(bay: Transform3D) -> bool: return not _under_mezzanine(bay.origin))
+	for bay in bays:
+		var box := InteriorKit.footprint(bay)
+		_solid(box.position, box.end)
+	InteriorKit.dress(_static, bays, InteriorKit.profile(use), _front_seed)
+
+
+func _furniture_contact() -> void:
+	var feet: Array[Rect2] = []
+	for fixture: CollisionShape3D in _col.get_children():
+		var shape := (fixture.shape as BoxShape3D).size
+		var at := fixture.position - shape * 0.5
+		if absf(at.y) > 0.038 or shape.y < 0.26 or minf(shape.x, shape.z) < 0.22:
+			continue
+		if minf(shape.x, shape.z) > 2.5 or shape.x + shape.z > 6.5:
+			continue
+		if at.z < -D + 0.28 or at.z + shape.z > -0.5 or at.x < 0.17 or at.x + shape.x > W - 0.17:
+			continue
+		feet.append(Rect2(at.x, at.z, shape.x, shape.z))
+		if feet.size() >= 38:
+			break
+	InteriorKit.add_contacts(_static, feet)
+
+
+func _under_mezzanine(p: Vector3) -> bool:
+	# The west stair and upper gallery are already furnished and have their own rails.
+	return p.x < 6.8 and p.z < -3.25 and p.z > -16.35
 
 
 func _flagship_lights(st: _Batch, sales_depth: float, tint: Color) -> void:
@@ -387,8 +532,38 @@ func _flagship_lights(st: _Batch, sales_depth: float, tint: Color) -> void:
 				_glow_quad(R(x - 0.07, z - 0.75, H - 0.308), R(x + 0.07, z + 0.75, H - 0.308), tint * 1.36, true)
 	for x_factor: float in [0.30, 0.70]:
 		for d_factor: float in [0.26, 0.70]:
-			_light(R(W * x_factor, sales_depth * d_factor, H - 0.54), tint, 1.24,
-				clampf(maxf(W, sales_depth) * 0.43, 8.0, 18.0))
+			_spot_light(R(W * x_factor, sales_depth * d_factor, H - 0.32), tint, 1.55,
+				clampf(maxf(W, sales_depth) * 0.39, 8.0, 17.0), 66.0)
+
+
+func _flagship_feature(st: _Batch, depth: float, tint: Color) -> void:
+	# The central walk remains open on both sides of the display island.
+	if W < 16.0 or depth < 14.0:
+		return
+	var x := W * 0.5 + 0.83
+	var d := depth * 0.56
+	var edge := Vector3(0.67, 0.64, 0.75)
+	var at := R(x, d, 0.0)
+	var reserved := AABB(at + Vector3(-1.59, 0.25, -1.35), Vector3(3.18, 2.0, 2.7))
+	for cs: CollisionShape3D in _col.get_children():
+		var size := (cs.shape as BoxShape3D).size
+		if reserved.intersects(AABB(cs.position - size * 0.5, size)):
+			return
+	match String(unit.get("street_use", "")):
+		"clothing", "department":
+			st.cylinder(at, 0.68, 0.13, Color(0.33, 0.23, 0.16), 22)
+			_mannequin(at + Vector3(-0.16, 0.13, 0), PI * 0.08)
+		"supermarket":
+			var oak := Color(0.45, 0.32, 0.21)
+			st.box(at - Vector3(edge.x, 0.0, edge.z), at + edge, oak)
+			for i in 4:
+				for j in 3:
+					var p := at + Vector3(-0.48 + 0.30 * i, 0.64, -0.42 + 0.4 * j)
+					st.cylinder(p, 0.09, 0.175, Color(0.44, 0.26, 0.14).lightened(0.07 * ((i + j) % 3)), 10)
+		_:
+			return
+	_solid(at - Vector3(edge.x, 0.0, edge.z), at + edge)
+	_spot_light(at + Vector3.UP * (H - 0.35), tint, 2.35, H + 1.0, 37.0)
 
 
 func _has_mezzanine() -> bool:
@@ -476,8 +651,8 @@ func _decor_corner(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float
 		var y := 0.0 + k * 0.09
 		st.box(R(0.25, 0.45, y), R(0.7, 0.85, y + 0.07), Color(0.85, 0.15, 0.15) if rival.is_empty() else Color(0.95, 0.95, 0.95))
 	_solid(R(0.2, 0.4, 0.0), R(0.75, 0.9, 0.5))
-	# Newspaper stand (left of the door).
-	var nx := door.x - 1.1
+	# Newspaper stand on the outer display bay.
+	var nx := door.x - ENTRY_SIDE - 0.85
 	if nx > 1.0:
 		st.box(R(nx, 0.45, 0.0), R(nx + 0.7, 0.85, 0.7), Color(0.25, 0.27, 0.3))
 		for j in 3:
@@ -519,6 +694,15 @@ func _shell(st: _Batch, wall: Color, trim: Color) -> void:
 	_wall_box(st, -0.05, 0.02, 0.0, D, 0.0, H, wall)
 	_wall_box(st, W - 0.02, W + 0.05, 0.0, D, 0.0, H, wall)
 	_wall_box(st, 0.0, W, D - 0.02, D + 0.05, 0.0, H, wall.darkened(0.06))
+	var use := String(unit.get("street_use", type_id))
+	var plaster_style := 3 if use in ["garage", "warehouse"] else 5
+	var stone_style := 7 if use in ["hotel", "restaurant", "bank", "residential"] else plaster_style
+	var side_span := Vector2(D - 0.35, H - 0.022)
+	var side_center := -(D + 0.29) * 0.5
+	_wall_finish(Vector3(0.024, H * 0.5, side_center), PI * 0.5, side_span, wall, stone_style)
+	_wall_finish(Vector3(W - 0.024, H * 0.5, side_center), -PI * 0.5, side_span, wall, plaster_style)
+	_wall_finish(Vector3(W * 0.5, H * 0.5, -D + 0.024), 0.0, Vector2(W - 0.05, H - 0.022), wall.darkened(0.06), stone_style)
+	st.box(R(0.046, D - 0.065, 0.0), R(W - 0.046, D - 0.022, 0.12), trim)
 	var ceil_col: Color = look.get("ceiling", Color(0.78, 0.78, 0.76)) if not look.is_empty() else Color(0.78, 0.78, 0.76)
 	st.box(R(0.0, 0.0, H - 0.01), R(W, D, H + 0.05), ceil_col)
 	# Suspended-ceiling grid (corner shops and the warehouse).
@@ -540,6 +724,18 @@ func _shell(st: _Batch, wall: Color, trim: Color) -> void:
 	_wall_box(st, 0.0, ox.x, 0.03, 0.3, 0.0, H, wall)
 	_wall_box(st, ox.y, W, 0.03, 0.3, 0.0, H, wall)
 	_wall_box(st, ox.x, ox.y, 0.03, 0.3, oh, H, wall)
+
+
+func _wall_finish(p: Vector3, yaw: float, span: Vector2, tint: Color, style: int) -> void:
+	var surface := QuadMesh.new()
+	surface.size = span
+	var node := MeshInstance3D.new()
+	node.mesh = surface
+	node.position = p
+	node.rotation.y = yaw
+	node.material_override = InteriorKit.wall_finish(span, tint, style, _front_seed)
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_static.add_child(node)
 
 
 func _front_opening_height() -> float:
@@ -720,8 +916,21 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 		_solid(R(px, -0.22, 0.0), R(px + 0.34, 0.0, fy))
 	# Fascia and cornice.
 	st.box(R(0.3, -0.3, fy), R(W - 0.3, -0.01, fy + 0.78), fascia)
+	var fascia_style := (_front_seed / 17) % 3
+	if trading_here and not flagship:
+		var trim_ink := accent_c.lerp(fascia, 0.27)
+		match fascia_style:
+			0:  # painted border with small mitred end plates
+				for y: float in [fy + 0.11, fy + 0.66]:
+					st.box(R(1.39, -0.326, y), R(W - 0.57, -0.304, y + 0.022), trim_ink)
+			1:  # two aluminium cappings with a recessed name band
+				for y: float in [fy + 0.015, fy + 0.71]:
+					st.box(R(0.35, -0.336, y), R(W - 0.35, -0.304, y + 0.055), fc.lightened(0.19))
+			_:  # inset tablet fitted to the centre of the frontage
+				st.box(R(1.26, -0.329, fy + 0.10), R(W - 0.44, -0.304, fy + 0.70), fascia.darkened(0.23))
 	if trading_here and sign_style == "lightbox":
-		_glow_quad(R(0.35, -0.305, fy + 0.04), R(W - 0.35, -0.305, fy + 0.74), fascia * 0.9)
+		var bulb_d := -0.334 if fascia_style == 2 and not flagship else -0.305
+		_glow_quad(R(1.27, bulb_d, fy + 0.13), R(W - 0.45, bulb_d, fy + 0.66), fascia * 0.9)
 	if trading_here and String(ident.get("initial", "")) != "":
 		# The logo: a roundel-ish badge with the initial at the fascia's left.
 		var lx0 := 0.55
@@ -860,6 +1069,18 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 		_sign.pixel_size = 0.00355
 		_sign.modulate = Color(0.98, 0.95, 0.89)
 		_sign.width = 6.9 / _sign.pixel_size
+	elif trading_here:
+		var strip := minf(W - 1.8, 12.0)
+		_sign.position.z = 0.354
+		_sign.position.y = fy + (0.47 if fascia_style == 0 and W > 9.2 else 0.39)
+		_fit_sign(_sign, strip - 0.32, 0.0046)
+		if fascia_style == 0 and W > 9.2:
+			var category := String(Premises.STREET_TITLES.get(unit.get("street_use", ""), {
+				"convenience": "Groceries", "cafe": "Coffee & cakes", "bakery": "Bread & pastries",
+				"takeaway": "Order & collect", "clothing": "Clothing", "phones": "Phones & repairs"
+			}.get(type_id, "")))
+			if category != "":
+				_street_label(category.to_upper(), R(_sign.position.x, -0.354, fy + 0.24), strip * 0.65, _sign.modulate, "condensed", 0.0025)
 	# OPEN / CLOSED / TO LET card in the door glass.
 	_open_sign = Label3D.new()
 	_open_sign.font_size = 64
@@ -993,11 +1214,11 @@ func _window_display(st: _Batch, spans: Array, gd: float) -> void:
 	match type_id:
 		"convenience":
 			# Right window: a stepped stand of drinks, crisps and sweets.
-			xa = door.y + 0.35
+			xa = door.y + ENTRY_SIDE
 			xb = W - 1.0
 		"bakery", "phones":
 			xa = 1.0
-			xb = door.x - 0.35
+			xb = door.x - ENTRY_SIDE
 		_:
 			return
 	if xb - xa < 0.8:
@@ -1053,7 +1274,8 @@ func _street_dressing(st: _Batch, h: int, oh: float) -> void:
 	var dark := brand.darkened(0.55)
 	if plants:
 		for side: float in [-1.0, 1.0]:
-			var cx := (door.x - 0.85) if side < 0.0 else (door.y + 0.85)
+			var offset := ENTRY_SIDE + 0.46
+			var cx := (door.x - offset) if side < 0.0 else (door.y + offset)
 			if cx - 0.3 < 0.4 or cx + 0.3 > W - 0.4:
 				continue
 			var y0 := _street_y(cx, -0.37)
@@ -1062,7 +1284,7 @@ func _street_dressing(st: _Batch, h: int, oh: float) -> void:
 			_batch_cone(st, R(cx, -0.37, y0 + 0.5), 0.3, 0.05, 0.95, Color(0.17, 0.36, 0.19))
 			_solid(R(cx - 0.3, -0.62, y0), R(cx + 0.3, -0.12, y0 + 1.0))
 	# The A-board, right of the door.
-	var xa := door.y + (1.75 if plants else 1.15)
+	var xa := maxf(W - 1.15, door.y + ENTRY_SIDE + (1.1 if plants else 0.55))
 	if xa + 0.35 < W - 0.35:
 		var y0 := _street_y(xa, -1.0)
 		var frame := brand.darkened(0.25)
@@ -1075,6 +1297,7 @@ func _street_dressing(st: _Batch, h: int, oh: float) -> void:
 				R(xa + 0.25, -1.0 + 0.04 * f + k, y0 + 0.86), R(xa - 0.25, -1.0 + 0.04 * f + k, y0 + 0.86), chalk)
 		var lab := Label3D.new()
 		lab.text = _aboard_text()
+		_trade_board = lab
 		lab.font = ShopStyle.font(String(ident.get("face", "")))
 		lab.font_size = 64
 		lab.pixel_size = 0.0021
@@ -1089,7 +1312,7 @@ func _street_dressing(st: _Batch, h: int, oh: float) -> void:
 		_solid(R(xa - 0.32, -1.27, y0), R(xa + 0.32, -0.73, y0 + 0.95))
 	# A newspaper rack outside a corner shop.
 	if type_id == "convenience":
-		var x1 := door.x - (1.3 if plants else 0.55)
+		var x1 := minf(1.35, door.x - ENTRY_SIDE - (1.0 if plants else 0.12))
 		var x0 := x1 - 0.75
 		if x0 > 0.45:
 			var y0 := _street_y((x0 + x1) * 0.5, -0.3)
@@ -1113,7 +1336,7 @@ func _street_dressing(st: _Batch, h: int, oh: float) -> void:
 			_solid(R(x0, -0.5, y0), R(x1, -0.12, y0 + 1.05))
 	# A café table and two chairs in front of the left window.
 	if type_id in ["cafe", "bakery"]:
-		var tx := door.x - (2.15 if plants else 1.4)
+		var tx := door.x - ENTRY_SIDE - (1.55 if plants else 0.98)
 		if tx - 0.75 > 0.4:
 			var y0 := _street_y(tx, -0.85)
 			var metal := Color(0.12, 0.12, 0.13)
@@ -1182,15 +1405,22 @@ func _shutters(st: _Batch, oh: float, sf: Dictionary) -> void:
 ## ladder, paint tins), post on the mat, and a letting agent's board.
 ## Keeps the way in clear: a prop `w` wide starting at x0 (`d0` deep) that
 ## would stand in the corridor behind the door moves beside the door.
-const ENTRY_CLEAR := 3.2  # m in from the facade kept free behind the door
+const ENTRY_CLEAR := 3.6
+const ENTRY_SIDE := 0.9
+const ENTRY_FORECOURT := 2.6
+
+
+func _clear_of_entry(x0: float, x1: float, near_d: float, far_d: float) -> bool:
+	return near_d >= ENTRY_CLEAR or far_d <= -ENTRY_FORECOURT \
+		or x1 <= door.x - ENTRY_SIDE or x0 >= door.y + ENTRY_SIDE
 
 
 func _beside_door(x0: float, w: float, d0: float) -> float:
-	if d0 > ENTRY_CLEAR or x0 > door.y + 0.5 or x0 + w < door.x - 0.5:
+	if _clear_of_entry(x0, x0 + w, d0, d0 + 1.1):
 		return x0
-	if door.y + 0.6 + w < W - 0.6:
-		return door.y + 0.6
-	return maxf(0.6, door.x - 0.6 - w)
+	if door.y + ENTRY_SIDE + w < W - 0.6:
+		return door.y + ENTRY_SIDE
+	return maxf(0.6, door.x - ENTRY_SIDE - w)
 
 
 func _vacant(st: _Batch, fy: float) -> void:
@@ -1269,6 +1499,16 @@ func _sign_text() -> String:
 ## `night`: the street's shut for the night (other people's shops with a
 ## roller shutter pull it down then).
 func update_signs(trading: bool, night := false) -> void:
+	if is_instance_valid(_trade_board):
+		_trade_board.text = _aboard_text() if trading else "CLOSED"
+	if kind == "shop" and (biz != null or not rival.is_empty()):
+		_lighting_open = trading or is_instance_valid(_delivery_worker)
+		for light in _sales_lights:
+			light.light_energy = float(light.get_meta("open_energy")) * (1.0 if _lighting_open else 0.16)
+		if _trade_glow:
+			_trade_glow.visible = _lighting_open
+		if is_instance_valid(_sign_light):
+			_sign_light.visible = trading
 	if _shutter:
 		_shutter.visible = night and not trading
 	if _sign:
@@ -1318,9 +1558,9 @@ func _fixture_sites(part_d: float) -> Array:
 		var gx0 := 1.95
 		var gx1 := W - 3.7
 		if gx1 - gx0 >= 1.15:
-			var gc := (gx0 + gx1) * 0.5
-			var d := 2.2
-			while d + BAY <= part_d - 1.5:
+			var gc := lerpf(gx0, gx1, [0.42, 0.5, 0.58][_front_seed % 3])
+			var d := ENTRY_CLEAR + 0.04 if not _clear_of_entry(gc - 1.0, gc + 1.0, 2.2, 2.2 + BAY) else 2.2
+			while d + BAY <= part_d - 1.0:
 				# (+x side faces right, −x side faces left; both run front→back)
 				sites.append({"back": R(gc + 0.02, d + BAY, 0.0), "along": Vector3(0, 0, 1), "out": Vector3.RIGHT, "wall": "gondola"})
 				sites.append({"back": R(gc - 0.02, d, 0.0), "along": Vector3(0, 0, -1), "out": Vector3.LEFT, "wall": "gondola"})
@@ -1329,6 +1569,13 @@ func _fixture_sites(part_d: float) -> Array:
 	while d2 + BAY <= part_d - 0.9:
 		sites.append({"back": R(0.05, d2 + BAY, 0.0), "along": Vector3(0, 0, 1), "out": Vector3.RIGHT, "wall": "left"})
 		d2 += BAY + 0.05
+	if _fitting_clear.has_area():
+		return sites.filter(func(site: Dictionary) -> bool:
+			var back: Vector3 = site["back"]
+			var edge := back + (site["along"] as Vector3) * BAY + (site["out"] as Vector3) * 0.96
+			var lo := Vector2(minf(back.x, edge.x), minf(back.z, edge.z))
+			var hi := Vector2(maxf(back.x, edge.x), maxf(back.z, edge.z))
+			return not Rect2(lo, hi - lo).intersects(_fitting_clear))
 	return sites
 
 
@@ -1381,30 +1628,25 @@ func _place_fixtures(st: _Batch, part_d: float) -> void:
 			push_warning("ShopInterior: no room for a %s in %s" % [w[0], unit.get("id")])
 			continue
 		_fixture(st, String(w[0]), int(w[1]), site)
-	# Back wall left bare (no fixture bought for it yet): a lit wall graphic
-	# instead of an empty stretch of paint, the first thing seen from the door.
-	var gi := 0
-	for site in back_sites:
-		_wall_graphic(st, site, gi)
-		gi += 1
-	if _mid_used and type_id == "convenience" and not unit.get("flagship", false):
-		_end_cap(st)
+	# A single feature panel avoids repeating the same ad across empty bays.
+	if not back_sites.is_empty():
+		var featured := _front_seed % back_sites.size()
+		_wall_graphic(st, back_sites[featured], featured)
+	if type_id == "convenience" and not unit.get("flagship", false) and _mid_used:
+		var first: Dictionary = sites.filter(func(s): return s["wall"] == "gondola").front()
+		var first_back: Vector3 = first["back"]
+		_end_cap(st, first_back.x - 0.02, -first_back.z - BAY)
 
 
 ## A promotional end cap on the front of the central gondola: a low unit
 ## stacked with offer packs under a hanging OFFER card, facing the door –
 ## what you see first in a real corner shop. Kept out of the way in.
-func _end_cap(st: _Batch) -> void:
-	var gx0 := 1.95
-	var gx1 := W - 3.7
-	if gx1 - gx0 < 1.15:
-		return
-	var gc := (gx0 + gx1) * 0.5
+func _end_cap(st: _Batch, gc: float, aisle_start: float) -> void:
 	var x0 := gc - 0.6
 	var x1 := gc + 0.6
-	var d0 := 1.6
-	var d1 := 2.18
-	if d0 < ENTRY_CLEAR and x1 > door.x - 0.5 and x0 < door.y + 0.5:
+	var d0 := aisle_start - 0.60
+	var d1 := aisle_start - 0.02
+	if not _clear_of_entry(x0, x1, d0, d1):
 		return
 	var body := Color(0.2, 0.22, 0.25)
 	st.box(R(x0, d0, 0.0), R(x1, d1, 0.12), body)                       # plinth
@@ -1455,7 +1697,7 @@ func _wall_graphic(st: _Batch, site: Dictionary, i: int) -> void:
 	_glow_quad(ga.min(gb), ga.max(gb), brand * 0.8)
 	var lines: Array = WALL_LINES.get(type_id, WALL_LINES["convenience"])
 	var lab := Label3D.new()
-	lab.text = String(lines[(i + absi(hash(unit.get("id", "")))) % lines.size()])
+	lab.text = String(lines[(i + _front_seed) % lines.size()])
 	lab.font = ShopStyle.font(String(ident.get("face", ""))) if biz else EmpireStyle.font("black")
 	lab.font_size = 96
 	# (Longest line ~13 characters across the ~1.3 m panel.)
@@ -1681,6 +1923,8 @@ func _fixture(st: _Batch, k: String, u: int, site: Dictionary) -> void:
 ## for you and your staff (into the stockroom, away from the shop floor), and
 ## a lit STOCKROOM sign above it.
 var _door_hinge: Node3D
+var _door_handle: Marker3D
+var _hero_reaching := false
 var _door_open := 0.0
 var _door_at := Vector3.ZERO
 const DOOR_OPEN_ANGLE := 1.75  # rad (about 100°)
@@ -1702,6 +1946,7 @@ func _stock_door(st: _Batch, part_d: float, dw0: float, dw1: float, trim: Color)
 	# The sign: a dark plate proud of the wall above the frame, lettered and
 	# lit from a strip underneath.
 	var cx := (dw0 + dw1) * 0.5
+	_door_at = R(cx, part_d + 0.07, 0.0)
 	var sw := maxf(dw1 - dw0 + 0.5, 1.7)
 	var plate := Color(0.09, 0.1, 0.12)
 	st.box(R(cx - sw * 0.5, part_d - 0.06, 2.44), R(cx + sw * 0.5, part_d - 0.005, 2.86), plate)
@@ -1748,6 +1993,9 @@ func _stock_door(st: _Batch, part_d: float, dw0: float, dw1: float, trim: Color)
 		_door_hinge = Node3D.new()
 		_door_hinge.name = "StockDoor"
 		_door_hinge.position = R(dw1, part_d + 0.07, 0.0)
+		_door_handle = Marker3D.new()
+		_door_handle.position = Vector3(-lw + 0.13, 1.2, 0.044)
+		_door_hinge.add_child(_door_handle)
 		var lm := MeshInstance3D.new()
 		lm.mesh = lb.commit()
 		lm.material_override = _mat("vc")
@@ -1763,7 +2011,6 @@ func _stock_door(st: _Batch, part_d: float, dw0: float, dw1: float, trim: Color)
 		tag.position = Vector3(-lw * 0.5, 1.92, 0.03)
 		_door_hinge.add_child(tag)
 		_static.add_child(_door_hinge)
-		_door_at = R(cx, part_d + 0.07, 0.0)
 		_door_open = 0.0
 		set_process(true)
 	else:
@@ -1777,6 +2024,7 @@ func _stock_door(st: _Batch, part_d: float, dw0: float, dw1: float, trim: Color)
 ## Opens the stockroom door for anyone walking up to it (you, your staff),
 ## swinging it gently shut again behind them.
 func _process(dt: float) -> void:
+	_update_delivery(dt)
 	if is_instance_valid(_public_visitor) and _public_visitor.arrived():
 		_public_wait -= dt
 		if _public_wait <= 0.0:
@@ -1790,16 +2038,115 @@ func _process(dt: float) -> void:
 		return
 	var at := to_world(_door_at)
 	var want := 0.0
+	var reaching := false
 	for n in get_tree().get_nodes_in_group("door_openers"):
 		var p: Vector3 = (n as Node3D).global_position
 		if absf(p.y - at.y) < 2.2 and Vector2(p.x - at.x, p.z - at.z).length() < 1.7:
 			want = 1.0
-			break
+		if n is Player and is_instance_valid(_door_handle):
+			var flat := Vector2(p.x - at.x, p.z - at.z)
+			reaching = flat.length_squared() < 0.95 * 0.95 and absf(p.y - at.y) < 1.7
+			if reaching and not _hero_reaching:
+				var rig := n.get_node_or_null("Rig") as CharacterRig
+				if rig:
+					rig.reach_for_handle(_door_handle)
+	_hero_reaching = reaching
 	if is_equal_approx(want, _door_open):
 		return
 	_door_open = move_toward(_door_open, want, dt * (2.6 if want > _door_open else 1.1))
 	var e := _door_open * _door_open * (3.0 - 2.0 * _door_open)
 	_door_hinge.rotation.y = -DOOR_OPEN_ANGLE * e
+
+
+## Present a settled stock order. The simulation has already received it.
+func show_stock_delivery(truck_pose: Transform3D, truck_mesh: Mesh, approach: Vector3) -> void:
+	if is_instance_valid(_delivery_worker) or walk.is_empty():
+		return
+	for spot: Dictionary in spots:
+		if spot["kind"] != "rack":
+			continue
+		var route := path(door_in, spot["pos"])
+		if route.is_empty():
+			continue
+		_delivery_start = door_out
+		_delivery_worker = ShopPerson.new(hash(unit["id"]), true)
+		_delivery_worker.name = "DeliveryWorker"
+		_delivery_worker.position = _delivery_start
+		_delivery_worker.floor_height = _delivery_floor_height
+		add_child(_delivery_worker)
+		_delivery_worker.position.y = _delivery_floor_height(_delivery_start)
+		_delivery_worker.set_carry(true)
+		route.insert(0, door_in)
+		_delivery_phase = 0
+		_delivery_wait = 0.0
+		if truck_mesh:
+			var truck := AnimatableBody3D.new()
+			truck.name = "DeliveryVan"
+			truck.sync_to_physics = false
+			truck.collision_layer = Car.BODY_LAYER
+			truck.collision_mask = 0
+			var shell := MeshInstance3D.new()
+			shell.mesh = truck_mesh
+			truck.add_child(shell)
+			var bounds := truck_mesh.get_aabb()
+			var box := BoxShape3D.new()
+			box.size = bounds.size
+			var collision := CollisionShape3D.new()
+			collision.shape = box
+			collision.position = bounds.get_center()
+			truck.add_child(collision)
+			add_child(truck)
+			truck.global_transform = truck_pose
+			_delivery_truck = truck
+		if truck_mesh and approach != Vector3.INF:
+			_delivery_phase = -1
+			_delivery_worker.hide()
+			_delivery_truck.global_position = approach
+			var arrival := create_tween()
+			arrival.tween_property(_delivery_truck, "global_position", truck_pose.origin, 1.65).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			arrival.tween_callback(_begin_unload.bind(route))
+		else:
+			_begin_unload(route)
+		refresh_goods()
+		set_process(true)
+		break
+
+
+func _begin_unload(route: PackedVector3Array) -> void:
+	if is_instance_valid(_delivery_worker):
+		_delivery_worker.show()
+		_delivery_worker.set_path(route)
+		_delivery_phase = 0
+
+
+func _delivery_floor_height(at: Vector3) -> float:
+	if at.z < -1.0:
+		return 0.0
+	var p := to_world(Vector3(at.x, 0.0, at.z))
+	var query := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.4, p - Vector3.UP * 1.9,
+		CityWorld.HUMAN_LAYER | 1)
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	return to_local(hit.position).y if not hit.is_empty() else at.y
+
+
+func _update_delivery(dt: float) -> void:
+	if _delivery_phase < 0 or not is_instance_valid(_delivery_worker) or not _delivery_worker.arrived():
+		return
+	if _delivery_phase == 0:
+		_delivery_worker.set_carry(false)
+		_delivery_wait = 0.85
+		_delivery_phase = 1
+	elif _delivery_phase == 1:
+		_delivery_wait -= dt
+		if _delivery_wait <= 0.0:
+			_delivery_worker.set_path(path(_delivery_worker.position, _delivery_start))
+			_delivery_phase = 2
+	else:
+		_delivery_worker.queue_free()
+		_delivery_worker = null
+		if is_instance_valid(_delivery_truck):
+			_delivery_truck.queue_free()
+		_delivery_truck = null
 
 
 func _backroom(st: _Batch, part_d: float, dw0: float, dw1: float) -> void:
@@ -2005,8 +2352,18 @@ func _build_street(st: _Batch) -> void:
 	var accent := Color(0.19, 0.31, 0.25) if warm else Color(0.17, 0.25, 0.35)
 	if work:
 		accent = Color(0.31, 0.32, 0.33)
+	var colours: Array = {
+		"bank": [Color(0.17, 0.27, 0.38), Color(0.17, 0.32, 0.27)],
+		"fitness": [Color(0.31, 0.17, 0.13), Color(0.19, 0.22, 0.27)],
+		"furniture": [Color(0.34, 0.24, 0.15), Color(0.23, 0.30, 0.24)],
+		"cafe": [Color(0.31, 0.20, 0.15), Color(0.23, 0.34, 0.29)],
+		"restaurant": [Color(0.36, 0.18, 0.14), Color(0.23, 0.21, 0.32)]
+	}.get(use, [accent, accent.lightened(0.10)])
+	accent = colours[_front_seed % colours.size()]
 	var floor_color := Color(0.61, 0.53, 0.44) if warm else Color(0.63, 0.66, 0.66)
-	_floor(floor_color, 1)
+	var floor_style := int({"cafe": 3, "restaurant": 3, "furniture": 3, "fitness": 2,
+		"garage": 2, "warehouse": 2, "hotel": 4, "residential": 4}.get(use, 1))
+	_floor(floor_color, floor_style)
 	look = {"ceiling": Color(0.68, 0.67, 0.64), "lights": "none"}
 	_shell(st, Color(0.78, 0.77, 0.72), accent)
 	var mid := (door.x + door.y) * 0.5
@@ -2031,8 +2388,28 @@ func _build_street(st: _Batch) -> void:
 		var bead := side + dir * 0.035
 		st.box(R(bead - 0.018, -0.107, 0.08), R(bead + 0.018, -0.095, height - 0.025), jamb.lightened(0.17))
 	var fascia_y := height + 0.30
-	st.box(R(ox.x - 0.2, -0.18, height + 0.03), R(ox.y + 0.2, 0.03, fascia_y + 0.24), accent)
-	_street_label(String(unit["name"]).to_upper(), R(mid, -0.196, fascia_y), minf(W - 1.1, 9.0), Color(0.97, 0.93, 0.81))
+	var face := "condensed"
+	var ink := Color(0.97, 0.93, 0.81)
+	var left := ox.x - 0.2
+	var right := ox.y + 0.2
+	if use in ["bank", "hotel", "residential", "furniture"]:
+		face = "serif"
+		var inset := minf(W * 0.12, 0.95)
+		left += inset
+		right -= inset
+		ink = Color(0.94, 0.84, 0.66)
+	elif use in ["cafe", "restaurant"]:
+		face = "retro" if _front_seed % 2 == 0 else "script"
+	elif work or use == "fitness":
+		face = "display"
+	var face_col := accent.darkened(0.22)
+	st.box(R(left, -0.20, height + 0.03), R(right, 0.03, fascia_y + 0.24), face_col)
+	if not work and _front_seed % 3 != 1:
+		for y: float in [fascia_y - 0.20, fascia_y + 0.20]:
+			st.box(R(left + 0.12, -0.230, y), R(right - 0.12, -0.196, y + 0.018), ink.lerp(accent, 0.5))
+	var name := String(unit["name"])
+	_street_label(name if face in ["retro", "script"] else name.to_upper(),
+		R(mid, -0.235, fascia_y), right - left - 0.42, ink, face, 0.0065)
 	_street_label(String(Premises.STREET_TITLES[use]).to_upper(), R(mid, D - 0.07, H * 0.68),
 		minf(W - 1.5, 6.8), Color(0.20, 0.23, 0.20))
 	if street_drop > 0.14:
@@ -2045,17 +2422,21 @@ func _build_street(st: _Batch) -> void:
 				for y: float in [0.45, 1.03, 1.52]:
 					st.box(R(side - 0.31, d - 0.02, y), R(side + 0.31, d + 1.34, y + 0.07), Color(0.48, 0.39, 0.26))
 	elif use in ["cafe", "restaurant"]:
-		for i in range(1, int(D / 2.5)):
-			_cafe_table(st, R(1.5, i * 2.25, 0), accent)
-			if W > 8.0:
-				_cafe_table(st, R(W - 1.5, i * 2.25, 0), accent)
+		var d := ENTRY_CLEAR + 0.48
+		while d < D - 3.45:
+			_cafe_table(st, R(1.5, d, 0), accent)
+			if W > 8.0 and use != "cafe":
+				_cafe_table(st, R(W - 1.5, d + 0.3, 0), accent)
+			d += 2.25 if use == "cafe" else 2.55
+		if use == "cafe":
+			_window_bar(st, accent)
 	elif use == "fitness":
 		for i in range(1, int(D / 2.0)):
 			var d := i * 1.8
 			_wall_box(st, 0.65, 2.2, d, d + 0.59, 0.0, 0.49, Color(0.13, 0.15, 0.17))
 			st.box(R(0.73, d - 0.06, 0.26), R(2.28, d + 0.65, 0.33), Color(0.48, 0.49, 0.49))
 	elif use == "furniture":
-		for z in range(3, int(D) - 3, 5):
+		for z in range(5, int(D) - 3, 5):
 			_street_furniture(st, 3.2, float(z), 0.0)
 			if W > 13.0:
 				_street_furniture(st, W - 3.2, float(z), 0.0)
@@ -2066,18 +2447,13 @@ func _build_street(st: _Batch) -> void:
 				"out": Vector3.RIGHT, "wall": "left"})
 
 	else:
-		var sofa := WAITING_SOFA.instantiate() as Node3D
-		sofa.position = R(1.35, 3.2, 0.0)
-		sofa.rotation.y = PI * 0.5
-		_static.add_child(sofa)
-		_solid(R(0.82, 2.1, 0.0), R(1.88, 4.3, 0.82))
-		var pp := R(W - 0.86, 1.2, 0.0)
-		st.box(pp - Vector3(0.32, 0.0, 0.32), pp + Vector3(0.32, 0.54, 0.32), accent)
-		_batch_cone(st, pp + Vector3.UP * 0.5, 0.43, 0.04, 1.2, Color(0.21, 0.38, 0.24))
+		_street_lobby_furnishings(st, use, accent)
 	var desk := D - 2.1
 	var half := minf(W * 0.29, 2.25)
 	_wall_box(st, mid - half, mid + half, desk, desk + 0.72, 0.0, 1.03, accent)
 	st.box(R(mid - half - 0.04, desk - 0.05, 1.02), R(mid + half + 0.04, desk + 0.77, 1.1), floor_color.lightened(0.21))
+	if use == "cafe" or use == "restaurant":
+		_street_service_counter(st, mid, half, desk, accent, use == "cafe")
 	if public_display and use != "furniture":
 		spots.append({"kind": "retail_checkout", "pos": R(mid, desk - 0.64, 0.0)})
 	elif use in ["hotel", "office", "residential", "bank", "garage", "warehouse", "furniture"]:
@@ -2087,7 +2463,75 @@ func _build_street(st: _Batch) -> void:
 	door_out = R(mid, -1.5, 0.0)
 	for d: float in [D * 0.3, D * 0.73]:
 		_glow_quad(R(0.9, d - 0.12, H - 0.02), R(W - 0.9, d + 0.12, H - 0.02), Color(1.0, 0.92, 0.77), true)
-	_light(R(mid, D * 0.54, H - 0.45), Color(1.0, 0.94, 0.83), 1.1, 6.6)
+	var tint := Color(1.0, 0.88, 0.72) if warm else Color(0.92, 0.96, 1.0)
+	for d: float in [D * 0.32, D * 0.70]:
+		_light(R(mid, d, H - 0.64), tint, 1.02, clampf(maxf(D * 0.58, W * 0.69), 5.4, 12.0))
+
+
+func _street_lobby_furnishings(st: _Batch, use: String, accent: Color) -> void:
+	var seating_depth := ENTRY_CLEAR + 1.34
+	if D < seating_depth + 2.0:
+		return
+	var walnut := Color(0.38, 0.27, 0.19)
+	if use == "residential":
+		# Parcel and mail lockers sit against the wall, facing into the lobby.
+		_wall_box(st, 0.045, 0.44, seating_depth - 1.05, seating_depth + 0.95, 0.0, 1.69, walnut.darkened(0.2))
+		for row in 4:
+			for col in 5:
+				var d := seating_depth - 0.96 + col * 0.37
+				var y := 0.24 + row * 0.33
+				st.box(R(0.437, d, y), R(0.462, d + 0.345, y + 0.30), walnut.lightened(0.05 * float((row + col) % 3)))
+				st.box(R(0.463, d + 0.09, y + 0.207), R(0.478, d + 0.23, y + 0.225), Color(0.65, 0.58, 0.47))
+	else:
+		var sofa := WAITING_SOFA.instantiate() as Node3D
+		sofa.position = R(0.92, seating_depth, 0.0)
+		sofa.rotation.y = PI * 0.5
+		_static.add_child(sofa)
+		_solid(R(0.41, seating_depth - 1.15, 0), R(1.41, seating_depth + 1.15, 0.88))
+		if use == "hotel" and W >= 7.5:
+			# Make a check-in lounge with a bordered rug and a cocktail table.
+			for inset: float in [0.0, 0.09]:
+				st.box(R(0.21 + inset, seating_depth - 1.43 + inset, 0.012 + inset * 0.03),
+					R(3.05 - inset, seating_depth + 1.43 - inset, 0.018 + inset * 0.03),
+					Color(0.30, 0.22, 0.16) if inset == 0.0 else accent.darkened(0.18))
+			st.cylinder(R(2.17, seating_depth, 0.0), 0.29, 0.38, walnut, 14)
+			st.cylinder(R(2.17, seating_depth, 0.38), 0.44, 0.051, Color(0.56, 0.54, 0.48), 18)
+			_solid(R(1.74, seating_depth - 0.43, 0.0), R(2.60, seating_depth + 0.43, 0.44))
+			st.box(R(2.00, seating_depth - 0.15, 0.433), R(2.31, seating_depth + 0.11, 0.451), accent.lightened(0.25))
+	if use in ["hotel", "office", "bank"] and W >= 7.6:
+		var d := minf(D - 3.0, seating_depth + 0.44)
+		var board := Color(0.19, 0.23, 0.22)
+		_wall_box(st, W - 0.14, W - 0.03, d - 0.71, d + 0.71, 1.11, 2.12, board)
+		var title := String({"hotel": "GUEST SERVICES", "office": "DIRECTORY", "bank": "CLIENT SERVICES"}[use])
+		var placard := _street_label(title, R(W - 0.149, d, 1.90), 1.21, Color(0.89, 0.85, 0.73), "condensed", 0.0025)
+		placard.rotation.y = -PI * 0.5
+		for row in 3:
+			var y := 1.30 + row * 0.15
+			st.box(R(W - 0.158, d - 0.48, y), R(W - 0.145, d + 0.10 + 0.10 * row, y + 0.022), Color(0.63, 0.61, 0.54))
+	var plant := preload("res://assets/models/home_plant.glb").instantiate() as Node3D
+	plant.position = R(W - 0.68, seating_depth - 0.75, 0.0)
+	_static.add_child(plant)
+	_solid(plant.position - Vector3(0.29, 0.0, 0.29), plant.position + Vector3(0.29, 1.11, 0.29))
+
+
+func _street_service_counter(st: _Batch, mid: float, half: float, depth: float, accent: Color, coffee: bool) -> void:
+	var x := mid - half + 0.63
+	var steel := Color(0.29, 0.31, 0.32)
+	st.box(R(x - 0.38, depth + 0.10, 1.1), R(x + 0.38, depth + 0.63, 1.53), steel)
+	if coffee:
+		st.box(R(x - 0.38, depth + 0.06, 1.1), R(x + 0.38, depth + 0.14, 1.24), accent)
+		for side: float in [-0.18, 0.18]:
+			st.cylinder(R(x + side, depth + 0.14, 1.24), 0.073, 0.12, Color(0.94, 0.92, 0.86), 10)
+	else:
+		for tray in 3:
+			var tx := x - 0.28 + tray * 0.28
+			st.box(R(tx - 0.1, depth + 0.06, 1.49), R(tx + 0.1, depth + 0.52, 1.54), Color(0.68, 0.62, 0.52))
+	var shelf_d := D - 0.12
+	st.box(R(mid - half, shelf_d - 0.32, 1.52), R(mid + half, shelf_d, 1.58), accent)
+	for k in 5:
+		var sx := mid - half * 0.72 + (float(k) * half * 0.36)
+		var colour: Color = [Color(0.88, 0.86, 0.79), Color(0.42, 0.29, 0.18)][(_front_seed + k) % 2]
+		st.cylinder(R(sx, shelf_d - 0.17, 1.58), 0.092, 0.17 + 0.04 * float(k % 3), colour, 9)
 
 
 func _street_furniture(st: _Batch, x: float, d: float, h: float) -> void:
@@ -2101,17 +2545,24 @@ func _street_furniture(st: _Batch, x: float, d: float, h: float) -> void:
 		st.box(R(x + leg - 0.04, d - 1.44, h), R(x + leg + 0.04, d - 0.92, h + 0.38), walnut.darkened(0.2))
 
 
-func _street_label(text: String, at: Vector3, width: float, ink: Color) -> void:
+func _fit_sign(label: Label3D, width: float, max_pixel: float) -> void:
+	var metrics := label.font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, label.font_size)
+	label.pixel_size = minf(max_pixel, width / maxf(metrics.x, 1.0))
+	label.width = width / label.pixel_size
+
+
+func _street_label(text: String, at: Vector3, width: float, ink: Color, font_key := "condensed", max_pixel := 0.008) -> Label3D:
 	var label := Label3D.new()
 	label.text = text
-	label.font = EmpireStyle.font("bold")
+	label.font = ShopStyle.font(font_key)
 	label.font_size = 64
 	label.outline_size = 0
-	label.pixel_size = minf(0.008, width / maxf(text.length() * 42.0, 1.0))
+	_fit_sign(label, width, max_pixel)
 	label.modulate = ink
 	label.position = at
 	label.visibility_range_end = 75.0
 	_static.add_child(label)
+	return label
 
 
 func _populate_public_room() -> void:
@@ -2717,29 +3168,35 @@ func _decor_trade(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float)
 	match decor:
 		"seating":
 			if free_mid:
-				var dd := 2.4
+				var dd := ENTRY_CLEAR + 0.12
+				var x := lerpf(gx0, gx1, [0.32, 0.50, 0.65][_front_seed % 3])
 				while dd + 1.2 < part_d - 1.2:
-					_cafe_table(st, R((gx0 + gx1) * 0.5, dd + 0.6, 0.0), accent)
+					_cafe_table(st, R(x, dd + 0.6, 0.0), accent)
 					dd += 1.9
 			_window_bar(st, accent)
 		"stools":
 			_window_bar(st, accent)
 			if free_mid:
-				var dd2 := 2.4
+				var dd2 := ENTRY_CLEAR + 0.12
 				while dd2 + 1.2 < part_d - 1.2:
 					_cafe_table(st, R((gx0 + gx1) * 0.5, dd2 + 0.6, 0.0), Color(0.85, 0.85, 0.86))
 					dd2 += 1.9
 		"boutique":
 			# Mannequins in the window, a mirror, a rug.
-			_mannequin(st, R(door.y + 0.9, 0.75, 0.0))
-			if door.x - 0.9 > 0.6:
-				_mannequin(st, R(door.x - 0.9, 0.75, 0.0))
+			var offset := ENTRY_SIDE + 0.36
+			if door.y + offset < W - 0.6:
+				_mannequin(R(door.y + offset, 0.75, 0.0), -PI * 0.12)
+			if door.x - offset > 0.6:
+				_mannequin(R(door.x - offset, 0.75, 0.0), PI * 0.16)
 			st.box(R(0.06, part_d - 2.6, 0.2), R(0.08, part_d - 1.6, 2.3), Color(0.75, 0.82, 0.86))
 			st.box(R(0.055, part_d - 2.65, 0.15), R(0.075, part_d - 1.55, 2.35), Color(0.75, 0.62, 0.35))
-			st.box(R(gx0 - 0.3, 1.6, 0.0), R(gx1 + 0.3, part_d - 1.4, 0.015), brand.lerp(Color(0.9, 0.86, 0.8), 0.5))
+			if not unit.get("flagship", false) and part_d > ENTRY_CLEAR + 1.8:
+				var rug_d := ENTRY_CLEAR + 0.45
+				st.box(R(gx0, rug_d, 0.0), R(gx1, minf(rug_d + 2.3, part_d - 1.1), 0.016),
+					brand.lerp(Color(0.9, 0.86, 0.8), 0.5))
 		"plinths":
 			# White plinths with a hero device on each, a big brand screen.
-			var px := door.y + 0.9
+			var px := door.y + ENTRY_SIDE + 0.34
 			if px < W - 2.8:
 				st.box(R(px - 0.3, 0.6, 0.0), R(px + 0.3, 1.2, 1.0), Color(0.97, 0.97, 0.98))
 				st.box(R(px - 0.08, 0.84, 1.0), R(px + 0.08, 0.96, 1.25), Color(0.1, 0.1, 0.12))
@@ -2870,7 +3327,7 @@ func _cafe_table(st: _Batch, c: Vector3, accent: Color) -> void:
 
 ## A bar along the front window with stools.
 func _window_bar(st: _Batch, accent: Color) -> void:
-	var x0 := door.y + 0.3
+	var x0 := door.y + ENTRY_SIDE
 	var x1 := W - 0.4
 	if x1 - x0 < 1.2:
 		return
@@ -2886,18 +3343,15 @@ func _window_bar(st: _Batch, accent: Color) -> void:
 
 
 ## A shop-window mannequin in an outfit of the brand's colours.
-func _mannequin(st: _Batch, p: Vector3) -> void:
-	var skin := Color(0.92, 0.92, 0.9)
-	var outfit: Color = brand.lerp(Color(0.95, 0.93, 0.9), 0.15)
-	st.cylinder(p, 0.18, 0.03, Color(0.2, 0.2, 0.22), 10)
-	st.cylinder(p, 0.02, 0.8, Color(0.6, 0.6, 0.62), 6)
-	st.box(p + Vector3(-0.17, 0.8, -0.1), p + Vector3(0.17, 1.05, 0.1), Color(0.18, 0.2, 0.28))
-	st.box(p + Vector3(-0.19, 1.05, -0.11), p + Vector3(0.19, 1.5, 0.11), outfit)
-	st.box(p + Vector3(-0.24, 1.15, -0.06), p + Vector3(-0.19, 1.48, 0.06), outfit)
-	st.box(p + Vector3(0.19, 1.15, -0.06), p + Vector3(0.24, 1.48, 0.06), outfit)
-	st.cylinder(p + Vector3(0, 1.5, 0), 0.045, 0.08, skin, 8)
-	st.box(p + Vector3(-0.08, 1.58, -0.09), p + Vector3(0.08, 1.8, 0.09), skin)
-	_solid(p + Vector3(-0.25, 0, -0.2), p + Vector3(0.25, 1.8, 0.2))
+func _mannequin(p: Vector3, angle: float) -> void:
+	var display := MeshInstance3D.new()
+	display.mesh = InteriorKit.mannequin()
+	display.position = p
+	display.rotation.y = angle
+	display.visibility_range_end = 44.0
+	display.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_static.add_child(display)
+	_solid(p + Vector3(-0.28, 0, -0.24), p + Vector3(0.28, 1.87, 0.24))
 
 
 # ------------------------------------------------------------ helpers
@@ -2917,6 +3371,15 @@ func _solid(a: Vector3, b: Vector3) -> void:
 	_col.add_child(cs)
 
 
+const FLOOR_DETAIL := [
+	"res://assets/textures/pbr/worldstate_retail_ceramic.png",
+	"res://assets/textures/pbr/worldstate_retail_ceramic.png",
+	"res://assets/textures/pbr/worldstate_pavement_concrete.png",
+	"res://assets/textures/pbr/worldstate_retail_oak.png",
+	"res://assets/textures/pbr/worldstate_retail_terrazzo.png",
+]
+
+
 func _floor(c: Color, style: int) -> void:
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(W, D)
@@ -2925,6 +3388,7 @@ func _floor(c: Color, style: int) -> void:
 	fm.set_shader_parameter("base_col", c)
 	fm.set_shader_parameter("room_size", Vector2(W, D))
 	fm.set_shader_parameter("style", style)
+	fm.set_shader_parameter("surface_detail", load(FLOOR_DETAIL[clampi(style, 0, FLOOR_DETAIL.size() - 1)]))
 	var fi := MeshInstance3D.new()
 	fi.mesh = pm
 	fi.material_override = fm
@@ -2936,19 +3400,36 @@ func _floor(c: Color, style: int) -> void:
 	_solid(R(0.0, 0.0, -0.3), R(W, D, 0.0))
 
 
+func _spot_light(p: Vector3, tint: Color, energy: float, radius: float, beam: float) -> void:
+	var light := SpotLight3D.new()
+	light.position = p
+	light.rotation.x = -PI * 0.5
+	light.light_color = tint
+	light.light_energy = energy
+	light.light_specular = 0.31
+	light.spot_range = radius
+	light.spot_attenuation = 1.18
+	light.spot_angle = beam
+	light.spot_angle_attenuation = 1.72
+	light.distance_fade_enabled = true
+	light.distance_fade_begin = 47.0
+	light.distance_fade_length = 19.0
+	light.set_meta("open_energy", energy)
+	_static.add_child(light)
+	_sales_lights.append(light)
+
+
 func _light(p: Vector3, c: Color, e: float, r: float) -> void:
 	var o := OmniLight3D.new()
 	o.position = p
 	o.light_color = c
-	o.light_energy = e
-	o.omni_range = r
-	o.omni_attenuation = 1.1
-	o.shadow_enabled = false
-	o.distance_fade_enabled = true
+	InteriorKit.tune_light(o, e, r)
 	# (Someone else's shop: only lit up close, there are dozens of them.)
 	o.distance_fade_begin = 90.0 if rival.is_empty() else 35.0
 	o.distance_fade_length = 30.0 if rival.is_empty() else 10.0
 	_static.add_child(o)
+	o.set_meta("open_energy", e)
+	_sales_lights.append(o)
 
 
 var _glow: _Batch
@@ -3064,7 +3545,7 @@ func cell_of(p: Vector3) -> Vector2i:
 
 
 ## A* over the walk grid (room coords in and out). Empty = no path.
-func path(from: Vector3, to: Vector3) -> PackedVector3Array:
+func path(from: Vector3, to: Vector3, avoid := Vector3.INF) -> PackedVector3Array:
 	var a := _nearest_free(cell_of(from))
 	var b := _nearest_free(cell_of(to))
 	var out := PackedVector3Array()
@@ -3101,6 +3582,11 @@ func path(from: Vector3, to: Vector3) -> PackedVector3Array:
 				if dx != 0 and dz != 0 and (not walk.has(cur + Vector2i(dx, 0)) or not walk.has(cur + Vector2i(0, dz))):
 					continue  # (no corner cutting)
 				var ng: float = g[cur] + (1.414 if dx != 0 and dz != 0 else 1.0)
+				if avoid != Vector3.INF:
+					# Prefer the open side of an aisle or door when somebody is there.
+					var next := cell_pos(nb)
+					var separation := Vector2(avoid.x - next.x, avoid.z - next.z).length()
+					ng += 6.0 * (1.0 - smoothstep(0.34, 0.83, separation))
 				if ng < float(g.get(nb, INF)):
 					g[nb] = ng
 					f[nb] = ng + Vector2(nb - b).length()

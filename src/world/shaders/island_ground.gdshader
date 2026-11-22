@@ -134,7 +134,7 @@ void fragment() {
 		albedo *= 1.0 - 0.08 * smoothstep(0.7, 0.9, vnoise(p * 0.7 + 11.0)) * near;
 		if (pbr_on) {
 			float kd = pbr_fade(v_dist);
-			vec4 detail = texture(pave_tex, p / 2.5);
+			vec4 detail = texture(pave_tex, p / 1.2);
 			albedo *= mix(1.0, 2.0 * detail.r, kd * 0.48);
 			rough = mix(0.83, detail.a, 0.45 * kd);
 			pbr_n = pbr_flat_normal(detail, normalize(v_wn), 0.65 * kd);
@@ -167,7 +167,7 @@ void fragment() {
 		rough = 0.86 - 0.08 * agg;
 		if (pbr_on) {
 			float kd = pbr_fade(v_dist);
-			vec4 d = texture(asph_tex, p / 2.4);
+			vec4 d = texture(asph_tex, p / 1.5);
 			albedo *= mix(1.0, d.r * 2.0, 0.85 * kd);
 			rough = mix(rough, d.a, 0.55 * kd * (1.0 - wetness));
 			pbr_n = pbr_flat_normal(d, normalize(v_wn), 0.9 * kd);

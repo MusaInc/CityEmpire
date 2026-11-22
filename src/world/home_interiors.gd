@@ -188,6 +188,20 @@ func _build(mat: Material) -> Node3D:
 	mi.visibility_range_end = 420.0  # only drawn when it can matter
 	root.add_child(mi)
 	var xf := CityLayout.bxf(h["b"])
+	var room_frame := Transform3D(Basis(f[1], Vector3.UP, f[2]), P(0.0, 0.0, 0.0))
+	_fit_storage(root, xf, room_frame, tier)
+	var contact := Node3D.new()
+	contact.transform = xf * room_frame
+	root.add_child(contact)
+	var feet: Array[Rect2] = []
+	var room_inv := room_frame.affine_inverse()
+	for bx in col_boxes:
+		var local := room_inv * bx
+		if absf(local.position.y) < 0.04 and local.size.y > 0.25 and minf(local.size.x, local.size.z) > 0.27:
+			if local.size.x + local.size.z < 6.1 and Rect2(0.18, -D + 0.18, W - 0.36, D - 0.36).encloses(
+					Rect2(local.position.x, local.position.z, local.size.x, local.size.z)):
+				feet.append(Rect2(local.position.x, local.position.z, local.size.x, local.size.z))
+	InteriorKit.add_contacts(contact, feet)
 	if not col_boxes.is_empty():
 		var body := StaticBody3D.new()
 		body.name = "Furniture"
@@ -208,13 +222,7 @@ func _build(mat: Material) -> Node3D:
 		var lp: Vector3 = L[0]
 		o.position = xf * P(lp.x, lp.z, lp.y)
 		o.light_color = L[1]
-		o.light_energy = L[2]
-		o.omni_range = L[3]
-		o.omni_attenuation = 1.2
-		o.shadow_enabled = false
-		o.distance_fade_enabled = true
-		o.distance_fade_begin = 120.0
-		o.distance_fade_length = 40.0
+		InteriorKit.tune_light(o, L[2], L[3])
 		o.set_meta("base", o.light_energy)
 		root.add_child(o)
 	var floor_mesh := PlaneMesh.new()
@@ -224,6 +232,8 @@ func _build(mat: Material) -> Node3D:
 	floor_mat.set_shader_parameter("timber", pal[1])
 	floor_mat.set_shader_parameter("room_size", Vector2(W, D))
 	floor_mat.set_shader_parameter("style", int(pal[3]))
+	floor_mat.set_shader_parameter("surface_detail", InteriorKit.finish_texture(
+		["oak", "concrete", "ceramic", "oak", "terrazzo"][int(pal[3])]))
 	var floor_node := MeshInstance3D.new()
 	floor_node.mesh = floor_mesh
 	floor_node.material_override = floor_mat
@@ -243,6 +253,52 @@ func _build(mat: Material) -> Node3D:
 
 ## The layers beside the batched shell: glow, glass, feature walls, pools
 ## and progress boards.
+## Fit storage around existing furniture, windows, the entry strip and stairs.
+func _fit_storage(root: Node3D, xf: Transform3D, room_frame: Transform3D, tier: int) -> void:
+	var blocked: Array[Rect2] = []
+	var inverse := room_frame.affine_inverse()
+	for bx in col_boxes:
+		var local := inverse * bx
+		if local.end.y > 0.17 and local.position.y < H - 0.10:
+			blocked.append(Rect2(local.position.x, local.position.z, local.size.x, local.size.z).grow(0.12))
+	for window in wins:
+		var start := float(window[1])
+		var end := float(window[2])
+		match window[0]:
+			"left":
+				blocked.append(Rect2(0, -end, 0.52, end - start))
+			"right":
+				blocked.append(Rect2(W - 0.52, -end, 0.52, end - start))
+			"back":
+				blocked.append(Rect2(start, -D, end - start, 0.52))
+	for spot in spot_list:
+		blocked.append(Rect2(float(spot[1]) - 0.75, -float(spot[2]) - 0.75, 1.5, 1.5))
+	for item in assets:
+		blocked.append(Rect2(float(item[1]) - 0.9, -float(item[2]) - 0.9, 1.8, 1.8))
+	for surface in walls_fx:
+		# Existing feature wall finishes frame artwork and the entrance.
+		if surface[6] != 6:
+			continue
+		var start := float(surface[2])
+		var extent := float(surface[3]) - start
+		match surface[0]:
+			"left", "right":
+				blocked.append(Rect2(0.0 if surface[0] == "left" else W - 0.52, -start - extent, 0.52, extent))
+			"back":
+				blocked.append(Rect2(start, -D, extent, 0.52))
+	# An authored mezzanine and stairs occupy the west perimeter of the penthouse.
+	var bays := InteriorKit.plan(W, D, H, blocked, 3.35, 0.13, [tier < 4, true, false])
+	if bays.is_empty():
+		return
+	var dress := Node3D.new()
+	dress.name = "BuiltInStorage"
+	dress.transform = xf * room_frame
+	root.add_child(dress)
+	for bay in bays:
+		col_boxes.append(room_frame * InteriorKit.footprint(bay))
+	InteriorKit.dress(dress, bays, "library", hash(h["id"]))
+
+
 func _extras(root: Node3D, xf: Transform3D) -> void:
 	if not glow.is_empty():
 		var gm := ArrayMesh.new()
@@ -297,6 +353,9 @@ func _extras(root: Node3D, xf: Transform3D) -> void:
 		wm.set_shader_parameter("style", int(fx[6]))
 		wm.set_shader_parameter("seed", float(fx[8]) if fx.size() > 8 else 0.0)
 		wm.set_shader_parameter("corners", 0.0 if int(fx[6]) == 6 else 1.0)
+		if int(fx[6]) != 6:
+			wm.set_shader_parameter("surface_detail", InteriorKit.finish_texture("oak" if int(fx[6]) == 1 else "concrete"))
+			wm.set_shader_parameter("detail_on", true)
 		var wi := MeshInstance3D.new()
 		wi.name = "Feature"
 		wi.mesh = st.commit()

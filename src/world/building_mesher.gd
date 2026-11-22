@@ -1275,6 +1275,10 @@ static func awning_runs(b: Dictionary) -> Array:
 			if avoid.any(func(obstacle: AABB) -> bool: return obstacle.intersects(span)):
 				continue
 			var col: Color = AWNING_COLORS[rng.randi_range(0, AWNING_COLORS.size() - 1)]
+			# A carved showroom owns this void. The adjoining shell can still
+			# have a street canopy when it faces away from the room.
+			if b.has("venue_void") and span.intersects(b["venue_void"]):
+				continue
 			out_runs.append([
 				_fpt(face, centre + half_width, 0.0, y),
 				_fpt(face, centre - half_width, 0.0, y),

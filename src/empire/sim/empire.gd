@@ -18,6 +18,7 @@ extends RefCounted
 
 signal notified(text: String, kind: String)  # kind: info / good / warn / bad
 signal sold(biz_id: String, amount: float)
+signal stock_delivered(business: Business)
 signal day_ended(report: Dictionary)
 signal goal_done(goal: Dictionary)
 signal changed
@@ -652,6 +653,7 @@ func delivery_fee(b: Business) -> float:
 func _deliver_orders() -> void:
 	for b: Business in businesses:
 		var keep: Array = []
+		var delivered := false
 		for o: Dictionary in b.orders:
 			if int(o["due"]) <= day:
 				var u: Dictionary = o["units"]
@@ -663,6 +665,7 @@ func _deliver_orders() -> void:
 					var cost := float(o.get("unit_prices", {}).get(pid, EmpireData.unit_cost(pid)))
 					_receive(b.backroom, pid, units, cost)
 				_note("Delivery arrived at %s" % b.name, "info", {"kind": "biz", "id": b.id, "tab": "stock"})
+				delivered = true
 			else:
 				keep.append(o)
 		b.orders = keep
@@ -671,6 +674,8 @@ func _deliver_orders() -> void:
 		if b.has_upgrade("backroom"):
 			base += int(EmpireData.upgrade("backroom").get("backroom", 0))
 		b.backroom.case_capacity = maxi(base, b.backroom.cases_used())
+		if delivered:
+			stock_delivered.emit(b)
 
 
 ## Managers top up for tomorrow: anything on sale with under half a

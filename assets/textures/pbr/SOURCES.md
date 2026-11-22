@@ -14,3 +14,18 @@ R = albedo luminance (mean 0.5), G/B = OpenGL normal x/y, A = roughness.
 CC0: no attribution required; listed here for provenance.
 | metal_plate_02.png | metal_plate_02 | painted steel: bridges, gantries, kits |
 | codex_concrete.png | (Codex study 04_concrete_wall, owner's) | concrete structures: pylons, viaducts, parapets |
+
+## WorldState street and retail materials
+
+The `worldstate_*.png` maps use original ImageGen colour studies from
+`../source/codex`. They store luminance, derived relief normals and
+material-specific roughness in one mipmapped texture. The outdoor maps are
+1024 px square and the indoor maps are 512 px square.
+
+| Material | Runtime use |
+|---|---|
+| `worldstate_street_asphalt.png` | Roadways, bridge decks and airport asphalt |
+| `worldstate_pavement_concrete.png` | Pavements, forecourts, concrete floors |
+| `worldstate_retail_ceramic.png` | Shop tile floors |
+| `worldstate_retail_oak.png` | Wood floors in cafés and fashion shops |
+| `worldstate_retail_terrazzo.png` | Electronics retail floors |

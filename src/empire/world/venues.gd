@@ -126,7 +126,7 @@ func _load(id: String, xf: Transform3D) -> void:
 	for n in root.get_children():
 		var nm := String(n.name)
 		if n is MeshInstance3D:
-			_fix_materials(n as MeshInstance3D, id in ["aviation", "marina"])
+			_fix_materials(n as MeshInstance3D)
 			(n as MeshInstance3D).visibility_range_end = FREE_RANGE
 		if nm == "Venue" and n is MeshInstance3D:
 			_collide(root, n as MeshInstance3D)
@@ -146,6 +146,63 @@ func _load(id: String, xf: Transform3D) -> void:
 		if nm.begins_with("spot_") and not nm.begins_with("spot_car_"):
 			R["spots"].append([nm, (R["marks"][nm] as Transform3D).origin])
 	rooms[id] = R
+	_stock_perimeter.call_deferred(id, root)
+
+
+## The Blender shell already has fixed displays. Only use unoccupied solid
+## walls and check the whole standing aisle in the loaded physics world.
+func _stock_perimeter(id: String, root: Node3D) -> void:
+	await get_tree().physics_frame
+	await get_tree().process_frame
+	if not is_instance_valid(root) or root.is_queued_for_deletion():
+		return
+	var defs: Dictionary = DEFS[id]
+	var width := float(defs["w"])
+	var depth := float(defs["d"])
+	var transform_in_room := Transform3D(Basis.IDENTITY, Vector3(-width * 0.5, 0, 0))
+	var frame := root.global_transform * transform_in_room
+	var blocked: Array[Rect2] = []
+	for key: String in rooms[id]["marks"]:
+		var mark: Transform3D = rooms[id]["marks"][key]
+		var point := frame.affine_inverse() * mark.origin
+		var reach := 4.0 if key.begins_with("craft_") or key.begins_with("car_") else 1.6
+		blocked.append(Rect2(point.x - reach, point.z - reach, reach * 2.0, reach * 2.0))
+	var clothing := id in ["arden", "threadline"]
+	var bays := InteriorKit.plan(width, depth, float(defs["h"]), blocked, 4.0, 0.06,
+		[not clothing, not clothing, true])
+	var clear: Array[Transform3D] = []
+	var body := StaticBody3D.new()
+	body.collision_layer = CityWorld.HUMAN_LAYER | 1
+	body.collision_mask = 0
+	body.transform = transform_in_room
+	var space := root.get_world_3d().direct_space_state
+	for bay in bays:
+		var box := InteriorKit.footprint(bay)
+		var query_box := BoxShape3D.new()
+		query_box.size = Vector3(1.22, box.size.y - 0.30, 1.10)
+		var direction := bay.basis.z.normalized()
+		var params := PhysicsShapeQueryParameters3D.new()
+		params.shape = query_box
+		params.collision_mask = body.collision_layer
+		params.transform = frame * Transform3D(Basis(bay.basis.x.normalized(), Vector3.UP, direction),
+			box.get_center() + Vector3.UP * 0.05 + direction * 0.38)
+		if not space.intersect_shape(params, 1).is_empty():
+			continue
+		clear.append(bay)
+		var fixture := CollisionShape3D.new()
+		var collider := BoxShape3D.new()
+		collider.size = box.size
+		fixture.shape = collider
+		fixture.position = box.get_center()
+		body.add_child(fixture)
+		if clear.size() >= (4 if clothing else 8):
+			break
+	if clear.is_empty():
+		body.free()
+		return
+	body.name = "PerimeterDisplays"
+	root.add_child(body)
+	InteriorKit.dress(body, clear, InteriorKit.profile(id), hash(id))
 
 
 func _update_commercial_sign(p: Vector3) -> void:
@@ -274,7 +331,7 @@ static var _tint_mat: StandardMaterial3D
 
 
 ## glTF transmission doesn't import: glass becomes a light alpha pane.
-func _fix_materials(mi: MeshInstance3D, premium: bool) -> void:
+func _fix_materials(mi: MeshInstance3D) -> void:
 	if _glass_mat == null:
 		_glass_mat = StandardMaterial3D.new()
 		_glass_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -295,7 +352,7 @@ func _fix_materials(mi: MeshInstance3D, premium: bool) -> void:
 			var fm := (m as BaseMaterial3D).duplicate() as BaseMaterial3D
 			fm.roughness = 0.45
 			mi.set_surface_override_material(i, fm)
-		if premium and rn in ["floor_stone", "floor_oak", "wall_plaster"]:
+		if rn in ["floor_stone", "floor_oak", "floor_polished_dark", "floor_tile", "floor_polished_light", "wall_plaster"]:
 			mi.set_surface_override_material(i, _premium_finish(rn, m as StandardMaterial3D))
 		match rn:
 			"glass_clear":
@@ -307,12 +364,12 @@ func _fix_materials(mi: MeshInstance3D, premium: bool) -> void:
 static func _premium_finish(id: String, gltf: StandardMaterial3D) -> StandardMaterial3D:
 	if not _finishes.has(id):
 		var finish := gltf.duplicate() as StandardMaterial3D
-		var file := {"floor_stone": "terrazzo", "floor_oak": "oak", "wall_plaster": "plaster"}[id] as String
+		var file := String({"floor_oak": "oak", "wall_plaster": "plaster"}.get(id, "terrazzo"))
 		finish.albedo_texture = load("res://assets/textures/pbr/showroom_%s.jpg" % file)
-		finish.albedo_color = Color("eeece4") if id != "wall_plaster" else Color("f1efe9")
+		finish.albedo_color = gltf.albedo_color.lightened(0.16)
 		finish.uv1_triplanar = true
 		finish.uv1_scale = Vector3.ONE * (0.60 if id == "floor_oak" else 0.76)
-		finish.roughness = 0.39 if id == "floor_stone" else 0.54
+		finish.roughness = 0.45 if id in ["floor_stone", "floor_tile"] else 0.58
 		finish.metallic_specular = 0.34
 		finish.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 		_finishes[id] = finish
@@ -380,11 +437,7 @@ func _lights(root: Node3D, id: String) -> void:
 			var o := OmniLight3D.new()
 			o.position = Vector3(-W * 0.5 + W * (i + 0.5) / nx, H - 0.8, -D * (k + 0.5) / nz)
 			o.light_color = Color(1.0, 0.94, 0.85) if warm else Color(0.96, 0.98, 1.0)
-			o.light_energy = 1.5
-			o.omni_range = maxf(W / nx, D / nz) * 1.1 + 2.0
-			o.omni_attenuation = 0.8
-			o.shadow_enabled = false
-			o.distance_fade_enabled = true
+			InteriorKit.tune_light(o, 1.72, maxf(W / nx, D / nz) * 1.1 + 2.0)
 			o.distance_fade_begin = 80.0
 			o.distance_fade_length = 30.0
 			root.add_child(o)

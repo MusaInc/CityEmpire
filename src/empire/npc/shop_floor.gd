@@ -78,6 +78,8 @@ func _process(dt: float) -> void:
 	var game_dt := dt * minutes_per_second  # game minutes this frame
 	# New arrivals from the street, one through the door at a time.
 	_door_t -= dt
+	if not biz.open or not biz.within_hours(empire.hour()):
+		biz.pending_arrivals = 0
 	while biz.pending_arrivals > 0:
 		if customers.size() >= MAX_INSIDE or biz.pending_arrivals > 6:
 			# A full shop (or a backlog after the clock ran fast): the model
@@ -116,7 +118,7 @@ func _spawn_customer() -> void:
 	var c := {"p": p, "shopper": shopper, "state": "enter", "wants": wants, "basket": Stock.new(0, "basket"),
 		"wait": 0.0, "till": -1, "slot": -1, "t": 0.0, "mood": 0.0, "impulse_done": false}
 	customers.append(c)
-	p.set_path(room.path(p.position, room.door_in))
+	p.set_path(_route(p.position, room.door_in))
 
 
 ## Someone already in the doorway (the next arrival waits outside).
@@ -128,12 +130,17 @@ func _doorway_busy() -> bool:
 	return false
 
 
+func _route(from: Vector3, to: Vector3) -> PackedVector3Array:
+	return room.path(from, to, hero_at)
+
+
 func _walkable(at: Vector3) -> bool:
 	return room.walk.has(room.cell_of(at))
 
 
 ## Body clearance: two people's centres no closer than this (shoulders).
 const PERSONAL := 0.52
+const HERO_PASS_CLEARANCE := 0.39
 
 
 ## Who's in the spot `at` (a step ahead of `me`): 0 nobody, 1 a shopper or
@@ -151,7 +158,7 @@ func _blocked(at: Vector3, me: ShopPerson) -> int:
 	if hero_at != Vector3.INF:
 		var h := hero_at - me.position
 		h.y = 0.0
-		if Vector2(hero_at.x - at.x, hero_at.z - at.z).length() < PERSONAL + 0.1 and h.dot(heading) > 0.0:
+		if Vector2(hero_at.x - at.x, hero_at.z - at.z).length() < HERO_PASS_CLEARANCE and h.dot(heading) > 0.0:
 			return 2
 	return 0
 
@@ -237,7 +244,7 @@ func _next_want(c: Dictionary) -> void:
 		c["slot"] = si
 		c["state"] = "to_shelf"
 		p.face_goal = Vector3.INF
-		p.set_path(room.path(p.position, room.slot_pick[si] + Vector3(_rng.randf_range(-0.3, 0.3), 0, 0)))
+		p.set_path(_route(p.position, room.slot_pick[si] + Vector3(_rng.randf_range(-0.3, 0.3), 0, 0)))
 		return
 	if not c["impulse_done"]:
 		c["impulse_done"] = true
@@ -275,12 +282,12 @@ func _queue_step(c: Dictionary) -> void:
 			if not _till_taken(t):
 				c["state"] = "at_till"
 				c["till"] = t
-				p.set_path(room.path(p.position, room.till_customer[t]))
+				p.set_path(_route(p.position, room.till_customer[t]))
 				p.face_goal = room.till_staff[t]
 				return
 	var spot: Vector3 = room.queue[mini(qi, room.queue.size() - 1)]
 	if p.path.is_empty() or p.path[p.path.size() - 1].distance_to(spot) > 0.2:
-		p.set_path(room.path(p.position, spot))
+		p.set_path(_route(p.position, spot))
 		p.face_goal = room.till_customer[0]
 
 
@@ -309,7 +316,7 @@ func _leave(c: Dictionary, _why: String) -> void:
 	c["state"] = "leave"
 	p.face_goal = Vector3.INF
 	p.carry = 0.0
-	p.set_path(room.path(p.position, room.door_out + Vector3(_rng.randf_range(-2.0, 2.0), 0, 1.0)))
+	p.set_path(_route(p.position, room.door_out + Vector3(_rng.randf_range(-2.0, 2.0), 0, 1.0)))
 
 
 # ---------------------------------------------------------------- tills
@@ -420,13 +427,28 @@ func _update_staff(dt: float) -> void:
 	for k in staff_people:
 		var s: Dictionary = staff_people[k]
 		var p: ShopPerson = s["p"]
+		var finish_queue: bool = s["role"] == "cashier" and not customers.is_empty()
+		if not open and not finish_queue:
+			if s["state"] != "closing":
+				s["state"] = "closing"
+				p.set_carry(false)
+				p.face_goal = Vector3.INF
+				var outside := room.door_out + Vector3(float(hash(k) % 3) * 0.4 - 0.4, 0, 1.1)
+				p.set_path(_route(p.position, outside))
+			elif p.arrived():
+				p.hide()
+			continue
+		if s["state"] == "closing":
+			p.show()
+			s["state"] = "idle"
+			p.set_path(_route(p.position, room.door_in))
 		s["t"] = float(s["t"]) - dt
 		match String(s["role"]):
 			"cashier":
 				var t: int = s["till"]
 				var spot: Vector3 = room.till_staff[t] if t >= 0 else room.office_pos
 				if p.arrived() and p.position.distance_to(spot) > 0.3:
-					p.set_path(room.path(p.position, spot))
+					p.set_path(_route(p.position, spot))
 				p.face_goal = room.till_customer[t] if t >= 0 else Vector3.INF
 			"stocker":
 				if float(s["t"]) > 0.0 or not p.arrived():
@@ -434,7 +456,7 @@ func _update_staff(dt: float) -> void:
 				if s["state"] == "to_shelf":
 					s["state"] = "back"
 					p.set_carry(false)
-					p.set_path(room.path(p.position, room.rack_pos))
+					p.set_path(_route(p.position, room.rack_pos))
 					s["t"] = 1.5
 				elif open and biz.backroom.total_units() > 0 and not room.slot_pick.is_empty():
 					# The emptiest shelf there's back stock for (that's the one
@@ -446,7 +468,7 @@ func _update_staff(dt: float) -> void:
 					s["state"] = "to_shelf"
 					var pid: String = biz.slots[si]["product"] if si < biz.slots.size() else ""
 					p.set_carry(true, EmpireData.colour(pid).lerp(Color(0.7, 0.55, 0.35), 0.5) if pid != "" else Color(0.7, 0.55, 0.35))
-					p.set_path(room.path(p.position, room.slot_pick[si]))
+					p.set_path(_route(p.position, room.slot_pick[si]))
 					s["t"] = 2.5
 					_goods_dirty = true
 				else:
@@ -462,7 +484,7 @@ func _update_staff(dt: float) -> void:
 					continue
 				if s["role"] == "manager" and _rng.randf() < 0.5:
 					dest = room.office_pos
-				p.set_path(room.path(p.position, dest))
+				p.set_path(_route(p.position, dest))
 				s["t"] = _rng.randf_range(3.0, 7.0)
 			"driver":
 				p.visible = false  # out on the road with the van

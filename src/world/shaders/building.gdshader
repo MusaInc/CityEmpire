@@ -676,11 +676,20 @@ void fragment() {
 			float lum = dot(refl, vec3(0.3, 0.55, 0.15));
 			refl = mix(refl, clamp(tint * 1.85, 0.0, 1.0) * lum * 1.35, 0.40);
 		}
-		// Blinds half-drawn in some windows (offices and flats, not shops).
-		float blind_h = step(0.86, hash12(cell * 2.7 + seed * 17.0)) * (shop ? 0.0 : 1.0);
-		float blind_edge = mix(-0.42, 0.56, hash12(cell + 5.1)) * whalf.y;
+		// Neighbours often share the same fittings, but adjust them independently.
+		float blind_setting = hash12(cell * 2.7 + seed * 17.0);
+		float blind_h = smoothstep(0.56, 0.62, blind_setting) * (shop ? 0.0 : 1.0);
+		float blind_edge = mix(-0.88, 0.67, hash12(cell + 5.1 + seed)) * whalf.y;
 		float window_pixel = clamp(max(length(uv_dx), length(uv_dy)) * 0.65, 0.008, 0.23);
-		float in_blind = blind_h * smoothstep(blind_edge - window_pixel, blind_edge + window_pixel, wpos.y);
+		bool punched = !shop && style != 2.0 && style != 6.0 && v_kind != KIND_GLASS;
+		// Project the sight line back to the actual inset of the pane. What
+		// falls outside it is the masonry return inside the same aperture.
+		float recess_depth = punched ? mix(0.15, 0.29, fract(seed * 17.73)) : 0.035;
+		vec3 v_local = vec3(dot(view_w, tang), view_w.y, max(dot(view_w, n_w), 0.12));
+		vec2 pane_pos = wpos - v_local.xy * recess_depth / v_local.z;
+		vec2 margin = whalf - abs(pane_pos);
+		float clear_pane = smoothstep(-window_pixel, window_pixel, min(margin.x, margin.y));
+		float in_blind = blind_h * smoothstep(blind_edge - window_pixel, blind_edge + window_pixel, pane_pos.y);
 		// Lit rooms: a few by day; after dusk they come on one by one (each
 		// window has its own threshold) up to a per-building share, in warm
 		// tungsten, cool office white or the odd blue TV glow.
@@ -705,7 +714,7 @@ void fragment() {
 		if (detail > 0.0) {
 			vec3 d_in = -view_w;
 			vec3 dl = vec3(dot(d_in, tang), d_in.y, dot(d_in, -n_w));
-			vec2 o = shop ? vec2(fract(uv.x / 6.0) * 6.0 - 3.0, uv.y - 2.3) : wpos;
+			vec2 o = shop ? vec2(fract(uv.x / 6.0) * 6.0 - 3.0, uv.y - 2.3) : clamp(pane_pos, -whalf, whalf);
 			vec3 rs = shop ? vec3(6.0, 4.6, 7.0) : vec3(csize.x * (curtain ? 2.0 : 1.0), csize.y, curtain ? 6.0 : 4.2);
 			float daylight = dot(sky_horizon, vec3(0.3, 0.55, 0.15)) * 0.5 * (1.0 - 0.85 * night);
 			vec3 rm = room(o, dl, rs, rnd, lit, lamp_col * mix(0.7, lit_k, night), daylight);
@@ -715,8 +724,10 @@ void fragment() {
 		}
 		vec3 gcol = mix(interior, refl, curtain ? 0.26 + 0.60 * fres : 0.10 + 0.59 * fres);
 		// Diffuse fabric, partially drawn, leaves the room visible below it.
-		vec3 fabric = mix(vec3(0.26, 0.25, 0.23), lamp_col * (0.35 + 0.16 * rnd), lit);
-		gcol = mix(gcol, fabric, in_blind * detail * mix(0.64, 0.76, night));
+		vec3 fabric = mix(vec3(0.26, 0.25, 0.23), vec3(0.48, 0.45, 0.39), rnd);
+		fabric = mix(fabric, lamp_col * (0.35 + 0.16 * rnd), lit);
+		float blind_slats = sin(pane_pos.y * 105.0) * (1.0 - smoothstep(0.01, 0.05, window_pixel));
+		gcol = mix(gcol, fabric * (0.94 + 0.06 * blind_slats), in_blind * detail * mix(0.70, 0.8, night));
 		gcol += lamp_col * lit * lit_k * mix(0.04, 0.095, night) * (1.0 - detail * 0.7);
 		vec3 room_glow = mix(lamp_col * lit_k * 0.33, interior * 0.77, detail);
 		room_glow *= 1.0 - in_blind * 0.58 * detail;
@@ -729,7 +740,6 @@ void fragment() {
 		emit += wall * (1.0 - glass) * night * (0.016 + 0.075 * exp(-uv.y / 7.0)) * vec3(1.0, 0.84, 0.66);
 		// Window reveal: slightly darker frame around each opening.
 		vec3 framed = mix(wall, wall * 0.72, (1.0 - glass) * frame * detail);
-		bool punched = !shop && style != 2.0 && style != 6.0 && v_kind != KIND_GLASS;
 		if (punched && window_zone && detail > 0.0) {
 			// Stone sill under each window and (brick) a lintel over it.
 			vec3 stone = (style == 1.0 || style == 3.0) ? vec3(0.8, 0.76, 0.68) : base * 1.16;
@@ -745,7 +755,7 @@ void fragment() {
 		// the sun-side edge of the glass (a deep punched window on masonry,
 		// a shallow one on curtain walls), and the frame inside darkens.
 		float lit_face = dot(n_w, sun_dir);
-		float depth = punched ? 0.26 : 0.07;
+		float depth = recess_depth;
 		float reveal = 0.0;
 		if (!shop) {
 			if (lit_face > 0.04) {
@@ -759,15 +769,21 @@ void fragment() {
 			reveal = max(reveal * 0.85, rim * 0.6);
 		}
 		gcol *= 1.0 - reveal * 0.55 * detail;
+		if (punched) {
+			float return_weight = (1.0 - clear_pane) * detail;
+			float lower_return = step(margin.y, margin.x) * step(pane_pos.y, 0.0);
+			gcol = mix(gcol, wall * mix(0.46, 0.78, lower_return), return_weight);
+			emit *= 1.0 - return_weight;
+		}
 		// Punched sash windows get a visible frame at walking distance. Fade
 		// the fine frame by its pixel footprint to avoid distant crawling.
 		if (punched && window_zone && detail > 0.0 && whalf.x > 0.42) {
 			float window_near = (1.0 - smoothstep(18.0, 88.0, camera_distance)) * glass;
 			float rail = (1.0 - smoothstep(0.027 - window_pixel, 0.027 + window_pixel,
-				abs(wpos.y + whalf.y * 0.12))) * (0.027 / (0.027 + window_pixel));
-			float stile = (1.0 - smoothstep(0.021 - window_pixel, 0.021 + window_pixel, abs(wpos.x)))
+				abs(pane_pos.y + whalf.y * 0.12))) * (0.027 / (0.027 + window_pixel));
+			float stile = (1.0 - smoothstep(0.021 - window_pixel, 0.021 + window_pixel, abs(pane_pos.x)))
 				* (0.021 / (0.021 + window_pixel)) * step(0.53, rnd);
-			float sash = max(rail, stile) * window_near;
+			float sash = max(rail, stile) * window_near * clear_pane;
 			gcol = mix(gcol, wall * 0.73, sash);
 			emit *= 1.0 - sash * 0.91;
 		}
@@ -790,8 +806,9 @@ void fragment() {
 		// bottom of each pane.
 		float grime = age * (0.3 + 0.7 * vnoise_b(uv * vec2(1.3, 0.8) + seed * 3.0)) * (0.6 + 0.4 * (1.0 - smoothstep(-whalf.y, 0.0, wpos.y)));
 		albedo = mix(albedo, albedo * 0.72 + vec3(0.07, 0.065, 0.055), glass * grime * 0.55 * detail);
-		rough = mix(0.86, 0.19 + 0.07 * rnd, glass);
-		metal = mix(0.0, 0.04, glass);
+		float pane_coverage = glass * (punched ? mix(1.0, clear_pane, detail) : 1.0);
+		rough = mix(0.86, 0.19 + 0.07 * rnd, pane_coverage);
+		metal = mix(0.0, 0.04, pane_coverage);
 		// Real relief for the light: the inner 15 cm round a punched window is
 		// its reveal (wall facing into the opening), the sill below tilts up
 		// to catch the sun, the lintel tilts down – so as the sun moves round
@@ -1102,6 +1119,10 @@ void fragment() {
 		// different batches of brick) so long walls aren't one flat colour.
 		albedo *= 1.0 + (vnoise_b(uv * vec2(0.08, 0.03) + seed * 5.0) - 0.5) * 0.1 * detail;
 	}
+	if ((v_kind == KIND_STONE || v_kind == KIND_WALL) && uv.y >= 0.0 && uv.y < 0.48 && abs(v_world_normal.y) < 0.18) {
+		float base_contact = 1.0 - smoothstep(0.02, 0.48, uv.y);
+		albedo *= 1.0 - base_contact * detail * (0.19 + 0.06 * wetness);
+	}
 	// Rain: surfaces darken and gloss (glass is already glossy).
 	if (relief > 0.0) {
 		vec3 nv = normalize((VIEW_MATRIX * vec4(bend_n, 0.0)).xyz);
@@ -1123,7 +1144,7 @@ void fragment() {
 		rough = 0.86 - 0.08 * agg;
 		if (pbr_on) {
 			float kd = pbr_fade(camera_distance);
-			vec4 d = texture(asph_tex, p / 1.9);
+			vec4 d = texture(asph_tex, p / 1.5);
 			albedo *= mix(1.0, d.r * 2.0, 0.85 * kd);
 			rough = mix(rough, d.a, 0.55 * kd * (1.0 - wetness));
 			NORMAL = normalize((VIEW_MATRIX * vec4(pbr_flat_normal(d, normalize(v_world_normal), 0.63 * kd), 0.0)).xyz);

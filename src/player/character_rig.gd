@@ -185,6 +185,8 @@ var _press := 0.0          # leaning on a wall, hands flat on it 0..1
 ## City Empire: both hands hold a stack of cases in front of the chest.
 var carrying := false
 var _carry := 0.0
+var _handle: Node3D
+var _handle_time := 0.0
 var _press_n := Vector3.ZERO
 var _guard_off := {}       # limb root bone -> [upper offset, ang vel, lower offset, ang vel]
 var _brace := 0.0          # arms coming up before an impact 0..1
@@ -242,7 +244,8 @@ var _hip_shift := 0.0        # pelvis side-shift over the stance foot (m)
 var _settle := {}          # side -> [progress 0..1, from ankle pos]: a small step back under the hips
 const SETTLE_DIST := 0.16  # a standing foot further than this from its rest spot steps in
 const SETTLE_TIME := 0.28
-var _step_off := 0.0       # visual ease after the capsule steps up a kerb
+var _step_off := 0.0       # signed visual offset across steps and kerbs
+var _ground_travel := Vector3.ZERO
 var _grips := {}           # "l"/"r" -> [open_node, grip_node]
 var _gear := {}            # headwear model name -> MeshInstance3D on the head pivot
 ## The outfit being drawn (Shop.look()).
@@ -761,6 +764,7 @@ func _connect_player() -> void:
 	player.slammed.connect(_on_slam)
 	player.perfect_release.connect(_on_perfect)
 	player.stepped_up.connect(func(h: float) -> void: _step_off = minf(_step_off + h, Player.MANTLE_MAX))
+	player.stepped_down.connect(func(h: float) -> void: _step_off = maxf(_step_off - h, -0.16))
 	player.respawned.connect(_on_respawned)
 	player.landed.connect(func(spd, _street): on_landed(spd))
 	player.wall_kicked.connect(_on_wall)
@@ -972,7 +976,7 @@ func _pose_hems(pivots: Dictionary) -> void:
 		var depth := knee_depth.max(foot_depth * 0.83) if hem.long else knee_depth
 		var seated := 0.0
 		if hem.seated >= 0:
-			seated = smoothstep(0.24, 0.414, paired_depth)
+			seated = smoothstep(0.19, 0.36, paired_depth)
 			hem.mesh.set_blend_shape_value(hem.seated, seated)
 		hem.mesh.set_blend_shape_value(hem.front, (1.0 - seated) * 0.78 * smoothstep(0.044, 0.316, depth.x))
 		hem.mesh.set_blend_shape_value(hem.back, (1.0 - seated) * 0.71 * smoothstep(0.038, 0.275, depth.y))
@@ -998,7 +1002,7 @@ func set_facing(dir: Vector3) -> void:
 func on_landed(speed: float) -> void:
 	var impact := maxf(speed, player.land_impact if player else 0.0)
 	cloth_kick(Vector3.DOWN * clampf(impact * 0.045, 0.0, 0.9))
-	_land_squash = clampf(impact / 22.0, 0.15, 1.0)
+	_land_squash = smoothstep(1.4, 11.0, impact) * 0.58 if player and player.everyday else clampf(impact / 22.0, 0.15, 1.0)
 	var vh := Vector3(player.s.velocity.x, 0, player.s.velocity.z).length() if player else 0.0
 	if ragdolling or (player and player.stunned):
 		return
@@ -1326,6 +1330,7 @@ func _on_respawned() -> void:
 	_gait.reset()
 	_gait_amp = 0.0
 	_step_off = 0.0
+	_ground_travel = Vector3.ZERO
 	_reset_scarf()
 
 
@@ -1483,6 +1488,13 @@ func _set_grip(side: String, on: bool) -> void:
 func _update_animated(dt: float) -> void:
 	var s := player.s
 	var v := s.velocity
+	if player.everyday:
+		if player.has_footing():
+			_ground_travel = _ground_travel.lerp(player.foot_velocity, 1.0 - exp(-22.0 * dt))
+			v.x = _ground_travel.x
+			v.z = _ground_travel.z
+		else:
+			_ground_travel = Vector3(v.x, 0.0, v.z)
 	var acc := (v - _prev_vel) / maxf(dt, 0.001)
 	_prev_vel = v
 	_accel = _accel.lerp(acc.limit_length(80.0), 1.0 - exp(-10.0 * dt))
@@ -1495,7 +1507,7 @@ func _update_animated(dt: float) -> void:
 	# the body keeps walking through them (animation only) instead of
 	# flickering into the air poses.
 	_floor_t = 0.0 if player.is_on_floor() else _floor_t + dt
-	var grounded := player.is_on_floor() and not s.attached
+	var grounded := player.has_footing() and not s.attached
 	if not grounded and _floor_t < 0.12 and v.y > -4.0 and v.y < 2.0 and not on_rope and _was_grounded \
 			and not s.attached and _getup_t <= 0.0 and _roll_time <= 0.0:
 		# (Only with a floor within a kerb's height under the feet.)
@@ -1523,7 +1535,7 @@ func _update_animated(dt: float) -> void:
 	_bump_t = maxf(_bump_t - dt, 0.0)
 	if grounded and not _was_grounded:
 		_air_t = 0.0
-	if not grounded and _was_grounded and v.y > 6.0 and not on_rope:
+	if not grounded and _was_grounded and v.y > (3.4 if player.everyday else 6.0) and not on_rope:
 		_takeoff_t = 0.3  # push-off: legs extend, arms drive up
 		_jump_t = 0.0
 	if not grounded and _was_grounded and not on_rope:
@@ -1571,6 +1583,14 @@ func _update_animated(dt: float) -> void:
 		_facing = _facing.slerp(-_stagger_n, 1.0 - exp(-10.0 * dt)).normalized()  # still facing the wall
 	elif player.wall_kick and not grounded and hs > 1.0 and vh.normalized().dot(_facing) < 0.2:
 		pass  # drifting back off a wall-run kick: keep facing on, no about-turn
+	elif player.everyday and grounded:
+		var intent := player.controls.move
+		if hs > 0.48 or intent.length_squared() > 0.0144:
+			var use_travel := hs > 0.85 or intent.length_squared() <= 0.0144
+			var wish := vh.normalized() if use_travel else intent.normalized()
+			var angle := _facing.signed_angle_to(wish, Vector3.UP)
+			var rate := lerpf(7.7, 4.8, smoothstep(1.4, 5.5, hs))
+			_facing = _facing.rotated(Vector3.UP, clampf(angle, -rate * dt, rate * dt))
 	elif hs > 1.0:
 		# Walking turns follow the path closely (feet and hips stay lined up
 		# with where the body is going); at a run the body swings round more.
@@ -1619,6 +1639,8 @@ func _update_animated(dt: float) -> void:
 		# ankle–hip–shoulder, not a bend at the waist).
 		var run_lean := 0.04 + 0.17 * clampf((hs - 2.0) / 12.0, 0.0, 1.0) if hs > 1.0 else 0.0
 		var bank := clampf(-_yaw_rate * hs * 0.025, -0.35, 0.35)
+		if player.everyday:
+			bank = clampf(la_w.dot(right_w) * 0.012, -0.15, 0.15) * smoothstep(0.6, 2.6, hs)
 		if _hard_t > 0.0:
 			# Three-point landing: the whole body pitches forward over the knee.
 			fa = 0.3 * _hard_k()
@@ -1717,7 +1739,10 @@ func _update_animated(dt: float) -> void:
 	_resid = _resid.slerp(Quaternion.IDENTITY, 1.0 - exp(-9.0 * dt))
 	var body := _body_basis * Basis(_resid * trick_rot) * Basis(Vector3.RIGHT, _flip)
 	global_basis = body
-	_step_off = move_toward(_step_off, 0.0, dt * 2.2) * exp(-8.0 * dt)
+	if player.everyday:
+		_step_off = move_toward(_step_off, 0.0, dt * 0.60) * exp(-13.5 * dt)
+	else:
+		_step_off = move_toward(_step_off, 0.0, dt * 2.2) * exp(-8.0 * dt)
 	global_position = player.global_position + Vector3.DOWN * _step_off
 	if _getup_t > 0.0:
 		# The body starts where the ragdoll left it (on the ground) and rises
@@ -1760,7 +1785,7 @@ func _update_animated(dt: float) -> void:
 	elif wall_run:
 		_pose_wall_run(q, dt)
 	elif grounded:
-		bob = _pose_ground(q, dt, hs, la)
+		bob = _pose_ground(q, dt, v, la)
 		if _stagger_t > 0.0:
 			# Thrown back off the wall: chest and head go back, knees give.
 			var sk := smoothstep(0.0, 0.12, Player.STAGGER_TIME + 0.2 - _stagger_t) * clampf(_stagger_t / 0.35, 0.0, 1.0)
@@ -1795,6 +1820,8 @@ func _update_animated(dt: float) -> void:
 		# with the toes pointed, the opposite arm punches up – a running
 		# jump, not a hop. Blends out over 0.3 s into the airborne poses.
 		var k := smoothstep(0.0, 1.0, _takeoff_t / 0.3) * smoothstep(0.0, 0.07, 0.3 - _takeoff_t)
+		if player.everyday:
+			k *= lerpf(0.28, 0.72, smoothstep(0.6, 5.0, hs))
 		var lead := _lead
 		var trail := "r" if lead == "l" else "l"
 		var sgn := {"l": -1.0, "r": 1.0}
@@ -1856,6 +1883,9 @@ func _update_animated(dt: float) -> void:
 			var ik := _two_bone(cb, d, 0.44, Vector3(0.75 * sgn, -0.4, 0.3))
 			q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(ik[0], _carry)
 			q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(ik[1], _carry)
+	_handle_time = maxf(0.0, _handle_time - dt)
+	if grounded and _carry < 0.1 and _handle_time > 0.0 and is_instance_valid(_handle):
+		_pose_handle(q)
 	# Hip bob (running) – the pelvis rides up and down over the stance leg.
 	(bones["hips"] as Node3D).position.y = lerpf((bones["hips"] as Node3D).position.y,
 		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop, 1.0 - exp(-20.0 * dt))
@@ -1897,7 +1927,8 @@ const GETUP_TIME := 1.05
 ## counter-rotate, the arms swing against the legs (loose and nearly straight
 ## walking, pumping at ~90° running), the head stays level and steady.
 ## Returns the pelvis height offset (bob, crouch, landing squash).
-func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
+func _pose_ground(q: Dictionary, dt: float, travel: Vector3, la: Vector3) -> float:
+	var hs := Vector2(travel.x, travel.z).length()
 	var g := _gait
 	var space := get_world_3d().direct_space_state
 	var ground := func(at: Vector3) -> Dictionary: return _ground_hit(space, at, 2.2)
@@ -1906,7 +1937,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		var ank := {}
 		for sd in ["l", "r"]:
 			ank[sd] = _plant[sd][0] if _plant.has(sd) else (bones["foot_" + sd] as Node3D).global_position
-		g.begin(ank, _facing, ground, player.s.velocity)
+		g.begin(ank, _facing, ground, travel)
 	var run0 := g.run
 	var crouch := ((0.017 if player.everyday else 0.012) + (0.050 if player.everyday else 0.038) * run0 + 0.016 * g.sprint) * clampf(hs / 1.2, 0.0, 1.0)
 	var td := g.touchdowns
@@ -1916,7 +1947,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		g.shift(carry)
 		for sd in _plant:
 			_plant[sd][0] = (_plant[sd][0] as Vector3) + carry
-	g.update(dt, player.s.velocity, _facing, player.global_position, hips_w, ground, crouch)
+	g.update(dt, travel, _facing, player.global_position, hips_w, ground, crouch)
 	if g.touchdowns != td:
 		footstep.emit(g.last_touchdown)
 	_gait_live = true
@@ -2002,6 +2033,13 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		_idle_pose(q, 1.0 - amp / 0.35, dt)
 	else:
 		_idle_reset()
+	if player.everyday and not g.moving and fl.planted != fr.planted:
+		# Transfer weight over the supporting foot before the other repositions.
+		var swing := fr if fl.planted else fl
+		var shift := sin(PI * swing.w) * (-1.0 if fl.planted else 1.0)
+		_hip_shift += shift * 0.035
+		q["hips"] = (q["hips"] as Quaternion) * _rz(-shift * 0.055)
+		q["spine"] = (q["spine"] as Quaternion) * _rz(shift * 0.05)
 	_standing = not g.moving
 	if stumble_t > 0.0:
 		var u := 1.0 - stumble_t / STUMBLE_TIME
@@ -3002,6 +3040,28 @@ func _hand_to_ground(q: Dictionary, sd: String, fwd: float, out: float, k: float
 		minf(d.length(), 0.53), Vector3(0.4 * sg, 0.0, 0.9))
 	q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(ik[0], k)
 	q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(ik[1], k)
+
+
+func reach_for_handle(handle: Node3D) -> void:
+	if not carrying:
+		_handle = handle
+		_handle_time = 0.48
+
+
+func _pose_handle(q: Dictionary) -> void:
+	var at := _handle.global_position
+	var right := (bones["upper_arm_r"] as Node3D).global_position
+	var left := (bones["upper_arm_l"] as Node3D).global_position
+	var side := "r" if right.distance_squared_to(at) < left.distance_squared_to(at) else "l"
+	var toward := at - (right if side == "r" else left)
+	if toward.length_squared() < 0.01 or toward.dot(_facing) < -0.08:
+		return
+	var chest := (bones["chest"] as Node3D).global_basis.orthonormalized()
+	var ik := _two_bone(chest, toward.normalized(), minf(toward.length(), 0.53),
+		Vector3(0.55 if side == "r" else -0.55, -0.35, 0.6))
+	var weight := smoothstep(0.0, 0.18, _handle_time) * (1.0 - smoothstep(0.32, 0.48, _handle_time))
+	q["upper_arm_" + side] = (q["upper_arm_" + side] as Quaternion).slerp(ik[0], weight)
+	q["forearm_" + side] = (q["forearm_" + side] as Quaternion).slerp(ik[1], weight)
 
 
 ## Get-up progress 0..1 (1 = not getting up).

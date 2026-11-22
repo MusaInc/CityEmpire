@@ -15,6 +15,7 @@ var _step_dist := 0.0
 var _step_i := 0
 var _horn_in := 9.0
 var _rig_steps := false  # footsteps come from the rig's foot plants
+var surface_at: Callable
 
 var player: Player
 var atmosphere: Atmosphere
@@ -226,10 +227,27 @@ func _on_footstep(pos: Vector3) -> void:
 
 func _step_sound(pos: Vector3, vh: float) -> void:
 	var surf := "gravel" if player.height_above_ground() > 3.0 else "concrete"
-	var world := get_parent().get_node_or_null("World") if get_parent() else null
-	if surf == "concrete" and world and world.get("layout") and world.layout.is_park(Vector2(pos.x, pos.z)):
-		surf = "grass"
+	var pitch_bias := 0.0
+	var volume_bias := 0.0
+	if surface_at.is_valid():
+		match String(surface_at.call(pos)):
+			"grass":
+				surf = "grass"
+			"asphalt", "wet_asphalt":
+				surf = "gravel"
+				pitch_bias = -0.12
+				volume_bias = -4.0
+			"interior":
+				surf = "concrete"
+				pitch_bias = 0.14
+				volume_bias = -2.0
+			"paving":
+				surf = "concrete"
+	else:
+		var world := get_parent().get_node_or_null("World") if get_parent() else null
+		if surf == "concrete" and world and world.get("layout") and world.layout.is_park(Vector2(pos.x, pos.z)):
+			surf = "grass"
 	_step_i = (_step_i + 1 + randi() % 2) % 3
 	# Sprinting lands harder: louder and a touch lower.
-	play("step_%s_%d" % [surf, _step_i], linear_to_db(clampf(0.25 + vh / 14.0, 0.25, 0.85)),
-		randf_range(0.94, 1.06) - clampf((vh - 10.0) * 0.008, 0.0, 0.06))
+	play("step_%s_%d" % [surf, _step_i], linear_to_db(clampf(0.25 + vh / 14.0, 0.25, 0.85)) + volume_bias,
+		randf_range(0.94, 1.06) + pitch_bias - clampf((vh - 10.0) * 0.008, 0.0, 0.06))

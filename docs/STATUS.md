@@ -3,14 +3,14 @@
 
 ## Master plan implementation status (2026-11-22)
 
-The benchmark's eight matched views were captured in Godot Mobile on desktop. TestFlight 0.10.0 build 36 includes the bridge, glazing, character rig and driving lens work. The night lighting, financial history, delivery and touch changes below are in the working tree.
+The benchmark's eight matched views were captured in Godot Mobile on desktop. TestFlight 0.10.0 build 37 is in internal testing with the enterable ground floors, façade and street wear, planting, traffic, finance and touch updates. The layered sky and daylight pass was implemented after that upload.
 
 | Area | Implemented or verified | Work still open |
 | --- | --- | --- |
 | A. Rendering | Corrected bridge paint overlap, square lamp artefacts in fog and vehicle window materials. Removed the reference cycles behind seven resources retained on basic scene exit. Added road-field cache with seed and geometry validation. | Intermittent grey wall in motion, Mobile renderer shutdown after a driving session, and an all-district audit of overlapping and floating geometry. |
 | B. Architecture | Added 564 enterable ground floors across all three islands, including purpose-specific public rooms and eight flagships. Openings, glazed fronts and collision use the same building record. | Extend access to shaped, steep and special-purpose buildings. Review the remaining façades and rooflines. |
 | C. Roads | Textured asphalt and paving, junction paint and continuous bridge markings. Drove both joints of the suspension bridge and the Skyport Harbour Bridge. Cars on matched approaches use the same clock as the displayed signal. Added paired through-road signal heads and queueing at 35 compatible junctions in the default map. | Remaining road joins, pavement continuity, and junctions where both approaches lack space for signal heads. |
-| D. Lighting | Night exposure, softer façade spill and asphalt fill checked in matched CBD and Westbank views. Wet roads now distinguish damp aggregate from standing water and reflect nearby lamps. Sash frames, partial blinds and shaded window edges add depth after dark. | Review dusk transitions, billboard brightness, Skyport wet surfaces and physical iOS performance. |
+| D. Lighting | Night exposure, softer façade spill and asphalt fill checked in matched CBD and Westbank views. Wet roads distinguish damp aggregate from standing water and reflect nearby lamps. Sash frames, partial blinds and shaded window edges add depth after dark. The new sky has two cloud layers, sunlit cloud edges, a correctly sized sun and lower shadow contrast under overcast skies. | Review billboard brightness, Skyport wet surfaces and physical iOS performance. |
 | E. Vehicles | Corrected sealed fleet glazing and distant traffic glass. Tested the dual-stick driving setup and delivery from the Garage. | Cabin and inspection quality across the catalogue, damage presentation and tyre feedback by surface. |
 | F. Environment | Existing planter and square trees survive density settings. Commercial Island and Westbank retain more of their planned verge trees on medium and high settings. Oak, birch and pine have shaded lower crowns and varied tones, with local detail batches in the city and Skyport. Scenic forests use the light mesh. | Check foliage detail transitions and frame pacing on iPhones and iPads. Inspect coast and mountain transitions at gameplay distances. |
 | G. Characters | Wardrobe restores the gameplay view. Both body switches retain the correct bind pose. Matched jacket and jeans across standing, running and seated poses. | Full outfit matrix, including skirts, dresses, shoes and accessories in gameplay motion. |
@@ -25,6 +25,14 @@ The benchmark's eight matched views were captured in Godot Mobile on desktop. Te
 ## Façade and glazing alignment
 
 Retail, reception and office glazing now uses one surface per framed pane. Window heads follow the actual shell opening and the distant storefront proxy sits on a separate plane. Façade shader variants leave the stone foundation material and opacity intact. Flagship canopies sit above the glazing and carry their lettering on the street-facing edge. The upper façade grid fits complete bays between corner piers and adds opaque belts at partial storeys. Ledges, balcony slabs, fire escapes and tower fins use the same storey and bay spacing. Matched Mobile renderer views cover Harbour Food Hall, a reception, Westbank and the CBD. Masonry now picks up short mineral streaks below the fitted sills and darker, irregular splash marks near the pavement. The street shader adds lane-aligned asphalt repairs, tar seams, oil near stopping points, gutter sediment and drain runoff, with a lighter treatment in newer districts.
+
+## Street-level realism pass
+
+Punched windows now reveal the inner masonry and inset frames as the player changes viewing angle. Variable blinds leave different parts of nearby rooms visible. Pavements have staggered slabs, stronger joints and varied roughness. A short-range mesh gives parked cars and street furniture local contact shading on medium and high settings. Shops dim their signs and sales floor at closing. Staff leave after the remaining customers finish, and nearby stock deliveries show a worker carrying cases from the doorway to the stockroom. A van appears where a parking strip has room and rolls into place when the approach is clear.
+
+Footstep sounds follow the street-to-shop transition. The driver hears a rolling layer that changes across surfaces and short suspension sounds on sharper bumps. The walking rig samples across the sole at kerb contacts, reaches towards the stockroom door plate and applies the seated hem shape earlier. Matched desktop Godot Mobile views cover Westbank masonry, paving and the starter shop. Physical iPhone and iPad verification remains open.
+
+Retail and public premises use different sign treatments by frontage and trade, with lettering fitted to the actual panel. Interior finishes and aisle placement can vary between stores of the same kind. Shop fittings leave the entrance approach clear, and the checkout queue fits before the stockroom partition. Pavement boards and display stands sit near the outer ends of the frontage. Loose delivery cases stage in the stockroom.
 
 
 ## Enterable ground floors

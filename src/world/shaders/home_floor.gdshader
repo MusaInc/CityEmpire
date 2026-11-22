@@ -7,6 +7,8 @@ uniform vec3 timber : source_color = vec3(0.35, 0.23, 0.14);
 uniform vec2 room_size = vec2(10.0);
 uniform int style = 0;
 
+uniform sampler2D surface_detail : filter_linear_mipmap_anisotropic, repeat_enable;
+
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
 	vec2 i = floor(p);
@@ -73,6 +75,12 @@ void fragment() {
 	// it the floor reads as a sticker under the walls).
 	float edge = min(min(p.x, room_size.x - p.x), min(p.y, room_size.y - p.y));
 	c *= mix(0.68, 1.0, smoothstep(0.0, 0.7, edge));
+	bool wood = style == 0 || style == 3;
+	vec4 map = texture(surface_detail, p / (wood ? vec2(1.32, 2.0) : vec2(2.1)));
+	c *= mix(1.0, map.r * 2.0, 0.47);
+	NORMAL_MAP = vec3(map.gb, 1.0);
+	NORMAL_MAP_DEPTH = wood ? 0.45 : 0.34;
+	rough = mix(rough, map.a, 0.34);
 	ALBEDO = c;
 	ROUGHNESS = rough;
 	SPECULAR = spec;

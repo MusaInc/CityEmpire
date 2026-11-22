@@ -11,6 +11,9 @@ uniform int style = 0;
 uniform float seed = 0.0;
 uniform float corners = 1.0;  // 0 for pieces hung on a wall (paintings)
 
+uniform sampler2D surface_detail : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform bool detail_on = false;
+
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
 	vec2 i = floor(p);
@@ -98,6 +101,13 @@ void fragment() {
 		ao *= mix(0.84, 1.0, smoothstep(0.0, 0.6, size.y - p.y));
 		ao *= mix(0.8, 1.0, smoothstep(0.0, 0.7, min(p.x, size.x - p.x)));
 		c *= ao;
+	}
+	if (detail_on && style != 6) {
+		vec4 map = texture(surface_detail, p / (style == 1 ? vec2(1.5, 1.2) : vec2(2.7)));
+		c *= mix(1.0, map.r * 2.0, 0.16);
+		rough = mix(rough, map.a, 0.13);
+		NORMAL_MAP = vec3(map.gb, 1.0);
+		NORMAL_MAP_DEPTH = 0.32;
 	}
 	ALBEDO = c;
 	ROUGHNESS = rough;

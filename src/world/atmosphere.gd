@@ -119,7 +119,6 @@ func _ready() -> void:
 	env.fog_depth_curve = 1.35
 	env.fog_sun_scatter = 0.3
 	env.fog_aerial_perspective = 0.8
-	env.fog_sky_affect = 0.15
 	env.glow_enabled = preset.get("glow", true)
 	env.glow_intensity = 0.22
 	env.glow_bloom = 0.035
@@ -258,6 +257,7 @@ func _apply(dt: float, instant: bool) -> void:
 	var ang := sun_angles(hour)
 	var el := ang.x
 	var overcast := smoothstep(0.55, 1.0, float(w["cloud"]))
+	var cloud_softness := smoothstep(0.48, 0.90, float(w["cloud"]))
 	var fog := float(w["fog"])
 	night = 1.0 - smoothstep(-8.0, 3.0, el)
 	var lamps := maxf(night, overcast * 0.35 * float(w["dark"]))
@@ -270,7 +270,7 @@ func _apply(dt: float, instant: bool) -> void:
 			[25.0, Color(1.0, 0.89, 0.76)], [60.0, Color(1.0, 0.97, 0.90)]])
 		sun.light_energy = day_light * _rampf(el, [[0.0, 1.3], [10.0, 1.65], [25.0, 1.85], [60.0, 1.95]])
 		sky_mat.set_shader_parameter("sun_glow", 1.0)
-		sky_mat.set_shader_parameter("disc_size", 0.9993)
+		sky_mat.set_shader_parameter("disc_size", 0.999989)
 		sky_mat.set_shader_parameter("disc_k", 6.0)
 		sky_mat.set_shader_parameter("sun_tint", sun.light_color)
 	else:
@@ -279,18 +279,19 @@ func _apply(dt: float, instant: bool) -> void:
 		sun.light_color = Color(0.7, 0.76, 0.95)
 		sun.light_energy = 0.45 * (1.0 - smoothstep(-12.0, -3.0, el))
 		sky_mat.set_shader_parameter("sun_glow", 0.25)
-		sky_mat.set_shader_parameter("disc_size", 0.99955)
+		sky_mat.set_shader_parameter("disc_size", 0.999984)
 		sky_mat.set_shader_parameter("disc_k", 2.2)
 		sky_mat.set_shader_parameter("sun_tint", Color(0.8, 0.85, 1.0))
 	var punch := float(w["punch"])
 	var hz := float(w["haze"])
 	var warm := float(w["warm"])
 	sun.light_energy *= (1.0 - 0.8 * overcast) * lerpf(1.0, float(w["sun"]), day_light)
+	sun.light_energy *= 1.0 - 0.24 * cloud_softness * day_light
 	# Dawn mist: on calm mornings a low fog lies in the streets and over the
 	# water and burns off by mid-morning (less if it's windy and wet).
 	var dawn := smoothstep(4.0, 6.0, hour) * (1.0 - smoothstep(8.0, 10.5, hour))
 	var mist := maxf(float(w["mist"]), dawn * 0.75 * (1.0 - float(w["rain"])) * (1.0 - 0.7 * punch))
-	sun.shadow_opacity = lerpf(1.0, 0.95, day_light) - 0.62 * overcast
+	sun.shadow_opacity = lerpf(1.0 - 0.62 * overcast, 0.95 - 0.78 * cloud_softness, day_light)
 
 	# --- sky colours by sun height, greyed by cloud.
 	var zen := _ramp(el, [[-18.0, Color(0.012, 0.02, 0.05)], [-6.0, Color(0.07, 0.1, 0.25)],
@@ -313,6 +314,8 @@ func _apply(dt: float, instant: bool) -> void:
 	haze = haze.lerp(Color(1.0, 0.86, 0.66), hz * warm * 0.4 * day_light)
 	zen = zen.lerp(Color(0.8, 0.85, 1.0), fl * 0.6)
 	hor = hor.lerp(Color(0.8, 0.85, 1.0), fl * 0.6)
+	var fog_col := hor.lerp(Color(0.52, 0.66, 0.86), 0.5 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
+	fog_col = fog_col.lerp(Color(0.86, 0.8, 0.7) * lerpf(0.35, 1.0, day_light), warm * 0.6)
 	# The sky shader is radiance-mapped: update it a few times a second, not
 	# every frame (it changes slowly), except for lightning.
 	_sky_t -= dt
@@ -330,12 +333,17 @@ func _apply(dt: float, instant: bool) -> void:
 		sky_mat.set_shader_parameter("cloud_shade", cs.lerp(grey_c * 0.6, overcast * 0.6))
 		sky_mat.set_shader_parameter("cloud_cover", w["cloud"])
 		sky_mat.set_shader_parameter("cloud_dark", w["dark"])
+		sky_mat.set_shader_parameter("sky_fog_tint", fog_col)
+		sky_mat.set_shader_parameter("sky_fog_amount", 0.06 + 0.68 * fog + 0.09 * hz)
 		sky_mat.set_shader_parameter("stars", night * (1.0 - overcast) * (1.0 - fog))
 		sky_mat.set_shader_parameter("flash", fl)
 
 	# --- ambient, exposure, fog.
 	env.ambient_light_energy = _rampf(el, [[-15.0, 0.46], [-4.0, 0.49], [2.0, 0.57], [20.0, 0.67]]) \
 		* (1.0 + 0.16 * overcast + 0.08 * hz * day_light) + fl * 2.0
+	var direct_daylight := day_light * (1.0 - overcast)
+	env.ambient_light_energy *= 1.0 - 0.12 * direct_daylight
+	env.ambient_light_sky_contribution = 0.22 + 0.14 * direct_daylight
 	# The non-sky share: light bounced off sunlit stone (warm-neutral by day,
 	# dusky at sunset, moonlit blue at night).
 	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
@@ -356,16 +364,10 @@ func _apply(dt: float, instant: bool) -> void:
 	env.fog_depth_end = lerpf(1350.0, 520.0, fog) * hk * (1.0 + 0.45 * alt * (1.0 - fog))
 	env.fog_density = lerpf(lerpf(0.84, 0.9, hz), 0.97, fog) * (1.0 - 0.12 * alt * (1.0 - fog))
 	env.fog_depth_curve = lerpf(1.35, 1.1, hz)
-	var fog_col := hor.lerp(Color(0.52, 0.66, 0.86), 0.5 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
-	# Heat haze is dusty gold-grey, not blue.
-	fog_col = fog_col.lerp(Color(0.86, 0.8, 0.7) * lerpf(0.35, 1.0, day_light), warm * 0.6)
 	env.fog_light_color = fog_col
 	env.fog_light_energy = lerpf(1.0, 0.55, night)
 	env.fog_sun_scatter = (0.3 + 0.25 * hz) * day_light * (1.0 - overcast)
 	env.fog_aerial_perspective = lerpf(0.8, 0.6, hz)
-	# A fog bank hides the sky too (it read as a clear blue day over a
-	# misty street), haze milks it a little.
-	env.fog_sky_affect = 0.15 + 0.6 * fog + 0.15 * hz
 	# Low fog: thick at the water and in the low streets, thinning with
 	# height (hilltops and towers stand clear of it). Fog weather keeps it
 	# all day; on calm mornings it is the dawn mist above.

@@ -24,6 +24,7 @@ var _yaw_goal := 0.0
 var face_goal := Vector3.INF       # look at this (parent space) when standing
 var blocked_by: Callable           # (pos) -> int : 0 free, 1 someone, 2 the player
 var floor_ok: Callable             # (pos) -> bool : walkable (not a fixture)
+var floor_height: Callable         # optional (pos) -> local y, for exterior steps
 var _wait_t := 0.0
 var _excused := false
 
@@ -175,6 +176,8 @@ func _process(dt: float) -> void:
 		var f := face_goal - position
 		if Vector2(f.x, f.z).length() > 0.05:
 			_yaw_goal = atan2(-f.x, -f.z)
+	if floor_height.is_valid():
+		position.y = move_toward(position.y, float(floor_height.call(position)), dt * 2.4)
 	walk = move_toward(walk, 1.0 if moving else 0.0, dt * 4.0)
 	rotation.y = lerp_angle(rotation.y, _yaw_goal, 1.0 - exp(-dt * 9.0))
 	_mi.set_instance_shader_parameter("stride", stride)

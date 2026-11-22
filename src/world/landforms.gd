@@ -354,7 +354,8 @@ func build(layout: CityLayout) -> void:
 	forms(layout)
 	_mat = ShaderMaterial.new()
 	_mat.shader = load("res://src/world/shaders/island_ground.gdshader")
-	_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/asphalt_01.png"))
+	_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/worldstate_street_asphalt.png"))
+	_mat.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/worldstate_pavement_concrete.png"))
 	_mat.set_shader_parameter("pbr_on", true)
 	var body := StaticBody3D.new()
 	body.name = "LandformCollision"

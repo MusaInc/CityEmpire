@@ -1572,10 +1572,12 @@ static func _carve_venues(P: Dictionary) -> void:
 		if fz > 0.0 and r.position.y > z0 + 0.5:
 			pieces.append([r.position.x, z0, r.end.x, r.position.y, y0, y1])
 		var out: Array = []
+		var venue_void := AABB(Vector3(r.position.x, y0, r.position.y), Vector3(r.size.x, h, r.size.y))
 		for pc: Array in pieces:
 			var nb := b.duplicate(true)
 			nb["tiers"] = [pc]
 			nb["venue_shell"] = true
+			nb["venue_void"] = venue_void
 			out.append(nb)
 		if y1 - (y0 + h) > 0.6:
 			var slab := b.duplicate(true)
@@ -1721,8 +1723,8 @@ func _process(_dt: float) -> void:
 func _ground_mat() -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = load("res://src/world/shaders/island_ground.gdshader")
-	m.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/asphalt_01.png"))
-	m.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/concrete_pavement.png"))
+	m.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/worldstate_street_asphalt.png"))
+	m.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/worldstate_pavement_concrete.png"))
 	m.set_shader_parameter("pbr_on", true)
 	m.set_shader_parameter("skyport_grass", true)
 	var edge := w(Vector3(0.0, 0.0, 180.0))

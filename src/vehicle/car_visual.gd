@@ -195,14 +195,18 @@ static var _contact_shader: Shader
 var _contact: MeshInstance3D
 
 
-func _add_contact_shadow(size: Vector3) -> void:
+static func contact_shader() -> Shader:
 	if _contact_shader == null:
 		_contact_shader = Shader.new()
 		_contact_shader.code = CONTACT_SHADER
+	return _contact_shader
+
+
+func _add_contact_shadow(size: Vector3) -> void:
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(size.x * 1.24, size.z * 1.16)
 	var sm := ShaderMaterial.new()
-	sm.shader = _contact_shader
+	sm.shader = contact_shader()
 	_contact = MeshInstance3D.new()
 	_contact.name = "ContactShadow"
 	_contact.mesh = pm

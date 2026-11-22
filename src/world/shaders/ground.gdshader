@@ -213,7 +213,7 @@ void fragment() {
 			float st1 = hash12(floor(p * 9.0));
 			float st2 = hash12(floor(p * 23.0) + 5.0);
 			float agg = (st1 - 0.5) * (1.0 - smoothstep(0.03, 0.12, fpx)) + (st2 - 0.5) * 0.7 * (1.0 - smoothstep(0.01, 0.05, fpx));
-			agg *= pbr_on ? 0.0 : 1.0;   // (the photo carries the grain: both read as cobbles)
+			agg *= pbr_on ? 0.26 : 1.0;  // Subtle grain under the photo's finer aggregate.
 			albedo *= 1.0 + 0.32 * agg;
 			rough = 0.86 - 0.08 * agg;
 			float sa = street_age(p);
@@ -404,11 +404,15 @@ void fragment() {
 				albedo *= 1.0 - 0.1 * ka * vnoise(p * 2.3);
 			} else if (kerb < 3.3) {
 				// Pavement flagstones by the road, each a slightly different tone.
-				vec2 f = fract(p / 1.2);
-				vec2 id = floor(p / 1.2);
-				float joint = max(band(f.x, 0.03, aa / 1.2), band(f.y, 0.03, aa / 1.2));
-				joint = max(joint, max(band(f.x - 1.0, 0.03, aa / 1.2), band(f.y - 1.0, 0.03, aa / 1.2)));
-				albedo = c * (0.93 + 0.1 * hash12(id)) * (1.0 - 0.14 * joint * near);
+				vec2 courses = p / vec2(1.2, 0.8);
+				courses.x += mod(floor(courses.y), 2.0) * 0.5;
+				vec2 f = fract(courses);
+				vec2 id = floor(courses);
+				vec2 seam = min(f, 1.0 - f) * vec2(1.2, 0.8);
+				float joint = 1.0 - smoothstep(0.016, 0.033 + aa, min(seam.x, seam.y));
+				float grout_dark = 0.23 + 0.10 * wetness;
+				albedo = c * mix(0.83, 1.02, hash12(id)) * (1.0 - grout_dark * joint * near);
+				rough = mix(0.81, 0.95, hash12(id + 11.0));
 				albedo *= 1.0 - 0.08 * step(0.97, hash12(id + 3.0)) * near;  // the odd stained slab
 				float pa = street_age(p);
 				// Chewing gum spots, drip stains and (older streets) weeds in
@@ -418,9 +422,8 @@ void fragment() {
 				albedo *= 1.0 - 0.3 * gum * near;
 				albedo *= 1.0 - 0.12 * smoothstep(0.7, 0.9, vnoise(p * 0.5 + 21.0)) * pa * near;
 				// (Clumps where joints meet, not lines along them.)
-				vec2 fc = abs(fract(p / 1.2 + 0.5) - 0.5) * 1.2;
-				float corner = 1.0 - smoothstep(0.06, 0.16, length(fc));
-				float weeds = corner * step(1.0 - 0.35 * smoothstep(0.45, 0.85, pa), hash12(floor(p / 1.2 + 0.5) + 31.0))
+				float corner = 1.0 - smoothstep(0.06, 0.16, length(seam));
+				float weeds = corner * step(1.0 - 0.35 * smoothstep(0.45, 0.85, pa), hash12(floor(p / 0.8 + 0.5) + 31.0))
 					* step(0.35, hash12(floor(p * 14.0)));
 				albedo = mix(albedo, vec3(0.17, 0.25, 0.1) * (0.8 + 0.4 * hash12(floor(p * 9.0))), weeds * 0.85 * near);
 				float slab_crack = step(1.0 - 0.06 * pa, hash12(id + 17.0)) * (1.0 - smoothstep(0.0, 0.02 + aa, abs(f.x - f.y)));
@@ -532,14 +535,14 @@ void fragment() {
 	// Photographic detail (2026-11-21): real asphalt / paving up close.
 	if (pbr_on && !shore && flat_top && (asphalt || pave)) {
 		float kd = pbr_fade(camera_distance);
-		vec4 d = asphalt ? texture(asph_tex, p / 1.9) : texture(pave_tex, p / 1.8);
+		vec4 d = asphalt ? texture(asph_tex, p / 1.5) : texture(pave_tex, p / 1.2);
 		float substrate = kd * (1.0 - 0.75 * paint_coverage);
 		albedo *= mix(1.0, d.r * 2.0, (asphalt ? 0.86 : 0.73) * substrate);
 		rough = mix(rough, d.a, 0.48 * substrate * (1.0 - surface_wet));
 		// Water fills the rough aggregate. Residual normal variation comes
 		// from the stone sticking out around shallow puddle edges.
 		vec3 nw = pbr_flat_normal(d, normalize(v_wn),
-			(asphalt ? 0.63 : 0.47) * substrate * (1.0 - 0.86 * puddle));
+			(asphalt ? 0.79 : 0.57) * substrate * (1.0 - 0.86 * puddle));
 		NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	}
 	// Low, diffuse city-sky bounce fills the gaps between streetlamps.

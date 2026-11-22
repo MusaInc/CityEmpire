@@ -308,10 +308,17 @@ func test_manager_reorders_and_delivery_arrives(t) -> void:
 	e.advance(10.0)
 	t.check(not b.orders.is_empty(), "the manager ordered stock at closing")
 	var bought0 := int(e.stats["units_bought"])
+	var received := []
+	e.stock_delivered.connect(func(shop: Business):
+		received.append([shop.id, shop.backroom.total_units(), shop.orders.is_empty()]))
 	e.minute = 23.0 * 60.0 + 59.0
 	e.advance(7.0 * 60.0)
 	t.check(b.orders.is_empty() and b.backroom.total_units() > 0, "the delivery arrived by 06:00")
 	t.check(int(e.stats["units_bought"]) > bought0, "delivered units counted as bought")
+	t.check(received.size() == 1 and received[0][0] == b.id and received[0][1] > 0 and received[0][2],
+		"delivery presentation is notified once after stock and orders settle")
+	e._deliver_orders()
+	t.check(received.size() == 1, "already settled stock does not replay the delivery")
 
 
 # ------------------------------------------------------- ownership etc

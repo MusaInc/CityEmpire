@@ -12,6 +12,11 @@ const ENGINE_OF := {"kestrel": "i4", "civ_van": "diesel", "civ_box": "diesel", "
 	"marlin": "v6", "brute": "v8", "vanta": "f6", "halcyon": "v10", "stiletto": "v10", "warden": "diesel"}
 
 var car: Car
+var surface_at: Callable
+var _road_surface := "asphalt"
+var _surface_time := 0.0
+var _compression := 0.0
+var _joint_wait := 0.0
 var _streams := {}
 var _lo: AudioStreamPlayer
 var _hi: AudioStreamPlayer
@@ -27,9 +32,9 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_lo = _player()
 	_hi = _player()
-	for k in ["tyre_squeal", "tyre_scrub", "wind"]:
+	for k in ["tyre_squeal", "tyre_scrub", "wind", "rolling"]:
 		var p := _player()
-		p.stream = _loop(k)
+		p.stream = _loop("tyre_scrub" if k == "rolling" else k)
 		p.volume_db = -80.0
 		_loops[k] = p
 	for i in 4:
@@ -78,6 +83,9 @@ func set_car(c: Car, model := {}) -> void:
 	if car and is_instance_valid(car) and car.impact.is_connected(_on_impact):
 		car.impact.disconnect(_on_impact)
 	car = c
+	_surface_time = 0.0
+	_joint_wait = 0.3
+	_compression = 0.0
 	if c == null:
 		for p in [_lo, _hi] + _loops.values():
 			(p as AudioStreamPlayer).stop()
@@ -141,6 +149,24 @@ func _process(dt: float) -> void:
 	for i in 4:
 		slip = maxf(slip, car.wheel_slip[i])
 	var sp := car.speed
+	_surface_time -= dt
+	if _surface_time <= 0.0 and surface_at.is_valid():
+		_road_surface = String(surface_at.call(car.global_position))
+		_surface_time = 0.12
+	var tyre_level := -5.0 if _road_surface == "asphalt" else (0.0 if _road_surface == "wet_asphalt" else 3.0)
+	var tyre_pitch := 1.05 if _road_surface == "wet_asphalt" else (0.68 if _road_surface == "grass" else 0.84)
+	var rolling := smoothstep(1.5, 32.0, sp) * float(car.wheels_on_ground) * 0.25
+	_set_loop("rolling", -80.0 if paused or rolling < 0.001 else -25.0 + tyre_level + linear_to_db(rolling),
+		k, tyre_pitch + minf(sp, 40.0) * 0.008)
+	var comp := maxf(maxf(car.wheel_comp_visual[0], car.wheel_comp_visual[1]),
+		maxf(car.wheel_comp_visual[2], car.wheel_comp_visual[3]))
+	_joint_wait -= dt
+	if not paused and _joint_wait <= 0.0 and car.wheels_on_ground >= 2 and sp > 3.5:
+		var jolt := comp - _compression
+		if jolt > maxf(0.042, dt * 1.15):
+			play("bump", lerpf(-23.0, -11.0, smoothstep(0.04, 0.14, jolt)), 0.66)
+			_joint_wait = 0.26
+	_compression = comp
 	_set_loop("tyre_squeal", -80.0 if paused or slip < 0.25 or sp < 6.0 else lerpf(-20.0, -6.0, slip), k, lerpf(0.9, 1.1, clampf(sp / 50.0, 0.0, 1.0)))
 	_set_loop("tyre_scrub", -80.0 if paused or slip < 0.15 else lerpf(-26.0, -12.0, slip), k)
 	_set_loop("wind", -80.0 if paused else lerpf(-40.0, -14.0, clampf(sp / 45.0, 0.0, 1.0)), k)

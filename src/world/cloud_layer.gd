@@ -3,7 +3,7 @@ extends Node3D
 ## Clouds in the world at the tallest towers' height (the spire is 272 m):
 ## SLICES horizontal planes 290-330 m up following the camera (the pattern is
 ## in world space, so they don't slide with it). cloud_layer.gdshader shades
-## them. Two slices on Medium, three on High (transparent overdraw).
+## them. Fade them in during climbs to the cloud layer.
 
 const BASE := 290.0
 const DEPTH := 40.0
@@ -35,9 +35,15 @@ func _ready() -> void:
 
 
 func _process(_dt: float) -> void:
-	if view_fn.is_valid():
-		var p: Vector3 = view_fn.call()
-		global_position = Vector3(snappedf(p.x, 100.0), 0.0, snappedf(p.z, 100.0))
+	if not view_fn.is_valid():
+		return
+	var p: Vector3 = view_fn.call()
+	var weight := smoothstep(BASE - 145.0, BASE - 60.0, p.y)
+	visible = weight > 0.0
+	if not visible:
+		return
+	global_position = Vector3(snappedf(p.x, 100.0), 0.0, snappedf(p.z, 100.0))
 	for m in _mats:
 		m.set_shader_parameter("cover", cover)
 		m.set_shader_parameter("dark", dark)
+		m.set_shader_parameter("flight_fade", weight)

@@ -4,7 +4,7 @@ extends SceneTree
 ## normal x/y (z rebuilt in the shader), A = roughness. One sampler, one
 ## VRAM-compressed texture per material (mobile budget).
 ##   godot --headless -s res://tools/textures/pack_detail.gd -- <dir> <name> <out.png>
-##   ... -- --albedo <image.png> <out.png> [normal strength]
+##   ... -- --albedo <image.png> <out.png> [normal strength] [roughness] [size]
 ## The second form takes a colour-only (tileable) image – e.g. the generated
 ## WorldState material studies – and derives the normal from its luminance as
 ## height (wrapping, so it stays tileable) and roughness from it (darker gaps
@@ -12,8 +12,9 @@ extends SceneTree
 func _init() -> void:
 	var a := OS.get_cmdline_user_args()
 	if a[0] == "--albedo":
-		_from_albedo(a[1], a[2], float(a[3]) if a.size() > 3 else 3.0)
-		quit()
+		var roughness := float(a[4]) if a.size() > 4 else 0.72
+		var size := int(a[5]) if a.size() > 5 else 1024
+		quit(_from_albedo(a[1], a[2], float(a[3]) if a.size() > 3 else 3.0, roughness, size))
 		return
 	var dir := a[0]
 	var name := a[1]
@@ -40,11 +41,13 @@ func _init() -> void:
 	quit()
 
 
-func _from_albedo(src: String, dst: String, strength: float) -> void:
+func _from_albedo(src: String, dst: String, strength: float, roughness: float, size: int) -> Error:
 	var img := Image.load_from_file(src)
+	if img == null or img.is_empty():
+		return ERR_FILE_CANT_READ
 	img.convert(Image.FORMAT_RGBA8)
-	if img.get_width() != 1024:
-		img.resize(1024, 1024, Image.INTERPOLATE_LANCZOS)
+	if img.get_size() != Vector2i(size, size):
+		img.resize(size, size, Image.INTERPOLATE_LANCZOS)
 	var w := img.get_width()
 	var h := img.get_height()
 	var lum := PackedFloat32Array()
@@ -57,6 +60,8 @@ func _from_albedo(src: String, dst: String, strength: float) -> void:
 			lum[y * w + x] = l
 			mean += l
 	mean /= float(w * h)
+	_wrap_edges(lum, w, h)
+	_wrap_edges(lum, w, h, true)
 	var out := Image.create(w, h, false, Image.FORMAT_RGBA8)
 	for y in h:
 		for x in w:
@@ -64,7 +69,27 @@ func _from_albedo(src: String, dst: String, strength: float) -> void:
 			var dx := lum[y * w + (x + 1) % w] - lum[y * w + (x - 1 + w) % w]
 			var dy := lum[((y + 1) % h) * w + x] - lum[((y - 1 + h) % h) * w + x]
 			var n := Vector3(-dx * strength, dy * strength, 1.0).normalized()
-			var rough := clampf(0.72 + 0.3 * (mean - l) / maxf(mean, 0.01), 0.45, 1.0)
+			var rough := clampf(roughness + 0.22 * (mean - l) / maxf(mean, 0.01), 0.18, 1.0)
 			out.set_pixel(x, y, Color(clampf(l / maxf(mean, 0.01) * 0.5, 0.0, 1.0), n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, rough))
-	out.save_png(dst)
+	var err := out.save_png(dst)
 	print("packed %s from albedo: mean luminance %.3f" % [src.get_file(), mean])
+	return err
+
+
+## Match the outermost texels and fade their correction into a narrow band.
+## Normals are then calculated with wrapped neighbours from that same height.
+func _wrap_edges(pixels: PackedFloat32Array, width: int, height: int, vertical := false) -> void:
+	var span := height if vertical else width
+	var runs := width if vertical else height
+	var step := width if vertical else 1
+	var pitch := 1 if vertical else width
+	var band := maxi(2, span / 32)
+	for i in band:
+		var weight := 0.5 * (1.0 - smoothstep(0.0, float(band), float(i)))
+		for j in runs:
+			var a := j * pitch + i * step
+			var b := j * pitch + (span - 1 - i) * step
+			var first := pixels[a]
+			var last := pixels[b]
+			pixels[a] = lerpf(first, last, weight)
+			pixels[b] = lerpf(last, first, weight)

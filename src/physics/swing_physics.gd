@@ -42,6 +42,8 @@ class Controls:
 	## Inside a home: a calm, precise walk/jog (rooms are ~15 m across –
 	## city sprint speed and wide momentum turns overshoot the furniture).
 	var indoors := false
+	## Ordinary on-foot traversal, with a walk range and weight-bearing turns.
+	var everyday := false
 
 
 static func attach(s: State, anchor: Vector3, p: SwingParams) -> bool:
@@ -217,8 +219,13 @@ static func _swing_steer(s: State, v: Vector3, c: Controls, p: SwingParams, h: f
 static func _air_steer(v: Vector3, c: Controls, p: SwingParams, h: float) -> Vector3:
 	var m := Vector3(c.move.x, 0.0, c.move.z)
 	var ml := m.length()
-	if ml < 0.0001:
+	if ml < (0.035 if c.everyday else 0.0001):
 		return v
+	if c.everyday:
+		# A hop keeps its takeoff momentum, with only a small correction in flight.
+		var limit := INDOOR_SPEED if c.indoors else p.player_run_speed
+		var flat := Vector3(v.x, 0.0, v.z).move_toward(m.limit_length(1.0) * limit, 3.15 * h)
+		return Vector3(flat.x, v.y, flat.z)
 	if c.turn_assist:
 		v = _turn(v, m, p.air_turn_rate, h)
 	var dir := m / ml
@@ -253,6 +260,9 @@ static func _turn(v: Vector3, move: Vector3, rate_deg: float, h: float) -> Vecto
 static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> Vector3:
 	var vh := Vector3(v.x, 0.0, v.z)
 	var m := Vector3(c.move.x, 0.0, c.move.z).limit_length(1.0)
+	if c.everyday:
+		vh = _everyday_move(vh, m, INDOOR_SPEED if c.indoors else p.player_run_speed, c.indoors, h)
+		return Vector3(vh.x, minf(v.y, 0.0), vh.z)
 	if c.indoors:
 		# Indoors: speed follows the stick directly (top 4.6 m/s, a brisk
 		# jog), turns are immediate and letting go stops within a step.
@@ -295,6 +305,37 @@ static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> V
 	else:
 		vh = vh.move_toward(Vector3.ZERO, (p.ground_friction + speed * 2.0) * h)
 	return Vector3(vh.x, minf(v.y, 0.0), vh.z)
+
+
+## The inner stick range is a walk. A fast change of direction spends
+## some forward speed on turning, and an about-face needs a braking step.
+static func _everyday_move(v: Vector3, m: Vector3, top: float, indoors: bool, dt: float) -> Vector3:
+	var speed := v.length()
+	var strength := m.length()
+	if strength < 0.035:
+		return v.move_toward(Vector3.ZERO, (10.0 + speed * 2.25) * dt)
+	var walk_input := minf(strength / 0.56, 1.0)
+	var run_input := smoothstep(0.51, 1.0, strength)
+	var desired_speed := lerpf(1.85 * walk_input, top, run_input)
+	var wish := m / strength
+	var run := smoothstep(1.6, 5.0, speed)
+	var accel := lerpf(9.5, 15.0, run)
+	if speed < 0.25:
+		return v.move_toward(wish * desired_speed, accel * dt)
+	var heading := v / speed
+	var angle := heading.signed_angle_to(wish, Vector3.UP)
+	var turn_size := absf(angle)
+	if speed > 1.05 and turn_size > deg_to_rad(118.0):
+		return v.move_toward(Vector3.ZERO, (15.0 + speed * 2.0) * dt)
+	var rate := lerpf(16.0, 4.6, run) * (1.18 if indoors else 1.0)
+	heading = heading.rotated(Vector3.UP, clampf(angle, -rate * dt, rate * dt))
+	var corner := smoothstep(0.34, 1.9, turn_size) * run
+	desired_speed *= 1.0 - corner * 0.52
+	var decel := lerpf(13.0, 20.0, corner)
+	# A doorway changes the speed cap mid-stride. Ease into the new pace.
+	if speed > top + 0.15 and turn_size < 0.45:
+		decel = 10.0
+	return heading * move_toward(speed, desired_speed, (accel if desired_speed > speed else decel) * dt)
 
 
 ## Automatic web pull (fraction of reel_in_speed) – there are no reel buttons.

@@ -34,6 +34,15 @@ func test_busy_shop_floor(t) -> void:
 	e.minute = 11.0 * 60.0
 	var si := ShopInterior.new()
 	si.setup(u, b)
+	var centre := (si.door.x + si.door.y) * 0.5
+	var entrance := AABB(Vector3(centre - 0.61, 0.45, -3.45), Vector3(1.22, 0.94, 4.5))
+	var obstructions := 0
+	for fixture: CollisionShape3D in si._col.get_children():
+		var bounds := (fixture.shape as BoxShape3D).size
+		if AABB(fixture.position - bounds * 0.5, bounds).intersects(entrance):
+			obstructions += 1
+	t.check(obstructions == 0, "the doorway and approach stay clear of interior and street fixtures")
+	t.check(-si.pile_pos.z > si.D - ShopInterior.BACKROOM, "delivery overflow stages behind the shop floor")
 	var root := Node3D.new()
 	runner.root.add_child(root)
 	root.add_child(si)

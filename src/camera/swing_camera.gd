@@ -68,6 +68,7 @@ var _last_subject := Vector3.ZERO
 var _snapped := false
 var _bump := 0.0           # landing / catch impulse (m, spring-damped)
 var _bump_v := 0.0
+var _step_height := 0.0
 var _tug := 0.0            # web-catch pull-back (m, spring-damped)
 var _tug_v := 0.0
 var _roll := 0.0
@@ -137,7 +138,11 @@ func set_target(p: Player) -> void:
 	p.rope_snapped.connect(func(spd: float): _fov_kick = minf(_fov_kick + spd * 0.2, 3.0))
 	# Perfect release: a quick widening punch that sells the burst of speed.
 	p.perfect_release.connect(func(_n): _fov_kick = minf(_fov_kick + 7.0, 10.0); _punch = 1.0)
-	p.landed.connect(func(spd: float, _street: bool): _bump_v -= clampf(spd * 0.09, 0.0, 2.6))
+	p.landed.connect(func(spd: float, _street: bool):
+		_bump_v -= clampf((spd - 1.4) * 0.07, 0.0, 0.85) if p.everyday else clampf(spd * 0.09, 0.0, 2.6))
+	if p.everyday:
+		p.stepped_up.connect(func(h: float): _step_height = clampf(_step_height - h, -0.27, 0.27))
+		p.stepped_down.connect(func(h: float): _step_height = clampf(_step_height + h, -0.27, 0.27))
 	p.attached.connect(func(_a: Vector3): _tug_v += clampf(p.speed() * 0.04, 0.4, 1.6))
 
 
@@ -218,7 +223,7 @@ func _process(dt: float) -> void:
 	var vh := Vector3(v.x, 0.0, v.z)
 	var spd := v.length()
 	var t := clampf(spd / fov_speed_full, 0.0, 1.0)
-	var grounded := target.is_on_floor() and not target.s.attached
+	var grounded := target.has_footing() and not target.s.attached
 
 	# --- yaw: follow the travel heading, smoothly and without flips ----------
 	var rail_at: Array = rail.call(target.global_position) if rail.is_valid() else []
@@ -311,6 +316,8 @@ func _process(dt: float) -> void:
 	var close_h := lerpf(0.76, 1.0, _indoor)
 	_height = lerpf(_height, (run_h if grounded else 1.6) * close_h * minf(distance_scale * 1.2, 1.0), 1.0 - exp(-3.0 * dt))
 	var ahead := (vh * 0.12).limit_length(minf(3.5, _dist * 0.35))
+	if target.everyday:
+		ahead = (vh * lerpf(0.10, 0.045, _indoor)).limit_length(0.63)
 	# In flight, lean the framing a little toward the web you'd get next.
 	var bias_goal := Vector3.ZERO
 	var tg := target.targeting
@@ -323,7 +330,8 @@ func _process(dt: float) -> void:
 	_bump += _bump_v * dt
 	_tug_v += (-_tug * 90.0 - _tug_v * 14.0) * dt
 	_tug += _tug_v * dt
-	var focus_goal := target.global_position + Vector3.UP * (_height + _lift) + ahead + _pick_bias
+	_step_height = 0.0 if _snapped else _step_height * exp(-9.5 * dt)
+	var focus_goal := target.global_position + Vector3.UP * (_height + _lift + _step_height) + ahead + _pick_bias
 	var clear_before := _clear_yaw
 	if rail_at.is_empty() and _indoor < 0.5:
 		_clear_view(focus_goal, yaw + look_yaw, dt)
@@ -418,6 +426,11 @@ func _process(dt: float) -> void:
 		var close := clampf((2.4 - global_position.distance_to(shaken)) / 1.8, 0.0, 1.0) * _indoor
 		var ahead_dir := -Basis(Vector3.UP, yaw + look_yaw + _clear_yaw).z
 		aim += (ahead_dir * 1.5 + Vector3.DOWN * 1.0) * close
+	if target.everyday:
+		# Aim between shoulders and feet. Keep the existing close-wall framing
+		# when the camera is pinned inches from the player.
+		var full_body := smoothstep(1.30, 2.35, global_position.distance_to(shaken))
+		aim.y -= lerpf(0.15, 0.47, _indoor) * full_body
 	if aim.distance_squared_to(global_position) > 0.01:
 		look_at(aim, Vector3.UP)
 		# Pinned close to the hero (scrambles, wall bumps at street level) a

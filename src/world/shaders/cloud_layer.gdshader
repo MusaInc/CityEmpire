@@ -13,6 +13,7 @@ global uniform float night;
 uniform float cover = 0.45;     // weather: 0 clear .. 1 overcast
 uniform float slice = 0.0;      // 0 base .. 1 top of the layer
 uniform float dark = 0.0;       // rain clouds
+uniform float flight_fade = 0.0;
 
 varying vec3 v_w;
 
@@ -65,5 +66,5 @@ void fragment() {
 	col *= mix(1.0, 0.1, night);
 	col = mix(col, sky_horizon, smoothstep(900.0, 4000.0, dist) * 0.55);   // aerial perspective
 	ALBEDO = col;
-	ALPHA = a * mix(0.82, 0.95, cover);
+	ALPHA = a * mix(0.82, 0.95, cover) * flight_fade;
 }

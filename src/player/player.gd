@@ -38,6 +38,7 @@ signal slammed(speed: float, point: Vector3)
 signal struck(kind: String, speed: float)
 signal launched
 signal stepped_up(height: float)
+signal stepped_down(height: float)
 ## Any contact with a wall or obstacle worth a visible reaction (visual only):
 ## speed into the surface and its normal.
 signal bumped(speed: float, normal: Vector3)
@@ -88,6 +89,11 @@ var input_enabled := true
 ## and steps up kerbs exactly as in CitySwing.
 var swing_enabled := true
 var everyday := false
+## Measured horizontal ground travel relative to the support surface.
+var foot_velocity := Vector3.ZERO
+var _step_support := 0.0
+var _step_direction := Vector3.ZERO
+var _ground_height := INF
 ## Standing in a home (HomeSystem sets it): indoor walking (SwingPhysics Controls.indoors).
 var indoors := false
 ## A scripted move (HomeSystem: window grab/climb/vault) is placing the body:
@@ -300,11 +306,12 @@ func _read_input(dt: float) -> Dictionary:
 		return bot.drive(self, dt)
 	if not input_enabled:
 		return {"move": Vector3.ZERO, "aim": aim_dir, "grapple": false, "reel": 0.0, "jump": false}
-	var mv := Input.get_vector("move_left", "move_right", "move_back", "move_forward")
+	var mv := Input.get_vector("move_left", "move_right", "move_back", "move_forward", 0.12 if everyday else -1.0)
 	# Response curve: most of the stick's travel is a walk-to-jog range, so
 	# walking is easy to hold; only full deflection sprints.
 	# Indoors the curve is gentler: a small push already walks.
-	mv = mv.normalized() * pow(mv.length(), 1.5 if indoors or everyday else 2.8) if mv.length() > 0.001 else Vector2.ZERO
+	if not everyday and mv.length_squared() > 0.000001:
+		mv = mv.normalized() * pow(mv.length(), 1.5 if indoors else 2.8)
 	var basis := view.global_transform.basis if view else global_transform.basis
 	var fwd := -basis.z
 	fwd.y = 0.0
@@ -373,8 +380,12 @@ func _physics_process(dt: float) -> void:
 	_stagger_cool = maxf(_stagger_cool - dt, 0.0)
 	if stagger_t > 0.0:
 		move = Vector3.ZERO  # knocked back: the legs catch the body first
-	_move_smooth = _move_smooth.lerp(move, 1.0 - exp(-dt / MOVE_SMOOTH))
+	var response := MOVE_SMOOTH
+	if everyday:
+		response = 0.037 if move.length_squared() < 0.0016 else 0.047
+	_move_smooth = _move_smooth.lerp(move, 1.0 - exp(-dt / response))
 	controls.move = _move_smooth
+	controls.everyday = everyday
 	# Human steering turns the travel; bots/courses keep the raw model (a
 	# review script can opt in with `human_steer` to move like a player).
 	controls.turn_assist = bot == null or bot.get("human_steer") == true
@@ -427,7 +438,7 @@ func _physics_process(dt: float) -> void:
 	_advance_line(dt, origin)
 
 	_kick_window = maxf(_kick_window - dt, 0.0)
-	if controls.jump and not is_on_floor():
+	if controls.jump and not has_footing():
 		_kick_window = params.wall_save_window  # a wall in the next instant: kick off it
 		if is_on_wall():
 			var n := get_wall_normal()
@@ -443,24 +454,35 @@ func _physics_process(dt: float) -> void:
 
 	_update_wall_run(dt, move)
 
+	_step_support = maxf(_step_support - dt, 0.0)
+	if _step_support > 0.0 and (_move_smooth.dot(_step_direction) < 0.04 or _launch_pending or stunned):
+		_step_support = 0.0
 	# Integrate the model from the body's real position.
 	s.position = global_position
-	s.grounded = is_on_floor() and not _launch_pending
+	s.grounded = has_footing() and not _launch_pending
+	if controls.jump:
+		_step_support = 0.0
 	_launch_pending = false
 	var start := global_position
 	SwingPhysics.step(s, controls, p_eff(), dt)
 	if s.snap_speed > 2.0:
 		rope_snapped.emit(s.snap_speed)
-	floor_snap_length = 0.0 if (s.attached or s.velocity.y > 0.5) else 0.4
+	floor_snap_length = 0.0 if (s.attached or s.velocity.y > 0.5) else (0.045 if _step_support > 0.0 else 0.4)
 	velocity = (s.position - start) / dt
-	if everyday and not s.attached and not stunned and (s.grounded or air_time < 0.2) and s.velocity.y < 1.0:
-		if _everyday_step(velocity * dt):
-			floor_snap_length = 0.0
+	var stepped := false
+	if everyday and not s.attached and not stunned and (s.grounded or air_time < 0.12) and s.velocity.y < 1.0:
+		stepped = _everyday_step(velocity * dt)
+		if stepped:
+			floor_snap_length = 0.045
 	elif s.grounded and not s.attached and s.velocity.y < 0.5:
 		_try_step_up(velocity * dt)
 	elif not s.grounded and not s.attached and not stunned:
 		_try_mantle(velocity * dt)
 	move_and_slide()
+	if _step_support > 0.0:
+		apply_floor_snap()
+		if is_on_floor():
+			_step_support = 0.0
 	# Riding something that moves (a train): the model's velocity is relative
 	# to it while aboard. Landing on it takes its velocity off yours; leaving
 	# it (jumping, running off, a web) keeps its speed on top of yours.
@@ -487,6 +509,13 @@ func _physics_process(dt: float) -> void:
 		_prev_pos = global_position
 
 	var moved := global_position - start
+	if everyday:
+		var measured := Vector3(moved.x, 0.0, moved.z) / dt - carry_velocity
+		# The capsule makes a small forward adjustment when clearing a nosing.
+		# That correction isn't locomotion and must not drive the stepping clock.
+		var travel := Vector3(s.velocity.x, 0.0, s.velocity.z)
+		foot_velocity = travel if stepped else measured.limit_length(travel.length() + 0.75)
+		_update_step_descent(stepped, moved.y)
 	distance_travelled += Vector3(moved.x, 0.0, moved.z).length()
 	top_speed = maxf(top_speed, s.velocity.length())
 	if is_on_floor():
@@ -535,7 +564,7 @@ func _everyday_step(motion: Vector3) -> bool:
 	if spd < 1e-4:
 		return false
 	var dir := h / spd
-	var probe := dir * maxf(spd, 0.1)
+	var probe := dir * maxf(spd, 0.045)
 	var blocked := KinematicCollision3D.new()
 	if not test_move(global_transform, probe, blocked):
 		return false  # nothing in the way
@@ -557,7 +586,10 @@ func _everyday_step(motion: Vector3) -> bool:
 			var hit := space.intersect_ray(q)
 			if hit.is_empty() or (hit["normal"] as Vector3).y < 0.7:
 				continue
-			rise = maxf(rise, (hit["position"] as Vector3).y - feet)
+			var height := (hit["position"] as Vector3).y - feet
+			if height >= 0.03:
+				rise = height
+				break
 		if rise > 0.0:
 			break
 	if rise < 0.03 or rise > STEP_EVERYDAY:
@@ -566,15 +598,35 @@ func _everyday_step(motion: Vector3) -> bool:
 	if test_move(global_transform, lift):
 		return false  # no headroom
 	var raised := global_transform.translated(lift)
-	var ahead := dir * spd + into * 0.14
-	if test_move(raised, ahead):
-		return false  # still blocked up there: a wall, not a step
-	global_position = raised.origin + ahead
+	if test_move(raised, h):
+		return false  # wall or another obstruction at the top
+	# The rounded capsule reaches the nosing ahead of its centre. Carry
+	# the current stride through at tread height until its floor catches up.
+	global_position = raised.origin + h
 	velocity = Vector3.ZERO
 	s.position = global_position
 	s.velocity.y = 0.0
+	_step_support = clampf(0.32 / maxf(spd * Engine.physics_ticks_per_second, 0.5), 0.08, 0.34)
+	_step_direction = dir
 	stepped_up.emit(rise)
 	return true
+
+
+func has_footing() -> bool:
+	return is_on_floor() or _step_support > 0.0
+
+
+func _update_step_descent(stepped: bool, vertical_travel: float) -> void:
+	if not has_footing():
+		return
+	var y := global_position.y
+	if carry_velocity == Vector3.ZERO and not stepped and _ground_height < INF and air_time < 0.18:
+		var drop := _ground_height - y
+		if air_time > 0.0 and drop > 0.045 and drop < 0.43:
+			stepped_down.emit(drop)
+		elif air_time == 0.0 and vertical_travel < -0.032:
+			stepped_down.emit(minf(-vertical_travel, 0.16))
+	_ground_height = y
 
 
 ## Airborne and moving into a ledge (a roof edge with its cornice and
@@ -1219,6 +1271,11 @@ func respawn(at: Variant = null) -> void:
 	s.velocity = Vector3.ZERO
 	velocity = Vector3.ZERO
 	_move_smooth = Vector3.ZERO
+	foot_velocity = Vector3.ZERO
+	_step_support = 0.0
+	_ground_height = INF
+	controls.move = Vector3.ZERO
+	air_time = 0.0
 	stagger_t = 0.0
 	_stagger_cool = 0.0
 	reach_extra = 0.0

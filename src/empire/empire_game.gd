@@ -201,6 +201,7 @@ func _ready() -> void:
 	add_child(audio)
 	audio.attach_player(player)
 	audio.attach_weather(atmosphere)
+	audio.surface_at = _surface_sound_at
 	sfx.director = audio
 	carry_node = Node3D.new()
 	carry_node.name = "Carry"
@@ -241,6 +242,7 @@ func _ready() -> void:
 	car_audio = CarAudio.new()
 	car_audio.name = "CarAudio"
 	add_child(car_audio)
+	car_audio.surface_at = _surface_sound_at
 	# Solid traffic near you (the drawn cars have no bodies of their own).
 	traffic_bodies = TrafficBodies.new()
 	traffic_bodies.name = "TrafficBodies"
@@ -907,6 +909,7 @@ func _connect_empire() -> void:
 	_brand_sig = "?"
 	_sync_brand()
 	empire.notified.connect(func(t, k): ui.toast(t, k, empire.last_ref))
+	empire.stock_delivered.connect(_show_stock_delivery, CONNECT_DEFERRED)
 	empire.day_ended.connect(func(r):
 		# City500: your position, and the market's day in the news.
 		for n in City500.day_ended(empire):
@@ -1013,6 +1016,18 @@ func _kerb_point(p: Vector3) -> Vector3:
 	return Vector3(p.x, g + 0.35, p.z)
 
 
+func _surface_sound_at(p: Vector3) -> String:
+	if driving == "" and player.indoors:
+		return "interior"
+	var at := Vector2(p.x, p.z)
+	var map := layout.mainland if layout.mainland and p.x < CityLayout.FAR_SHORE else layout
+	if absf(p.y - map.ground_y(p.x, p.z)) < 3.0 and map.is_park(at):
+		return "grass"
+	if map.roads.on_road(at) or (driving != "" and p.y > map.ground_y(p.x, p.z) + 2.1):
+		return "wet_asphalt" if atmosphere.wetness > 0.32 else "asphalt"
+	return "paving"
+
+
 # --------------------------------------------------------------- frame
 func _process(dt: float) -> void:
 	if empire == null:
@@ -1031,6 +1046,8 @@ func _process(dt: float) -> void:
 		_sync_brand()
 		_stream_interiors()
 		_update_live_floor()
+		for id: String in interiors:
+			_refresh_signs(id)
 		if state == "play":
 			_objective_gps()
 			_update_stadium()
@@ -1216,6 +1233,83 @@ func _refresh_signs(unit_id: String) -> void:
 	si.update_signs((si.unit.has("street_use") and b == null) or (b != null and b.open and b.within_hours(empire.hour())))
 
 
+func _show_stock_delivery(b: Business) -> void:
+	if state != "play":
+		return
+	var si: ShopInterior = interiors.get(b.premises["id"])
+	if not is_instance_valid(si) or si.kind != "shop":
+		return
+	var door_at := si.to_world(si.door_out)
+	if door_at.distance_squared_to(player.global_position) > 55.0 * 55.0:
+		return
+	var bay := _delivery_bay(door_at)
+	var truck := world._load_mesh("car_van") if bay.origin != Vector3.INF else null
+	si.show_stock_delivery(bay, truck, _delivery_van_start(bay) if truck else Vector3.INF)
+
+
+## Keep the delivery van on a free parking strip, clear of an intersection.
+func _delivery_bay(door_at: Vector3) -> Transform3D:
+	var missing := Transform3D(Basis.IDENTITY, Vector3.INF)
+	if not gps.ready_net():
+		return missing
+	var lane := gps.net.nearest(door_at, Vector3.ZERO, 34.0, -1, true)
+	if lane.is_empty():
+		return missing
+	var id: int = lane["lane"]
+	var near := gps.net.lane_point(id, lane["s"])
+	var direction := gps.net.lane_dir(id, lane["s"])
+	direction = Vector3(direction.x, 0, direction.z).normalized()
+	if direction.is_zero_approx():
+		return missing
+	var side := Vector3(-direction.z, 0.0, direction.x)
+	if side.dot(door_at - near) < 0.0:
+		side = -side
+	var roads := layout.mainland.roads if layout.mainland and door_at.x < CityLayout.FAR_SHORE else layout.roads
+	var basis := Basis.looking_at(direction, Vector3.UP)
+	var query := PhysicsShapeQueryParameters3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(2.35, 1.55, 5.9)
+	query.shape = box
+	query.collision_mask = CityWorld.PROPS_LAYER | CityWorld.SOLID_LAYER | Car.BODY_LAYER | 1
+	var space := get_world_3d().direct_space_state
+	for along: float in [0.0, 6.4, -6.4, 12.8, -12.8]:
+		for offset: float in [0.6, 1.5, 2.4, 3.3, 4.2]:
+			var p := near + direction * along + side * offset
+			var field := roads.field_at(Vector2(p.x, p.z))
+			var inset := field.y - absf(field.x)
+			if field.y < 7.0 or field.w < 9.0 or inset < 1.2 or inset > 2.0:
+				continue
+			p = _kerb_point(p) - Vector3.UP * 0.31
+			query.transform = Transform3D(basis, p + Vector3.UP * 1.02)
+			if space.intersect_shape(query, 1).is_empty():
+				return Transform3D(basis, p)
+	return missing
+
+
+func _delivery_van_start(bay: Transform3D) -> Vector3:
+	var roads := layout.mainland.roads if layout.mainland and bay.origin.x < CityLayout.FAR_SHORE else layout.roads
+	var stroke := PhysicsShapeQueryParameters3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(2.35, 1.48, 5.9)
+	stroke.shape = box
+	stroke.collision_mask = CityWorld.PROPS_LAYER | CityWorld.SOLID_LAYER | Car.BODY_LAYER | 1
+	var space := get_world_3d().direct_space_state
+	for distance: float in [4.8, 3.2, 1.8]:
+		var start := _kerb_point(bay.origin + bay.basis.z * distance) - Vector3.UP * 0.31
+		if absf(start.y - bay.origin.y) > distance * 0.12:
+			continue
+		var field := roads.field_at(Vector2(start.x, start.z))
+		var inset := field.y - absf(field.x)
+		if field.y < 7.0 or field.w < 9.0 or inset < 1.2 or inset > 2.2:
+			continue
+		stroke.transform = Transform3D(bay.basis, start + Vector3.UP * 1.02)
+		stroke.motion = bay.origin - start
+		var motion := space.cast_motion(stroke)
+		if not motion.is_empty() and motion[0] >= 1.0 and space.intersect_shape(stroke, 1).is_empty():
+			return start
+	return Vector3.INF
+
+
 func _pallet(unit_id: String) -> Stock:
 	if not empire.pallets.has(unit_id):
 		empire.pallets[unit_id] = Stock.new(0, "pallet")
@@ -1249,8 +1343,6 @@ func _update_live_floor() -> void:
 			Sfx.play("cash", -3.0)
 			ui.float_text("+" + EmpireData.money(amt, true), at, Color(0.5, 1.0, 0.6)))
 		floor.walked_out.connect(func(at): ui.float_text("Gave up waiting", at, Color(1.0, 0.45, 0.35)))
-	for id in interiors:
-		_refresh_signs(id)
 
 
 ## Walking at a shop door, in or out: the direction bends towards the middle
@@ -1432,7 +1524,7 @@ func _update_spot() -> void:
 					best = {"kind": "letboard", "unit": id, "world": w}
 					best_d = d2
 		# Carrying cases in your own shop with nothing else at hand: put them
-		# down (they stack by the door).
+		# down (they stack in the stockroom staging area).
 		if best.is_empty() and not empire.carried.is_empty():
 			for id in interiors:
 				var si2: ShopInterior = interiors[id]
@@ -1672,13 +1764,13 @@ func spot_prompt() -> Array:
 	return ["", false]
 
 
-## Puts everything you're carrying down on the shop floor (by the door).
+## Moves the cases you're carrying to the stockroom staging area.
 func _put_down(b: Business, si: ShopInterior) -> void:
 	var n := empire.carried.cases_used()
 	for pid in empire.carried.units.keys():
 		Stock.transfer(empire.carried, b.floor_pile, pid, empire.carried.qty(pid))
 	Sfx.play("drop", -6.0)
-	ui.toast("Put %d case%s down by the door. Staff move them to the stockroom when there's room (or overnight)." % [n, "" if n == 1 else "s"], "info")
+	ui.toast("Staged %d case%s in the stockroom. Staff put them on the racks when there's room." % [n, "" if n == 1 else "s"], "info")
 	si.refresh_goods()
 
 
@@ -1848,7 +1940,7 @@ func _boot_action(vid: String) -> void:
 	if cargo.is_empty():
 		return
 	# Parked at one of your shops: everything goes into its stockroom (what
-	# doesn't fit is left by the door for staff to tidy away).
+	# doesn't fit stays in the staging area for staff to tidy away).
 	var shop := _own_shop_near(cars[vid].global_position)
 	if shop != null:
 		var cases := cargo.cases_used()
@@ -1860,7 +1952,7 @@ func _boot_action(vid: String) -> void:
 			spill += Stock.cases_for(pid4, cargo.qty(pid4))
 			Stock.transfer(cargo, shop.floor_pile, pid4, cargo.qty(pid4))
 		ui.toast("Unloaded %d case%s into %s's stockroom%s" % [cases, "" if cases == 1 else "s", shop.name,
-			"" if spill == 0 else " (%d by the door: the stockroom's full)" % spill], "good" if spill == 0 else "warn")
+			"" if spill == 0 else " (%d staged: the racks are full)" % spill], "good" if spill == 0 else "warn")
 		Sfx.play("drop", -4.0, 0.8)
 		if interiors.has(shop.premises["id"]):
 			interiors[shop.premises["id"]].refresh_goods()

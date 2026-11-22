@@ -716,11 +716,11 @@ func _materials() -> void:
 		building_mat.set_shader_parameter("has_graffiti", true)
 	ground_mat = ShaderMaterial.new()
 	ground_mat.shader = load("res://src/world/shaders/ground.gdshader")
-	# Photographic PBR detail (CC0, assets/textures/pbr/SOURCES.md).
-	ground_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/asphalt_01.png"))
-	ground_mat.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/concrete_pavement.png"))
+	# Packed surface detail (assets/textures/pbr/SOURCES.md).
+	ground_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/worldstate_street_asphalt.png"))
+	ground_mat.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/worldstate_pavement_concrete.png"))
 	ground_mat.set_shader_parameter("pbr_on", true)
-	building_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/asphalt_01.png"))
+	building_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/worldstate_street_asphalt.png"))
 	building_mat.set_shader_parameter("pbr_on", true)
 	building_mat.set_shader_parameter("wall_tex", load("res://assets/textures/pbr/concrete_wall_008.png"))
 	building_mat.set_shader_parameter("brick_tex", load("res://assets/textures/pbr/codex_brick.png"))
@@ -1510,6 +1510,7 @@ func refresh_props(key: Vector2i) -> void:
 			root.remove_child(ch)
 			ch.queue_free()
 	_add_props(root, key, null)   # (the ground pools stay: only the halos are rebuilt)
+	_add_street_contacts(root, key)
 	var furn := _mesh_from(_furniture_arrays(key))
 	if furn:
 		var fi := MeshInstance3D.new()
@@ -1531,6 +1532,66 @@ func refresh_parked(key: Vector2i) -> void:
 			root.remove_child(ch)
 			ch.queue_free()
 	_add_traffic(root, key)
+	_add_street_contacts(root, key)
+
+
+static var _street_contact_mat: ShaderMaterial
+
+
+## One feathered contact mesh per visible block, rebuilt from the same parked
+## cars and furniture lists used by the renderer. The patches hug the slope.
+func _add_street_contacts(root: Node3D, key: Vector2i) -> void:
+	if layout == null or prop_density < 0.75:
+		return
+	var old := root.get_node_or_null("StreetContacts")
+	if old:
+		root.remove_child(old)
+		old.queue_free()
+	var mesh := SurfaceTool.new()
+	mesh.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var wrote := false
+	for item: Array in parked_cars(key):
+		wrote = _street_contact_quad(mesh, item[0], Vector2(2.65, 5.8), true) or wrote
+	for item: Array in chunk_furniture(key):
+		var size := Vector2.ZERO
+		match String(item[0]):
+			"bench":
+				size = Vector2(2.15, 0.82)
+			"bin", "bollard":
+				size = Vector2(0.65, 0.64)
+		if size != Vector2.ZERO:
+			wrote = _street_contact_quad(mesh, item[1], size, false) or wrote
+	if not wrote:
+		return
+	if _street_contact_mat == null:
+		_street_contact_mat = ShaderMaterial.new()
+		_street_contact_mat.shader = CarVisual.contact_shader()
+		_street_contact_mat.set_shader_parameter("strength", 0.30)
+	var instance := MeshInstance3D.new()
+	instance.name = "StreetContacts"
+	instance.mesh = mesh.commit()
+	instance.material_override = _street_contact_mat
+	instance.visibility_range_end = 86.0
+	instance.visibility_range_end_margin = 12.0
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(instance)
+
+
+func _street_contact_quad(mesh: SurfaceTool, placement: Transform3D, size: Vector2, road: bool) -> bool:
+	var points := PackedVector3Array()
+	var uvs := PackedVector2Array([Vector2.ZERO, Vector2.RIGHT, Vector2.ONE, Vector2.DOWN])
+	for uv in uvs:
+		var local := (uv - Vector2.ONE * 0.5) * size
+		var p := placement * Vector3(local.x, 0.0, local.y)
+		var ground := layout.terrain.road_y(p.x, p.z) if road else layout.ground_y(p.x, p.z)
+		if not is_finite(ground) or absf(p.y - ground) > 0.25:
+			return false
+		p.y = ground + 0.035
+		points.append(p)
+	for index in [0, 1, 2, 0, 2, 3]:
+		mesh.set_uv(uvs[index])
+		mesh.add_vertex(points[index])
+	return true
 
 
 static func _add_faces(body: StaticBody3D, m: BuildingMesher) -> void:
@@ -2090,6 +2151,7 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 	Prof.end("chunk_props")
 	Prof.begin("chunk_cars")
 	_add_traffic(root, key)
+	_add_street_contacts(root, key)
 	Prof.end("chunk_cars")
 	Prof.begin("chunk_walkers")
 	_add_walkers(root, key, res.get("walkers", []))
