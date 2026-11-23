@@ -13,6 +13,7 @@ from build_b_surface import packed_image, pixels
 from garment_kit import _dilate, raster_uv
 from hero_finish import material_vertices
 from hero_groom import ribbon
+from hero_polish import balance_face, rebuild_bun, shape_lips, smooth_side_hairline, tidy_flyaways
 from portrait_wrap import smooth as smooth_array
 from wardrobe_quality import adjust_basis, smooth
 
@@ -271,6 +272,7 @@ def refine_scalp(face, shell, identity, eyes, output):
             p -= ray * min(.0017, max(0, gap-.0013)) * line
     shell.data.update()
     if identity == 'jules':
+        smooth_side_hairline(shell, skin, eye)
         fade_front_rim(shell, skin, eye)
 
     mat = shell.data.materials[0]
@@ -327,7 +329,7 @@ def fade_front_rim(shell, skin, eye):
                 count[edge] = count.get(edge, 0) + 1
     rim = {i for edge, n in count.items() if n == 1 for i in edge}
     rim = [data.vertices[i].co.copy() for i in rim
-           if data.vertices[i].co.y > eye.y - .075 and data.vertices[i].co.z > eye.z - .030]
+           if data.vertices[i].co.y > eye.y - .115 and data.vertices[i].co.z > eye.z - .030]
     if not rim:
         return
     from mathutils.kdtree import KDTree
@@ -441,6 +443,22 @@ def split_skirt_correctives(models):
         if obj is None:
             continue
         keys = obj.data.shape_keys.key_blocks
+        if name == 'Lower_midiskirt' and 'Hem_Seated' in keys:
+            # Seated, the back panel hung from the hips straight through the
+            # seat. Fold it forward under the seat instead (she sits on it).
+            seated = keys['Hem_Seated']
+            waist = max(v.co.z for v in obj.data.vertices)
+            seat = waist - .200
+            for vertex in obj.data.vertices:
+                b = vertex.co
+                back = smooth(.035, -.055, b.y)
+                below = smooth(seat + .025, seat - .015, b.z)
+                w = back * below
+                if w <= 0:
+                    continue
+                target = Vector((b.x * .96, b.y * .5 + .035, seat - .004 + (seat - b.z) * .045))
+                key = seated.data[vertex.index].co
+                seated.data[vertex.index].co = key.lerp(target, w)
         for motion in ('Front', 'Back'):
             left = keys['Hem_' + motion]
             right = obj.shape_key_add(name='Hem_' + motion + '_Right')
@@ -503,6 +521,9 @@ def finish_realism(rig, meshes, identity, output):
         return
     eyes = eye_centres(face)
     face_planes(face, identity, eyes)
+    if identity == 'jules':
+        balance_face(face, eyes)
+        shape_lips(face, eyes)
     lashes(face, eyes, identity)
     finish_complexion(face, identity, eyes, output)
     fit_jacket(models, rig, face, identity)
@@ -512,4 +533,9 @@ def finish_realism(rig, meshes, identity, output):
     if identity == 'jules':
         frame_bun(face, shell, models['Groom_bun_jules'], eyes)
         split_skirt_correctives(models)
+        rebuild_bun(shell, models['Groom_bun_jules'])
+    else:
+        groom = models.get('Groom_crop_ade')
+        if groom is not None:
+            tidy_flyaways(shell, groom, (eyes[0] + eyes[1]) * .5)
     face['worldstate_realism'] = 1

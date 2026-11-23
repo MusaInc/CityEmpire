@@ -127,6 +127,7 @@ var _midi_lining_index := -1
 var _next_blink := 2.6
 var _blink_followup := false
 var _blink_phase := 0.0
+var _blink_facing := Vector3.FORWARD
 var wardrobe_preview := false
 var _glove_mesh: MeshInstance3D
 var _hand_mesh: MeshInstance3D  # bare anatomical hands (Skin_Hands), shown instead of the glove when bare_hands
@@ -1042,6 +1043,13 @@ func _pose_hems(pivots: Dictionary) -> void:
 
 func _apply_hem_stride(hem: Dictionary, indices: Vector2i, depth: Vector2, weight: float) -> void:
 	var mesh: MeshInstance3D = hem.mesh
+	if hem.long:
+		# A long hem only gives way once the shin actually reaches it: the
+		# A-line flare already clears an ordinary step, so starting early
+		# blew the skirt into a bell on every stride.
+		mesh.set_blend_shape_value(indices.x, weight * hem.front_range * 0.62 * smoothstep(0.13, 0.46, depth.x))
+		mesh.set_blend_shape_value(indices.y, weight * 0.5 * smoothstep(0.10, 0.36, depth.y))
+		return
 	mesh.set_blend_shape_value(indices.x, weight * hem.front_range * smoothstep(0.044, 0.316, depth.x))
 	mesh.set_blend_shape_value(indices.y, weight * 0.71 * smoothstep(0.038, 0.275, depth.y))
 
@@ -1108,6 +1116,8 @@ func _on_wall() -> void:
 ## The line catching the body: a physical jolt through spine, head and legs
 ## (spring impulses, so it settles by itself instead of snapping).
 func _jolt(strength: float) -> void:
+	if strength > 0.35:
+		blink_soon()
 	_angvel["spine"] += Vector3(-2.5, 0, 0) * strength
 	_angvel["chest"] += Vector3(-1.5, 0, 0) * strength
 	_angvel["head"] += Vector3(3.0, 0, 0) * strength
@@ -1480,6 +1490,11 @@ func _process(dt: float) -> void:
 func _update_blink(dt: float) -> void:
 	if _blink_index < 0:
 		return
+	# A quick turn of the body (and so the head) carries a blink with it.
+	if dt > 0.0 and _facing.length_squared() > 0.5:
+		if _blink_facing.angle_to(_facing) / dt > 3.2:
+			blink_soon()
+		_blink_facing = _facing
 	_next_blink -= dt
 	if _next_blink > 0.0:
 		return
@@ -1496,6 +1511,12 @@ func _update_blink(dt: float) -> void:
 		return
 	var closed := smoothstep(0.0, 0.047, _blink_phase) * (1.0 - smoothstep(0.067, 0.15, _blink_phase))
 	_face_mesh.set_blend_shape_value(_blink_index, closed)
+
+
+## Start a blink within a frame or two (gaze shifts, head turns, a jolt).
+func blink_soon() -> void:
+	if _blink_index >= 0 and _blink_phase == 0.0 and _next_blink > 0.12:
+		_next_blink = 0.04
 
 
 func _update_expression(dt: float) -> void:
@@ -3629,6 +3650,8 @@ func _idle_pose(q: Dictionary, k: float, dt: float) -> void:
 		if edge_k > 0.5 and _irng.randf() < 0.5:
 			_gaze_goal = Vector2(_irng.randf_range(-0.3, 0.3), -0.42)  # down at the street
 		_gaze_next = _irng.randf_range(1.6, 4.5)
+		if absf(_gaze_goal.x - _gaze.x) > 0.45:
+			blink_soon()  # people blink with a big change of gaze
 	_gaze = _gaze.lerp(_gaze_goal, 1.0 - exp(-2.2 * dt))
 	# Occasional actions (not while winded).
 	_idle_next -= dt
