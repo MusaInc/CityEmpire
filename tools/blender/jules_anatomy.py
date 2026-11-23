@@ -312,3 +312,27 @@ def ade_chin(face, eye):
         if d.length_squared > 1e-14:
             delta[i] = d
     _apply(face, delta)
+
+
+def fit_ade_wrap(face, eyes):
+    """Close the medial lid pockets and fit the chin below the projected beard."""
+    basis = face.data.shape_keys.key_blocks[0].data
+    skin = material_vertices(face, ('hero_skin_face_',))
+    lashes = material_vertices(face, ('hero_brow',))
+    eye = (eyes[0] + eyes[1]) * .5
+    delta = {}
+    for i in skin | lashes:
+        p = basis[i].co
+        dz = p.z - eye.z
+        chin = 0.0
+        if i in skin:
+            chin = (smooth(-.097, -.119, dz) * smooth(-.164, -.130, dz)
+                    * smooth(.064, .037, abs(p.x)) * smooth(eye.y - .038, eye.y + .014, p.y))
+        near = eyes[0] if p.x * eyes[0].x > 0 else eyes[1]
+        dx = abs(p.x) - abs(near.x)
+        corner = (_bell(dx + .0079, .0043) * _bell(p.z - near.z + .0062, .0037)
+                  * smooth(near.y - .003, near.y + .007, p.y))
+        d = Vector((0, -.012 * chin + .0010 * corner, .0055 * chin + .0030 * corner))
+        if d.length_squared > 1e-14:
+            delta[i] = d
+    _apply(face, delta)

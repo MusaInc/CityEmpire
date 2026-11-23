@@ -50,6 +50,7 @@ OUTFITS['ade_expression'] = dict(OUTFITS['ade_bomber'], expression='Focus')
 OUTFITS['jules_expression'] = dict(OUTFITS['jules_moto'], expression='Smile')
 OUTFITS['ade_blink'] = dict(OUTFITS['ade_bomber'], expression='Blink')
 OUTFITS['jules_blink'] = dict(OUTFITS['jules_moto'], expression='Blink')
+OUTFITS['jules_square_neck'] = dict(OUTFITS['square_neck'], face='jules')
 SKIN = {'ade': (.72, .44, .30), 'theo': (0.78, 0.6, 0.5), 'kai': (0.6, 0.43, 0.32), 'malik': (0.42, 0.27, 0.18), 'ren': (0.72, 0.55, 0.42),
         'rio': (0.36, 0.22, 0.15), 'sam': (0.9, 0.74, 0.64), 'noa': (0.79, 0.64, 0.51),
         'jules': (.80, .50, .355)}
@@ -130,6 +131,8 @@ VIEWS = {
     'face_side': (Vector((0.95, 0.15, 0.03)), Vector((0, 0.03, 1.61)), 85),
     'collar': (Vector((0.15, 0.85, 0.12)), Vector((0, 0.03, 1.5)), 60),
     'shoulder': (Vector((0.75, 0.55, 0.18)), Vector((0.2, 0, 1.45)), 60),
+    'upper_front': (Vector((0.0, 1.28, 0.04)), Vector((0, 0.04, 1.39)), 67),
+    'upper_three_quarter': (Vector((0.66, 1.10, 0.04)), Vector((0, 0.04, 1.39)), 67),
     'cuff': (Vector((0.6, 0.5, 0.05)), Vector((0.55, 0.0, 0.95)), 60),
     'hair': (Vector((0.52, -0.75, 0.17)), Vector((0, -.04, 1.64)), 83),
     'jacket_detail': (Vector((.29, .80, .05)), Vector((0, .02, 1.30)), 55),
@@ -320,6 +323,37 @@ def review_scalp(material, shader, uv_layer, skin, short=False):
     links.new(blend.outputs[0], base)
 
 
+def review_ade_goatee(material, shader):
+    """Reduce the studio key's sheen on the photographed chin stubble."""
+    nodes, links = material.node_tree.nodes, material.node_tree.links
+    if nodes.get('Review beard position'):
+        return
+    position = nodes.new('ShaderNodeNewGeometry')
+    distance = nodes.new('ShaderNodeVectorMath')
+    distance.name = 'Review beard position'
+    distance.operation = 'DISTANCE'
+    distance.inputs[1].default_value = (0, .149, 1.627)
+    links.new(position.outputs['Position'], distance.inputs[0])
+    mask = nodes.new('ShaderNodeMapRange')
+    mask.interpolation_type = 'SMOOTHSTEP'
+    mask.inputs['From Min'].default_value = .021
+    mask.inputs['From Max'].default_value = .044
+    mask.inputs['To Max'].default_value = 0
+    mask.inputs['To Min'].default_value = 1
+    links.new(distance.outputs['Value'], mask.inputs['Value'])
+    shade = nodes.new('ShaderNodeMapRange')
+    shade.inputs['From Max'].default_value = .033
+    shade.inputs['To Min'].default_value = .27
+    shade.inputs['To Max'].default_value = .5
+    links.new(shader.inputs['Base Color'].links[0].from_socket, shade.inputs['Value'])
+    blend = nodes.new('ShaderNodeMix')
+    blend.data_type = 'FLOAT'
+    blend.inputs[2].default_value = shader.inputs['Specular IOR Level'].default_value
+    links.new(mask.outputs['Result'], blend.inputs[0])
+    links.new(shade.outputs['Result'], blend.inputs[3])
+    links.new(blend.outputs[0], shader.inputs['Specular IOR Level'])
+
+
 def tint(spec):
     # Approximate the game's tints on the imported materials (white-ish
     # authored colours are multiplied by the outfit colour, as in hero_pbr).
@@ -355,6 +389,8 @@ def tint(spec):
                 col = SKIN[spec['face']]
             elif nm == 'hero_lid_rim':
                 col = tuple(value * .88 for value in SKIN[spec['face']])
+            elif nm in ('hero_hair_ade_crop', 'hero_hair_cards_ade'):
+                col = (1, 1, 1)
             elif nm.startswith('hero_hair') or nm in ('hero_brow', 'hero_lash'):
                 col = HAIR.get(spec['face'], (.13, .086, .060))
             elif nm == 'hero_glove':
@@ -382,8 +418,10 @@ def tint(spec):
                     m.node_tree.links.new(mix.outputs[2], p.inputs['Base Color'])
                 else:
                     p.inputs['Base Color'].default_value = (*lin(col), 1)
-            if nm in ('hero_hair_buzz', 'hero_hair_crop', 'hero_hair_fade', 'hero_hair_bun') and len(o.data.uv_layers) > 1:
+            if nm in ('hero_hair_buzz', 'hero_hair_crop', 'hero_hair_fade', 'hero_hair_bun', 'hero_hair_ade_crop') and len(o.data.uv_layers) > 1:
                 review_scalp(m, p, o.data.uv_layers[1].name, SKIN[spec['face']], nm != 'hero_hair_bun')
+            if nm == 'hero_skin_face_ade' and bpy.data.materials.get('hero_hair_ade_crop'):
+                review_ade_goatee(m, p)
 
 
 def aim(view, spec):

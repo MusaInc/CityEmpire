@@ -5,10 +5,12 @@ drafted, so garments sample the new body just as they do for Build A.
 """
 import math
 
+import numpy as np
 from mathutils import Vector
 
 from build_b_detail import dress_armholes, relax_hand, ribbed_hem
-from build_b_surface import denim_surface, knit_surface, surface_detail
+from build_b_surface import denim_surface, falloff, knit_surface, packed_image, pixels, surface_detail
+from garment_kit import _dilate, raster_uv
 from wardrobe_quality import adjust_basis, smooth
 
 
@@ -493,3 +495,68 @@ def fit_silhouette(meshes, rig, anatomy_study=None):
         edit['b_forearm_' + side].tail = edit['b_hand_' + side].head
     bpy.ops.object.mode_set(mode='OBJECT')
     anchor_leather_waist(next(obj for obj in meshes if obj.name == 'Top_Fashion_Moto'))
+
+
+def fit_jules_shoulders(rig, meshes, output):
+    """Carry one shoulder contour through the skin, sewn panels and pose keys."""
+    models = {obj.name: obj for obj in meshes}
+    joints = rig.data.bones
+    shoulder = joints['b_upper_arm_r'].head_local
+    axis = (joints['b_forearm_r'].head_local - shoulder).normalized()
+
+    def contour(p):
+        x, y, z = p
+        side = abs(x)
+        if z < 1.20 or z > 1.49 or side > .37:
+            return Vector()
+        clavicle = bell(side - .105, .046) * bell(z - 1.435, .024) * smooth(.009, .048, y)
+        upper = smooth(shoulder.z - .072, shoulder.z - .017, z)
+        bridge = bell(side - .160, .037) * upper
+        cap = bell(side - .225, .043) * upper
+        sign = math.copysign(1, x)
+        delta = Vector((-sign * .012 * cap, .0026 * clavicle, .010 * bridge - .010 * cap))
+        across = Vector((side, y, z)) - shoulder
+        along = across.dot(axis)
+        radial = across - axis * along
+        radial.x *= sign
+        taper = (smooth(.137, .183, side) * smooth(1.20, 1.24, z)
+                 * smooth(.006, .043, along) * (1 - smooth(.079, .161, along)))
+        return delta - radial * .075 * taper
+
+    def chest(p):
+        return bell(abs(p.x) - .096, .050) * bell(p.z - 1.278, .046) * smooth(.119, .155, p.y)
+
+    def clothing(p):
+        return contour(p) - Vector((0, .003 * chest(p), 0))
+
+    def torso_fit(p):
+        # Relieve the skin where a fitted front panel passes over the bust.
+        return contour(p) - Vector((0, .009 * chest(p), 0))
+
+    for obj in meshes:
+        name = obj.name
+        if name.startswith(('Top_', 'Topx_')) and not name.endswith('_Skirt'):
+            adjust_basis(obj, clothing)
+        elif name in ('Fashion_Torso_Skin', 'Fashion_Crop_Skin'):
+            adjust_basis(obj, torso_fit)
+        elif name.startswith('Skin_Arms_') or name in ('Face_jules', 'Build B anatomy study'):
+            adjust_basis(obj, contour)
+
+    # The neck and chest are separate surfaces. Match the skin tint through
+    # their meet while retaining the photographed neck above the collar.
+    face, torso = models['Face_jules'], models['Fashion_Torso_Skin']
+    skin = face.data.materials['hero_skin_face_jules'].node_tree.nodes['Principled BSDF']
+    body = torso.data.materials['hero_skin_body'].node_tree.nodes['Principled BSDF']
+    body_image = body.inputs['Base Color'].links[0].from_node.image
+    size = body_image.size[0]
+    pos, _, used = raster_uv(torso, size, material_index=0)
+    shoulder_skin = used & (pos[..., 2] > 1.38) & (pos[..., 1] > .028) & (abs(pos[..., 0]) < .13)
+    target = np.median(pixels(body_image)[shoulder_skin, :3], axis=0)
+    colour = skin.inputs['Base Color'].links[0].from_node
+    size = colour.image.size[0]
+    pos, _, used = raster_uv(face, size, material_index=face.data.materials.find('hero_skin_face_jules'))
+    rgb = pixels(colour.image)[..., :3].copy()
+    lower = used & (pos[..., 2] < 1.482)
+    weight = (1 - falloff(1.431, 1.482, pos[..., 2][lower]))[:, None]
+    rgb[lower] += (target - rgb[lower]) * weight
+    colour.image = packed_image(output / 'face_jules_albedo.png', _dilate(rgb, used, 8))

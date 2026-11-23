@@ -359,14 +359,15 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 		var name_key := source.resource_name
 		var build_b := body_type == "b"
 		var is_hair := name_key.begins_with("hero_hair_") and not name_key.begins_with("hero_hair_tie")
-		var short_hair := name_key in ["hero_hair_buzz", "hero_hair_crop", "hero_hair_fade"]
+		var scan_hair := name_key in ["hero_hair_ade_crop", "hero_hair_cards_ade"]
+		var short_hair := name_key in ["hero_hair_buzz", "hero_hair_crop", "hero_hair_fade", "hero_hair_ade_crop"]
 		var is_skin := name_key in SKIN_MATERIALS or name_key.begins_with("hero_skin_face")
 		var face_skin := name_key.begins_with("hero_skin_face") or name_key in ["hero_lid_rim", "hero_lips"]
 		var mapped := (source.normal_enabled and source.normal_texture != null) or FABRIC_DETAIL.has(name_key)
 		var shader_name := "hero_pbr" if mapped else "hero_pbr_plain"
 		if is_skin:
 			shader_name = "hero_skin"
-		elif name_key == "hero_hair_cards":
+		elif name_key in ["hero_hair_cards", "hero_hair_cards_ade"]:
 			shader_name = "hero_hair_cards"
 		elif name_key == "hero_eye":
 			shader_name = "hero_eye"
@@ -443,7 +444,7 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 		if source.resource_name.begins_with("hero_skin_face"):
 			region = "skin"  # per-face baked albedo (lips, scalp and brow shading are in the texture)
 			reference = source.albedo_color
-		if is_hair:
+		if is_hair and not scan_hair:
 			var stubble := name_key == "hero_hair_buzz"
 			material.set_shader_parameter("hair_fibres", 0.25 if stubble else 0.57)
 			material.set_shader_parameter("normal_strength", 0.74 if mapped else 0.0)
@@ -451,6 +452,9 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			material.set_shader_parameter("rim_strength", 0.10 if stubble else 0.14)
 			region = "hair"  # per-style strand textures (build_character.hair_material)
 			reference = source.albedo_color
+		if scan_hair:
+			material.set_shader_parameter("base_color", Color.WHITE)
+			material.set_shader_parameter("rim_strength", 0.10)
 		match source.resource_name:
 			"hero_jacket":
 				region = "suit"

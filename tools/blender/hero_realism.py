@@ -13,7 +13,7 @@ from build_b_surface import packed_image, pixels
 from garment_kit import _dilate, raster_uv
 from hero_finish import material_vertices
 from hero_groom import ribbon
-from hero_polish import sculpt_face, shape_figure, balance_face, rebuild_bun, shape_lips, smooth_side_hairline, tidy_flyaways
+from hero_polish import sculpt_face, shape_figure, balance_face, rebuild_bun, shape_lips, smooth_side_hairline
 from portrait_wrap import smooth as smooth_array
 from wardrobe_quality import adjust_basis, smooth
 
@@ -549,14 +549,20 @@ def finish_realism(rig, meshes, identity, output):
         source = Path(__file__).resolve().parents[2] / 'art/hero/sources/jules-portrait-reference.jpeg'
         print('PORTRAIT LANDMARKS', project_portrait(face, shell, identity, eyes, source, (.80, .50, .355), output))
         from hero_polish import hairline_cards
+        from female_character import fit_jules_shoulders
         hairline_cards(face, shell, models['Groom_bun_jules'], eyes)
+        anatomy = bpy.data.objects.get('Build B anatomy study')
+        fit_jules_shoulders(rig, [*meshes, anatomy] if anatomy is not None else meshes, output)
     else:
-        groom = models.get('Groom_crop_ade')
-        if groom is not None:
-            tidy_flyaways(shell, groom, (eyes[0] + eyes[1]) * .5)
-        from portrait_project import ADE_IMAGE, photo_iris, project_portrait
+        from portrait_project import ADE_IMAGE, fit_projection, photo_iris, project_portrait
+        from ade_hair import build_ade_hair
+        from jules_anatomy import fit_ade_wrap
         sources = Path(__file__).resolve().parents[2] / 'art/hero/sources'
+        projection = fit_projection(face, shell, eyes, ADE_IMAGE)
         print('PORTRAIT LANDMARKS', project_portrait(face, shell, identity, eyes, sources / 'ade-face-unwrap.jpeg',
-                                                     (.72, .44, .30), output, ADE_IMAGE))
+                                                     (.72, .44, .30), output, ADE_IMAGE, projection))
         photo_iris(face, sources / 'ade-face-atlas.jpeg', (1519, 86), 39, output)
+        build_ade_hair(face, shell, models['Groom_crop_ade'], eyes, sources / 'ade-face-atlas.jpeg',
+                       sources / 'ade-face-unwrap.jpeg', output, projection)
+        fit_ade_wrap(face, eyes)
     face['worldstate_realism'] = 1

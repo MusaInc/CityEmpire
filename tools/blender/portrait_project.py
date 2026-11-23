@@ -225,7 +225,17 @@ MOUTH_DZ = {'Face_jules': .0595, 'Face_ade': .064}
 CORNER = {'Face_jules': .020, 'Face_ade': .026}
 
 
-def project_portrait(face, shell, identity, eyes, source_path, tint, output, image_landmarks=JULES_IMAGE):
+def fit_projection(face, shell, eyes, image_landmarks):
+    lm, eye_z = _mesh_landmarks(face, shell, eyes)
+    keys = list(image_landmarks)
+    src = _frame(np.array([tuple(lm[k]) for k in keys]), eye_z)
+    dst = np.array([image_landmarks[k] for k in keys], dtype=np.float64)
+    model = _tps_fit(src, dst)
+    assert np.max(np.linalg.norm(_tps_apply(model, src) - dst, axis=1)) < 2
+    return model, eye_z, {k: tuple(round(c, 4) for c in lm[k]) for k in keys}
+
+
+def project_portrait(face, shell, identity, eyes, source_path, tint, output, image_landmarks=JULES_IMAGE, projection=None):
     slot = next(i for i, m in enumerate(face.data.materials) if m.name.startswith('hero_skin_face_'))
     shader = face.data.materials[slot].node_tree.nodes['Principled BSDF']
     colour_node = shader.inputs['Base Color'].links[0].from_node
@@ -235,13 +245,7 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
 
     if shell is not None and identity == 'jules':
         trim_scalp_rim(shell, face, eyes)
-    lm, eye_z = _mesh_landmarks(face, shell, eyes)
-    keys = [k for k in image_landmarks if k in lm]
-    src = _frame(np.array([tuple(lm[k]) for k in keys]), eye_z)
-    dst = np.array([image_landmarks[k] for k in keys], dtype=np.float64)
-    model = _tps_fit(src, dst)
-    for k, s, d, f in zip(keys, src, dst, _tps_apply(model, src)):
-        assert np.linalg.norm(f - d) < 2, (k, f, d)
+    model, eye_z, landmarks = projection or fit_projection(face, shell, eyes, image_landmarks)
 
     photo = _source(source_path)
     el, er = image_landmarks['eye_l'], image_landmarks['eye_r']
@@ -309,7 +313,12 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     covered = sample(keep.astype(np.float32)) * inside
     weight = np.ones(len(P))
     zmin = P[:, 2].min()
-    weight *= np.clip((P[:, 2] - zmin - .004) / .03, 0, 1)
+    if identity == 'ade':
+        front = np.clip((P[:, 1] - .085) / .052, 0, 1)
+        neck = np.clip((P[:, 2] - (1.578 - .056 * front)) / (.077 - .013 * front), 0, 1)
+        weight *= neck * neck * (3 - 2 * neck)
+    else:
+        weight *= np.clip((P[:, 2] - zmin - .004) / .03, 0, 1)
 
     tint_lin = srgb_to_linear(np.array(tint[:3], dtype=np.float64))
     albedo_lin = srgb_to_linear(colour) / tint_lin
@@ -321,7 +330,7 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     base = old[used]
     # Match the old map's tone at the seam so the neck joins the body.
     seam = weight < .5
-    if seam.any():
+    if seam.any() and identity != 'ade':
         gain = (albedo[seam].mean(0) + 1e-4) / (base[seam].mean(0) + 1e-4)
         base = np.clip(base * gain, 0, 1)
     old[used] = base * (1 - weight[:, None]) + albedo * weight[:, None]
@@ -343,7 +352,7 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     normal_image.image = packed_image(output / f'face_{identity}_normal.png',
                                       _dilate(normal_map * .5 + .5, used, 7), normal=True)
     normal_node.inputs['Strength'].default_value = 1.0
-    return {k: tuple(round(c, 4) for c in lm[k]) for k in keys}
+    return landmarks
 
 
 def photo_iris(face, atlas_path, centre, iris_px, output, size=512):
