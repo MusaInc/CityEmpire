@@ -61,6 +61,8 @@ def shape_lips(face, eyes):
         d = Vector((0,
                     (.0023 * lower + .0015 * upper) * across,
                     (-.0011 * _bell(dz + .0765, .0040) + .0007 * border * (1 + bow)) * across))
+        # Close the resting lip seam (it read as a slack, open mouth).
+        d.z += -.0021 * _bell(dz + .0620, .0026) * across + .0021 * _bell(dz + .0680, .0026) * across
         # Corners tuck in slightly so the mouth doesn't look stretched.
         d.y -= .0006 * _bell(abs(p.x) - .023, .004) * _bell(dz + .065, .006)
         delta[index] = d * front
@@ -107,7 +109,7 @@ def balance_face(face, eyes, amount=.55, soften=.22):
     _apply_delta(face, delta)
 
 
-def smooth_side_hairline(shell, skin, eye, iterations=36):
+def smooth_side_hairline(shell, skin, eye, iterations=36, min_abs_x=.030):
     """Relax the scalp outline so it turns smoothly over the ear (the old
     outline stepped down in a square notch); the rows behind follow."""
     data = shell.data
@@ -122,7 +124,7 @@ def smooth_side_hairline(shell, skin, eye, iterations=36):
             neighbours.setdefault(a, []).append(b)
             neighbours.setdefault(b, []).append(a)
     rim = [i for i, ring in neighbours.items()
-           if len(ring) == 2 and data.vertices[i].co.z > eye.z - .045 and abs(data.vertices[i].co.x) > .030]
+           if len(ring) == 2 and data.vertices[i].co.z > eye.z - .045 and abs(data.vertices[i].co.x) >= min_abs_x]
     if not rim:
         return
     start = {i: data.vertices[i].co.copy() for i in rim}
@@ -381,3 +383,63 @@ def shape_figure(rig, meshes, identity):
         obj = names.get(name)
         if obj is not None:
             _leg_tailor(obj, lambda z: 1 - .11 * smooth(.97, .78, z) - .09 * smooth(.75, .30, z), j)
+
+
+def sculpt_face(face, eyes):
+    """Jules: relax the faceted cheek planes, slim the nose base, taper the
+    jaw to the chin and set the chin a touch forward (towards the reference)."""
+    eye = (eyes[0] + eyes[1]) * .5
+    basis = _basis(face)
+    skin = material_vertices(face, ('hero_skin_face_',))
+    pts = {i: basis[i].co.copy() for i in skin}
+    bm = bmesh.new()
+    bm.from_mesh(face.data)
+    bm.verts.ensure_lookup_table()
+    ring = {}
+    seam = {i for i in pts if bm.verts[i].is_boundary}
+    for i in pts:
+        v = bm.verts[i]
+        if v.is_boundary:
+            continue
+        ring[i] = [e.other_vert(v).index for e in v.link_edges if e.other_vert(v).index in pts]
+    bm.free()
+
+    def zone(p):
+        dz, ax = p.z - eye.z, abs(p.x)
+        cheek = math.exp(-((ax - .040) / .030) ** 4 - ((dz + .036) / .032) ** 4)
+        front = smooth(eye.y - .075, eye.y - .02, p.y)
+        near_eye = min((p - e).length for e in eyes)
+        nose = math.exp(-(p.x / .017) ** 4 - ((dz + .022) / .026) ** 4)
+        mouth = math.exp(-(p.x / .028) ** 4 - ((dz + .066) / .013) ** 4)
+        return cheek * front * smooth(.017, .028, near_eye) * (1 - nose) * (1 - mouth)
+
+    weight = {i: zone(p) for i, p in pts.items()}
+    cur = dict(pts)
+    for step in range(40):  # Taubin: smooth without shrinking the cheek
+        k = .55 if step % 2 == 0 else -.57
+        nxt = dict(cur)
+        for i, nb in ring.items():
+            w = weight[i]
+            if w < .01 or len(nb) < 3:
+                continue
+            avg = sum((cur[j] for j in nb), Vector()) / len(nb)
+            nxt[i] = cur[i] + (avg - cur[i]) * k * w
+        cur = nxt
+    delta = {}
+    for i, p in pts.items():
+        d = cur[i] - p
+        dz, ax = p.z - eye.z, abs(p.x)
+        front = smooth(eye.y - .07, eye.y - .02, p.y)
+        jaw = smooth(-.050, -.088, dz) * smooth(.020, .055, ax)
+        d.x += -p.x * .075 * jaw
+        # Under the jaw: tuck toward the neck so the jawline reads as an edge.
+        under = (smooth(-.088, -.112, dz) * math.exp(-((p.y - (eye.y - .045)) / .022) ** 2)
+                 * smooth(.06, .02, ax) ** .5 * smooth(-.135, -.118, dz))
+        d.y += -.0075 * under
+        d.z += .0035 * under
+        d.y += .0022 * math.exp(-(p.x / .016) ** 2 - ((dz + .094) / .012) ** 2) * front
+        ala = math.exp(-((ax - .014) / .007) ** 2 - ((dz + .036) / .008) ** 2) * front
+        d.x += -p.x * .13 * ala
+        if d.length_squared > 1e-12 and i not in seam:
+            delta[i] = d
+    _apply_delta(face, delta)

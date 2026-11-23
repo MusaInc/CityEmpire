@@ -8,7 +8,7 @@ _show_variants), and renders fixed cameras under fixed lights with Cycles on
 the CPU: a material pass and a clay pass (uniform grey: geometry only, which
 is what this reconstruction is judged on). Same cameras every milestone.
 """
-import bpy, sys, math, json
+import bpy, os, sys, math, json
 from pathlib import Path
 from mathutils import Matrix, Vector
 
@@ -52,7 +52,7 @@ OUTFITS['ade_blink'] = dict(OUTFITS['ade_bomber'], expression='Blink')
 OUTFITS['jules_blink'] = dict(OUTFITS['jules_moto'], expression='Blink')
 SKIN = {'ade': (0.52, 0.36, 0.265), 'theo': (0.78, 0.6, 0.5), 'kai': (0.6, 0.43, 0.32), 'malik': (0.42, 0.27, 0.18), 'ren': (0.72, 0.55, 0.42),
         'rio': (0.36, 0.22, 0.15), 'sam': (0.9, 0.74, 0.64), 'noa': (0.79, 0.64, 0.51),
-        'jules': (.72, .53, .40)}
+        'jules': (.80, .50, .355)}
 HAIR = {'sam': (.31, .18, .10), 'theo': (.25, .15, .10), 'jules': (.112, .073, .055)}
 
 if GLB.endswith('.blend'):
@@ -66,9 +66,9 @@ armature = next((obj for obj in bpy.context.scene.objects if obj.type == 'ARMATU
 sc = bpy.context.scene
 sc.render.engine = 'CYCLES'
 sc.cycles.device = 'CPU'
-sc.cycles.samples = 24
+sc.cycles.samples = int(os.environ.get('REVIEW_SAMPLES', 24))
 sc.cycles.use_denoising = True
-sc.render.resolution_x, sc.render.resolution_y = 720, 900
+sc.render.resolution_x, sc.render.resolution_y = (int(v) for v in os.environ.get('REVIEW_RES', '720x900').split('x'))
 sc.render.film_transparent = False
 sc.view_settings.view_transform = 'AgX'
 sc.view_settings.look = 'AgX - Medium High Contrast'
@@ -121,6 +121,8 @@ VIEWS = {
     'side': (Vector((4.2, 0, 0.1)), Vector((0, 0, 0.92)), 50),
     'rear': (Vector((0, -4.2, 0.2)), Vector((0, 0, 0.92)), 50),
     'face': (Vector((0.22, 0.95, 0.03)), Vector((0, 0.05, 1.61)), 85),
+    'portrait': (Vector((0.10, 0.62, 0.0)), Vector((0, 0.09, 1.555)), 85),
+    'portrait_34': (Vector((0.42, 0.48, 0.0)), Vector((0, 0.08, 1.555)), 85),
     'face_side': (Vector((0.95, 0.15, 0.03)), Vector((0, 0.03, 1.61)), 85),
     'collar': (Vector((0.15, 0.85, 0.12)), Vector((0, 0.03, 1.5)), 60),
     'shoulder': (Vector((0.75, 0.55, 0.18)), Vector((0.2, 0, 1.45)), 60),
@@ -332,7 +334,7 @@ def tint(spec):
             nm = m.name
             col = None
             if nm == 'hero_eye':
-                tint_review_iris(m, p, (.57, .39, .22) if spec['face'] == 'jules' else (.42, .30, .19))
+                tint_review_iris(m, p, (.42, .27, .14) if spec['face'] == 'jules' else (.42, .30, .19))
             if nm in ('hero_shirt', 'hero_tee', 'hero_knit', 'hero_blazer', 'hero_fleece', 'hero_bomber', 'hero_rib', 'hero_lapel', 'hero_top', 'hero_shirt_trim', 'hero_buttonhole'):
                 col = spec['top_col']
             elif nm == 'hero_racer_cotton':
@@ -421,12 +423,12 @@ for name in WANT:
         aim(v, spec)
         sc.render.filepath = '%s/%s__%s.png' % (OUT, name, v)
         bpy.ops.render.render(write_still=True)
-    if name == WANT[0] and VIEWS_WANTED is None:
+    if name == WANT[0] and (VIEWS_WANTED is None or os.environ.get('REVIEW_CLAY')):
         saved = {o.name: list(o.data.materials) for o in meshes}
         for o in meshes:
             for i in range(len(o.data.materials)):
                 o.data.materials[i] = clay
-        for v in CLAY_VIEWS:
+        for v in (VIEWS_WANTED if os.environ.get('REVIEW_CLAY') else CLAY_VIEWS):
             aim(v, spec)
             sc.render.filepath = '%s/%s__clay_%s.png' % (OUT, name, v)
             bpy.ops.render.render(write_still=True)

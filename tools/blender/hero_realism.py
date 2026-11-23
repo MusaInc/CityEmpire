@@ -13,7 +13,7 @@ from build_b_surface import packed_image, pixels
 from garment_kit import _dilate, raster_uv
 from hero_finish import material_vertices
 from hero_groom import ribbon
-from hero_polish import shape_figure, balance_face, rebuild_bun, shape_lips, smooth_side_hairline, tidy_flyaways
+from hero_polish import sculpt_face, shape_figure, balance_face, rebuild_bun, shape_lips, smooth_side_hairline, tidy_flyaways
 from portrait_wrap import smooth as smooth_array
 from wardrobe_quality import adjust_basis, smooth
 
@@ -392,16 +392,16 @@ def frame_bun(face, shell, groom, eyes):
     direction = Vector((0,-1,0))
     lock_motion = []
     for sign in (-1, 1):
-        for lock in range(7):
+        for lock in range(4):
             centres, normals = [], []
             phase = rng.uniform(-.13, .13)
-            root_x = rng.uniform(.008, .021)
+            root_x = rng.uniform(.041, .053)
             strand_width = rng.uniform(.0007,.0022)
             length = rng.uniform(.144,.183) + (.012 if sign<0 else 0)
             for row in range(21):
                 t = row/20
                 z = eye.z + .075 - length*t
-                x = sign * (root_x + .048*math.sin(min(1, t*1.24)*math.pi/2)
+                x = sign * (root_x + .016*math.sin(min(1, t*1.24)*math.pi/2)
                             + .008*math.sin(t*math.tau+phase)*smooth(.15,.71,t))
                 origin = Vector((x, eye.y+.087, z))
                 root = cap.ray_cast(origin, direction, .16)[0] if row < 7 else None
@@ -523,7 +523,10 @@ def finish_realism(rig, meshes, identity, output):
     face_planes(face, identity, eyes)
     if identity == 'jules':
         balance_face(face, eyes)
+        sculpt_face(face, eyes)
         shape_lips(face, eyes)
+        from portrait_project import drop_geometry_brows
+        drop_geometry_brows(face)   # the photographic texture carries the brows
     lashes(face, eyes, identity)
     finish_complexion(face, identity, eyes, output)
     fit_jacket(models, rig, face, identity)
@@ -535,6 +538,9 @@ def finish_realism(rig, meshes, identity, output):
         frame_bun(face, shell, models['Groom_bun_jules'], eyes)
         split_skirt_correctives(models)
         rebuild_bun(shell, models['Groom_bun_jules'])
+        from portrait_project import project_portrait
+        source = Path(__file__).resolve().parents[2] / 'art/hero/sources/jules-portrait-reference.jpeg'
+        print('PORTRAIT LANDMARKS', project_portrait(face, shell, identity, eyes, source, (.80, .50, .355), output))
     else:
         groom = models.get('Groom_crop_ade')
         if groom is not None:
