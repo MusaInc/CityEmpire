@@ -39,8 +39,8 @@ const OTHER_ITEMS := [
 	# colours are tints. All free: who you are isn't for sale.
 	{"id": "hero_kai", "slot": "hero", "name": "Kai", "face": "kai", "style": "buzz", "skin": Color(0.6, 0.42, 0.3),
 		"hair": Color(0.06, 0.045, 0.035), "eyes": Color(0.28, 0.17, 0.08), "price": 0},
-	{"id": "hero_ade", "slot": "hero", "name": "Ade", "face": "ade", "style": "crop", "skin": Color(0.52, 0.36, 0.265),
-		"hair": Color(0.075, 0.06, 0.052), "eyes": Color(0.16, 0.09, 0.05), "price": 0},
+	{"id": "hero_ade", "slot": "hero", "name": "Ade", "face": "ade", "style": "crop", "skin": Color(0.72, 0.44, 0.3),
+		"hair": Color(0.075, 0.06, 0.052), "eyes": Color(1, 1, 1), "price": 0},
 	{"id": "hero_ren", "slot": "hero", "name": "Ren", "face": "ren", "style": "crop", "skin": Color(0.84, 0.66, 0.52),
 		"hair": Color(0.04, 0.035, 0.035), "eyes": Color(0.2, 0.12, 0.06), "price": 0},
 	{"id": "hero_theo", "slot": "hero", "name": "Theo", "face": "theo", "style": "buzz", "skin": Color(0.9, 0.72, 0.62),

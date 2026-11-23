@@ -122,18 +122,28 @@ def _mesh_landmarks(face, shell, eyes):
     tip = max(mid, key=lambda p: p.y)
     sub = min((p for p in mid if tip.z - .03 < p.z < tip.z - .003), key=lambda p: p.y).copy()
     sub.x = 0
-    chin = min(mid, key=lambda p: p.z)
+    # Chin = where the profile turns under, below its most forward point
+    # (Ade's face mesh runs on down the throat, so not simply the lowest).
+    front = {}
+    for p in mid:
+        if eye_z - .13 < p.z < eye_z - .075:
+            k = round((p.z - eye_z) / .0015)
+            if k not in front or p.y > front[k].y:
+                front[k] = p
+    jaw = [front[k] for k in sorted(front, reverse=True)]
+    pog = max(jaw, key=lambda p: p.y)
+    chin = next((p for p in jaw if p.z < pog.z and p.y < pog.y - .012), jaw[-1])
     # Mouth: the deepest midline notch between the lips (below the nose).
     band = [p for p in mid if eye_z - .085 < p.z < sub.z - .015]
     centre = [p for p in band if abs(p.x) < .0012] or band
-    mouth = min(centre, key=lambda p: p.y + 3 * abs(p.z - (eye_z - .0595))).copy()
+    mouth = min(centre, key=lambda p: p.y + 3 * abs(p.z - (eye_z - MOUTH_DZ.get(face.name, .0595)))).copy()
     mouth.x = 0
     lm = {'eye_l': eyes[0] if eyes[0].x < 0 else eyes[1], 'eye_r': eyes[1] if eyes[1].x > 0 else eyes[0],
           'subnasale': sub, 'mouth': mouth, 'chin': chin}
     for side, sign in (('l', -1), ('r', 1)):
         e = lm['eye_' + side]
         lm['brow_' + side] = Vector((e.x * 1.08, e.y + .012, e.z + .0175))
-        lm['corner_' + side] = Vector((sign * .020, mouth.y - .008, mouth.z))
+        lm['corner_' + side] = Vector((sign * CORNER.get(face.name, .020), mouth.y - .008, mouth.z))
         band = [p for p in skin if sign * p.x > 0 and eye_z - .065 < p.z < eye_z + .03]
         reach = max(abs(p.x) for p in band)
         ear = [p for p in band if abs(p.x) > reach - .011]
@@ -198,6 +208,23 @@ def trim_scalp_rim(shell, face, eyes, density=.93):
     smooth_side_hairline(shell, skin, eye, iterations=70, min_abs_x=0)
 
 
+# Ade: the face panel cropped out of the supplied atlas (ade-face-atlas.jpeg,
+# x 305..1432) -> ade-face-unwrap.jpeg. 250 px between the eyes.
+ADE_IMAGE = {
+    'eye_l': (440, 352), 'eye_r': (690, 352),
+    'brow_l': (435, 280), 'brow_r': (695, 280),
+    'subnasale': (570, 515), 'mouth': (567, 615),
+    'corner_l': (450, 615), 'corner_r': (685, 615),
+    'chin': (567, 800), 'hairline': (567, 135),
+    'tragus_l': (160, 450), 'tragus_r': (975, 450),
+    'ear_top_l': (95, 315), 'ear_top_r': (1035, 315),
+    'lobe_l': (135, 545), 'lobe_r': (1000, 545),
+}
+HAIR_LUM = {'jules': .17, 'ade': .085}
+MOUTH_DZ = {'Face_jules': .0595, 'Face_ade': .064}
+CORNER = {'Face_jules': .020, 'Face_ade': .026}
+
+
 def project_portrait(face, shell, identity, eyes, source_path, tint, output, image_landmarks=JULES_IMAGE):
     slot = next(i for i, m in enumerate(face.data.materials) if m.name.startswith('hero_skin_face_'))
     shader = face.data.materials[slot].node_tree.nodes['Principled BSDF']
@@ -206,7 +233,7 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     normal_image = normal_node.inputs['Color'].links[0].from_node
     size = colour_node.image.size[0]
 
-    if shell is not None:
+    if shell is not None and identity == 'jules':
         trim_scalp_rim(shell, face, eyes)
     lm, eye_z = _mesh_landmarks(face, shell, eyes)
     keys = [k for k in image_landmarks if k in lm]
@@ -217,19 +244,24 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
         assert np.linalg.norm(f - d) < 2, (k, f, d)
 
     photo = _source(source_path)
+    el, er = image_landmarks['eye_l'], image_landmarks['eye_r']
+    sc = (er[0] - el[0]) / 313.0          # 1.0 for the Jules source
+    ey0 = (el[1] + er[1]) / 2
+    cx = (el[0] + er[0]) / 2
     H, W = photo.shape[:2]
     yy, xx = np.mgrid[0:H, 0:W]
     lum = photo @ np.array([.2126, .7152, .0722])
     background = lum < .03
-    brows = sum(((xx - bx) / 150.) ** 2 + ((yy - by) / 45.) ** 2 < 1
+    brows = sum(((xx - bx) / (150. * sc)) ** 2 + ((yy - by) / (45. * sc)) ** 2 < 1
                 for k, (bx, by) in image_landmarks.items() if k.startswith('brow'))
-    hair = (lum < .17) & ((yy < 300) | (((xx < 260) | (xx > W - 260)) & (yy < 470))) & ~brows.astype(bool)
-    openings = sum(((xx - ex) / 104.) ** 2 + ((yy - ey - 2) / 37.) ** 2 < 1
+    hair = ((lum < HAIR_LUM.get(identity, .17)) & ((yy < ey0 - 122 * sc)
+            | (((xx < 260 * sc) | (xx > W - 260 * sc)) & (yy < ey0 + 48 * sc))) & ~brows.astype(bool))
+    openings = sum(((xx - ex) / (104. * sc)) ** 2 + ((yy - ey - 2 * sc) / (37. * sc)) ** 2 < 1
                    for k, (ex, ey) in image_landmarks.items() if k.startswith('eye')).astype(bool)
-    near_eyes = sum(((xx - ex) / 135.) ** 2 + ((yy - ey - 6) / 62.) ** 2 < 1
+    near_eyes = sum(((xx - ex) / (135. * sc)) ** 2 + ((yy - ey - 6 * sc) / (62. * sc)) ** 2 < 1
                     for k, (ex, ey) in image_landmarks.items() if k.startswith('eye')).astype(bool)
     skinlike = ~(background | hair)
-    fringe = hair & (_blur(skinlike.astype(np.float32), 9.0) > .06) & (yy < 360)
+    fringe = hair & (_blur(skinlike.astype(np.float32), 9.0 * sc) > .06) & (yy < ey0 - 62 * sc)
     keep = ~(background | (hair & ~fringe) | openings | (near_eyes & (lum < .30)))
     keep = _blur(keep.astype(np.float32), 1.5) > .98
     filled = _fill(photo, keep)
@@ -240,12 +272,13 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     # The photo's lid crease shadow and liner, spread over a deeper mesh
     # socket, read as a bruise: lift the broad shading, keep the fine detail.
     flum = filled @ np.array([.2126, .7152, .0722])
-    skin_lum = np.median(flum[keep & ~near_eyes & (yy > 380) & (yy < 900)])
-    socket = _blur(sum(((xx - ex) / 150.) ** 2 + ((yy - ey - 4) / 72.) ** 2 < 1
-                       for k, (ex, ey) in image_landmarks.items() if k.startswith('eye')).astype(np.float32), 14)
+    cheeks = (yy > ey0 + 28 * sc) & (yy < ey0 + 200 * sc) & (np.abs(xx - cx) > 110 * sc) & (np.abs(xx - cx) < 300 * sc)
+    skin_lum = np.median(flum[keep & ~near_eyes & cheeks])
+    socket = _blur(sum(((xx - ex) / (150. * sc)) ** 2 + ((yy - ey - 4 * sc) / (72. * sc)) ** 2 < 1
+                       for k, (ex, ey) in image_landmarks.items() if k.startswith('eye')).astype(np.float32), 14 * sc)
     lift = np.clip(skin_lum * .97 / np.maximum(_blur(flum, 10), 1e-3), 1, 1.45)
     filled = filled * (1 + (lift - 1) * socket)[..., None]
-    skin_mean = filled[keep & (yy > 450) & (yy < 900) & (np.abs(xx - W / 2) < 330)].mean(0)
+    skin_mean = filled[keep & cheeks].mean(0)
     # Lids and sockets keep their shading but take the cheek's hue (the photo's
     # pink lids turned into an orange ring on the deeper mesh socket).
     flum = filled @ np.array([.2126, .7152, .0722])
@@ -311,3 +344,24 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
                                       _dilate(normal_map * .5 + .5, used, 7), normal=True)
     normal_node.inputs['Strength'].default_value = 1.0
     return {k: tuple(round(c, 4) for c in lm[k]) for k in keys}
+
+
+def photo_iris(face, atlas_path, centre, iris_px, output, size=512):
+    """Resample a photographed eyeball into the ocular atlas layout (iris
+    edge at r = .49 of the half-width) and use it for both eyes."""
+    from build_b_surface import packed_image
+    img = _source(atlas_path)
+    yy, xx = (np.mgrid[0:size, 0:size] + .5) / size * 2 - 1
+    scale = iris_px / .49
+    u = centre[0] + xx * scale
+    v = centre[1] + yy * scale
+    u = np.clip(u, 0, img.shape[1] - 1.001)
+    v = np.clip(v, 0, img.shape[0] - 1.001)
+    x0, y0 = u.astype(int), v.astype(int)
+    fx, fy = (u - x0)[..., None], (v - y0)[..., None]
+    out = (img[y0, x0] * (1 - fx) * (1 - fy) + img[y0, x0 + 1] * fx * (1 - fy)
+           + img[y0 + 1, x0] * (1 - fx) * fy + img[y0 + 1, x0 + 1] * fx * fy)
+    out = out[::-1].astype(np.float32)   # Blender rows run bottom-up; values stay sRGB
+    material = face.data.materials['hero_eye']
+    node = material.node_tree.nodes['Principled BSDF'].inputs['Base Color'].links[0].from_node
+    node.image = packed_image(output / 'ocular_albedo.png', out)

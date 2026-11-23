@@ -50,7 +50,7 @@ OUTFITS['ade_expression'] = dict(OUTFITS['ade_bomber'], expression='Focus')
 OUTFITS['jules_expression'] = dict(OUTFITS['jules_moto'], expression='Smile')
 OUTFITS['ade_blink'] = dict(OUTFITS['ade_bomber'], expression='Blink')
 OUTFITS['jules_blink'] = dict(OUTFITS['jules_moto'], expression='Blink')
-SKIN = {'ade': (0.52, 0.36, 0.265), 'theo': (0.78, 0.6, 0.5), 'kai': (0.6, 0.43, 0.32), 'malik': (0.42, 0.27, 0.18), 'ren': (0.72, 0.55, 0.42),
+SKIN = {'ade': (.72, .44, .30), 'theo': (0.78, 0.6, 0.5), 'kai': (0.6, 0.43, 0.32), 'malik': (0.42, 0.27, 0.18), 'ren': (0.72, 0.55, 0.42),
         'rio': (0.36, 0.22, 0.15), 'sam': (0.9, 0.74, 0.64), 'noa': (0.79, 0.64, 0.51),
         'jules': (.80, .50, .355)}
 HAIR = {'sam': (.31, .18, .10), 'theo': (.25, .15, .10), 'jules': (.112, .073, .055)}
@@ -123,6 +123,8 @@ VIEWS = {
     'face': (Vector((0.22, 0.95, 0.03)), Vector((0, 0.05, 1.61)), 85),
     'portrait': (Vector((0.10, 0.62, 0.0)), Vector((0, 0.09, 1.555)), 85),
     'portrait_34': (Vector((0.42, 0.48, 0.0)), Vector((0, 0.08, 1.555)), 85),
+    'portrait_a': (Vector((0.11, 0.66, 0.0)), Vector((0, 0.10, 1.70)), 85),
+    'portrait_a34': (Vector((0.45, 0.51, 0.0)), Vector((0, 0.09, 1.70)), 85),
     'mouth_front': (Vector((0.0, 0.40, 0.0)), Vector((0, 0.12, 1.53)), 85),
     'mouth_profile': (Vector((0.40, 0.0, 0.0)), Vector((0, 0.11, 1.53)), 85),
     'face_side': (Vector((0.95, 0.15, 0.03)), Vector((0, 0.03, 1.61)), 85),
@@ -336,7 +338,7 @@ def tint(spec):
             nm = m.name
             col = None
             if nm == 'hero_eye':
-                tint_review_iris(m, p, (.42, .27, .14) if spec['face'] == 'jules' else (.42, .30, .19))
+                tint_review_iris(m, p, (.42, .27, .14) if spec['face'] == 'jules' else (1, 1, 1))
             if nm in ('hero_shirt', 'hero_tee', 'hero_knit', 'hero_blazer', 'hero_fleece', 'hero_bomber', 'hero_rib', 'hero_lapel', 'hero_top', 'hero_shirt_trim', 'hero_buttonhole'):
                 col = spec['top_col']
             elif nm == 'hero_racer_cotton':

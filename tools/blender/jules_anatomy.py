@@ -72,7 +72,7 @@ def _margin_table(points, c, sign):
     return at, keys[0] / 1000, keys[-1] / 1000
 
 
-def almond_eyes(face):
+def almond_eyes(face, up=.0053, down=.0057, corner_in=.0005, corner_out=.0016, scale=None):
     basis = face.data.shape_keys.key_blocks[0].data
     rim = material_vertices(face, ('hero_lid_rim',))
     skin = material_vertices(face, ('hero_skin_face_',))
@@ -86,9 +86,9 @@ def almond_eyes(face):
 
         def target(dm):
             t = max(0.0, 1 - ((dm - mid) / half) ** 2)
-            corner = .0005 + (.0016 - .0005) * smooth(inner, outer, dm)
-            upper = corner + .0053 * max(0.0, 1 - ((dm - mid + .0025) / half) ** 2) ** .62
-            lower = corner - .0057 * max(0.0, 1 - ((dm - mid - .003) / half) ** 2) ** .85
+            corner = corner_in + (corner_out - corner_in) * smooth(inner, outer, dm)
+            upper = corner + up * max(0.0, 1 - ((dm - mid + .0025) / half) ** 2) ** .62
+            lower = corner - down * max(0.0, 1 - ((dm - mid - .003) / half) ** 2) ** .85
             return lower, upper, t
 
         for i in set(rim) | set(skin):
@@ -101,11 +101,15 @@ def almond_eyes(face):
                 continue
             lo0, hi0 = margin(dm)
             lo1, hi1, t = target(dm)
+            if scale is not None:
+                # Keep this face's own lid curves; just close the opening.
+                lo1, hi1 = lo0 * scale[1], hi0 * scale[0]
             # Keep the inner canthus as modelled (re-cutting it opened the
             # corner pocket): blend into the new margins across the inner third.
-            keep = smooth(inner + .0015, inner + .0095, dm)
-            lo1 = lo0 + (lo1 - lo0) * keep
-            hi1 = hi0 + (hi1 - hi0) * smooth(inner + .001, inner + .007, dm)
+            if scale is None:
+                keep = smooth(inner + .0015, inner + .0095, dm)
+                lo1 = lo0 + (lo1 - lo0) * keep
+                hi1 = hi0 + (hi1 - hi0) * smooth(inner + .001, inner + .007, dm)
             dz = off.z
             fade = smooth(outer + .001, outer - .0035, dm) * smooth(inner - .001, inner + .0035, dm)
             if dz >= 0 and hi0 > .0004:
@@ -174,11 +178,12 @@ def relax_corners(face, corners, radius=.0045, iterations=14):
     _apply(face, delta)
 
 
-def lower_face(face, eye):
+def lower_face(face, eye, knots=None, retract=.52, philtrum=.0235, protect_nose=True,
+               lips_band=(-.077, -.071, -.047, -.053)):
     """Raise the mouth (shorter upper lip) and set the lips back."""
     basis = face.data.shape_keys.key_blocks[0].data
     skin = material_vertices(face, ('hero_skin_face_',))
-    knots = [(-.043, -.043), (-.065, -.0595), (-.099, -.0965), (-.118, -.118)]
+    knots = knots or [(-.043, -.043), (-.065, -.0595), (-.099, -.0965), (-.118, -.118)]
 
     def remap(dz):
         if dz >= knots[0][0] or dz <= knots[-1][0]:
@@ -198,15 +203,18 @@ def lower_face(face, eye):
         side = smooth(.070, .036, abs(p.x))
         # The nose's underside (nostril floor, columella, alar base) shares
         # this height band but stands well forward: it must not ride up.
-        nose_base = smooth(eye.y + .026, eye.y + .032, p.y) * smooth(-.052, -.046, dz)
-        nose_base = max(nose_base, smooth(.022, .010, abs(p.x)) * smooth(-.049, -.044, dz)
-                        * smooth(eye.y + .018, eye.y + .026, p.y))
+        nose_base = 0.0
+        if protect_nose:
+            nose_base = smooth(eye.y + .026, eye.y + .032, p.y) * smooth(-.052, -.046, dz)
+            nose_base = max(nose_base, smooth(.022, .010, abs(p.x)) * smooth(-.049, -.044, dz)
+                            * smooth(eye.y + .018, eye.y + .026, p.y))
         d = Vector((0, 0, (remap(dz) - dz) * front * side * (1 - nose_base)))
         nz = dz + d.z
         # Lips: pull the vermilion back toward the philtrum / chin plane.
-        lips = smooth(.030, .019, abs(p.x)) * smooth(-.077, -.071, nz) * smooth(-.047, -.053, nz)
-        excess = max(0.0, (p.y - eye.y) - .0235)
-        d.y -= .52 * excess * lips
+        a, b, c, e = lips_band
+        lips = smooth(.030, .019, abs(p.x)) * smooth(a, b, nz) * smooth(c, e, nz)
+        excess = max(0.0, (p.y - eye.y) - philtrum)
+        d.y -= retract * excess * lips
         if d.length_squared > 1e-14:
             delta[i] = d
     _apply(face, delta)
@@ -268,3 +276,39 @@ def correct_anatomy(face, eyes):
     nose(face, eye)
     lower_face(face, eye)
     narrow_face(face, eye)
+
+
+def correct_ade(face, eyes):
+    """Ade against his head-scan atlas (4340 px/m from the 5.76 cm eye
+    spacing): 14.4 mm round openings with sclera under the iris -> 8.5 mm
+    almond; nose base 16 mm and mouth 11 mm lower than the photo while the
+    chin matched (short chin) -> lift nose and mouth, lengthen the chin."""
+    eye = (eyes[0] + eyes[1]) * .5
+    almond_eyes(face, scale=(.90, .58))
+    lower_face(face, eye,
+               knots=[(-.015, -.015), (-.036, -.032), (-.054, -.046), (-.072, -.064),
+                      (-.100, -.101), (-.122, -.122)],
+               retract=.25, philtrum=.036, protect_nose=False,
+               lips_band=(-.086, -.079, -.054, -.059))
+
+    ade_chin(face, eye)
+
+
+def ade_chin(face, eye):
+    """A longer, stronger chin (the photo's) and a slightly wider mouth."""
+    basis = face.data.shape_keys.key_blocks[0].data
+    skin = material_vertices(face, ('hero_skin_face_',))
+    delta = {}
+    for i in skin:
+        p = basis[i].co
+        dz, ax = p.z - eye.z, abs(p.x)
+        front = smooth(eye.y - .02, eye.y + .005, p.y)
+        width = smooth(.040, .018, ax)
+        chin = _bell(dz + .098, .016) * width * front
+        under = smooth(-.098, -.110, dz) * smooth(-.135, -.118, dz) * width * smooth(eye.y - .045, eye.y - .010, p.y)
+        d = Vector((0, .0045 * chin, -.0040 * chin - .0060 * under))
+        mouth = _bell(dz + .064, .006) * smooth(.016, .024, ax) * smooth(.034, .027, ax) * front
+        d.x += math.copysign(.0018 * mouth, p.x)
+        if d.length_squared > 1e-14:
+            delta[i] = d
+    _apply(face, delta)

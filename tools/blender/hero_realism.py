@@ -529,6 +529,11 @@ def finish_realism(rig, meshes, identity, output):
         correct_anatomy(face, eyes)
         from portrait_project import drop_geometry_brows
         drop_geometry_brows(face)   # the photographic texture carries the brows
+    else:
+        from portrait_project import drop_geometry_brows
+        from jules_anatomy import correct_ade
+        drop_geometry_brows(face)
+        correct_ade(face, eyes)
     lashes(face, eyes, identity)
     finish_complexion(face, identity, eyes, output)
     fit_jacket(models, rig, face, identity)
@@ -549,4 +554,9 @@ def finish_realism(rig, meshes, identity, output):
         groom = models.get('Groom_crop_ade')
         if groom is not None:
             tidy_flyaways(shell, groom, (eyes[0] + eyes[1]) * .5)
+        from portrait_project import ADE_IMAGE, photo_iris, project_portrait
+        sources = Path(__file__).resolve().parents[2] / 'art/hero/sources'
+        print('PORTRAIT LANDMARKS', project_portrait(face, shell, identity, eyes, sources / 'ade-face-unwrap.jpeg',
+                                                     (.72, .44, .30), output, ADE_IMAGE))
+        photo_iris(face, sources / 'ade-face-atlas.jpeg', (1519, 86), 39, output)
     face['worldstate_realism'] = 1
