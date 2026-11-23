@@ -10,6 +10,7 @@ from mathutils import Vector
 
 from build_b_surface import falloff, surface_detail
 from garment_kit import seam_height
+from jules_accessories import finish_jules_accessories
 from jules_collection import project_trim_uv
 from wardrobe_quality import adjust_basis, smooth
 from jules_upper_fit import fit_upper_collection
@@ -48,6 +49,7 @@ def finish_jules_collection(collection, output):
     """Refit the existing sewn panels and bake new textile relief."""
     if collection.rig.get('jules_surface_finish'):
         finish_sewn_details(collection)
+        finish_jules_accessories(collection, output)
         return
     models = collection.models
     output.mkdir(parents=True, exist_ok=True)
@@ -168,6 +170,7 @@ def finish_jules_collection(collection, output):
 
     collection.rig['jules_surface_finish'] = 1
     finish_sewn_details(collection)
+    finish_jules_accessories(collection, output)
 
 
 def textile_field(style, name):

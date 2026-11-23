@@ -15,15 +15,47 @@ def bell(value, radius):
     return math.exp(-(value / radius) ** 2)
 
 
+def seat_shoulder_joints(rig):
+    """Centre the humeral pivots and add weighted clavicles under the collar."""
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode='EDIT')
+    bones = rig.data.edit_bones
+    for side in ('l', 'r'):
+        shoulder = bones['b_upper_arm_' + side]
+        elbow = bones['b_forearm_' + side]
+        shoulder.use_connect = False
+        elbow.use_connect = False
+        # Preserve bone axes and the forearm/hand bind transforms.
+        shift = Vector((math.copysign(.004, -shoulder.head.x), .010, -.049))
+        shoulder.head += shift
+        shoulder.tail += shift
+        name = 'b_clavicle_' + side
+        clavicle = bones.get(name) or bones.new(name)
+        clavicle.parent = bones['b_chest']
+        clavicle.head = Vector((math.copysign(.036, shoulder.head.x), .042, 1.411))
+        clavicle.tail = shoulder.head
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
 def shoulder_line(p):
     x, y, z = p
     side = abs(x)
-    cap = bell(side - .179, .056) * bell(z - 1.441, .045)
-    pocket = bell(side - .147, .034) * bell(z - 1.355, .043)
-    front = bell(y - .034, .044)
-    return Vector((-x * .019 * cap + math.copysign(.0036 * pocket * front, x),
-                   .0045 * pocket * front,
-                   -.004 * cap + .005 * pocket * front))
+    crown = bell(side - .203, .061) * bell(z - 1.382, .028) * bell(y - .003, .073)
+    deltoid = bell(side - .175, .039) * bell(z - 1.365, .031) * bell(y - .016, .064)
+    armpit = bell(side - .147, .026) * bell(z - 1.351, .035) * bell(y - .072, .038)
+    fold = bell(side - .158, .033) * bell(z - 1.331, .035) * bell(y - .014, .051)
+    clavicle = bell(side - .140, .027) * bell(z - 1.395, .028) * smooth(.027, -.015, y)
+    bridge = bell(side - .152, .034) * bell(z - 1.394, .024) * bell(y - .008, .060)
+    proximal = bell(side - .192, .057) * smooth(.144, .173, side) * smooth(.289, .242, side)
+    centre_z = 1.363 - .55 * max(0, side - .184)
+    centre_y = -.007
+    radial_z = z - centre_z
+    radial_y = y - centre_y
+    proximal *= smooth(.098, .070, abs(radial_z)) * smooth(.112, .085, abs(radial_y))
+    return Vector((-math.copysign(.009 * crown + .007 * fold, x),
+                   .0045 * deltoid - .009 * armpit + .005 * fold + .25 * radial_y * proximal,
+                   -.0055 * crown + .0048 * deltoid - .022 * fold + .005 * clavicle + .009 * bridge
+                   + .63 * radial_z * proximal))
 
 
 def chest_fit(p, strength, ripple, ease):
@@ -91,53 +123,107 @@ def balance_arm_weights(obj, rig):
         side = 'l' if p.x < 0 else 'r'
         root, axis = arms[side]
         reach = (p - root).dot(axis)
-        zone = smooth(.118, .149, abs(p.x)) * smooth(.280, .225, abs(p.x))
+        zone = smooth(.108, .148, abs(p.x)) * smooth(.298, .245, abs(p.x))
         zone *= smooth(1.29, 1.345, p.z) * smooth(1.49, 1.423, p.z)
-        arm = smooth(-.014, .119, reach)
-        blend_weights(obj, vertex, {'chest': 1-arm, 'upper_arm_' + side: arm}, zone)
+        front_fold = bell(p.y - .075, .052) * bell(abs(p.x) - .136, .039)
+        arm = smooth(.123, .237, abs(p.x) + .22*reach - .025*front_fold)
+        clavicle = (1-arm) * .29 * bell(p.z - 1.405, .045) * smooth(.095, .137, abs(p.x))
+        blend_weights(obj, vertex, {'chest': 1-arm-clavicle, 'upper_arm_' + side: arm,
+                                   'clavicle_' + side: clavicle}, zone)
 
 
-def relax_forward_shoulders(torso, rig):
-    """Relax the posed deltoid fold and put the correction back in bind space."""
-    mesh = torso.data
+def shoulder_loops(torso):
+    """Split the long shoulder edges so the cap and axillary fold curve smoothly."""
+    mesh = bmesh.new()
+    mesh.from_mesh(torso.data)
+    edges = [edge for edge in mesh.edges if edge.is_manifold and all(
+        .127 < abs(v.co.x) < .265 and 1.306 < v.co.z < 1.435 for v in edge.verts)]
+    bmesh.ops.subdivide_edges(mesh, edges=edges, cuts=1, use_grid_fill=True)
+    mesh.to_mesh(torso.data)
+    mesh.free()
+    torso.data.update()
+
+
+def vertex_neighbours(mesh):
     neighbours = [[] for _ in mesh.vertices]
     for edge in mesh.edges:
         a, b = edge.vertices
         neighbours[a].append(b)
         neighbours[b].append(a)
+    return neighbours
+
+
+def relax_patch(positions, neighbours, influence, strengths):
+    relaxed = [p.copy() for p in positions]
+    for strength in strengths:
+        changes = {}
+        for i, amount in influence.items():
+            centre = sum((relaxed[j] for j in neighbours[i]), Vector()) / len(neighbours[i])
+            changes[i] = relaxed[i].lerp(centre, strength * amount)
+        for i, point in changes.items():
+            relaxed[i] = point
+    return relaxed
+
+
+def round_socket(torso):
+    mesh = torso.data
+    neighbours = vertex_neighbours(mesh)
+    positions = [v.co.copy() for v in mesh.vertices]
+    influence = {}
+    for i, p in enumerate(positions):
+        mask = smooth(.124, .145, abs(p.x)) * smooth(.278, .217, abs(p.x))
+        mask *= smooth(1.295, 1.344, p.z) * smooth(1.448, 1.398, p.z)
+        if mask > .01 and neighbours[i]:
+            influence[i] = mask
+    rounded = relax_patch(positions, neighbours, influence, (.54, -.27, .52, -.20, .36))
+    for i in influence:
+        delta = rounded[i] - positions[i]
+        for key in mesh.shape_keys.key_blocks:
+            key.data[i].co += delta
+        mesh.vertices[i].co = rounded[i]
+    mesh.update()
+
+
+def pose_shoulder_correctives(torso, rig):
+    """Relax the deltoid in forward and raised poses and bake back to bind space."""
+    mesh = torso.data
+    neighbours = vertex_neighbours(mesh)
     identity = Matrix.Identity(3)
     for side, sign in [('l', -1), ('r', 1)]:
         name = 'b_upper_arm_' + side
         pivot = rig.data.bones[name].head_local
         arm_index = torso.vertex_groups[name].index
-        rotation = Matrix.Rotation(math.radians(42), 3, 'X') @ Matrix.Rotation(math.radians(sign*30), 3, 'Y')
-        posed, influence, inverse = [], {}, {}
-        for vertex in mesh.vertices:
-            p = vertex.co
-            weight = next((g.weight for g in vertex.groups if g.group == arm_index), 0.0)
-            amount = smooth(.123, .150, sign*p.x) * smooth(.264, .219, sign*p.x)
-            amount *= smooth(1.305, 1.350, p.z) * smooth(1.466, 1.417, p.z)
-            transform = identity * (1-weight) + rotation * weight
-            posed.append(pivot + transform @ (p - pivot))
-            if amount > .01 and neighbours[vertex.index]:
-                influence[vertex.index] = amount
-                inverse[vertex.index] = transform.inverted_safe()
-
-        relaxed = [p.copy() for p in posed]
-        for strength in (.61, -.20, .61, -.20, .51):
-            changes = {}
-            for i, amount in influence.items():
-                centre = sum((relaxed[j] for j in neighbours[i]), Vector()) / len(neighbours[i])
-                changes[i] = relaxed[i].lerp(centre, strength * amount)
-            for i, point in changes.items():
-                relaxed[i] = point
-
-        correction = torso.shape_key_add(name='Reach_Shoulder_' + side)
-        for i in influence:
-            delta = inverse[i] @ (relaxed[i] - posed[i])
-            if delta.length > .025:
-                delta = delta.normalized() * .025
-            correction.data[i].co += delta
+        reach = Matrix.Rotation(math.radians(42), 3, 'X') @ Matrix.Rotation(math.radians(sign*30), 3, 'Y')
+        lift = Matrix.Rotation(math.radians(-sign*60), 3, 'Y')
+        for label, rotation in [('Reach', reach), ('Lift', lift)]:
+            posed, influence, inverse = [], {}, {}
+            for vertex in mesh.vertices:
+                p = vertex.co
+                weight = next((g.weight for g in vertex.groups if g.group == arm_index), 0.0)
+                amount = smooth(.109, .132, sign*p.x) * smooth(.283, .231, sign*p.x)
+                amount *= smooth(1.287, 1.330, p.z) * smooth(1.443, 1.403, p.z)
+                transform = identity * (1-weight) + rotation * weight
+                posed.append(pivot + transform @ (p - pivot))
+                if amount > .01 and neighbours[vertex.index]:
+                    influence[vertex.index] = amount
+                    inverse[vertex.index] = transform.inverted_safe()
+            relaxed = relax_patch(posed, neighbours, influence, (.69, -.15, .69, -.15, .66, .51))
+            if label == 'Lift':
+                for i in influence:
+                    # Restore the upper deltoid envelope as the humerus
+                    # abducts, then fair it into the clavicle and upper arm.
+                    p = mesh.vertices[i].co
+                    bridge = bell(sign*p.x - .175, .049) * bell(p.z - 1.385, .033)
+                    bridge *= bell(p.y - .004, .064) * smooth(.117, .152, sign*p.x)
+                    relaxed[i].z += .039 * bridge
+                relaxed = relax_patch(relaxed, neighbours, influence, (.61, .45, -.23))
+            correction = torso.shape_key_add(name=f'{label}_Shoulder_{side}')
+            limit = .057 if label == 'Lift' else .028
+            for i in influence:
+                delta = inverse[i] @ (relaxed[i] - posed[i])
+                if delta.length > limit:
+                    delta = delta.normalized() * limit
+                correction.data[i].co += delta
 
 
 def follow_correctives(obj, source):
@@ -147,9 +233,12 @@ def follow_correctives(obj, source):
     surface = SkinSurface(source)
     keys = source.data.shape_keys.key_blocks
     samples = [surface.tree.find_nearest(v.co) for v in obj.data.vertices]
-    obj.shape_key_add(name='Basis')
+    if obj.data.shape_keys is None:
+        obj.shape_key_add(name='Basis')
     for source_key in keys:
-        if not source_key.name.startswith(('Bend_Shoulder_', 'Reach_Shoulder_')):
+        if not source_key.name.startswith(('Bend_Shoulder_', 'Reach_Shoulder_', 'Lift_Shoulder_')):
+            continue
+        if obj.data.shape_keys.key_blocks.get(source_key.name) is not None:
             continue
         key = obj.shape_key_add(name=source_key.name)
         for vertex, (hit, _, index, _) in zip(key.data, samples):
@@ -249,6 +338,7 @@ def bra_band(collection, clothing):
 
 def fit_upper_collection(collection):
     models = collection.models
+    seat_shoulder_joints(collection.rig)
     head = models['Face_jules']
     neckline_skin = surface_tree(head.data)
     head_edges = collar_boundary(head)
@@ -258,9 +348,11 @@ def fit_upper_collection(collection):
             fade = 1.0 if distance is None else smooth(.002, .012, distance)
             return shoulder_line(point) * fade
         adjust_basis(models[name], skin_fit)
+        shoulder_loops(models[name])
+        round_socket(models[name])
         balance_arm_weights(models[name], collection.rig)
         close_skin_join(models[name], head, head_edges)
-        relax_forward_shoulders(models[name], collection.rig)
+        pose_shoulder_correctives(models[name], collection.rig)
 
     for cut, strength, ripple, ease in (
         ('Ribcrop', .65, .0023, .001),
@@ -275,6 +367,7 @@ def fit_upper_collection(collection):
                     adjust_basis(ob, lambda p: chest_fit(p, strength, ripple, ease))
                     if name.startswith('Top_Fashion_'):
                         balance_arm_weights(ob, collection.rig)
+                        follow_correctives(ob, models['Fashion_Torso_Skin'])
 
     bra = models['Top_Fashion_Crossbra']
     skin = models['JulesSkin_Crossbra']
@@ -284,12 +377,14 @@ def fit_upper_collection(collection):
         delta = chest_fit(p, 1.25, .0009, 0)
         direction = Vector((p.x, p.y-.018, 0)).normalized()
         origin = Vector((0, .018, p.z))
-        side = smooth(.065, .123, abs(p.x)) * smooth(.111, .058, p.y)
+        side = smooth(.087, .128, abs(p.x)) * smooth(.111, .064, p.y)
         if side > .001:
-            hit, _, _, _ = body.ray_cast(origin + direction*.23, -direction, .23)
+            # Cast from inside the ribs so a nearby raised upper arm cannot
+            # be selected as the surface supporting the bra side wing.
+            hit, _, _, _ = body.ray_cast(origin, direction, .23)
             if hit is not None:
-                gap = max(0, (p-hit).dot(direction) - .007)
-                delta -= direction * min(.034, gap) * side
+                gap = max(0, (p-hit).dot(direction) - .0040)
+                delta -= direction * min(.049, gap) * side
         if p.y > .07 and abs(p.x) < .141:
             hit = body.ray_cast(Vector((p.x, .35, p.z)), Vector((0, -1, 0)))[0]
             if hit is not None:
@@ -299,16 +394,35 @@ def fit_upper_collection(collection):
         return delta
 
     adjust_basis(bra, support)
-    balance_arm_weights(bra, collection.rig)
+    for vertex in bra.data.vertices:
+        p = vertex.co
+        # The side panels follow the rib cage. The separate straps take
+        # shoulder tension without pulling the bra's armhole into a point.
+        influence = smooth(.079, .12, abs(p.x)) * smooth(1.226, 1.27, p.z)
+        if influence > .005:
+            chest = smooth(1.210, 1.319, p.z)
+            blend_weights(bra, vertex, {'chest': chest, 'spine': 1-chest}, influence)
 
     def neckline(p):
         x = abs(p.x)
         cup = bell(x - .076, .042)
         scoop = 1.316 + .030 * cup - .062 * smooth(.084, .143, x)
-        back = 1.279 + .013 * smooth(.060, .133, x)
+        back = 1.273 + .002 * smooth(.060, .133, x)
         limit = back + (scoop - back) * smooth(.042, .111, p.y)
         return limit - p.z
 
     collection.cut(bra, neckline, .0024)
+
+    def bind_armhole(p):
+        side = smooth(.086, .127, abs(p.x)) * smooth(.113, .063, p.y)
+        upper = smooth(1.225, 1.272, p.z)
+        if side * upper < .001:
+            return Vector()
+        direction = Vector((p.x, p.y-.018, 0)).normalized()
+        hit, _, _, _ = body.ray_cast(Vector((0, .018, p.z)), direction, .23)
+        gap = max(0, (p-hit).dot(direction) - .006) if hit is not None else 0
+        return -direction * min(.023, gap) * side * upper
+
+    adjust_basis(bra, bind_armhole)
     replace_straps(collection, bra, skin)
     bra_band(collection, bra)

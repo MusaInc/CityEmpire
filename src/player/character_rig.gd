@@ -52,6 +52,7 @@ const GARMENT_BENDS := {
 	"Bend_Elbow_l": "forearm_l", "Bend_Elbow_r": "forearm_r",
 	"Bend_Shoulder_l": "upper_arm_l", "Bend_Shoulder_r": "upper_arm_r",
 	"Reach_Shoulder_l": "upper_arm_l", "Reach_Shoulder_r": "upper_arm_r",
+	"Lift_Shoulder_l": "upper_arm_l", "Lift_Shoulder_r": "upper_arm_r",
 }
 ## Gear pieces that ride a bone other than the head (gadgets).
 const GEAR_BONES := {"jet_l": "foot_l", "jet_r": "foot_r", "jet_l_fire": "foot_l", "jet_r_fire": "foot_r",
@@ -388,7 +389,6 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 		if build_b and name_key == "hero_skin_body":
 			material.set_shader_parameter("roughness", 0.61)
 			material.set_shader_parameter("rim_strength", 0.14)
-			material.set_shader_parameter("inside_shade", 0.82)
 		if build_b and name_key.begins_with("hero_fashion_top_satin_"):
 			material.set_shader_parameter("rim_strength", 0.19)
 		if source.roughness_texture:
@@ -772,7 +772,7 @@ func _show_variants() -> void:
 				var index := mi.find_blend_shape_by_name(shape)
 				if index >= 0:
 					_garment_bends.append({"mesh": mi, "index": index, "bone": GARMENT_BENDS[shape],
-						"forward_reach": shape.begins_with("Reach_")})
+						"driver": shape.get_slice("_", 0)})
 		if mi.visible and (n.begins_with("Top") or n.begins_with("Hair_") or n.begins_with("Groom_")):
 			for entry: Dictionary in mi.get_meta(&"hero_surfaces", []):
 				var material: ShaderMaterial = entry.material
@@ -1023,9 +1023,10 @@ func _sync_skeleton() -> void:
 		skeleton.set_bone_pose_rotation(index, rest.basis.get_rotation_quaternion() * Quaternion(up.normalized(), protract))
 	for correction in _garment_bends:
 		var rotation: Quaternion = rots[correction.bone]
-		if correction.forward_reach:
-			var forward := -(rotation * Vector3.DOWN).z
-			correction.mesh.set_blend_shape_value(correction.index, smoothstep(0.21, 0.67, forward))
+		if correction.driver == "Reach" or correction.driver == "Lift":
+			var direction := rotation * Vector3.DOWN
+			var amount := -direction.z if correction.driver == "Reach" else Vector2(direction.x, maxf(direction.y, 0.0)).length()
+			correction.mesh.set_blend_shape_value(correction.index, smoothstep(0.27, 0.88, amount))
 			continue
 		var bend := 2.0 * acos(clampf(absf(rotation.w), 0.0, 1.0))
 		var shoulder := String(correction.bone).begins_with("upper_arm_")

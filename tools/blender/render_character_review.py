@@ -164,6 +164,7 @@ VIEWS = {
     'collar': (Vector((0.15, 0.85, 0.12)), Vector((0, 0.03, 1.5)), 60),
     'shoulder': (Vector((0.75, 0.55, 0.18)), Vector((0.2, 0, 1.45)), 60),
     'upper_front': (Vector((0.0, 1.28, 0.04)), Vector((0, 0.04, 1.39)), 67),
+    'upper_side': (Vector((1.28, 0.0, 0.04)), Vector((0, 0.04, 1.39)), 67),
     'upper_three_quarter': (Vector((0.66, 1.10, 0.04)), Vector((0, 0.04, 1.39)), 67),
     'cuff': (Vector((0.6, 0.5, 0.05)), Vector((0.55, 0.0, 0.95)), 60),
     'hair': (Vector((0.52, -0.75, 0.17)), Vector((0, -.04, 1.64)), 83),
@@ -244,7 +245,7 @@ def show(spec):
         elif n == 'Fashion_Biker_Barefeet':
             vis = lower in ('bikershorts', 'sprintshorts') and shoes in ('sandals', 'eveningstraps')
         elif n == 'Fashion_Lounge_Socks':
-            vis = lower in ('bikershorts', 'sprintshorts') and shoes in ('trainers', 'streettrainers', 'highstreet')
+            vis = lower in ('bikershorts', 'sprintshorts', 'utilitymini') and shoes in ('trainers', 'streettrainers', 'highstreet')
         elif n == 'Fashion_Feet':
             vis = shoes in ('sandals', 'eveningstraps') and not barefoot and not cropped and lower not in ('bikershorts', 'sprintshorts')
         elif n == 'Fashion_Barefoot_Legs':
@@ -276,9 +277,24 @@ def pose(spec):
     for side, sign in [('l', -1), ('r', 1)]:
         arm = armature.pose.bones['b_upper_arm_' + side]
         axes = arm.bone.matrix_local.to_3x3().normalized()
-        lowered = Matrix.Rotation(math.radians(27) * sign, 3, 'Y')
+        review_arms = os.environ.get('REVIEW_ARMS', 'rest')
+        spread, reach = {
+            'rest': (15, 0), 'forward': (12, 42),
+            'outward': (88, 0), 'raised': (112, 0),
+        }[review_arms]
+        posed = (Matrix.Rotation(math.radians(reach), 3, 'X')
+                 @ Matrix.Rotation(math.radians(42-spread) * sign, 3, 'Y'))
         arm.rotation_mode = 'QUATERNION'
-        arm.rotation_quaternion = (axes.inverted() @ lowered @ axes).to_quaternion()
+        arm.rotation_quaternion = (axes.inverted() @ posed @ axes).to_quaternion()
+        for obj in meshes:
+            if obj.hide_render or obj.data.shape_keys is None:
+                continue
+            keys = obj.data.shape_keys.key_blocks
+            for label, value in [('Bend', .28 if reach else .72 if spread >= 88 else 0),
+                                 ('Reach', .82 if reach else 0), ('Lift', 1 if spread >= 88 else 0)]:
+                key = keys.get(f'{label}_Shoulder_{side}')
+                if key is not None:
+                    key.value = value
     if spec.get('seat'):
         from wardrobe_quality import seated_leg_transforms
         joints = {bone.name[2:]: bone.head_local.copy() for bone in armature.data.bones}
