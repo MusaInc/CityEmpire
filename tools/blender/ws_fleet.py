@@ -130,7 +130,7 @@ def gap_decal(surf, m, out, line, view, w=0.006, side=1, lift=0.0015):
     pts = [V(p) for p in line]
     dense = []
     for a, b in zip(pts, pts[1:]):
-        n = max(1, int((b - a).length / 0.12))
+        n = max(1, math.ceil((b - a).length / 0.055))
         dense += [a.lerp(b, i / n) for i in range(n)]
     dense.append(pts[-1])
     sides = (1, -1) if view == "side" and side == 0 else (side,)
@@ -204,13 +204,29 @@ def build_traffic(name):
         ymid = (arc_f[0][0] + arc_r[0][0]) / 2 + 0.08
         lines = [arc_f + [(arc_f[-1][0] - 0.02, top(arc_f[-1][0]))], [(ymid, K.SILL_Z), (ymid, top(ymid))],
                  [(arc_f[0][0], K.SILL_Z), (arc_r[0][0], K.SILL_Z)], arc_r + [(arc_r[-1][0] - 0.01, top(arc_r[-1][0]))]]
+    gap_surface = K.Surface([body])
     gs = K.Surface([clean])
+    width = 0.0105 if kind == "van" else 0.006
     for ln in lines:
-        gap_decal(gs, m, out, ln, "side", side=0)
+        gap_decal(gap_surface, m, out, ln, "side", w=width, side=0, lift=0.006)
+    if kind == "van":
+        # Separate pull handles either side of the sliding door's leading
+        # shut line. The rear door track follows the curved body surface.
+        for door_y in (yb + 0.17, yb - 0.19):
+            for sd in (1, -1):
+                hit = gap_surface.cast(*K.ray("side", door_y, belt - 0.045, sd))
+                if hit:
+                    at, normal = hit[:2]
+                    out.append(box("handle_seal", (0.015, 0.214, 0.063), at + normal * 0.005, m["liner"], bevel=0.006))
+                    out.append(box("pull_handle", (0.035, 0.175, 0.031), at + normal * 0.018, m["plastic"], bevel=0.009))
+        track_y0, track_y1 = yb - 1.30, YR + 0.31
+        track_z = belt + 0.075
+        gap_decal(gap_surface, m, out, [(track_y0, track_z), (track_y1, track_z)],
+                  "side", w=0.021, side=0, lift=0.006)
     for sx in (1, -1):
         bon = [(sx * (K.half_width(y) - 0.13), y) for y in (K.Y_COWL + 0.04, (K.Y_COWL + YF) / 2, YF - 0.2)]
         if YF - 0.2 > K.Y_COWL + 0.1:
-            gap_decal(gs, m, out, bon, "top")
+            gap_decal(gap_surface, m, out, bon, "top", lift=0.004)
     if kind == "saloon":
         xi = W2 * 0.5 - 0.018          # (lines up with the boot's rear shut line)
         for sx in (1, -1):
@@ -323,6 +339,7 @@ def build_traffic(name):
     bpy.ops.object.modifier_apply(modifier=dt.name)
     bpy.data.objects.remove(clean, do_unlink=True)
     ob = kit.join(name, [body] + [o for o in out if o is not None])
+    ob.data.validate(clean_customdata=False)
     kit.export(name + ".glb", [ob])
     tris = sum(len(p.vertices) - 2 for p in ob.data.polygons)
     # Mid-distance LOD (~1.2k triangles): the same car collapsed; the
@@ -334,6 +351,7 @@ def build_traffic(name):
     dec.ratio = min(1.0, 1200.0 / max(tris, 1))
     bpy.context.view_layer.objects.active = lo
     bpy.ops.object.modifier_apply(modifier=dec.name)
+    lo.data.validate(clean_customdata=False)
     kit.export(name + "_lod1.glb", [lo])
     print("FLEET", name, "lod1 tris", sum(len(p.vertices) - 2 for p in lo.data.polygons))
     print("FLEET", name, "tris", tris, "materials", len(ob.data.materials))

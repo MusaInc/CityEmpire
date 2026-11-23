@@ -81,6 +81,7 @@ var sea: Array = []            # Rect2 (also in `water`); the island is cut out 
 var reserved: Array = []       # Rect2 footprints owned by landmarks and set pieces (world, axis-aligned)
 var structures: Array = []     # Dictionary specs for BuildingMesher.add_structure (cranes, bridge)
 var bridge_ramp := PackedVector3Array()  # island approach, deck centreline
+var bridge_promenade := PackedVector2Array()
 var public_furniture: Array = []  # authored public spaces, merged with street furniture
 var public_gardens: Array[Vector3] = []
 var anchor_lines: Array = []   # [from:Vector3, to:Vector3] web anchors on thin structures (jibs, cables)
@@ -209,6 +210,11 @@ func generate(p_seed := 1207) -> CityLayout:
 	if SkyportIsland.enabled:
 		for ln: Dictionary in SkyportIsland.plan(self).get("rail", []):
 			rail.lines.append(ln)
+	# Keep the city lots, bridge piers and original junction generation stable.
+	CityInfrastructure.close_bridge_underpass(self)
+	if not bridge_promenade.is_empty():
+		roads.bake_field(2.0, "_bridge_walk")
+		CityInfrastructure.bridge_walk(self)
 	aim_streetlights()
 	if mainland != null:
 		mainland.aim_streetlights()

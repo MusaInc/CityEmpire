@@ -389,6 +389,7 @@ func _apply(dt: float, instant: bool) -> void:
 	RenderingServer.global_shader_parameter_set("sun_dir", sun.global_basis * Vector3.BACK)
 	RenderingServer.global_shader_parameter_set("night", lamps)
 	RenderingServer.global_shader_parameter_set("wetness", wetness)
+	CarVisual.visible_wetness = wetness
 	RenderingServer.global_shader_parameter_set("rain", w["rain"])
 	CarVisual.lamps = lamps   # (your cars' headlights, lamp glows and brake-light boost)
 	if _world and _world.has_method("set_night"):

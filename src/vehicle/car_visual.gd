@@ -11,14 +11,19 @@ const DIR := "res://assets/vehicles/"
 const BEACON_SHADER := preload("res://src/vehicle/beacon.gdshader")
 const PAINT_SHADER := preload("res://src/vehicle/car_paint.gdshader")
 const GLASS_SHADER := preload("res://src/vehicle/car_glass.gdshader")
+const RUBBER_SHADER := preload("res://src/vehicle/wheel_rubber.gdshader")
+const ROTOR_SHADER := preload("res://src/vehicle/brake_rotor.gdshader")
+const REVERSE_SHADER := preload("res://src/vehicle/reverse_lamp.gdshader")
 const FLARE_SHADER := preload("res://src/vehicle/lamp_flare.gdshader")
 
 static var _mesh_cache := {}
 static var _mat_cache := {}
 static var _lamp_cache := {}
 static var _flare_mat: ShaderMaterial
+static var _wheel_mats := {}
 ## 0 day .. 1 night (street lamps on). Set by Atmosphere every frame.
 static var lamps := 0.0
+static var visible_wetness := 0.0
 
 var car: Car
 var body: MeshInstance3D
@@ -30,6 +35,15 @@ var head_lights: Array[SpotLight3D] = []
 var lamp_pos := {}                  # "head"/"tail" -> Array[Vector3] (local, one per side)
 var tail_mat: StandardMaterial3D
 var head_mat: StandardMaterial3D
+var _reverse_mat: ShaderMaterial
+var _reverse_light: SpotLight3D
+var _brake_level := 0.0
+var _reverse_level := 0.0
+var _contact_weight := 0.0
+var _shadow_strength := 0.0
+var _showroom := false
+var _road_film := 0.0
+var _visible_film := -1.0
 var beacon_mat: ShaderMaterial
 var beacon_light_a: OmniLight3D
 var beacon_light_b: OmniLight3D
@@ -188,7 +202,8 @@ uniform float strength = 0.3;
 void fragment() {
 	float d = length((UV - 0.5) * 2.0);
 	ALBEDO = vec3(0.0);
-	ALPHA = (1.0 - smoothstep(0.15, 1.0, d)) * strength * (1.0 - night);   // (nothing under cars after dark)
+	float core = 1.0 - smoothstep(0.12, 0.94, d);
+	ALPHA = core * strength * (1.0 - night * 0.47);
 }
 """
 static var _contact_shader: Shader
@@ -212,8 +227,70 @@ func _add_contact_shadow(size: Vector3) -> void:
 	_contact.mesh = pm
 	_contact.material_override = sm
 	_contact.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_contact.visibility_range_end = 75.0
 	_contact.position = Vector3(0, 0.04, 0)
 	add_child(_contact)
+	_contact.top_level = true
+	_contact.visible = false
+
+
+func _ground_shadow(dt: float) -> void:
+	var up := Vector3.ZERO
+	var origin := Vector3.ZERO
+	var count := 0
+	for i in 4:
+		if car.wheel_contact(i):
+			var n := car.wheel_contact_normal(i)
+			if n.y < 0.56:
+				continue
+			up += n
+			origin += car.wheel_contact_point(i)
+			count += 1
+	var support := float(count) / 4.0
+	if _showroom:
+		up = car.global_basis.y
+		origin = car.global_transform * Vector3(0, car.wheel_local(0).y - float(car.spec["wheel_r"]), 0)
+		count = 1
+		support = 1.0
+	if count >= 2 or _showroom:
+		up = up.normalized()
+		origin /= float(count)
+		var fwd := -car.global_basis.z
+		var flat := fwd.slide(up).normalized()
+		if flat.length_squared() > 0.5:
+			var distance := (car.global_position - origin).dot(up)
+			var foot := car.global_position - up * distance
+			var xf := Transform3D(Basis.looking_at(flat, up), foot + up * 0.028)
+			_contact.global_transform = xf
+	else:
+		support = 0.0
+	_contact_weight = lerpf(_contact_weight, support, 1.0 - exp(-dt * 15.0))
+	_contact.visible = _contact_weight >= 0.02
+	var strength := _contact_weight * 0.42
+	if _contact.visible and absf(_shadow_strength - strength) > 0.008:
+		_shadow_strength = strength
+		(_contact.material_override as ShaderMaterial).set_shader_parameter("strength", strength)
+
+
+func set_showroom() -> void:
+	_showroom = true
+	paint_mat.set_shader_parameter("showroom", true)
+	if flares:
+		flares.hide()
+
+
+static func _wheel_finish(name: String, offroad: bool) -> Material:
+	if name not in ["tyre", "tyre_wall", "disc"]:
+		return shared_mat(name)
+	var key := name + ("_offroad" if offroad and name == "tyre" else "")
+	if not _wheel_mats.has(key):
+		var finish := ShaderMaterial.new()
+		finish.shader = ROTOR_SHADER if name == "disc" else RUBBER_SHADER
+		if name != "disc":
+			finish.set_shader_parameter("sidewall", name == "tyre_wall")
+			finish.set_shader_parameter("offroad", offroad and name == "tyre")
+		_wheel_mats[key] = finish
+	return _wheel_mats[key]
 
 
 func setup(p_car: Car) -> void:
@@ -228,6 +305,12 @@ func setup(p_car: Car) -> void:
 	paint_mat = ShaderMaterial.new()
 	paint_mat.shader = PAINT_SHADER
 	paint_mat.set_shader_parameter("base_color", spec["paint"])
+	if float(spec["size"].y) > 1.70:
+		paint_mat.set_shader_parameter("metallic", 0.19)
+		paint_mat.set_shader_parameter("roughness", 0.39)
+		paint_mat.set_shader_parameter("gloss", 0.64)
+		paint_mat.set_shader_parameter("flake", 0.3)
+		_road_film = 0.12 if car.role != "display" else 0.0
 	var paint2 := StandardMaterial3D.new()
 	paint2.albedo_color = spec.get("paint2", Color(0.9, 0.9, 0.9))
 	paint2.roughness = 0.35
@@ -236,12 +319,12 @@ func setup(p_car: Car) -> void:
 	head_mat.albedo_color = Color(0.95, 0.95, 0.9)
 	head_mat.emission_enabled = true
 	head_mat.emission = Color(1.0, 0.95, 0.85)
-	head_mat.emission_energy_multiplier = 1.2
+	head_mat.emission_energy_multiplier = 0.16
 	tail_mat = StandardMaterial3D.new()
 	tail_mat.albedo_color = Color(0.5, 0.02, 0.02)
 	tail_mat.emission_enabled = true
 	tail_mat.emission = Color(1.0, 0.04, 0.02)
-	tail_mat.emission_energy_multiplier = 0.8
+	tail_mat.emission_energy_multiplier = 0.0
 	if mesh:
 		for i in mesh.get_surface_count():
 			var src := mesh.surface_get_material(i)
@@ -252,6 +335,11 @@ func setup(p_car: Car) -> void:
 				"paint2": m = paint2
 				"lamp_head": m = head_mat
 				"lamp_tail": m = tail_mat
+				"lamp_rev":
+					if _reverse_mat == null:
+						_reverse_mat = ShaderMaterial.new()
+						_reverse_mat.shader = REVERSE_SHADER
+					m = _reverse_mat
 				"beacon_red", "beacon_blue":
 					if beacon_mat == null:
 						beacon_mat = ShaderMaterial.new()
@@ -260,7 +348,8 @@ func setup(p_car: Car) -> void:
 				_: m = shared_mat(n)
 			body.set_surface_override_material(i, m)
 	# Wheels.
-	var wmesh := load_mesh("wheel_" + str(spec.get("wheel", "five")))
+	var wheel_style := String(spec.get("wheel", "five"))
+	var wmesh := load_mesh("wheel_" + wheel_style)
 	var wr: float = spec["wheel_r"]
 	for i in 4:
 		var pivot := Node3D.new()
@@ -275,7 +364,7 @@ func setup(p_car: Car) -> void:
 		if wmesh:
 			for s in wmesh.get_surface_count():
 				var src := wmesh.surface_get_material(s)
-				wm.set_surface_override_material(s, shared_mat(src.resource_name if src else "tyre"))
+				wm.set_surface_override_material(s, _wheel_finish(src.resource_name if src else "tyre", wheel_style == "offroad"))
 		# Left wheels face outward the other way.
 		if i % 2 == 0:
 			wm.rotation.y = PI
@@ -284,13 +373,14 @@ func setup(p_car: Car) -> void:
 		var cal := MeshInstance3D.new()
 		cal.name = "Caliper"
 		cal.mesh = _caliper_mesh()
-		cal.material_override = shared_mat("caliper") if spec.get("caliper", true) else shared_mat("trim")
+		var painted_caliper := spec.get("caliper", wheel_style not in ["steel", "offroad"]) as bool
+		cal.material_override = shared_mat("caliper") if painted_caliper else shared_mat("trim")
 		var sx := -1.0 if i % 2 == 0 else 1.0
 		var rr := wr * 0.53
 		# Behind the axle (front wheels) / ahead of it (rear), at about 10 o'clock.
 		var ang := deg_to_rad(35.0)
 		var zs := 1.0 if i < 2 else -1.0
-		cal.position = Vector3(sx * float(spec.get("tyre_w", 0.26)) * 0.03, rr * cos(ang), zs * rr * sin(ang))
+		cal.position = Vector3(sx * float(spec.get("tyre_w", 0.26)) * 0.25, rr * cos(ang), zs * rr * sin(ang))
 		cal.rotation.x = -zs * ang
 		cal.scale = Vector3.ONE * wr / 0.33
 		pivot.add_child(cal)
@@ -305,11 +395,16 @@ func setup(p_car: Car) -> void:
 	car.repaired.connect(reset_dents)
 
 
-static var _cal_mesh: BoxMesh
+static var _cal_mesh: ArrayMesh
 static func _caliper_mesh() -> Mesh:
 	if _cal_mesh == null:
-		_cal_mesh = BoxMesh.new()
-		_cal_mesh.size = Vector3(0.07, 0.07, 0.15)
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_add_box(st, Vector3(0.065, 0.050, 0.129), Vector3.ZERO)
+		_add_box(st, Vector3(0.079, 0.042, 0.090), Vector3(0, -0.020, 0))
+		_add_box(st, Vector3(0.053, 0.027, 0.021), Vector3(0, 0.021, 0.074))
+		_add_box(st, Vector3(0.053, 0.027, 0.021), Vector3(0, 0.021, -0.074))
+		_cal_mesh = st.commit()
 	return _cal_mesh
 
 
@@ -427,6 +522,22 @@ func enable_headlights(_shadows := false) -> void:
 	main.visible = false
 	add_child(main)
 	head_lights.append(main)
+	if not lamp_pos["tail"].is_empty() and _reverse_mat != null:
+		var tail := Vector3.ZERO
+		for p: Vector3 in lamp_pos["tail"]:
+			tail += p
+		tail /= float(lamp_pos["tail"].size())
+		_reverse_light = SpotLight3D.new()
+		_reverse_light.name = "ReverseSpill"
+		_reverse_light.light_color = Color(0.84, 0.91, 1.0)
+		_reverse_light.spot_range = 7.0
+		_reverse_light.spot_angle = 52.0
+		_reverse_light.spot_angle_attenuation = 1.6
+		_reverse_light.light_specular = 0.18
+		_reverse_light.position = Vector3(0, tail.y, tail.z + 0.28)
+		_reverse_light.rotation = Vector3(deg_to_rad(-12), PI, 0)
+		_reverse_light.visible = false
+		add_child(_reverse_light)
 
 
 func set_siren(on: bool) -> void:
@@ -461,28 +572,43 @@ func _process(dt: float) -> void:
 	if car == null:
 		return
 	if _contact:
-		var sm := _contact.material_override as ShaderMaterial
-		sm.set_shader_parameter("strength", 0.3 * clampf(float(car.wheels_on_ground) / 4.0, 0.0, 1.0))
+		_ground_shadow(dt)
 	_t += dt
 	_dent_cooldown -= dt
-	var spec := car.spec
 	for i in 4:
 		var p := wheels[i]
 		p.position = car.wheel_local(i)
 		if i < 2:
-			p.rotation.y = -car.steer_angle
+			p.rotation.y = -car.wheel_steering(i)
 		_spins[i].rotation.x = -car.wheel_spin[i]
-	# Brake lights (and a dim glow when lit at night).
-	var braking := car.brake > 0.1 and car.forward_speed > 0.5
-	tail_mat.emission_energy_multiplier = (3.2 if braking or car.disabled else 0.7) + lamps * 1.6
-	head_mat.emission_energy_multiplier = 1.2 + lamps * 5.0
+	# Running lights, service brake and reverse are separate circuits.
+	var rise := 1.0 - exp(-dt * 30.0)
+	_brake_level = lerpf(_brake_level, 1.0 if car.brake_lamps else 0.0, rise)
+	_reverse_level = lerpf(_reverse_level, 1.0 if car.reverse_gear else 0.0, rise)
+	var switched_off := _showroom or car.disabled or (car.park_lock and not car.occupied)
+	var night_lights := 0.0 if switched_off else lamps
+	if flares:
+		flares.visible = not switched_off
+	tail_mat.emission_energy_multiplier = night_lights * 0.81 + _brake_level * 2.55
+	head_mat.emission_energy_multiplier = 0.16 + night_lights * 4.6
+	if _reverse_mat:
+		_reverse_mat.set_shader_parameter("reverse_level", _reverse_level * 2.9)
+	if _reverse_light:
+		_reverse_light.visible = _reverse_level > 0.025 and night_lights > 0.08
+		_reverse_light.light_energy = _reverse_level * night_lights * 3.1
+	if car.occupied and not _showroom:
+		var wet := visible_wetness
+		_road_film = minf(0.46, _road_film + dt * smoothstep(5.0, 22.0, car.speed) * wet * 0.008)
+	if absf(_visible_film - _road_film) > 0.013:
+		_visible_film = _road_film
+		paint_mat.set_shader_parameter("road_film", _visible_film)
 	if not head_lights.is_empty():
-		var on := lamps > 0.05 and not car.disabled
+		var on := night_lights > 0.05
 		head_lights[0].visible = on
-		head_lights[0].light_energy = 18.0 * lamps
+		head_lights[0].light_energy = 18.0 * night_lights
 		if head_lights.size() > 1:
 			head_lights[1].visible = on
-			head_lights[1].light_energy = 3.0 * lamps
+			head_lights[1].light_energy = 3.0 * night_lights
 	if beacon_light_a and beacon_light_a.visible:
 		var ph := fmod(_t * 2.6, 1.0)
 		var a := 1.0 if ph < 0.5 else 0.0
@@ -1031,3 +1157,78 @@ static func _add_cone(st: SurfaceTool, base: Vector3, dir: Vector3, r: float, le
 	var x := y.cross(Vector3.UP if absf(y.y) < 0.9 else Vector3.RIGHT).normalized()
 	var z := x.cross(y)
 	st.append_from(cm, 0, Transform3D(Basis(x, y, z), base + y * length * 0.5))
+
+
+static var _access_meshes := {}
+var _access_nodes: Node3D
+var _access_panels: Array[Node3D] = []
+var _access_handles: Array[Node3D] = []
+
+
+func pose_access(side: float, amount: float, profile: Dictionary) -> Node3D:
+	if _access_nodes == null:
+		_build_access(profile)
+	var i := 1 if side > 0.0 else 0
+	_access_panels[i].rotation.y = side * amount * deg_to_rad(57.0)
+	return _access_handles[i]
+
+
+func end_access() -> void:
+	if _access_nodes:
+		_access_nodes.queue_free()
+		_access_nodes = null
+		_access_panels.clear()
+		_access_handles.clear()
+	body.show()
+
+
+func _build_access(profile: Dictionary) -> void:
+	var id := String(car.spec["body"])
+	var pieces: Dictionary = _access_meshes.get(id, {})
+	if not _access_meshes.has(id):
+		var path := "res://assets/vehicle_entries/" + id + ".glb"
+		if ResourceLoader.exists(path):
+			var scene := (load(path) as PackedScene).instantiate()
+			for n: MeshInstance3D in scene.find_children("*", "MeshInstance3D", true, false):
+				pieces[String(n.name)] = n.mesh
+			scene.free()
+		_access_meshes[id] = pieces
+	_access_nodes = Node3D.new()
+	_access_nodes.name = "VehicleDoors"
+	add_child(_access_nodes)
+	var animated := not _deformed and pieces.has("CabinOpening") and pieces.has("DoorLeft") and pieces.has("DoorRight")
+	if animated:
+		body.hide()
+		_access_nodes.add_child(_access_piece(pieces["CabinOpening"]))
+	for side: float in [-1.0, 1.0]:
+		var pivot := Node3D.new()
+		var hinge: Array = profile["hinge"]
+		pivot.position = Vector3(side * float(profile["edge"]), float(hinge[1]), float(hinge[0]))
+		_access_nodes.add_child(pivot)
+		_access_panels.append(pivot)
+		if animated:
+			var door := _access_piece(pieces["DoorLeft" if side < 0.0 else "DoorRight"])
+			door.position = -pivot.position
+			pivot.add_child(door)
+		var handle := Marker3D.new()
+		var pull: Array = profile["handle"]
+		handle.position = Vector3(side * 0.039, float(pull[1]) - float(hinge[1]), float(pull[0]) - float(hinge[0]))
+		pivot.add_child(handle)
+		_access_handles.append(handle)
+
+
+func _access_piece(mesh: Mesh) -> MeshInstance3D:
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	var finishes := {}
+	for i in body.mesh.get_surface_count():
+		var source := body.mesh.surface_get_material(i)
+		if source:
+			finishes[source.resource_name] = body.get_surface_override_material(i)
+	for i in mesh.get_surface_count():
+		var source := mesh.surface_get_material(i)
+		if source:
+			# Blender suffixes duplicate material names when processing a fleet in one scene.
+			var name := source.resource_name.get_slice(".", 0)
+			instance.set_surface_override_material(i, finishes.get(name, shared_mat(name)))
+	return instance

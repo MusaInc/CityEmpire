@@ -179,3 +179,35 @@ func test_two_thumb_priority_and_power_slide(t) -> void:
 	input.queue_free()
 	c.queue_free()
 	g.queue_free()
+
+
+func test_brake_and_reverse_use_the_selected_gear(t) -> void:
+	var runner: SceneTree = t
+	var ground := _ground(runner)
+	var car := _car(runner)
+	await _launch(runner, car, 8.0)
+	car.throttle = 0.0
+	car.brake = 0.8
+	for i in 3:
+		await runner.physics_frame
+	t.check(car.brake_lamps and not car.reverse_gear, "brake pedal lights the brakes while travelling forward")
+
+	car.place(Transform3D(Basis.IDENTITY, Vector3(0, 0.4, 0)))
+	for i in 3:
+		await runner.physics_frame
+	t.check(car.reverse_gear and not car.brake_lamps, "the same pedal selects reverse at a standstill")
+
+	car.park_lock = true
+	car.occupied = false
+	car.handbrake = true
+	for i in 3:
+		await runner.physics_frame
+	t.check(not car.reverse_gear and not car.brake_lamps, "the unattended parking brake does not engage reverse or brake lights")
+
+	car.brake = 0.0
+	car.steer_angle = 0.29
+	t.check(car.wheel_steering(1) > car.wheel_steering(0) and car.wheel_steering(2) == 0.0,
+		"the inside front wheel steers more tightly and both rear wheels stay straight")
+	car.queue_free()
+	ground.queue_free()
+	await runner.process_frame

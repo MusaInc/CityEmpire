@@ -70,6 +70,8 @@ var kickdown := false
 var role := "player"
 
 # --- state (read by camera, audio, HUD, AI) ---
+var reverse_gear := false
+var brake_lamps := false
 var forward_speed := 0.0       # m/s along the body's forward axis
 var speed := 0.0               # |velocity| m/s
 var drift_angle := 0.0         # rad, signed slip of the body's velocity vs heading
@@ -106,6 +108,7 @@ var _contact: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector
 var _normal: Array[Vector3] = [Vector3.UP, Vector3.UP, Vector3.UP, Vector3.UP]
 var _hit: Array[bool] = [false, false, false, false]
 var wheel_spin: PackedFloat32Array = [0.0, 0.0, 0.0, 0.0]
+var _wheel_omega: PackedFloat32Array = [0.0, 0.0, 0.0, 0.0]
 var wheel_comp_visual: PackedFloat32Array = [0.0, 0.0, 0.0, 0.0]
 var _prev_vel := Vector3.ZERO
 var _was_air := false
@@ -220,6 +223,19 @@ func wheel_local(i: int) -> Vector3:
 	return top + Vector3(0, -(rest - wheel_comp_visual[i]) - 0.0, 0)
 
 
+## Inside front tyre follows a tighter arc than the outside tyre.
+func wheel_steering(i: int) -> float:
+	if i >= 2:
+		return 0.0
+	var wb: float = spec["wheelbase"]
+	var tangent := tan(steer_angle)
+	return atan2(wb * tangent, wb - _wheel_pos[i].x * tangent)
+
+
+func wheel_contact_normal(i: int) -> Vector3:
+	return _normal[i]
+
+
 func wheel_contact(i: int) -> bool:
 	return _hit[i]
 
@@ -311,6 +327,8 @@ func _physics_process(dt: float) -> void:
 		_still = _still + dt if linear_velocity.length() < 0.15 and angular_velocity.length() < 0.15 else 0.0
 		if _still > 0.6:
 			freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+			reverse_gear = false
+			brake_lamps = false
 			freeze = true
 			linear_velocity = Vector3.ZERO
 			angular_velocity = Vector3.ZERO
@@ -358,8 +376,13 @@ func _physics_process(dt: float) -> void:
 		steer_rate *= 1.7
 	steer_angle = move_toward(steer_angle, target_steer, steer_rate * dt)
 
-	# Reverse: brake held at (near) standstill.
-	var reversing := reverse_enabled and brk > 0.5 and forward_speed < 1.5 and thr < 0.5
+	# The parking brake holds the car after exit. Only an active driver
+	# holding the service brake at near standstill selects reverse.
+	var active_driver := not disabled and not in_water and (not park_lock or occupied)
+	var reversing := active_driver and reverse_enabled and not handbrake and brk > 0.5 \
+		and forward_speed < 0.45 and thr < 0.5
+	reverse_gear = reversing
+	brake_lamps = active_driver and not reversing and brk > 0.1
 	var drive := 0.0
 	var top: float = spec["top_speed"] * (1.0 - 0.2 * (1.0 - health)) * (1.0 - 0.18 * puncture)
 	if reversing:
@@ -397,6 +420,7 @@ func _physics_process(dt: float) -> void:
 		coast = mass * (float(spec.get("engine_brake", 1.2)) + 1.3 * minf(sp_t, 1.0))
 	# GAS while still rolling backwards brakes first, then drives off.
 	var auto_brk := clampf(thr, 0.0, 1.0) if (thr > 0.1 and forward_speed < -0.5 and not reversing) else 0.0
+	brake_lamps = brake_lamps or (active_driver and auto_brk > 0.1)
 	_update_gears(sp_t, thr, dt)
 
 	# --- wheels ---
@@ -418,12 +442,19 @@ func _physics_process(dt: float) -> void:
 		var r := _rays[i]
 		# Cast now: a RayCast3D's own update is a physics frame old, which at
 		# 25 m/s puts the hit 40 cm behind the wheel and unloads it.
+		var front := i < 2
+		var driven := drv == "awd" or (drv == "rwd" and not front) or (drv == "fwd" and front)
+		var hb := handbrake and not front and not disabled
 		r.force_raycast_update()
 		_hit[i] = r.is_colliding()
 		if not _hit[i]:
 			_comp[i] = move_toward(_comp[i], 0.0, dt * 2.0)
 			wheel_comp_visual[i] = _comp[i]
 			wheel_slip[i] = 0.0
+			var free_spin := _wheel_omega[i] * exp(-dt * 0.65)
+			if driven and absf(drive) > 0.12 and not hb:
+				free_spin = clampf(free_spin + drive * 32.0 * dt, -12.0 / wr, maxf(top, speed) / wr + 16.0)
+			_spin_wheel(i, 0.0 if hb else free_spin, 24.0 if hb else 60.0, dt)
 			continue
 		ground += 1
 		var p := r.get_collision_point()
@@ -449,16 +480,14 @@ func _physics_process(dt: float) -> void:
 		# Tyre frame on the contact plane.
 		var wfwd := fwd
 		if i < 2:
-			wfwd = fwd.rotated(up, -steer_angle)
+			wfwd = fwd.rotated(up, -wheel_steering(i))
 		wfwd = (wfwd - n * wfwd.dot(n)).normalized()
 		var wside := wfwd.cross(n).normalized()  # points right
 		var pv := vel + angular_velocity.cross(at)
 		var v_long := pv.dot(wfwd)
 		var v_lat := pv.dot(wside)
-		var front := i < 2
 		var mu_w: float = mu * (spec["grip_front"] if front else spec["grip_rear"])
 		var slide_mu: float = mu_w * spec.get("slide", 0.82)
-		var hb := handbrake and not front and not disabled
 		if hb:
 			slide_mu = mu_w * spec.get("hb_grip", 0.42)
 		# Lateral: slip angle -> force (peak, then sliding grip).
@@ -475,10 +504,8 @@ func _physics_process(dt: float) -> void:
 			f_lat = -v_lat * mass * 0.25 * 4.0
 			f_lat = clampf(f_lat, -mu_w * fz, mu_w * fz)
 		# Longitudinal.
-		var f_long := 0.0
-		var driven := drv == "awd" or (drv == "rwd" and not front) or (drv == "fwd" and front)
-		if driven:
-			f_long += engine_f / n_driven
+		var drive_force := engine_f / n_driven if driven else 0.0
+		var f_long := drive_force
 		var b_in := maxf(brk, auto_brk)
 		if b_in > 0.0 and not reversing:
 			var bf: float = spec["brake"] * mass * b_in * (0.62 if front else 0.38)
@@ -502,7 +529,7 @@ func _physics_process(dt: float) -> void:
 		var f := Vector2(f_long, f_lat)
 		var excess := 0.0
 		if f.length() > cap and f.length() > 0.0:
-			excess = f.length() / cap - 1.0
+			excess = f.length() / maxf(cap, 1.0) - 1.0
 			f = f.normalized() * cap
 		# Lateral force acts at a raised roll centre (arcade: cars lean but
 		# don't trip over their own tyres); drive/brake at the contact patch.
@@ -516,10 +543,11 @@ func _physics_process(dt: float) -> void:
 		wheel_slip[i] = ws
 		if not front:
 			rear_sliding = maxf(rear_sliding, s_ratio)
-		wheel_spin[i] += (v_long / wr) * dt * (0.0 if hb else 1.0)
-	for i in 4:
-		if not _hit[i]:
-			wheel_spin[i] += (forward_speed / wr) * dt * 0.98
+		var target_omega := v_long / wr
+		if absf(drive_force) > 1.0 and b_in < 0.1:
+			var unmet := 1.0 - clampf(absf(f.x / drive_force), 0.0, 1.0)
+			target_omega += signf(drive_force) * unmet * absf(drive) * 23.0
+		_spin_wheel(i, 0.0 if hb else target_omega, 26.0 if hb else 48.0, dt)
 	wheels_on_ground = ground
 
 	# Anti-roll bars (front and rear axle pairs).
@@ -662,6 +690,12 @@ func _physics_process(dt: float) -> void:
 	scraping = move_toward(scraping, 0.0, dt * 4.0)
 	_prev_vel = vel
 	Prof.end("car")
+
+
+func _spin_wheel(i: int, target: float, rate: float, dt: float) -> void:
+	var previous := _wheel_omega[i]
+	_wheel_omega[i] = lerpf(previous, target, 1.0 - exp(-rate * dt))
+	wheel_spin[i] = wrapf(wheel_spin[i] + (_wheel_omega[i] + previous) * 0.5 * dt, -PI, PI)
 
 
 func _update_gears(sp_t: float, thr: float, dt: float) -> void:
@@ -880,8 +914,14 @@ func place(xf: Transform3D, vel := Vector3.ZERO) -> void:
 	PhysicsServer3D.body_set_state(get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, xf)
 	PhysicsServer3D.body_set_state(get_rid(), PhysicsServer3D.BODY_STATE_LINEAR_VELOCITY, vel)
 	PhysicsServer3D.body_set_state(get_rid(), PhysicsServer3D.BODY_STATE_ANGULAR_VELOCITY, Vector3.ZERO)
+	reverse_gear = false
+	brake_lamps = false
+	wheels_on_ground = 0
+	var rolling_speed := vel.dot(-xf.basis.z) / float(spec["wheel_r"])
 	for i in 4:
 		_comp[i] = 0.0
+		_hit[i] = false
+		_wheel_omega[i] = rolling_speed
 	airtime = 0.0
 	_was_air = false
 	stuck_time = 0.0

@@ -75,10 +75,19 @@ func _spawn(v: Dictionary) -> Craft:
 	c.name = "Craft_" + String(v["id"])
 	c.setup(vclass(model), model, craft_spec(model))
 	c.water_check = game.layout.is_water
-	c.berths = game.skyport.wplan.get("berths", []) if game.skyport else []
 	game.add_child(c)
 	var p := Vector3(float(v["pos"][0]), float(v["pos"][1]), float(v["pos"][2]))
 	var yaw := float(v.get("yaw", 0.0))
+	if c.kind == "boat" and game.skyport:
+		# The chart marks the middle of each slip. Bring the hull alongside the
+		# pier with enough fender room for its beam, including boats in older saves.
+		var beam: Vector3 = c.spec["size"]
+		var alongside := SkyportIsland.wd(Vector3(0, 0, -1)) * (10.5 - beam.x * 0.5 - 0.42)
+		for berth: Array in game.skyport.wplan.get("berths", []):
+			var centre: Vector3 = berth[0]
+			c.berths.append([centre + alongside, berth[1]])
+			if p.distance_to(centre) < 1.4:
+				p = centre + alongside
 	if c.kind != "boat" and game.layout.is_water(p) and p.y < Craft.SEA_Y + 0.5 and game.skyport:
 		var slot := free_slot(c.kind)   # (saved sunk in the sea: back on its pad)
 		p = slot[0]
@@ -147,10 +156,24 @@ func _nearest_dealer() -> String:
 	return best
 
 
-func enter(vid: String) -> void:
+func enter(vid: String, animate := false) -> void:
 	var c: Craft = crafts.get(vid)
-	if c == null:
+	if c == null or game.vehicle_access.active():
 		return
+	if animate:
+		var dock := _step_off(c) if c.kind == "boat" else Vector3.INF
+		var found := game.vehicle_access.landing(c, true, dock)
+		if not c.can_exit() or found.is_empty():
+			game.ui.toast("Move beside a clear boarding point", "warn")
+			return
+		cam.set_target(c)
+		game.vehicle_access.start(c, true, found, _finish_entry.bind(vid), cam.cam)
+		return
+	_finish_entry(Vector3.ZERO, Transform3D.IDENTITY, 68.0, vid)
+
+
+func _finish_entry(_stand: Vector3, _from: Transform3D, _fov: float, vid: String) -> void:
+	var c: Craft = crafts.get(vid)
 	piloting = vid
 	game.player.input_enabled = false
 	game.player.visible = false
@@ -158,7 +181,8 @@ func enter(vid: String) -> void:
 	game.player.collision_layer = 0
 	# (Ease from the walking camera to the craft's: no cut.)
 	var from := get_viewport().get_camera_3d().global_transform if get_viewport().get_camera_3d() else Transform3D()
-	cam.set_target(c, from)
+	if _from == Transform3D.IDENTITY:
+		cam.set_target(c, from)
 	cam.cam.make_current()
 	game.world.set_viewer(cam)
 	_last = c.global_position
@@ -166,30 +190,35 @@ func enter(vid: String) -> void:
 
 
 ## Out of the craft (only when it's down / stopped). Returns why not.
-func exit() -> String:
+func exit(animate := false) -> String:
+	if game.vehicle_access.active():
+		return ""
 	var c: Craft = crafts.get(piloting)
 	if c == null:
 		piloting = ""
 		return ""
 	if not c.can_exit():
 		return {"heli": "Land first", "plane": "Stop on the ground first"}.get(c.kind, "Slow down first") as String
-	var v := game.empire.vehicle(piloting)
+	var dock := _step_off(c) if c.kind == "boat" else Vector3.INF
+	var found := game.vehicle_access.landing(c, false, dock)
+	if found.is_empty():
+		return "Moor beside a clear dock" if c.kind == "boat" else "Park beside a clear exit"
+	if animate:
+		game.vehicle_access.start(c, false, found, _finish_exit.bind(piloting))
+	else:
+		_finish_exit(found["pos"], Transform3D.IDENTITY, 70.0, piloting)
+	return ""
+
+
+func _finish_exit(stand: Vector3, from: Transform3D, fov: float, vid: String) -> void:
+	var c: Craft = crafts.get(vid)
+	var v := game.empire.vehicle(vid)
 	v["pos"] = [c.global_position.x, c.global_position.y, c.global_position.z]
 	v["yaw"] = c.global_basis.get_euler().y
-	var out := _step_off(c)
-	var was := piloting
 	piloting = ""
-	game.player.process_mode = Node.PROCESS_MODE_INHERIT
-	game.player.visible = true
-	game.player.collision_layer = 1 << 2
-	game.player.respawn(out + Vector3.UP * 0.9)
-	game.player.input_enabled = true
-	game.camera.face(c.global_basis.get_euler().y)
-	game.camera.cam.make_current()
-	game.world.set_viewer(game.camera)
+	game._finish_on_foot(stand, c.global_basis.get_euler().y, from, fov)
 	if v.get("test", false):
-		end_test(was)
-	return ""
+		end_test(vid)
 
 
 ## After a crash: the airport's recovery crew brings the craft back to where
@@ -227,7 +256,8 @@ func _step_off(c: Craft) -> Vector3:
 	for pr: Array in game.skyport.wplan["piers"]:
 		var a: Vector3 = pr[0]
 		var b: Vector3 = pr[1]
-		var q := Vector3(clampf(c.global_position.x, a.x, b.x), 0.7, clampf(c.global_position.z, a.z, b.z))
+		var q := Vector3(clampf(c.global_position.x, a.x + 0.34, b.x - 0.34),
+			b.y + 0.10, clampf(c.global_position.z, a.z + 0.34, b.z - 0.34))
 		var d := q.distance_to(c.global_position)
 		if d < bd:
 			bd = d
@@ -290,6 +320,9 @@ var script_input := {}
 func _physics_process(_dt: float) -> void:
 	var c: Craft = crafts.get(piloting)
 	if c == null:
+		return
+	if game.vehicle_access.active():
+		c.input = {"active": false, "gas": 0.0, "brake": 1.0, "kick": false, "steer": 0.0}
 		return
 	if not script_input.is_empty():
 		c.input = script_input.duplicate()
@@ -556,7 +589,7 @@ func prompt(s: Dictionary) -> Array:
 func act(s: Dictionary) -> void:
 	match String(s["kind"]):
 		"sky_craft":
-			enter(String(s["vehicle"]))
+			enter(String(s["vehicle"]), true)
 		"sky_display":
 			SkyportUI.vehicle_card(game.ui, String(s["model"]), String(s["site"]))
 		"sky_roof":

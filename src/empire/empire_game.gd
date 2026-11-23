@@ -38,6 +38,7 @@ var rig: CharacterRig
 var camera: SwingCamera
 var chase: ChaseCamera
 var drive_input: DriveInput
+var vehicle_access := VehicleAccess.new(self)
 var skyport: SkyportIsland
 var skyport_play: SkyportPlay
 var venues: Venues   # walk-in showrooms + clothes shops on Skyport
@@ -987,6 +988,7 @@ func _play() -> void:
 
 
 func _teleport(p: Vector3, yaw: float) -> void:
+	vehicle_access.interrupt()
 	if skyport and SkyportIsland.distance_to(p) < SkyportIsland.NEAR_LOAD and not skyport.near_loaded():
 		skyport.load_near_now()   # (arriving at once: its buildings must be solid now)
 	if venues:
@@ -1054,6 +1056,9 @@ func _process(dt: float) -> void:
 			_update_pursuit()
 			ExploreUI.discover(self)
 	if state != "play":
+		return
+	if vehicle_access.active():
+		vehicle_access.tick(dt)
 		return
 	_update_spot()
 	_update_indoors()
@@ -1784,13 +1789,13 @@ func _carried_for(b: Business, slot_i: int) -> String:
 
 ## Do the current spot's action.
 func act() -> void:
-	if state != "play":
+	if state != "play" or vehicle_access.active():
 		return
 	if driving != "":
-		exit_vehicle()
+		exit_vehicle(true)
 		return
 	if skyport_play and skyport_play.piloting != "":
-		var why := skyport_play.exit()
+		var why := skyport_play.exit(true)
 		if why != "":
 			ui.toast(why, "warn")
 		return
@@ -1907,7 +1912,7 @@ func act() -> void:
 			sleep_until(7.0)
 			save_game()
 		"car_door":
-			enter_vehicle(spot["vehicle"])
+			enter_vehicle(spot["vehicle"], true)
 		"car_boot":
 			_boot_action(spot["vehicle"])
 
@@ -2176,7 +2181,25 @@ func _spawn_car(v: Dictionary) -> Car:
 	return c
 
 
-func enter_vehicle(vid: String) -> void:
+func enter_vehicle(vid: String, animate := false) -> void:
+	var c: Car = cars.get(vid)
+	if c == null or vehicle_access.active():
+		return
+	if animate:
+		if absf(c.speed) > 1.15 or c.in_water or player.stunned:
+			ui.toast("The car needs to be stopped", "warn")
+			return
+		var found := vehicle_access.landing(c, true)
+		if found.is_empty():
+			ui.toast("Move to a clear door", "warn")
+			return
+		chase.set_target(c, true)
+		vehicle_access.start(c, true, found, _finish_vehicle_entry.bind(vid), chase.cam)
+		return
+	_finish_vehicle_entry(Vector3.ZERO, Transform3D.IDENTITY, 64.0, vid)
+
+
+func _finish_vehicle_entry(_stand: Vector3, _from: Transform3D, _fov: float, vid: String) -> void:
 	var c: Car = cars.get(vid)
 	if c == null:
 		return
@@ -2190,7 +2213,8 @@ func enter_vehicle(vid: String) -> void:
 	drive_input.car = c
 	drive_input.enabled = true
 	speed_fx.player = c
-	chase.set_target(c, true)
+	if _from == Transform3D.IDENTITY:
+		chase.set_target(c, true)
 	chase.cam.make_current()
 	world.set_viewer(chase)
 	_last_car_pos = c.global_position
@@ -2200,39 +2224,80 @@ func enter_vehicle(vid: String) -> void:
 	car_audio.set_car(c, EmpireData.vehicle_model(String(empire.vehicle(vid).get("model", ""))))
 
 
-func exit_vehicle() -> void:
+func exit_vehicle(animate := false) -> void:
+	if vehicle_access.active():
+		return
 	var c: Car = cars.get(driving)
 	if c == null:
 		driving = ""
 		return
-	if Vector2(c.linear_velocity.x, c.linear_velocity.z).length() > 4.0:
-		ui.toast("Slow down to get out", "warn")
+	if Vector2(c.linear_velocity.x, c.linear_velocity.z).length() > (1.15 if animate else 4.0):
+		ui.toast("Stop the car to get out", "warn")
 		return
-	var v := empire.vehicle(driving)
-	var xf := c.global_transform
-	v["pos"] = [xf.origin.x, xf.origin.y, xf.origin.z]
-	v["yaw"] = xf.basis.get_euler().y
-	var side := xf * Vector3(-c.spec["size"].x * 0.5 - 0.9, 0.0, -0.2)
+	var found := vehicle_access.landing(c, false)
+	if found.is_empty():
+		ui.toast("Both sides are blocked. Move to a clear spot.", "warn")
+		return
 	drive_input.enabled = false
-	drive_input.car = null
-	speed_fx.player = null
 	c.throttle = 0.0
 	c.brake = 1.0
 	c.handbrake = true
 	c.power_slide = 0.0
+	if animate:
+		vehicle_access.start(c, false, found, _finish_vehicle_exit.bind(driving))
+		return
+	_finish_vehicle_exit(found["pos"], Transform3D.IDENTITY, 70.0, driving)
+
+
+func _finish_vehicle_exit(stand: Vector3, from: Transform3D, fov: float, vid: String) -> void:
+	var c: Car = cars.get(vid)
+	if c == null:
+		return
+	var v := empire.vehicle(vid)
+	var xf := c.global_transform
+	v["pos"] = [xf.origin.x, xf.origin.y, xf.origin.z]
+	v["yaw"] = xf.basis.get_euler().y
+	drive_input.car = null
+	speed_fx.player = null
 	c.occupied = false
 	driving = ""
 	car_audio.set_car(null)
+	_finish_on_foot(stand, xf.basis.get_euler().y, from, fov)
+	if v.get("test", false) and skyport_play:
+		skyport_play.end_test(vid)
+
+
+func _finish_on_foot(stand: Vector3, yaw: float, from: Transform3D, fov: float) -> void:
 	player.process_mode = Node.PROCESS_MODE_INHERIT
 	player.visible = true
 	player.collision_layer = 1 << 2
-	player.respawn(Vector3(side.x, maxf(side.y, xf.origin.y) + 0.9, side.z))
+	player.respawn(stand)
 	player.input_enabled = true
-	camera.face(xf.basis.get_euler().y)
+	rig.set_facing(-Basis(Vector3.UP, yaw).z)
+	camera.face(yaw)
+	if from != Transform3D.IDENTITY:
+		camera.blend_from(from, fov)
 	camera.cam.make_current()
 	world.set_viewer(camera)
-	if v.get("test", false) and skyport_play:
-		skyport_play.end_test(String(v["id"]))
+
+
+func restore_vehicle_view() -> void:
+	player.scripted = false
+	player.visible = false
+	player.input_enabled = false
+	player.process_mode = Node.PROCESS_MODE_DISABLED
+	player.collision_layer = 0
+	if driving != "":
+		var car: Car = cars.get(driving)
+		if car:
+			drive_input.car = car
+			drive_input.enabled = true
+			chase.set_target(car, true)
+			chase.cam.make_current()
+			world.set_viewer(chase)
+	elif skyport_play and skyport_play.piloting != "":
+		skyport_play.cam.cam.make_current()
+		world.set_viewer(skyport_play.cam)
 
 
 func _track_driving(dt: float) -> void:

@@ -107,6 +107,9 @@ var look_down := 0.0
 var _look_down := 0.0
 ## Scripted shots (cine) that frame something other than the hero hide it.
 var hide_body := false
+var _handoff := 0.0
+var _handoff_from := Transform3D.IDENTITY
+var _handoff_fov := 70.0
 ## Indoors (set by HomeSystem): the room's ceiling height (world y), else INF.
 ## A home is a box a few metres across: the lens comes in closer and lower,
 ## never cranes into the ceiling, and treats partitions and big furniture
@@ -154,6 +157,13 @@ func shake(amount: float) -> void:
 
 func snap() -> void:
 	_snapped = true
+	_handoff = 0.0
+
+
+func blend_from(from: Transform3D, lens_fov: float) -> void:
+	_handoff_from = from
+	_handoff_fov = lens_fov
+	_handoff = 0.42
 
 
 ## Point the camera along a heading (spawns).
@@ -466,6 +476,13 @@ func _process(dt: float) -> void:
 	look.set_speed(clampf((spd - 22.0) / 30.0, 0.0, 1.0) + _punch * 0.5, dt)
 	if lens:
 		lens.set_speed(t * t * (3.0 - 2.0 * t) + _punch * 0.4, dt)
+	if _handoff > 0.0:
+		var k := smoothstep(0.0, 0.42, _handoff)
+		var blended := global_transform.interpolate_with(_handoff_from, k)
+		blended.origin = _ray_clear(target.global_position + Vector3.UP * 0.33, blended.origin)
+		global_transform = blended
+		cam.fov = lerpf(cam.fov, _handoff_fov, k)
+		_handoff = maxf(0.0, _handoff - dt)
 
 
 ## Hugging a facade (wall runs, swings close to a tower) the lens used to sit

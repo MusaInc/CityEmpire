@@ -309,7 +309,7 @@ class MapPainter:
 				match kind:
 					"park", "green":
 						col = PARK
-					"plaza":
+					"plaza", "promenade":
 						col = PLAZA
 					"piece":
 						col = PIECE

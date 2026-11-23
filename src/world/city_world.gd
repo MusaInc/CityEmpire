@@ -641,7 +641,7 @@ func bot_heading() -> Vector3:
 ## until it strays from it; at the coast it turns back.
 func bot_goal(p: Node3D) -> Vector3:
 	if _boulevards.is_empty():
-		for name in ["diagonal", "spine", "valley", "heights", "crescent", "inner"]:
+		for name in ["diagonal", "diagonal_east", "spine", "valley", "heights", "crescent", "inner"]:
 			var r: Dictionary = layout.roads.by_name.get(name, {})
 			if not r.is_empty():
 				_boulevards.append(r["pts"])

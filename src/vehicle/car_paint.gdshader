@@ -11,6 +11,9 @@ uniform float metallic = 0.45;
 uniform float roughness = 0.3;
 uniform float gloss = 1.0;       // 0 matte .. 1 full clear coat
 uniform float dirt = 0.0;        // 0 clean .. 1 wrecked
+uniform float road_film = 0.0;
+uniform bool showroom = false;
+global uniform float wetness;
 global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
@@ -34,40 +37,42 @@ float hash3(vec3 p) {
 }
 
 void fragment() {
-	vec3 base = mix(base_color, vec3(0.08, 0.07, 0.06), dirt * 0.45);
-	vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
-	// Cheap occlusion: sills and lower doors darker, under-surfaces darker
-	// still. Grounds the car on the road and sharpens the shoulder line.
-	float ao = mix(0.62, 1.0, smoothstep(0.12, 0.75, v_y)) * mix(0.55, 1.0, smoothstep(-0.7, 0.25, nw.y));
-	// Metallic "flop": the colour deepens and saturates away from the
-	// highlight (face-on bright, edges rich and dark) - real paint, not
-	// plastic, which keeps one flat tone all round.
-	float facing = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
-	vec3 deep = base * base * 1.15;
-	base = mix(deep, base, mix(1.0, smoothstep(0.05, 0.85, facing), metallic * 1.4));
-	ALBEDO = base * ao;
-	METALLIC = metallic * (1.0 - dirt * 0.6);
-	ROUGHNESS = mix(roughness, 0.8, dirt);
-	SPECULAR = 0.5;
+	float distance_to_lens = length(VERTEX);
+	float rain_film = showroom ? 0.0 : wetness;
+	float lower = 1.0 - smoothstep(0.29, 0.79, v_y);
+	float mottling = 0.56 + 0.20 * sin(31.0 * v_p.z + sin(33.0 * v_p.y)) *
+		sin(44.0 * v_p.y + 12.0 * v_p.x);
+	float film_detail = mix(0.56, mottling, 1.0 - smoothstep(3.0, 11.0, distance_to_lens));
+	float grime = lower * road_film * film_detail;
+	float wear = clamp(dirt * 0.76 + grime, 0.0, 0.93);
+	vec3 base = mix(base_color, vec3(0.107, 0.087, 0.068), grime * 0.31);
+	base = mix(base, vec3(0.068, 0.058, 0.05), dirt * 0.39);
+
 	vec3 n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 v = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 	vec3 r = reflect(-v, n);
-	// The city in the coat: sky, skyline, street (fake_reflect.gdshaderinc).
-	vec3 env = paint_reflection(r, (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz, sky_top, sky_horizon, sun_dir, night);
-	// Sun glint on the coat.
-	float sd = max(dot(r, normalize(sun_dir)), 0.0);
-	float glint = pow(sd, 160.0) * 0.9 + pow(sd, 24.0) * 0.08;
-	// Flakes: tiny sparkles in the base coat near the sun's reflection, faded
-	// out with distance (no shimmer far away).
-	float dist = length(VERTEX);
-	float fl = step(0.985, hash3(floor(v_p * 520.0))) * pow(sd, 40.0) * (1.0 - smoothstep(2.5, 6.0, dist));
-	glint += fl * flake * metallic * 0.12;
-	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
-	// (2026-11-20: 0.75 at grazing + a 6x glint washed bodies out milky
-	// grey under overcast skies and bloomed in the sun.)
-	float k = mix(0.09, 0.36, fres) * gloss * (1.0 - dirt * 0.85);
-	CLEARCOAT = 0.52 * gloss * (1.0 - dirt);
-	CLEARCOAT_ROUGHNESS = 0.18;
-	vec3 em = env * k + vec3(glint) * gloss * (1.0 - dirt);
-	EMISSION = min(em, vec3(2.4)) * (1.0 - night * 0.6);
+	float ao = mix(0.78, 1.0, smoothstep(0.12, 0.73, v_y)) * mix(0.60, 1.0, smoothstep(-0.74, 0.20, n.y));
+	float facing = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
+	float fresnel = pow(1.0 - facing, 4.0);
+	vec3 shade = base * mix(vec3(0.75), vec3(1.0), sqrt(clamp(base, vec3(0.0), vec3(1.0))));
+	ALBEDO = mix(base, shade, metallic * fresnel * 0.82) * ao;
+	METALLIC = metallic * (1.0 - wear * 0.51);
+	ROUGHNESS = clamp(roughness + wear * 0.32 - rain_film * 0.081, 0.16, 0.84);
+	SPECULAR = 0.47;
+	CLEARCOAT = clamp((gloss * 0.62 + rain_film * 0.20) * (1.0 - wear), 0.0, 1.0);
+	CLEARCOAT_ROUGHNESS = clamp(roughness * 0.52 + wear * 0.35 - rain_film * 0.056, 0.095, 0.60);
+	if (!showroom) {
+		vec3 world_at = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+		vec3 env = paint_reflection(r, world_at, sky_top, sky_horizon, sun_dir, night);
+		float sd = max(dot(r, normalize(sun_dir)), 0.0);
+		float glint = pow(sd, mix(110.0, 165.0, rain_film)) * 0.56 + pow(sd, 21.0) * 0.053;
+		// Flakes must resolve on screen to sparkle. Avoid stipple on a
+		// moving bonnet or at the van's large, shallow side angles.
+		vec3 cell = v_p * 190.0;
+		float resolve = (1.0 - smoothstep(0.7, 1.9, length(fwidth(cell)))) *
+			(1.0 - smoothstep(2.1, 5.1, distance_to_lens));
+		glint += step(0.968, hash3(floor(cell))) * resolve * pow(sd, 30.0) * flake * metallic * 0.097;
+		float coat = mix(0.055, 0.28, fresnel) * (gloss + rain_film * 0.16) * (1.0 - wear);
+		EMISSION = min(env * coat + vec3(glint * gloss * (1.0 - wear)), vec3(1.27)) * (1.0 - night * 0.67);
+	}
 }

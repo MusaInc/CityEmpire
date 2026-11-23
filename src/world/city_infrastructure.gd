@@ -2,18 +2,106 @@ class_name CityInfrastructure
 extends RefCounted
 ## Designed connections and public spaces, using the existing batched kit.
 
+static func _bridge_landing_cut(l: CityLayout) -> PackedVector2Array:
+	var first: Dictionary = {}
+	for rb in l.roads.roundabouts:
+		if rb.c.x > 150.0 and rb.c.x < 400.0 and rb.c.y > -140.0:
+			first = rb
+	return PackedVector2Array() if first.is_empty() else CityRoads._circle(first.c, float(first.r) + float(first.w) * 0.5 + 0.5, 32)
+
+
+## Close only the ground-level carriageway east of the staggered cross street.
+## The bridge deck still needs the original centreline into the roundabout.
+static func close_bridge_underpass(l: CityLayout) -> void:
+	const ENTRANCE_X := 216.0
+	var diagonal: Dictionary = l.roads.by_name["diagonal"]
+	var axis: PackedVector2Array = diagonal["pts"]
+	var cut := _bridge_landing_cut(l)
+	if cut.is_empty():
+		return
+	var sections := Geometry2D.clip_polyline_with_polygon(axis, cut)
+	if sections.size() != 2:
+		return
+	var approach: PackedVector2Array = sections[0]
+	var west := PackedVector2Array()
+	var walk := PackedVector2Array()
+	for i in approach.size():
+		var p := approach[i]
+		if p.x < ENTRANCE_X:
+			west.append(p)
+			continue
+		if walk.is_empty():
+			var a := approach[i - 1]
+			var edge := a.lerp(p, inverse_lerp(a.x, p.x, ENTRANCE_X))
+			west.append(edge)
+			walk.append(edge)
+		walk.append(p)
+	if walk.size() < 10:
+		return
+	l.bridge_promenade = walk
+	diagonal["pts"] = west
+	var east := diagonal.duplicate()
+	# Keep the roundabout through alignment for the normal junction trimming.
+	var east_axis := PackedVector2Array([approach[-1]])
+	for p in axis:
+		if p.x > approach[-1].x:
+			east_axis.append(p)
+	east["pts"] = east_axis
+	east["id"] = l.roads.roads.size()
+	east["name"] = "diagonal_east"
+	l.roads.roads.append(east)
+	l.roads.by_name["diagonal_east"] = east
+
+
+static func bridge_walk(l: CityLayout) -> void:
+	var walk := l.bridge_promenade
+	if walk.is_empty():
+		return
+	var paving := PackedVector2Array()
+	for p in walk:
+		if p.x < 276.0:
+			paving.append(p)
+	var half := float(l.roads.by_name["diagonal"]["w"]) * 0.5
+	var poly := CityRoads._buffer(paving, half - 0.40)
+	l.blocks.append({"poly": poly, "holes": [], "district": "waterfront", "kind": "promenade",
+		"rot": 0.0, "pivot": paving[0], "level": NAN, "basin": Rect2()})
+	var k := l._kit("bridge_walk")
+	var forward := (walk[1] - walk[0]).normalized()
+	var side := Vector2(-forward.y, forward.x)
+	# Close the full former carriageway while leaving a clear line between posts on foot.
+	for i in range(-10, 11):
+		var q := walk[0] + forward * 0.75 + side * (i * 1.28)
+		var h := l.ground_y(q.x, q.y) + CityTerrain.KERB
+		l._ksolid(k, q.x - 0.095, q.y - 0.095, q.x + 0.095, q.y + 0.095, h - 0.25, h + 0.86, Color("#424b4a"))
+		l._ksolid(k, q.x - 0.099, q.y - 0.099, q.x + 0.099, q.y + 0.099, h + 0.68, h + 0.74, Color("#b7baab"), false)
+	# Seating and shade-tolerant planting frame two clear routes either side of the piers.
+	var yaw := atan2(forward.y, forward.x)
+	for i: int in [2, 5, 8]:
+		for s: float in [-1.0, 1.0]:
+			var q := walk[i] + side * s * 9.8
+			var p := Vector3(q.x, l.ground_y(q.x, q.y) + CityTerrain.KERB, q.y)
+			lawn(l, p, yaw, Vector2(4.4, 2.7))
+			var seat := p - Vector3(side.x, 0, side.y) * s * 2.35
+			furniture(l, "bench", seat, -yaw + (PI if s < 0.0 else 0.0))
+			if i == 2:
+				furniture(l, "bin", seat + Vector3(forward.x, 0, forward.y) * 1.8, 0.0)
+	# End the central path where the underside draws close to the ground.
+	var end := walk[8]
+	var a := end - side * 8.5
+	var b := end + side * 8.5
+	var colour := Color("#62675f")
+	l._kbeam(k, Vector3(a.x, l.ground_y(a.x, a.y) + 0.64, a.y),
+		Vector3(b.x, l.ground_y(b.x, b.y) + 0.64, b.y), 0.48, 1.15, colour)
+
+
 static func bridge_landing(l: CityLayout) -> void:
 	var road: PackedVector2Array = l.roads.by_name.diagonal.pts
 	var path := PackedVector2Array()
 	# First roundabout is the ramp's at-grade destination; use the same cut
 	# as Traffic so its lanes meet the roundabout connectors exactly.
-	var first: Dictionary = {}
-	for rb in l.roads.roundabouts:
-		if rb.c.x > 150.0 and rb.c.x < 400.0 and rb.c.y > -140.0:
-			first = rb
-	if first.is_empty():
+	var cut := _bridge_landing_cut(l)
+	if cut.is_empty():
 		return
-	var cut := CityRoads._circle(first.c, float(first.r) + float(first.w) * 0.5 + 0.5, 32)
 	var sections := Geometry2D.clip_polyline_with_polygon(road, cut)
 	var approach: PackedVector2Array = sections[0]
 	# A straight lead-in off the bridge's square end (between the anchor

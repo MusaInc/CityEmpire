@@ -372,7 +372,7 @@ const SEG_CELL := 32.0
 const BAND := 9.0       # m past the kerb the field reaches
 
 
-func bake_field(cell := 1.5) -> void:
+func bake_field(cell := 1.5, cache_suffix := "") -> void:
 	field_cell = cell
 	# Over the whole coast (headlands and the far side of the ring road reach
 	# past `bounds`: outside the field the edge texels smeared over them).
@@ -449,7 +449,8 @@ func bake_field(cell := 1.5) -> void:
 		if DirAccess.make_dir_recursive_absolute(cache_dir) == OK:
 			# One replaceable entry per island. Hash the actual geometry so
 			# changed spurs, seeds or field resolution cannot reuse stale paint.
-			cache_path = cache_dir.path_join("westbank.bin" if landform == "westbank" else "island.bin")
+			var island_key := "westbank" if landform == "westbank" else "island"
+			cache_path = cache_dir.path_join(island_key + cache_suffix + ".bin")
 			var radii := {}
 			for id: int in _ring_c:
 				radii[id] = _ring_r(id)

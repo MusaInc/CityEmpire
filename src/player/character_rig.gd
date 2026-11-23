@@ -187,6 +187,10 @@ var carrying := false
 var _carry := 0.0
 var _handle: Node3D
 var _handle_time := 0.0
+var vehicle_pose := 0.0
+var vehicle_facing := Vector3.FORWARD
+var vehicle_grip: Node3D
+var vehicle_grip_weight := 0.0
 var _press_n := Vector3.ZERO
 var _guard_off := {}       # limb root bone -> [upper offset, ang vel, lower offset, ang vel]
 var _brace := 0.0          # arms coming up before an impact 0..1
@@ -1389,6 +1393,8 @@ func _process(dt: float) -> void:
 		global_basis = _body_basis
 		(bones["hips"] as Node3D).position = Vector3(_hip_shift * 0.5, 0.075, 0.0)
 		_drive_springs(pose, dt, false)
+	elif vehicle_pose > 0.0:
+		_pose_vehicle_access(dt)
 	elif ragdolling:
 		_update_ragdoll(dt)
 	else:
@@ -3040,6 +3046,62 @@ func _hand_to_ground(q: Dictionary, sd: String, fwd: float, out: float, k: float
 		minf(d.length(), 0.53), Vector3(0.4 * sg, 0.0, 0.9))
 	q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(ik[0], k)
 	q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(ik[1], k)
+
+
+func _pose_vehicle_access(dt: float) -> void:
+	global_position = player.global_position
+	_facing = vehicle_facing
+	var facing := Basis.looking_at(_facing, Vector3.UP)
+	_body_basis = _body_basis.slerp(facing, 1.0 - exp(-18.0 * dt)).orthonormalized()
+	global_basis = _body_basis
+	var q := {}
+	for bone in BONES:
+		q[bone] = Quaternion.IDENTITY
+	var sit := vehicle_pose
+	var lift := sin(sit * PI)
+	q["spine"] = _rx(-0.20 * lift)
+	q["chest"] = _rx(-0.14 * lift)
+	q["neck"] = _rx(0.22 * lift)
+	for sd in ["l", "r"]:
+		var sign_x := 1.0 if sd == "r" else -1.0
+		q["thigh_" + sd] = _rx(1.42 * sit + lift * (0.17 if sd == "r" else 0.03)) * _rz(sign_x * 0.12 * sit)
+		q["shin_" + sd] = _rx(-1.52 * sit - 0.22 * lift)
+		q["foot_" + sd] = _rx(0.20 * sit)
+		q["upper_arm_" + sd] = _rx(0.67 * sit) * _rz(sign_x * 0.10)
+		q["forearm_" + sd] = _rx(1.10 * sit + lift * 0.21)
+	if is_instance_valid(vehicle_grip) and vehicle_grip_weight > 0.001:
+		var at := vehicle_grip.global_position
+		var left := (bones["upper_arm_l"] as Node3D).global_position
+		var right := (bones["upper_arm_r"] as Node3D).global_position
+		var use_left := left.distance_squared_to(at) < right.distance_squared_to(at)
+		var sd := "l" if use_left else "r"
+		var direction := at - (left if use_left else right)
+		var chest := (bones["chest"] as Node3D).global_basis.orthonormalized()
+		var solved := _two_bone(chest, direction.normalized(), minf(direction.length(), 0.58),
+			Vector3(-0.5 if use_left else 0.5, -0.37, 0.61))
+		q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(solved[0], vehicle_grip_weight)
+		q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(solved[1], vehicle_grip_weight)
+	(bones["hips"] as Node3D).position.y = (BONES["hips"][1] as Vector3).y - 0.9
+	_drive_springs(q, dt, false, false)
+	# Hold the soles on the actual street or dock while the player works the
+	# latch. As the body crosses the sill the shared pose takes over.
+	var foot_weight := 1.0 - smoothstep(0.04, 0.29, sit)
+	if foot_weight > 0.001:
+		var space := player.get_world_3d().direct_space_state
+		var hips := (bones["hips"] as Node3D).global_basis.orthonormalized()
+		for sd in ["l", "r"]:
+			var ankle := (bones["foot_" + sd] as Node3D).global_position
+			var ground := _ground_hit(space, ankle, 0.24)
+			if ground.is_empty() or (ground["normal"] as Vector3).y < 0.72:
+				continue
+			ankle.y = (ground["position"] as Vector3).y + ANKLE_H
+			var direction := ankle - (bones["thigh_" + sd] as Node3D).global_position
+			var knee := Vector3(-0.08 if sd == "l" else 0.08, 0.0, -1.0)
+			var solved := _two_bone(hips, direction.normalized(), direction.length(), knee, 0.45, 0.44, -1.0)
+			for i in 2:
+				var bone: String = ("thigh_" if i == 0 else "shin_") + sd
+				_set_bone(bone, (_rot[bone] as Quaternion).slerp(solved[i], foot_weight))
+	_gait.reset()
 
 
 func reach_for_handle(handle: Node3D) -> void:

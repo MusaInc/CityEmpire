@@ -466,9 +466,12 @@ func _cars(R: Dictionary) -> void:
 		var vis := CarVisual.new()
 		c.add_child(vis)
 		vis.setup(c)
+		vis.set_showroom()
 		c.visual = vis
-		# (The marks' -Z faces the car's nose; cars face -Z too.)
-		c.place(Transform3D(xf.basis, xf.origin + Vector3.UP * 0.35))
+		# Markers sit on the plinth or floor. Align the bottom of the
+		# frozen suspension's tyres to that plane.
+		var tyre_bottom := c.wheel_local(0).y - float(c.spec["wheel_r"])
+		c.place(Transform3D(xf.basis, xf.origin - xf.basis.y * tyre_bottom))
 		c.freeze = true
 		c.set_meta("site", sid)
 		c.set_meta("model", model)
