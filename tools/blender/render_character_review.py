@@ -123,6 +123,8 @@ VIEWS = {
     'face': (Vector((0.22, 0.95, 0.03)), Vector((0, 0.05, 1.61)), 85),
     'portrait': (Vector((0.10, 0.62, 0.0)), Vector((0, 0.09, 1.555)), 85),
     'portrait_34': (Vector((0.42, 0.48, 0.0)), Vector((0, 0.08, 1.555)), 85),
+    'mouth_front': (Vector((0.0, 0.40, 0.0)), Vector((0, 0.12, 1.53)), 85),
+    'mouth_profile': (Vector((0.40, 0.0, 0.0)), Vector((0, 0.11, 1.53)), 85),
     'face_side': (Vector((0.95, 0.15, 0.03)), Vector((0, 0.03, 1.61)), 85),
     'collar': (Vector((0.15, 0.85, 0.12)), Vector((0, 0.03, 1.5)), 60),
     'shoulder': (Vector((0.75, 0.55, 0.18)), Vector((0.2, 0, 1.45)), 60),

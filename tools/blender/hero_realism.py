@@ -525,6 +525,8 @@ def finish_realism(rig, meshes, identity, output):
         balance_face(face, eyes)
         sculpt_face(face, eyes)
         shape_lips(face, eyes)
+        from jules_anatomy import correct_anatomy
+        correct_anatomy(face, eyes)
         from portrait_project import drop_geometry_brows
         drop_geometry_brows(face)   # the photographic texture carries the brows
     lashes(face, eyes, identity)
@@ -541,6 +543,8 @@ def finish_realism(rig, meshes, identity, output):
         from portrait_project import project_portrait
         source = Path(__file__).resolve().parents[2] / 'art/hero/sources/jules-portrait-reference.jpeg'
         print('PORTRAIT LANDMARKS', project_portrait(face, shell, identity, eyes, source, (.80, .50, .355), output))
+        from hero_polish import hairline_cards
+        hairline_cards(face, shell, models['Groom_bun_jules'], eyes)
     else:
         groom = models.get('Groom_crop_ade')
         if groom is not None:

@@ -443,3 +443,118 @@ def sculpt_face(face, eyes):
         if d.length_squared > 1e-12 and i not in seam:
             delta[i] = d
     _apply_delta(face, delta)
+
+
+def hairline_cards(face, shell, groom, eyes, rows=2, spacing=.0024, seed=731):
+    """Natural forehead transition: taper the cap into the skin over its last
+    12 mm, then lay two staggered rows of thin strand cards rooted just in
+    front of the edge and combed back over the cap toward the bun."""
+    import random
+    from mathutils.bvhtree import BVHTree
+    from mathutils.kdtree import KDTree
+    eye = (eyes[0] + eyes[1]) * .5
+    slot = next(i for i, m in enumerate(face.data.materials) if m.name.startswith('hero_skin_face_'))
+    skin = BVHTree.FromPolygons([v.co for v in face.data.vertices],
+                                [tuple(p.vertices) for p in face.data.polygons if p.material_index == slot])
+    data = shell.data
+    count = {}
+    for poly in data.polygons:
+        if poly.material_index == 0:
+            for edge in poly.edge_keys:
+                count[edge] = count.get(edge, 0) + 1
+    rim_ids = {i for e, n in count.items() if n == 1 for i in e}
+    rim = [data.vertices[i].co.copy() for i in rim_ids
+           if data.vertices[i].co.z > eye.z - .035 and data.vertices[i].co.y > eye.y - .125]
+    if not rim:
+        return
+    kd = KDTree(len(rim))
+    for k, co in enumerate(rim):
+        kd.insert(co, k)
+    kd.balance()
+    # 1. Taper: the cap's thickness runs out at its edge.
+    cap_ids = {i for p in data.polygons if p.material_index == 0 for i in p.vertices}
+    for i in cap_ids:
+        p = data.vertices[i].co
+        _, _, dist = kd.find(p)
+        if dist > .012:
+            continue
+        hit = skin.find_nearest(p)[0]
+        if hit is None:
+            continue
+        t = smooth(0, .012, dist)
+        data.vertices[i].co = hit + (p - hit) * (.12 + .88 * t)
+    data.update()
+    cap = BVHTree.FromPolygons([v.co for v in data.vertices],
+                               [tuple(p.vertices) for p in data.polygons if p.material_index == 0])
+    lengths = [v.co for p in data.polygons if data.materials[p.material_index].name.startswith('hero_hair_lengths')
+               for v in (data.vertices[i] for i in p.vertices)]
+    bun = sum(lengths, Vector()) / len(lengths) if lengths else Vector((0, eye.y - .09, eye.z + .14))
+
+    # Spread roots evenly along the edge.
+    roots, taken = [], KDTree(len(rim))
+    for k, co in enumerate(sorted(rim, key=lambda q: math.atan2(q.x, q.y - eye.y + .09))):
+        roots.append(co)
+    picked = []
+    for co in roots:
+        if all((co - q).length > spacing for q in picked[-6:]):
+            picked.append(co)
+
+    rng = random.Random(seed)
+    bm = bmesh.new()
+    bm.from_mesh(groom.data)
+    uv = bm.loops.layers.uv['SurfaceUV']
+    freedom = bm.loops.layers.uv.get('ClothFreedom')
+    deform = bm.verts.layers.deform.verify()
+    head = groom.vertex_groups['b_head'].index
+    for row in range(rows):
+        for co in picked:
+            if rng.random() < .18:
+                continue
+            root = co + Vector((rng.uniform(-.0012, .0012), 0, rng.uniform(-.0008, .0008)))
+            hit = skin.find_nearest(root)[0]
+            if hit is None:
+                continue
+            # March from 1-3 mm in front of the edge back over the cap.
+            towards = (bun - hit)
+            nrm = (hit - (eye + Vector((0, -.07, .03)))).normalized()
+            towards = (towards - nrm * towards.dot(nrm)).normalized()
+            start = hit - towards * rng.uniform(.0010, .0030) * (1 + row)
+            length = rng.uniform(.016, .030) + .006 * row
+            width = rng.uniform(.0016, .0030)
+            strip = rng.randrange(8)
+            steps = 7
+            rowsv = []
+            p = start
+            for s in range(steps + 1):
+                t = s / steps
+                on = cap.find_nearest(p)
+                base, n = (on[0], on[1]) if on[0] is not None and (on[0] - p).length < .01 else (skin.find_nearest(p)[0], nrm)
+                if base is None:
+                    break
+                lift = .00025 + .0011 * math.sin(math.pi * min(1, t * 1.1)) + .0004 * row
+                centre = base + n * lift
+                side = n.cross(towards).normalized()
+                w = width * (.55 + .45 * math.sin(math.pi * min(1, .15 + t)))
+                rowsv.append([bm.verts.new(centre + side * w * k) for k in (-1, 1)])
+                p = centre + towards * (length / steps)
+                towards = (bun - p)
+                towards = (towards - n * towards.dot(n)).normalized()
+            if len(rowsv) < 3:
+                for r in rowsv:
+                    for v in r:
+                        bm.verts.remove(v)
+                continue
+            for r in rowsv:
+                for v in r:
+                    v[deform][head] = 1
+            last = len(rowsv) - 1
+            for k, (a, b) in enumerate(zip(rowsv, rowsv[1:])):
+                f = bm.faces.new((a[0], a[1], b[1], b[0]))
+                f.smooth = True
+                for loop, sd, tt in zip(f.loops, (0, 1, 1, 0), (k, k, k + 1, k + 1)):
+                    loop[uv].uv = ((strip + .08 + .84 * sd) / 8, tt / last)
+                    if freedom is not None:
+                        loop[freedom].uv = (0, .92)
+    bm.to_mesh(groom.data)
+    bm.free()
+    groom.data.update()

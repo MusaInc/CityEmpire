@@ -120,11 +120,14 @@ def _mesh_landmarks(face, shell, eyes):
     eye_y = (eyes[0].y + eyes[1].y) / 2
     mid = [p for p in skin if abs(p.x) < .003 and p.y > eye_y - .02]
     tip = max(mid, key=lambda p: p.y)
-    sub = min((p for p in mid if tip.z - .03 < p.z < tip.z - .003), key=lambda p: p.y)
+    sub = min((p for p in mid if tip.z - .03 < p.z < tip.z - .003), key=lambda p: p.y).copy()
+    sub.x = 0
     chin = min(mid, key=lambda p: p.z)
     # Mouth: the deepest midline notch between the lips (below the nose).
     band = [p for p in mid if eye_z - .085 < p.z < sub.z - .015]
-    mouth = min(band, key=lambda p: p.y + 3 * abs(p.z - (eye_z - .065)))
+    centre = [p for p in band if abs(p.x) < .0012] or band
+    mouth = min(centre, key=lambda p: p.y + 3 * abs(p.z - (eye_z - .0595))).copy()
+    mouth.x = 0
     lm = {'eye_l': eyes[0] if eyes[0].x < 0 else eyes[1], 'eye_r': eyes[1] if eyes[1].x > 0 else eyes[0],
           'subnasale': sub, 'mouth': mouth, 'chin': chin}
     for side, sign in (('l', -1), ('r', 1)):
@@ -230,6 +233,10 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     keep = ~(background | (hair & ~fringe) | openings | (near_eyes & (lum < .30)))
     keep = _blur(keep.astype(np.float32), 1.5) > .98
     filled = _fill(photo, keep)
+    # The in-fill comes from coarse pyramid levels: soften it (not the photo).
+    soft = _blur(filled, 5.0)
+    hole = _blur((~keep).astype(np.float32), 3.0)[..., None]
+    filled = filled * (1 - hole) + soft * hole
     # The photo's lid crease shadow and liner, spread over a deeper mesh
     # socket, read as a bruise: lift the broad shading, keep the fine detail.
     flum = filled @ np.array([.2126, .7152, .0722])
