@@ -641,10 +641,13 @@ func _show_variants() -> void:
 	var cut: String = look_state.get("top", "long")
 	var lower: String = look_state.get("trousers", "cargo")
 	var footwear: String = look_state.get("footwear", "trainers")
-	var bare_legs := lower in ["dress", "miniskirt", "midiskirt", "maxiskirt", "tailoredshorts"]
+	var bare_legs := lower in ["dress", "miniskirt", "midiskirt", "maxiskirt", "tailoredshorts", "utilitymini", "beltedmini"]
 	var fitted_denim := body_type == "b" and lower in ["jeans", "fitjeans", "widejeans"]
 	var cropped := body_type == "b" and lower in CROPPED_TROUSERS
-	var barefoot_legs := footwear == "sandals" and (bare_legs or lower == "shorts")
+	var bare_shoe := footwear in ["sandals", "eveningstraps"]
+	var sports_bottom := lower in ["bikershorts", "sprintshorts"]
+	var crop_top := cut in ["fashion_crop", "fashion_ribcrop", "fashion_zipcrop", "fashion_crossbra"]
+	var barefoot_legs := bare_shoe and (bare_legs or lower == "shorts")
 	var mask: String = look_state.get("mask", "")
 	var hat: String = look_state.get("head", "")
 	var eyewear: String = look_state.get("face", "")
@@ -687,34 +690,40 @@ func _show_variants() -> void:
 			mi.visible = n.get_slice("_", 1) == lower and (n != "Lower_shorts_Legs" or not barefoot_legs)
 		elif n in ["Courier_Trainers", "Courier_Soles", "Courier_TrainerTongues", "Courier_TrainerLaces"]:
 			mi.visible = footwear == "trainers"
+		elif n.begins_with("JulesAccessory_"):
+			mi.visible = n == "JulesAccessory_" + String(look_state.get("accessory", "none"))
 		elif n.begins_with("Footwear_"):
 			mi.visible = n == "Footwear_" + footwear
 		elif n == "Ankle_Liner":
-			mi.visible = not cropped and not bare_legs and lower not in ["shorts", "bikershorts"] and footwear != "sandals"
+			mi.visible = not cropped and not bare_legs and lower != "shorts" and not sports_bottom and not bare_shoe
 			if body_type == "b" and footwear == "boots":
 				mi.visible = false
 		elif n == "Fashion_Cropped_Ankles":
-			mi.visible = cropped and footwear != "sandals"
+			mi.visible = cropped and not bare_shoe
 		elif n == "Fashion_Cropped_Barefeet":
-			mi.visible = cropped and footwear == "sandals"
+			mi.visible = cropped and bare_shoe
 		elif n == "Fashion_Feet":
-			mi.visible = footwear == "sandals" and not barefoot_legs and not cropped and lower != "bikershorts"
+			mi.visible = bare_shoe and not barefoot_legs and not cropped and not sports_bottom
 		elif n == "Fashion_Biker_Legs":
-			mi.visible = lower == "bikershorts" and footwear != "sandals"
+			mi.visible = sports_bottom and not bare_shoe
 		elif n == "Fashion_Biker_Barefeet":
-			mi.visible = lower == "bikershorts" and footwear == "sandals"
+			mi.visible = sports_bottom and bare_shoe
 		elif n == "Fashion_Lounge_Socks":
-			mi.visible = lower == "bikershorts" and footwear in ["trainers", "streettrainers"]
+			mi.visible = (sports_bottom or lower == "utilitymini") and footwear in ["trainers", "streettrainers", "highstreet"]
 		elif n == "Fashion_Barefoot_Legs":
-			mi.visible = barefoot_legs
+			mi.visible = barefoot_legs and cut != "fashion_cowldress"
 		elif n == "Fashion_Torso_Skin":
-			mi.visible = cut == "vest" or (cut.begins_with("fashion_") and cut not in ["fashion_crop", "fashion_moto", "fashion_pullover", "fashion_racer"])
+			mi.visible = cut == "vest" or (cut.begins_with("fashion_") and not crop_top and cut not in ["fashion_moto", "fashion_pullover", "fashion_racer"])
 		elif n == "Fashion_Racer_Midriff":
 			mi.visible = cut == "fashion_racer"
 		elif n == "Fashion_Crop_Skin":
-			mi.visible = cut == "fashion_crop"
+			mi.visible = crop_top and cut != "fashion_crossbra"
+		elif n == "JulesSkin_Crossbra":
+			mi.visible = cut == "fashion_crossbra"
 		elif n == "Fashion_Legs":
-			mi.visible = bare_legs and not barefoot_legs
+			mi.visible = bare_legs and not barefoot_legs and cut != "fashion_cowldress"
+		elif n.begins_with("JulesSkin_Cowldress"):
+			mi.visible = cut == "fashion_cowldress" and n.ends_with("_Bare") == bare_shoe
 		elif n == "Fashion_Slip":
 			mi.visible = bare_legs and lower != "tailoredshorts"
 		elif n.begins_with("Skin_Arms_"):
@@ -742,7 +751,7 @@ func _show_variants() -> void:
 		elif n.begins_with("Mask_"):
 			mi.visible = mask != "" and (n == "Mask_" + mask or n.begins_with("Mask_%s_" % mask))
 		if mi.visible and mi.mesh.get_blend_shape_count() > 0:
-			if lower == "midiskirt" and n in ["Fashion_Legs", "Fashion_Barefoot_Legs"]:
+			if lower in ["midiskirt", "utilitymini", "beltedmini", "dress"] and (n in ["Fashion_Legs", "Fashion_Barefoot_Legs"] or n.begins_with("JulesSkin_Cowldress")):
 				_midi_lining_index = mi.find_blend_shape_by_name("MidiSeatClearance")
 				if _midi_lining_index >= 0:
 					_midi_lining = mi
@@ -750,7 +759,7 @@ func _show_variants() -> void:
 			var back := mi.find_blend_shape_by_name("Hem_Back")
 			if front >= 0 and back >= 0:
 				_moving_hems.append({"mesh": mi, "front": front, "back": back, "seated": mi.find_blend_shape_by_name("Hem_Seated"),
-					"long": n in ["Lower_midiskirt", "Lower_maxiskirt"] or n.contains("Loosedress"),
+					"long": n in ["Lower_midiskirt", "Lower_maxiskirt"] or n.contains("Loosedress") or n.contains("Cowldress"),
 					"front_right": mi.find_blend_shape_by_name("Hem_Front_Right"),
 					"back_right": mi.find_blend_shape_by_name("Hem_Back_Right"),
 					"front_range": 1.0 if n == "Lower_midiskirt" else 0.78})
@@ -859,6 +868,10 @@ func _load_parts() -> Dictionary:
 			if mesh_name.begins_with("Groom_"):
 				mi.visibility_range_end = 5.5
 				mi.visibility_range_end_margin = 0.65
+			elif mesh_name.ends_with("_Topstitch"):
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				mi.visibility_range_end = 2.25
+				mi.visibility_range_end_margin = 0.45
 	for child in inst.find_children("*", "MeshInstance3D", true, false):
 		var key := String(child.name).to_lower()
 		child.get_parent().remove_child(child)
@@ -1005,7 +1018,9 @@ func _sync_skeleton() -> void:
 	for correction in _garment_bends:
 		var rotation: Quaternion = rots[correction.bone]
 		var bend := 2.0 * acos(clampf(absf(rotation.w), 0.0, 1.0))
-		correction.mesh.set_blend_shape_value(correction.index, smoothstep(0.38, 1.60, bend))
+		var shoulder := String(correction.bone).begins_with("upper_arm_")
+		var onset := 0.26 if player != null and player.everyday and shoulder else 0.38
+		correction.mesh.set_blend_shape_value(correction.index, smoothstep(onset, 1.60, bend))
 	if not _moving_hems.is_empty():
 		_pose_hems(piv)
 
@@ -1031,7 +1046,9 @@ func _pose_hems(pivots: Dictionary) -> void:
 		foot_depth.x = maxf(foot_depth.x, -ft)
 		foot_depth.y = maxf(foot_depth.y, ft)
 	if is_instance_valid(_midi_lining):
-		_midi_lining.set_blend_shape_value(_midi_lining_index, smoothstep(0.19, 0.36, paired_depth))
+		var sitting := smoothstep(0.19, 0.36, paired_depth)
+		var stride := smoothstep(0.12, 0.25, knee_depth.x)
+		_midi_lining.set_blend_shape_value(_midi_lining_index, maxf(sitting, stride))
 	for hem in _moving_hems:
 		var depth := knee_depth.max(foot_depth * 0.83) if hem.long else knee_depth
 		var seated := 0.0
@@ -2094,7 +2111,7 @@ func _pose_ground(q: Dictionary, dt: float, travel: Vector3, la: Vector3) -> flo
 	# little from the hips on top of the ankle lean; pulling away the weight
 	# goes forward, braking it sits back; landing folds.
 	var lean := (0.022 * walk + (0.109 if player.everyday else 0.18) * run + 0.10 * spr) * amp + push * 0.44 + _land_squash * 0.45 - brake * 0.4
-	var sh_yaw := ((0.091 if player.everyday else 0.075) + 0.043 * run) * amp
+	var sh_yaw := (lerpf(0.064, 0.102, run) if player.everyday else 0.075 + 0.043 * run) * amp
 	q["spine"] = _rx(-lean * 0.55) * _ry(lf * hip_yaw * 0.6) * _rz(-list * 0.8)
 	q["chest"] = _rx(-lean * 0.45 + 0.03 * walk) * _ry(lf * (hip_yaw * 0.4 + sh_yaw)) \
 		* _rz(-list * 0.4 + lf * 0.03 * run * amp)
@@ -2109,7 +2126,7 @@ func _pose_ground(q: Dictionary, dt: float, travel: Vector3, la: Vector3) -> flo
 	# elbow holds ~80–90°, opening on the back swing and closing coming
 	# through, the hand travelling hip → chest toward the midline.
 	var a_amp := (lerpf(0.20 if player.everyday else 0.25, 0.43 if player.everyday else 0.49, run) + 0.24 * spr) * amp
-	var a_base := lerpf(0.02, -0.065 if player.everyday else -0.1, run) * amp
+	var a_base := lerpf(-0.018 if player.everyday else 0.02, -0.065 if player.everyday else -0.1, run) * amp
 	for sd in ["l", "r"]:
 		var sdg := 1.0 if sd == "r" else -1.0
 		var fwd := lf * sdg  # this arm forward when the opposite leg is
@@ -3690,7 +3707,7 @@ func _idle_pose(q: Dictionary, k: float, dt: float) -> void:
 		wind_f = clampf(w_into * 0.012, -0.06, 0.06) * high
 	q["hips"] = (q["hips"] as Quaternion).slerp(_rz(shift * 0.06) * _ry(shift * 0.04), k)
 	q["spine"] = (q["spine"] as Quaternion).slerp(_rz(-shift * 0.05) * _rx(lean_f - wind_f - winded * 0.42), k)
-	q["chest"] = (q["chest"] as Quaternion).slerp(_rx(0.03 + br * br_amp * (1.0 + winded) - winded * 0.26) * _rz(-shift * 0.035)
+	q["chest"] = (q["chest"] as Quaternion).slerp(_rx((0.012 if player.everyday else 0.03) + br * br_amp * (1.0 + winded) - winded * 0.26) * _rz(-shift * 0.035)
 		* _ry(-shift * 0.05), k)
 	q["neck"] = (q["neck"] as Quaternion).slerp(_rx(-0.02 + winded * 0.26), k)
 	var head := _ry(_gaze.x * (1.0 - env * 0.8)) * _rz(shift * 0.05) * _rx(_gaze.y * (1.0 - winded) + br * br_amp * 0.3 + winded * 0.3)
@@ -3703,9 +3720,9 @@ func _idle_pose(q: Dictionary, k: float, dt: float) -> void:
 		if player.everyday:
 			asym = 0.016 + 0.018 * shift if sd == "l" else -0.011 * shift
 		# The narrower shoulder frame still has to clear the wider hip line.
-		var drop := (0.102 if body_type == "b" else 0.077) if player.everyday else 0.13
+		var drop := (0.083 if body_type == "b" else 0.069) if player.everyday else 0.13
 		q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(
-			_rz(sdg * (drop + asym + br * br_amp * 0.22)) * _rx(0.025 + winded * 0.62) * _ry(-0.20 * sdg * (1.0 - winded)), k)
+			_rz(sdg * (drop + asym + br * br_amp * 0.22)) * _rx((-0.014 if player.everyday else 0.025) + winded * 0.62) * _ry(-0.20 * sdg * (1.0 - winded)), k)
 		q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(_rx(0.21 + asym * 2.0 + br * 0.02 - winded * 0.1), k)
 		if player.everyday:
 			q["hand_" + sd] = (q["hand_" + sd] as Quaternion).slerp(_rx(-0.09) * _rz(-sdg * 0.04), k)

@@ -14,6 +14,18 @@ const PRICES := {
 	"shoes_royal": 260, "shoes_volt": 320, "shoes_gold": 900,
 	"head_cap": 15, "head_beanie": 14, "head_phones": 350,
 	"face_shades": 220,
+	"top_fashion_zipcrop": 95, "top_fashion_tailoredknit": 145, "top_fashion_crossbra": 65,
+	"top_fashion_cowldress": 680, "utilitymini": 86, "beltedmini": 130, "sprintshorts": 55,
+	"highstreet": 120, "pumps": 158, "eveningstraps": 205,
+	"street": 89, "office": 140, "evening": 230,
+}
+const JULES_STOCK := {
+	"clothes_everyday": ["top_fashion_zipcrop", "utilitymini", "highstreet", "street",
+		"top_fashion_crossbra", "sprintshorts"],
+	"clothes_premium": ["top_fashion_tailoredknit", "beltedmini", "pumps", "office",
+		"top_fashion_cowldress", "eveningstraps", "evening"],
+	"clothes_boutique": ["top_fashion_zipcrop", "utilitymini", "highstreet", "street",
+		"top_fashion_tailoredknit", "beltedmini", "pumps", "office"],
 }
 const STORES := {
 	"clothes_everyday": {"name": "Threadline", "items": ["top_tee", "top_polo", "top_hoodie", "top_jumper", "top_long",
@@ -28,7 +40,11 @@ const STORES := {
 ## The boutique you're in (its name on receipts and the store screen).
 static var boutique_name := "Boutique"
 ## Style options everyone can wear, including in stores.
-const FREE := ["head_bare", "face_none", "top_bomber"]
+const FREE := ["head_bare", "face_none", "top_bomber", "top_fashion_ribcrop", "relaxeddenim", "streettrainers", "day", "none"]
+
+
+static func stocks(store: String, id: String, body: String) -> bool:
+	return id in FREE or id in STORES[store]["items"] or (body == "b" and id in JULES_STOCK.get(store, []))
 
 
 static func owned(flags: Dictionary) -> Array:
@@ -52,7 +68,7 @@ static func price(item: String) -> int:
 ## What the look costs in items you don't own yet.
 static func unpaid(flags: Dictionary, look: Dictionary) -> Array:
 	var out: Array = []
-	for k in ["top", "shoes", "head", "eyewear"]:
+	for k in ["top", "trousers", "footwear", "shoes", "head", "eyewear", "accessory"]:
 		var it := String(look.get(k, ""))
 		if it != "" and not owns(flags, it, String(look.get("body", "a"))):
 			out.append(it)
@@ -78,7 +94,7 @@ static func save_outfit(flags: Dictionary, look: Dictionary) -> void:
 	var outs: Array = flags.get("outfits", [])
 	var keep := {"body": look.get("body", "a"), "trousers": look.get("trousers", "auto"),
 		"footwear": look.get("footwear", "trainers")}
-	for k in ["top", "top_col", "pants_col", "shoes", "head", "eyewear"]:
+	for k in ["top", "top_col", "pants_col", "shoes", "head", "eyewear", "accessory"]:
 		keep[k] = look.get(k, "")
 	outs.push_front(keep)
 	while outs.size() > 6:

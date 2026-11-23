@@ -1121,7 +1121,7 @@ static func character(ph: Phone, body: VBoxContainer) -> void:
 		var it := String(look.get(k, ""))
 		if it != "" and not it in Wardrobe.FREE:
 			parts.append(it.get_slice("_", 1).capitalize())
-	hv.add_child(G.text("Jules · Build B" if look["body"] == "b" else "Ade · Build A", "footnote", G.LABEL2, "medium"))
+	hv.add_child(G.text("Jules" if look["body"] == "b" else "Ade", "footnote", G.LABEL2, "medium"))
 	hv.add_child(G.para(" · ".join(parts) if not parts.is_empty() else "Everyday clothes", "title2", G.LABEL))
 	var paid := 0
 	for it in owned:

@@ -2,24 +2,22 @@ class_name HeroLook
 extends RefCounted
 ## WorldState's two fixed player identities. Keep the saved body IDs
 ## and wardrobe keys so older saves can be read without a version bump.
-const CHARACTERS := [["a", "Ade · Build A"], ["b", "Jules · Build B"]]
+const CHARACTERS := [["a", "Ade"], ["b", "Jules"]]
 const IDENTITIES := {"a": "hero_ade", "b": "hero_jules"}
 const TOPS := [["top_tee", "T-Shirt"], ["top_polo", "Polo"], ["top_shirt", "Shirt"], ["top_jumper", "Jumper"],
 	["top_hoodie", "Hoodie"], ["top_blazer", "Blazer & Tie"], ["top_long", "Base Layer"], ["top_bomber", "Bomber Jacket"]]
 const LOWER_CUTS := [["auto", "Match top"], ["cargo", "Cargo"], ["chinos", "Chinos"],
 	["jeans", "Jeans"], ["joggers", "Joggers"], ["shorts", "Shorts"]]
-const FASHION_TOPS := [["top_fashion_crop", "Crop Top"], ["top_fashion_tank", "Rib Tank"],
-	["top_fashion_vest", "Tailored Vest"], ["top_fashion_camisole", "Camisole"], ["top_fashion_blouse", "Blouse"],
-	["top_fashion_bodysuit", "Bodysuit"], ["top_fashion_cardigan", "Cardigan"], ["top_fashion_jacket", "Denim Jacket"],
-	["top_fashion_squareneck", "Square-Neck Top"], ["top_fashion_moto", "Leather Zip Jacket"],
-	["top_fashion_racer", "Cropped Leather Jacket"], ["top_fashion_pullover", "Fleece Pullover"]]
-const DRESSES := [["top_fashion_fitteddress", "Fitted Dress"], ["top_fashion_loosedress", "Loose Dress"],
-	["top_fashion_onedress", "One-Shoulder Dress"]]
-const FASHION_BOTTOMS := [["miniskirt", "Mini Skirt"], ["midiskirt", "Midi Skirt"], ["maxiskirt", "Maxi Skirt"],
-	["leggings", "Leggings"], ["fitjeans", "Fitted Jeans"], ["tailoredshorts", "Tailored Shorts"],
-	["widejeans", "Wide-Leg Jeans"], ["bikershorts", "Cycling Shorts"]]
-const FOOTWEAR := [["trainers", "Classic Trainers"], ["streettrainers", "Street Trainers"],
-	["heels", "Block Heels"], ["boots", "Ankle Boots"], ["sandals", "Strap Sandals"]]
+const FASHION_TOPS := [["top_fashion_ribcrop", "Cropped Rib Cardigan"], ["top_fashion_zipcrop", "Cropped Zip Hoodie"],
+	["top_fashion_tailoredknit", "Tailored V-Neck"], ["top_fashion_crossbra", "Crossback Sports Top"]]
+const DRESSES := [["top_fashion_cowldress", "Satin Slit Gown"]]
+const FASHION_BOTTOMS := [["relaxeddenim", "Relaxed Denim"], ["utilitymini", "Utility Mini"],
+	["beltedmini", "Belted Mini"], ["sprintshorts", "Training Shorts"]]
+const FOOTWEAR := [["streettrainers", "Low Trainers"], ["highstreet", "High Tops"],
+	["pumps", "Pumps"], ["eveningstraps", "Evening Heels"]]
+const ACCESSORIES := [["none", "None"], ["day", "Gold Pendant"], ["street", "Silver Chain"],
+	["office", "Brass Pendant"], ["evening", "Evening Pendant"]]
+
 const FASHION_LOOKS := [
 	["Red Leather", {"top": "top_fashion_racer", "trousers": "widejeans", "footwear": "streettrainers",
 		"top_col": "#803537", "pants_col": "#282d37", "shoes": "shoes_classic"}],
@@ -53,24 +51,49 @@ const CLOTH := ["#f2f1ec", "#c9c4b8", "#1a1c20", "#3b3f46", "#1f2d4a", "#3f6db3"
 	"#a8322d", "#d9822b", "#e3c74a", "#2f4a33", "#6f8a52", "#b59a74", "#6b4a3a", "#c96f92"]
 const TROUSERS := ["#1a1c20", "#3b3f46", "#25304a", "#2f4a73", "#8a7a5a", "#c9bc9c", "#3d4530", "#5a3d2c", "#e8e6df"]
 
+static var _collection: Dictionary
+
+
+static func collection(body: String) -> Array:
+	if _collection.is_empty():
+		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://config/hero_outfits.json"))
+		if parsed is Dictionary:
+			_collection = parsed
+	return _collection.get(body, [])
+
+
 static func tops_for(body: String) -> Array:
 	return separates_for(body) + DRESSES if body == "b" else TOPS
 
 
 static func separates_for(body: String) -> Array:
-	return TOPS.filter(func(item): return item[0] != "top_blazer") + FASHION_TOPS if body == "b" else TOPS
+	return FASHION_TOPS if body == "b" else TOPS
 
 
 static func top_for(body: String, id: String) -> String:
-	if body == "b" and id == "top_blazer":
-		return "top_shirt"
+	if body == "b":
+		if tops_for(body).any(func(piece): return piece[0] == id):
+			return id
+		if "dress" in id:
+			return DRESSES[0][0]
+		if id in ["top_fashion_racer", "top_fashion_jacket", "top_hoodie", "top_bomber"]:
+			return "top_fashion_zipcrop"
+		if id in ["top_fashion_moto", "top_fashion_blouse", "top_fashion_vest", "top_shirt", "top_blazer"]:
+			return "top_fashion_tailoredknit"
+		if id in ["top_fashion_pullover", "top_fashion_bodysuit", "top_fashion_crop"]:
+			return "top_fashion_crossbra"
+		return "top_fashion_ribcrop"
 	if body != "b" and id.begins_with("top_fashion_"):
 		return DEFAULT["top"]
 	return id
 
 
 static func bottoms_for(body: String) -> Array:
-	return LOWER_CUTS + FASHION_BOTTOMS if body == "b" else LOWER_CUTS
+	return FASHION_BOTTOMS if body == "b" else LOWER_CUTS
+
+
+static func footwear_for(body: String) -> Array:
+	return FOOTWEAR if body == "b" else [["trainers", "Classic Trainers"], ["derbies", "Leather Derbies"]]
 
 
 static func is_dress(id: String) -> bool:
@@ -78,7 +101,7 @@ static func is_dress(id: String) -> bool:
 
 
 const DEFAULT := {"body": "a", "top": "top_polo", "top_col": "#3f6db3",
-	"trousers": "auto", "pants_col": "#3b3f46", "shoes": "shoes_classic", "footwear": "trainers", "head": "head_bare", "eyewear": "face_none"}
+	"trousers": "auto", "pants_col": "#3b3f46", "shoes": "shoes_classic", "footwear": "trainers", "head": "head_bare", "eyewear": "face_none", "accessory": "none"}
 
 
 static func current(flags: Dictionary) -> Dictionary:
@@ -93,11 +116,31 @@ static func current(flags: Dictionary) -> Dictionary:
 	if not IDENTITIES.has(d["body"]):
 		d["body"] = "a"
 	var body := String(d["body"])
-	if not bottoms_for(body).any(func(entry): return entry[0] == d["trousers"]):
-		d["trousers"] = "auto"
 	d["top"] = top_for(body, String(d["top"]))
-	if body != "b" or not FOOTWEAR.any(func(entry): return entry[0] == d["footwear"]):
-		d["footwear"] = "trainers"
+	if body == "b":
+		# Migrate older looks by category. The hero and the original save slot
+		# stay the same, including saved swatches and the shoe colour.
+		var defaults := {
+			"top_fashion_ribcrop": ["relaxeddenim", "streettrainers"],
+			"top_fashion_zipcrop": ["utilitymini", "highstreet"],
+			"top_fashion_tailoredknit": ["beltedmini", "pumps"],
+			"top_fashion_crossbra": ["sprintshorts", "streettrainers"],
+			"top_fashion_cowldress": ["relaxeddenim", "eveningstraps"],
+		}
+		d["head"] = "head_bare"
+		var pairing: Array = defaults[d["top"]]
+		if not bottoms_for(body).any(func(piece): return piece[0] == d["trousers"]):
+			d["trousers"] = pairing[0]
+		if not footwear_for(body).any(func(piece): return piece[0] == d["footwear"]):
+			d["footwear"] = pairing[1]
+		if not ACCESSORIES.any(func(piece): return piece[0] == d["accessory"]):
+			d["accessory"] = "none"
+	else:
+		if not bottoms_for(body).any(func(piece): return piece[0] == d["trousers"]):
+			d["trousers"] = "auto"
+		if not footwear_for(body).any(func(piece): return piece[0] == d["footwear"]):
+			d["footwear"] = "trainers"
+		d["accessory"] = "none"
 	return d
 
 
@@ -113,7 +156,9 @@ static func change(flags: Dictionary, changes: Dictionary) -> void:
 		flags["character_outfits"] = outfits
 		var starting := {"body": body}
 		if body == "b":
-			starting.merge(FASHION_LOOKS[0][1])
+			var choices := collection(body)
+			if not choices.is_empty():
+				starting.merge(choices[0]["look"])
 		look = outfits.get(body, current({"look": starting})).duplicate()
 	look.merge(changes, true)
 	flags["look"] = current({"look": look})
@@ -128,6 +173,8 @@ static func build(selection: Dictionary) -> Dictionary:
 		"hero": IDENTITIES[body], "hair": "hair_natural", "pants": "pants_navy",
 		"shoes": l["shoes"], "suit": "sky"})
 	look["body"] = body
+	look["top"] = top.trim_prefix("top_")
+	look["accessory"] = l["accessory"]
 	look["suit"] = Color(String(l.get("top_col", DEFAULT["top_col"])))
 	look["pants"] = Color(String(l.get("pants_col", DEFAULT["pants_col"])))
 	# Bare hands (the hero model always wears gloves): the glove drawn in the
@@ -143,6 +190,8 @@ static func build(selection: Dictionary) -> Dictionary:
 			lower = "leggings"
 	look["trousers"] = "dress" if is_dress(top) else lower
 	look["footwear"] = l["footwear"]
+	if body == "b" and l["footwear"] == "pumps" and l["shoes"] == "shoes_gum":
+		look["shoe"] = Color("#a97550")
 	return look
 
 

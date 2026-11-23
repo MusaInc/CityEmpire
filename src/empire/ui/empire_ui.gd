@@ -2176,9 +2176,9 @@ func _swatch(a: Color, b: Color, on: bool, cb: Callable) -> Button:
 ## Your character: the camera turns to face the hero (left of the screen),
 ## the choices sit on the right and every tap shows straight away. `first`:
 ## straight after the welcome, with a "Start" button.
-var _style_tab := "character"
+var _style_tab := "looks"
 var _style_orbit := 0.0
-var _style_portrait := true
+var _style_portrait := false
 var _style_first := false
 var _style_camera_transform := Transform3D.IDENTITY
 var _style_camera_fov := 0.0
@@ -2211,8 +2211,8 @@ func open_style(first := false) -> void:
 	# Fit the visible area (iPad 4:3, wide phones, safe area), hero on the left.
 	var vp := _panel_root.get_viewport_rect().size
 	var ins := _safe_insets()
-	var W := clampf(vp.x * 0.47, 440.0, 600.0)
-	var H := minf(290.0 if first else 860.0, vp.y - ins[1] - ins[3] - 48.0)
+	var W := _style_width(vp.x)
+	var H := minf(244.0 if first else 650.0, vp.y - ins[1] - ins[3] - 36.0)
 	_style_inner = W - 60.0
 	_panel = PanelContainer.new()
 	_panel.custom_minimum_size = Vector2(W, H)
@@ -2236,7 +2236,7 @@ func open_style(first := false) -> void:
 	var tabs := HFlowContainer.new()  # (wraps on narrow panels instead of running off screen)
 	tabs.add_theme_constant_override("h_separation", 8)
 	tabs.add_theme_constant_override("v_separation", 8)
-	var tab_list := [["character", "Character"], ["clothes", "Clothes"], ["extras", "Shoes & accessories"], ["outfits", "Saved outfits"]]
+	var tab_list := [["looks", "Looks"], ["clothes", "Clothes"], ["extras", "Extras"], ["outfits", "Saved"], ["character", "Hero"]]
 	if first:
 		_style_tab = "character"
 	elif shop != "":
@@ -2245,35 +2245,35 @@ func open_style(first := false) -> void:
 		if not tab_list.any(func(tab): return tab[0] == _style_tab):
 			_style_tab = String(tab_list[0][0])
 		for tb in tab_list:
-			tabs.add_child(S.button(tb[1], func():
+			tabs.add_child(Glass.button(tb[1], func():
 				_style_tab = tb[0]
 				_style_portrait = false
-				open_style(false), _style_tab == tb[0], 0.0))
+				open_style(false), "filled" if _style_tab == tb[0] else "gray", "small"))
 		v.add_child(tabs)
 	var body := S.vbox(10)
 	match _style_tab:
+		"looks":
+			_style_collection(body, l)
 		"character":
-			_style_choices(body, "" if first else "PLAYABLE CHARACTER", HeroLook.CHARACTERS, l, "body", 2)
+			_style_choices(body, "", HeroLook.CHARACTERS, l, "body", 2)
 		"clothes":
 			var build_b := String(l["body"]) == "b"
-			if build_b and shop == "":
-				body.add_child(S.label("OUTFIT PRESETS", 14, S.AMBER, "black"))
-				var presets := GridContainer.new()
-				presets.columns = 3
-				for outfit in HeroLook.FASHION_LOOKS:
-					presets.add_child(S.button(outfit[0], func(): _style_set(outfit[1]), false, (_style_inner - 16.0) / 3.0))
-				body.add_child(presets)
-				_style_choices(body, "DRESSES", HeroLook.DRESSES, l, "top", 2)
-			_style_choices(body, "TOP", _style_list(HeroLook.separates_for(l["body"]), first, l["body"]), l, "top", 3)
+			if build_b:
+				_style_choices(body, "DRESSES", _style_list(HeroLook.DRESSES, first, l["body"]), l, "top", 2)
+			_style_choices(body, "TOP", _style_list(HeroLook.separates_for(l["body"]), first, l["body"]), l, "top", 2 if build_b else 3)
 			_style_colours(body, "GARMENT COLOUR", HeroLook.CLOTH, l, "top_col")
 			if not HeroLook.is_dress(l["top"]):
-				_style_choices(body, "BOTTOMS", HeroLook.bottoms_for(l["body"]), l, "trousers", 3)
+				_style_choices(body, "BOTTOMS", _style_list(HeroLook.bottoms_for(l["body"]), first, l["body"]) if build_b else HeroLook.bottoms_for(l["body"]), l, "trousers", 3)
 				_style_colours(body, "BOTTOM COLOUR", HeroLook.TROUSERS, l, "pants_col")
 		"extras":
-			if l["body"] == "b" and shop == "":
-				_style_choices(body, "FOOTWEAR", HeroLook.FOOTWEAR, l, "footwear", 2)
+			if l["body"] == "b":
+				_style_choices(body, "FOOTWEAR", _style_list(HeroLook.footwear_for(l["body"]), first, "b"), l, "footwear", 2)
+				_style_choices(body, "JEWELLERY", _style_list(HeroLook.ACCESSORIES, first, "b"), l, "accessory", 2)
+			elif shop == "":
+				_style_choices(body, "FOOTWEAR", HeroLook.footwear_for(l["body"]), l, "footwear", 2)
 			_style_choices(body, "SHOE COLOUR", _style_list(HeroLook.SHOES, first), l, "shoes", 3)
-			_style_choices(body, "HAT", _style_list(HeroLook.HATS, first), l, "head", 4)
+			if l["body"] != "b":
+				_style_choices(body, "HAT", _style_list(HeroLook.HATS, first), l, "head", 4)
 			_style_choices(body, "EYEWEAR", _style_list(HeroLook.EYEWEAR, first), l, "eyewear", 4)
 		"outfits":
 			body.add_child(S.label("SAVED OUTFITS", 14, S.AMBER, "black"))
@@ -2290,28 +2290,13 @@ func open_style(first := false) -> void:
 			body.add_child(S.button("Save what I'm wearing", func():
 				Wardrobe.save_outfit(e.flags, HeroLook.current(e.flags))
 				open_style(false), false, 300))
-	v.add_child(_scroll(body, 120.0))
+	v.add_child(_scroll(body, 62.0 if first else 110.0))
+	_style_preview_controls(vp, W, ins)
 	var foot := HFlowContainer.new()
 	foot.add_theme_constant_override("h_separation", 8)
 	foot.add_theme_constant_override("v_separation", 8)
-	foot.add_child(S.button("⟲", func():
-		_style_orbit -= PI / 6.0
-		_style_frame(), false, 45))
-	foot.add_child(S.button("⟳", func():
-		_style_orbit += PI / 6.0
-		_style_frame(), false, 45))
-	var zoom := S.button("Full body" if _style_portrait else "Close-up", func():
-		_style_portrait = not _style_portrait
-		_style_frame()
-		_update_style_zoom(), false, 100)
-	zoom.name = "StyleZoom"
-	foot.add_child(zoom)
-	var unpaid := Wardrobe.unpaid(e.flags, l) if (shop != "" and not first) else []
-	if not unpaid.is_empty():
-		# Second row for Buy + Leave (one row would run off a narrow panel).
-		v.add_child(foot)
-		foot = HFlowContainer.new()
 	foot.add_child(S.spacer())
+	var unpaid := Wardrobe.unpaid(e.flags, l) if (shop != "" and not first) else []
 	if not unpaid.is_empty():
 		var tot := 0
 		for it in unpaid:
@@ -2334,6 +2319,7 @@ var style_shop := ""
 var _style_store_name := ""
 var _style_entry := {}
 var _style_inner := 540.0  # usable width inside the Style panel
+var _style_zoom_button: Button
 
 
 ## Safe-area insets (left, top, right, bottom) in canvas px; zero in a window.
@@ -2346,6 +2332,69 @@ func _safe_insets() -> Array:
 	return [sa.position.x * k.x, sa.position.y * k.y, (win.x - sa.end.x) * k.x, (win.y - sa.end.y) * k.y]
 
 
+func _style_width(view_width: float) -> float:
+	return clampf(view_width * 0.43, 340.0, 560.0)
+
+
+func _style_preview_controls(vp: Vector2, panel_width: float, insets: Array) -> void:
+	var controls := S.hbox(8)
+	var left_span: float = vp.x - panel_width - insets[0] - insets[2] - 24.0
+	_anchor(controls, 0.0, 1.0, Vector2(insets[0] + left_span * 0.5 - 122.0, -66.0 - insets[3]), Vector2(244.0, 44.0))
+	controls.add_child(S.button("↶", func():
+		_style_orbit -= PI / 6.0
+		_style_frame(), false, 50))
+	controls.add_child(S.button("↷", func():
+		_style_orbit += PI / 6.0
+		_style_frame(), false, 50))
+	var zoom := S.button("Full body" if _style_portrait else "Close-up", func():
+		_style_portrait = not _style_portrait
+		_style_frame()
+		_update_style_zoom(), false, 128)
+	_style_zoom_button = zoom
+	controls.add_child(zoom)
+	_panel_root.add_child(controls)
+
+
+func _style_collection(body: VBoxContainer, look: Dictionary) -> void:
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 10)
+	var width := (_style_inner - 16.0) / 3.0
+	for preset in HeroLook.collection(look["body"]):
+		var selection: Dictionary = {"footwear": "trainers"}.merged(preset["look"], true)
+		var active := selection.keys().all(func(key): return look.get(key) == selection[key])
+		var card := S.button("", func(): _style_set(selection), false, width)
+		card.custom_minimum_size.y = width * 0.88
+		var box := StyleBoxFlat.new()
+		box.bg_color = Color("#2b2e38")
+		box.set_corner_radius_all(12)
+		box.set_border_width_all(2)
+		box.border_color = S.AMBER if active else Color("#3d404b")
+		for edge in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+			box.set_content_margin(edge, 7)
+		for state in ["normal", "hover", "pressed", "disabled"]:
+			card.add_theme_stylebox_override(state, box)
+		card.add_theme_color_override("icon_disabled_color", Color.WHITE)
+		card.icon = load("res://assets/ui/hero_outfits/%s.jpg" % preset["id"]) as Texture2D
+		card.expand_icon = true
+		card.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		card.disabled = not Wardrobe.unpaid(game.empire.flags, look.merged(selection, true)).is_empty()
+		if card.disabled:
+			card.tooltip_text = "Available when you own these clothes"
+		var column := S.vbox(4)
+		column.add_child(card)
+		var label := S.label(String(preset["name"]), 16, S.PAPER, "bold")
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		column.add_child(label)
+		if card.disabled:
+			var locked := S.label("Unlock in shops", 13, S.MUTED)
+			locked.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			column.add_child(locked)
+		grid.add_child(column)
+	body.add_child(grid)
+
+
 ## The choices for a list: the store's stock (priced) in a store, what you
 ## own in your wardrobe, everything when making your character.
 func _style_list(list: Array, first: bool, body := "a") -> Array:
@@ -2355,7 +2404,7 @@ func _style_list(list: Array, first: bool, body := "a") -> Array:
 		var id := String(it[0])
 		if first or style_shop == "" and Wardrobe.owns(flags, id, body):
 			out.append(it)
-		elif style_shop != "" and (id in Wardrobe.STORES[style_shop]["items"] or id in Wardrobe.FREE):
+		elif style_shop != "" and Wardrobe.stocks(style_shop, id, body):
 			var lbl := String(it[1])
 			if not Wardrobe.owns(flags, id, body):
 				lbl += " · " + EmpireData.money(float(Wardrobe.price(id)))
@@ -2383,6 +2432,8 @@ func _style_set(changes: Dictionary) -> void:
 
 
 func _style_choices(v: VBoxContainer, title: String, list: Array, l: Dictionary, key: String, cols: int) -> void:
+	if list.is_empty():
+		return
 	if not title.is_empty():
 		v.add_child(S.label(title, 14, S.AMBER, "black"))
 	var g := GridContainer.new()
@@ -2421,7 +2472,7 @@ func _style_pose(on: bool) -> void:
 ## The camera in front of the hero (orbiting with ⟲ ⟳), the hero on the left
 ## half of the screen, clear of the panel.
 func _update_style_zoom() -> void:
-	var button := _panel.find_child("StyleZoom", true, false) as Button
+	var button := _style_zoom_button
 	if button:
 		button.text = "Full body" if _style_portrait else "Close-up"
 
@@ -2431,10 +2482,10 @@ func _style_frame() -> void:
 	var fwd: Vector3 = game.rig._facing.rotated(Vector3.UP, _style_orbit)
 	var side := fwd.cross(Vector3.UP).normalized()
 	var cam: Camera3D = game.camera.cam
-	var target := p.global_position + Vector3.UP * (0.64 if _style_portrait else 0.02)
-	var eye := target + fwd * (1.25 if _style_portrait else 2.85) + Vector3.UP * (0.055 if _style_portrait else 0.21)
+	var target := p.global_position + Vector3.UP * (0.65 if _style_portrait else 0.015)
+	var eye := target + fwd * (1.03 if _style_portrait else 2.63) + Vector3.UP * (0.055 if _style_portrait else 0.21)
 	var vp := get_viewport().get_visible_rect().size
-	var panel_ratio := clampf(vp.x * 0.47, 440.0, 600.0) / vp.x
+	var panel_ratio := (_style_width(vp.x) + float(_safe_insets()[2])) / vp.x
 	cam.fov = 40.0 if _style_portrait else 47.0
 	var half_span := eye.distance_to(target) * tan(deg_to_rad(cam.fov) * 0.5) * vp.aspect()
 	# Shift both the camera and its aim so orbit is always centred on the hero.
@@ -2449,6 +2500,7 @@ func _close_style() -> void:
 	var e := game.empire
 	if first:
 		e.flags["styled"] = true
+		_style_tab = "looks"
 		# (Your starting outfit is yours.)
 		var lk := HeroLook.current(e.flags)
 		var o := Wardrobe.owned(e.flags)

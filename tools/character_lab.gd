@@ -269,11 +269,20 @@ func _city_review(outfits: Array) -> void:
 	if game.state == "title":
 		game._play()
 	game.ui.close_panel(true)
+	if not audit_look.is_empty():
+		var owned := Wardrobe.owned(game.empire.flags)
+		for outfit: Dictionary in audit_look.values():
+			for key in ["top", "trousers", "footwear", "shoes", "accessory"]:
+				if outfit.has(key) and outfit[key] not in owned:
+					owned.append(outfit[key])
 	for i in 15:
 		await get_tree().physics_frame
 	game.ui.open_style()
 	for o: String in outfits:
-		game.ui._style_tab = "clothes" if o.begins_with("a_") or o.begins_with("b_") else "character"
+		if audit_look.has(o):
+			game.ui._style_tab = "looks"
+		else:
+			game.ui._style_tab = "clothes" if o.begins_with("a_") or o.begins_with("b_") else "character"
 		game.ui._style_set(_look(o))
 		for view in [["portrait", true, 0.24], ["outfit", false, -0.22], ["rear", false, PI - 0.3]]:
 			if not view_filter.is_empty() and not view[0] in view_filter:
@@ -282,7 +291,7 @@ func _city_review(outfits: Array) -> void:
 			game.ui._style_orbit = view[2]
 			game.ui._style_frame()
 			game.ui._update_style_zoom()
-			for i in 2:
+			for i in 10:
 				await get_tree().process_frame
 			await RenderingServer.frame_post_draw
 			root.get_texture().get_image().save_png("%s/%s__wardrobe_%s.png" % [out, o, view[0]])

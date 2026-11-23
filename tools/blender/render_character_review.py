@@ -51,6 +51,21 @@ OUTFITS['jules_expression'] = dict(OUTFITS['jules_moto'], expression='Smile')
 OUTFITS['ade_blink'] = dict(OUTFITS['ade_bomber'], expression='Blink')
 OUTFITS['jules_blink'] = dict(OUTFITS['jules_moto'], expression='Blink')
 OUTFITS['jules_square_neck'] = dict(OUTFITS['square_neck'], face='jules')
+collection_path = Path(__file__).resolve().parents[2] / 'config/hero_outfits.json'
+for body, collection in json.loads(collection_path.read_text()).items():
+    for outfit in collection:
+        look = outfit['look']
+        top = look['top'].removeprefix('top_')
+        lower = 'dress' if top.endswith('dress') else look['trousers']
+        shoe_colour = {'shoes_classic': (.91, .89, .85), 'shoes_blackout': (.095, .092, .09),
+                       'shoes_gum': (.66, .46, .31), 'shoes_gold': (.72, .47, .20)}[look['shoes']]
+        def rgb(key):
+            value = look[key].removeprefix('#')
+            return tuple(int(value[i:i+2], 16) / 255 for i in (0, 2, 4))
+
+        OUTFITS[outfit['id']] = dict(face='ade' if body == 'a' else 'jules', hair='crop' if body == 'a' else 'bun',
+            top=top, acc=[], lower=lower, shoes=look.get('footwear', 'trainers'), top_col=rgb('top_col'),
+            pants=rgb('pants_col'), shoe_col=shoe_colour, accessory=look.get('accessory', 'none'))
 SKIN = {'ade': (.72, .44, .30), 'theo': (0.78, 0.6, 0.5), 'kai': (0.6, 0.43, 0.32), 'malik': (0.42, 0.27, 0.18), 'ren': (0.72, 0.55, 0.42),
         'rio': (0.36, 0.22, 0.15), 'sam': (0.9, 0.74, 0.64), 'noa': (0.79, 0.64, 0.51),
         'jules': (.80, .50, .355)}
@@ -146,8 +161,8 @@ def show(spec):
     f, hs, top = spec['face'], spec['hair'], spec['top']
     lower = spec.get('lower', 'chinos' if top in ('shirt', 'blazer') else 'cargo')
     shoes = spec.get('shoes', 'trainers')
-    bare = lower in ('dress', 'miniskirt', 'midiskirt', 'maxiskirt', 'tailoredshorts')
-    barefoot = shoes == 'sandals' and (bare or lower == 'shorts')
+    bare = lower in ('dress', 'miniskirt', 'midiskirt', 'maxiskirt', 'utilitymini', 'beltedmini', 'tailoredshorts')
+    barefoot = shoes in ('sandals', 'eveningstraps') and (bare or lower == 'shorts')
     cropped = any(o.name == 'Fashion_Cropped_Ankles' for o in meshes) and lower in (
         'cargo', 'chinos', 'jeans', 'joggers', 'fitjeans', 'leggings')
     for o in meshes:
@@ -183,34 +198,40 @@ def show(spec):
             vis = n.split('_')[1] == lower and not (barefoot and n == 'Lower_shorts_Legs')
         elif n in ('Courier_Trainers', 'Courier_Soles', 'Courier_TrainerTongues', 'Courier_TrainerLaces'):
             vis = shoes == 'trainers'
+        elif n.startswith('JulesAccessory_'):
+            vis = n == 'JulesAccessory_' + spec.get('accessory', 'none')
         elif n.startswith('Footwear_'):
             vis = n == 'Footwear_' + shoes
         elif n == 'Ankle_Liner':
-            vis = not cropped and not bare and lower not in ('shorts', 'bikershorts') and shoes not in ('sandals', 'boots')
+            vis = not cropped and not bare and lower not in ('shorts', 'bikershorts', 'sprintshorts') and shoes not in ('sandals', 'boots', 'eveningstraps')
         elif n == 'Fashion_Cropped_Ankles':
-            vis = cropped and shoes != 'sandals'
+            vis = cropped and shoes not in ('sandals', 'eveningstraps')
         elif n == 'Fashion_Cropped_Barefeet':
-            vis = cropped and shoes == 'sandals'
+            vis = cropped and shoes in ('sandals', 'eveningstraps')
         elif n == 'Fashion_Torso_Skin':
-            vis = top == 'vest' or (top.startswith('fashion_') and top not in ('fashion_crop', 'fashion_moto', 'fashion_pullover', 'fashion_racer'))
+            vis = top == 'vest' or (top.startswith('fashion_') and top not in ('fashion_crop', 'fashion_moto', 'fashion_pullover', 'fashion_racer', 'fashion_ribcrop', 'fashion_zipcrop', 'fashion_crossbra'))
         elif n == 'Fashion_Racer_Midriff':
             vis = top == 'fashion_racer'
         elif n == 'Fashion_Crop_Skin':
-            vis = top == 'fashion_crop'
+            vis = top in ('fashion_crop', 'fashion_ribcrop', 'fashion_zipcrop')
+        elif n == 'JulesSkin_Crossbra':
+            vis = top == 'fashion_crossbra'
         elif n == 'Fashion_Legs':
-            vis = bare and not barefoot
+            vis = bare and not barefoot and top != 'fashion_cowldress'
+        elif n.startswith('JulesSkin_Cowldress'):
+            vis = top == 'fashion_cowldress' and n.endswith('_Bare') == barefoot
         elif n == 'Fashion_Slip':
             vis = bare and lower != 'tailoredshorts'
         elif n == 'Fashion_Biker_Legs':
-            vis = lower == 'bikershorts' and shoes != 'sandals'
+            vis = lower in ('bikershorts', 'sprintshorts') and shoes not in ('sandals', 'eveningstraps')
         elif n == 'Fashion_Biker_Barefeet':
-            vis = lower == 'bikershorts' and shoes == 'sandals'
+            vis = lower in ('bikershorts', 'sprintshorts') and shoes in ('sandals', 'eveningstraps')
         elif n == 'Fashion_Lounge_Socks':
-            vis = lower == 'bikershorts' and shoes in ('trainers', 'streettrainers')
+            vis = lower in ('bikershorts', 'sprintshorts') and shoes in ('trainers', 'streettrainers', 'highstreet')
         elif n == 'Fashion_Feet':
-            vis = shoes == 'sandals' and not barefoot and not cropped and lower != 'bikershorts'
+            vis = shoes in ('sandals', 'eveningstraps') and not barefoot and not cropped and lower not in ('bikershorts', 'sprintshorts')
         elif n == 'Fashion_Barefoot_Legs':
-            vis = barefoot
+            vis = barefoot and top != 'fashion_cowldress'
         elif n == 'Courier_Waistband':
             vis = top == 'shirt'
         elif n.startswith('Mask_'):
@@ -383,7 +404,7 @@ def tint(spec):
                 col = spec['pants']
             elif nm.startswith('hero_fashion_shoe_'):
                 col = spec.get('shoe_col', (.62, .6, .57))
-            elif nm == 'hero_streettrainer_upper':
+            elif nm in ('hero_streettrainer_upper', 'hero_trainer_panels', 'hero_trainer', 'hero_trainer_tongue', 'hero_lace', 'hero_midsole', 'hero_outsole'):
                 col = spec.get('shoe_col', (.62, .6, .57))
             elif nm.startswith('hero_skin'):
                 col = SKIN[spec['face']]
@@ -396,7 +417,7 @@ def tint(spec):
             elif nm == 'hero_glove':
                 sk = SKIN[spec['face']]
                 col = (sk[0] * .8, sk[1] * .7, sk[2] * .66)
-            elif nm in ('hero_chino', 'hero_cargo', 'hero_cargo_pocket', 'hero_waistband'):
+            elif nm in ('hero_chino', 'hero_cargo', 'hero_cargo_pocket', 'hero_waistband', 'hero_jeans', 'hero_joggers', 'hero_shorts'):
                 col = spec['pants']
             if col is not None:
                 existing = m.node_tree.nodes.get('Review tint')

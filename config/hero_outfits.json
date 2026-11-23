@@ -1,0 +1,127 @@
+{
+  "a": [
+    {
+      "id": "ade_casual",
+      "name": "Casual",
+      "look": {
+        "top": "top_tee",
+        "trousers": "jeans",
+        "top_col": "#e4ded1",
+        "pants_col": "#35485f",
+        "shoes": "shoes_classic"
+      }
+    },
+    {
+      "id": "ade_streetwear",
+      "name": "Streetwear",
+      "look": {
+        "top": "top_bomber",
+        "trousers": "cargo",
+        "top_col": "#414b3d",
+        "pants_col": "#33373a",
+        "shoes": "shoes_gum"
+      }
+    },
+    {
+      "id": "ade_smart",
+      "name": "Smart",
+      "look": {
+        "top": "top_shirt",
+        "trousers": "chinos",
+        "top_col": "#a3b5c4",
+        "pants_col": "#81715f",
+        "shoes": "shoes_blackout"
+      }
+    },
+    {
+      "id": "ade_sports",
+      "name": "Sports",
+      "look": {
+        "top": "top_hoodie",
+        "trousers": "joggers",
+        "top_col": "#506378",
+        "pants_col": "#252933",
+        "shoes": "shoes_classic"
+      }
+    },
+    {
+      "id": "ade_formal",
+      "name": "Formal",
+      "look": {
+        "top": "top_blazer",
+        "trousers": "chinos",
+        "footwear": "derbies",
+        "top_col": "#262e3f",
+        "pants_col": "#262e3f",
+        "shoes": "shoes_blackout"
+      }
+    }
+  ],
+  "b": [
+    {
+      "id": "jules_casual",
+      "name": "Casual",
+      "look": {
+        "top": "top_fashion_ribcrop",
+        "trousers": "relaxeddenim",
+        "footwear": "streettrainers",
+        "top_col": "#ded1bd",
+        "pants_col": "#7395b3",
+        "shoes": "shoes_classic",
+        "accessory": "day"
+      }
+    },
+    {
+      "id": "jules_streetwear",
+      "name": "Streetwear",
+      "look": {
+        "top": "top_fashion_zipcrop",
+        "trousers": "utilitymini",
+        "footwear": "highstreet",
+        "top_col": "#24232a",
+        "pants_col": "#242127",
+        "shoes": "shoes_blackout",
+        "accessory": "street"
+      }
+    },
+    {
+      "id": "jules_smart",
+      "name": "Smart",
+      "look": {
+        "top": "top_fashion_tailoredknit",
+        "trousers": "beltedmini",
+        "footwear": "pumps",
+        "top_col": "#655147",
+        "pants_col": "#dfcdb7",
+        "shoes": "shoes_gum",
+        "accessory": "office"
+      }
+    },
+    {
+      "id": "jules_sports",
+      "name": "Sports",
+      "look": {
+        "top": "top_fashion_crossbra",
+        "trousers": "sprintshorts",
+        "footwear": "streettrainers",
+        "top_col": "#202128",
+        "pants_col": "#27282c",
+        "shoes": "shoes_classic",
+        "accessory": "none"
+      }
+    },
+    {
+      "id": "jules_formal",
+      "name": "Formal",
+      "look": {
+        "top": "top_fashion_cowldress",
+        "trousers": "relaxeddenim",
+        "footwear": "eveningstraps",
+        "top_col": "#71152e",
+        "pants_col": "#71152e",
+        "shoes": "shoes_gold",
+        "accessory": "evening"
+      }
+    }
+  ]
+}
