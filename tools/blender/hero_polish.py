@@ -280,3 +280,104 @@ def tidy_flyaways(shell, groom, eye, limit=.0032):
         if height > limit:
             v.co = p - normal * (height - limit) * .85
     groom.data.update()
+
+
+# ---------------------------------------------------------------- figure
+SKIP_FIGURE = ('Face_', 'Hair_', 'Groom_', 'Acc_', 'Mask_', 'Build ')
+
+
+def _figure_delta(p, identity, j):
+    """Rest-pose offset that reshapes the silhouette without moving a joint:
+    waist taper, shoulder caps, chest (Ade); waist, hips (Jules)."""
+    x, y, z = p
+    ax = abs(x)
+    d = Vector()
+    torso = 1 - smooth(.20, .27, ax)          # keeps the A-pose arms out of it
+    waist = j['hips'] + .55 * (j['chest'] - j['hips'])
+    if identity == 'ade':
+        taper = .115 * _bell((z - waist) / .085, 1) + .10 * _bell((z - (j['hips'] + .02)) / .06, 1)
+        widen = .055 * _bell((z - (j['chest'] + .11)) / .07, 1)
+        d.x += -x * taper * torso + x * widen * torso * (1 - smooth(.17, .22, ax))
+        d.y += -y * .55 * taper * torso * (1 if y > 0 else .35)
+        d.y += .010 * _bell((z - (j['chest'] + .09)) / .05, 1) * _bell(x / .085, 1) * smooth(-.01, .05, y)
+        cap, gain = .080, .013
+    else:
+        taper = .115 * _bell((z - waist) / .072, 1)
+        hips = .060 * _bell((z - (j['hips'] - .09)) / .085, 1) * smooth(.04, .13, ax)
+        d.x += (-x * taper - x * hips) * torso
+        d.y += -y * taper * torso * (.9 if y > 0 else .3)
+        belly = .16 * _bell((z - (j['hips'] + .05)) / .055, 1) * smooth(.0, .06, y)
+        d.y += -y * belly * torso
+        d.x += -x * .5 * belly * torso
+        cap, gain = .068, .006
+    for sign in (-1, 1):
+        shoulder = Vector((sign * j['shoulder_x'], 0, j['shoulder_z']))
+        off = p - shoulder
+        if off.length > 1e-5 and off.z > -.06:
+            d += off.normalized() * gain * _bell(off.length / cap, 1) * smooth(.10, .15, ax)
+    return d
+
+
+def _leg_tailor(obj, factor_at, j):
+    """Pull a garment's leg tube toward its leg axis (wide jeans, skirts)."""
+    keys = obj.data.shape_keys.key_blocks if obj.data.shape_keys else None
+    basis = keys[0].data if keys else obj.data.vertices
+    delta = {}
+    for i, v in enumerate(basis):
+        p = v.co
+        f = factor_at(p.z)
+        if f >= 1:
+            continue
+        if obj.name.startswith('Lower_') and 'skirt' in obj.name.lower():
+            centre = Vector((0, j['skirt_y'], p.z))
+        else:
+            side = 1 if p.x > 0 else -1
+            centre = Vector((side * (.1 + (.94 - p.z) * .087), 0, p.z))
+            # Leave the crotch seam where it is (inner panels would part).
+            f = 1 - (1 - f) * max(smooth(.025, .075, abs(p.x)), 1 - smooth(.70, .78, p.z))
+        delta[i] = (centre - p) * (1 - f) * Vector((1, 1, 0))
+    _apply_mesh_delta(obj, delta)
+
+
+def _apply_mesh_delta(obj, delta):
+    keys = obj.data.shape_keys.key_blocks if obj.data.shape_keys else []
+    for key in keys:
+        for i, d in delta.items():
+            key.data[i].co += d
+    for i, d in delta.items():
+        if keys:
+            obj.data.vertices[i].co = keys[0].data[i].co
+        else:
+            obj.data.vertices[i].co += d
+    obj.data.update()
+
+
+def shape_figure(rig, meshes, identity):
+    bones = rig.data.bones
+    head = lambda n: rig.matrix_world @ bones[n].head_local
+    j = {'hips': head('b_hips').z, 'chest': head('b_chest').z,
+         'shoulder_x': abs(head('b_upper_arm_l').x), 'shoulder_z': head('b_upper_arm_l').z}
+    for obj in meshes:
+        if obj.type != 'MESH' or obj.name.startswith(SKIP_FIGURE):
+            continue
+        keys = obj.data.shape_keys.key_blocks if obj.data.shape_keys else None
+        basis = keys[0].data if keys else obj.data.vertices
+        delta = {}
+        for i, v in enumerate(basis):
+            d = _figure_delta(v.co, identity, j)
+            if d.length_squared > 1e-12:
+                delta[i] = d
+        _apply_mesh_delta(obj, delta)
+    if identity != 'jules':
+        return
+    names = {o.name: o for o in meshes}
+    skirt = names.get('Lower_midiskirt')
+    if skirt is not None:
+        ys = [v.co.y for v in skirt.data.vertices]
+        j['skirt_y'] = (max(ys) + min(ys)) * .5
+        top = max(v.co.z for v in skirt.data.vertices)
+        _leg_tailor(skirt, lambda z: 1 - .15 * smooth(top - .16, top - .55, z), j)
+    for name in ('Lower_widejeans',):
+        obj = names.get(name)
+        if obj is not None:
+            _leg_tailor(obj, lambda z: 1 - .11 * smooth(.97, .78, z) - .09 * smooth(.75, .30, z), j)

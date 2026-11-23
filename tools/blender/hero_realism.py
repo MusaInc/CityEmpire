@@ -13,7 +13,7 @@ from build_b_surface import packed_image, pixels
 from garment_kit import _dilate, raster_uv
 from hero_finish import material_vertices
 from hero_groom import ribbon
-from hero_polish import balance_face, rebuild_bun, shape_lips, smooth_side_hairline, tidy_flyaways
+from hero_polish import shape_figure, balance_face, rebuild_bun, shape_lips, smooth_side_hairline, tidy_flyaways
 from portrait_wrap import smooth as smooth_array
 from wardrobe_quality import adjust_basis, smooth
 
@@ -527,6 +527,7 @@ def finish_realism(rig, meshes, identity, output):
     lashes(face, eyes, identity)
     finish_complexion(face, identity, eyes, output)
     fit_jacket(models, rig, face, identity)
+    shape_figure(rig, meshes, identity)
     style = 'crop' if identity == 'ade' else 'bun'
     shell = models[f'Hair_{style}_{identity}']
     refine_scalp(face, shell, identity, eyes, output)
