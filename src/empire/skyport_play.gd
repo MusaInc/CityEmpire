@@ -110,11 +110,17 @@ func free_slot(kind: String) -> Array:
 			opts = P["stands"]
 		_:
 			opts = P["berths"]
-	for o in opts:
+	for i in opts.size():
+		var o: Array = opts[i]
 		var taken := false
 		for k in crafts:
-			if is_instance_valid(crafts[k]) and (crafts[k] as Craft).global_position.distance_to(o[0]) < 9.0:
+			var c: Craft = crafts[k]
+			if not is_instance_valid(c) or c.kind != kind:
+				continue
+			var centre: Vector3 = c.berths[i][0] if kind == "boat" and i < c.berths.size() else o[0]
+			if c.global_position.distance_to(centre) < 9.0:
 				taken = true
+				break
 		if not taken:
 			return o
 	var last: Array = opts[opts.size() - 1]
