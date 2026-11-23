@@ -2,21 +2,21 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bo1be6nka8s1l"
-path.s3tc="res://.godot/imported/character_b_top_blazer_albedo.png-63fb10c319915387bd70432a3a5687f3.s3tc.ctex"
-path.etc2="res://.godot/imported/character_b_top_blazer_albedo.png-63fb10c319915387bd70432a3a5687f3.etc2.ctex"
+uid="uid://kxwu8hlhyqof"
+path.s3tc="res://.godot/imported/character_b_top_fashion_pullover_normal.png-47c05bc770490a9263d38bb40ab0f73f.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_top_fashion_pullover_normal.png-47c05bc770490a9263d38bb40ab0f73f.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "61b1dc2ae1b8a1068dc2b649e49ae3bf"
+"md5": "a055c1f6a0c0aea9d26602ee3d3b965a"
 }
 
 [deps]
 
-source_file="res://assets/models/character_b_top_blazer_albedo.png"
-dest_files=["res://.godot/imported/character_b_top_blazer_albedo.png-63fb10c319915387bd70432a3a5687f3.s3tc.ctex", "res://.godot/imported/character_b_top_blazer_albedo.png-63fb10c319915387bd70432a3a5687f3.etc2.ctex"]
+source_file="res://assets/models/character_b_top_fashion_pullover_normal.png"
+dest_files=["res://.godot/imported/character_b_top_fashion_pullover_normal.png-47c05bc770490a9263d38bb40ab0f73f.s3tc.ctex", "res://.godot/imported/character_b_top_fashion_pullover_normal.png-47c05bc770490a9263d38bb40ab0f73f.etc2.ctex"]
 
 [params]
 
@@ -26,7 +26,7 @@ compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
-compress/normal_map=0
+compress/normal_map=1
 compress/channel_pack=0
 mipmaps/generate=true
 mipmaps/limit=-1
@@ -41,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=512
+process/size_limit=1024
 detect_3d/compress_to=1

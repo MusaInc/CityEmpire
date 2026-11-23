@@ -82,20 +82,20 @@ void fragment() {
     EMISSION = surface_emission;
 #if defined(SKIN)
     // Diffuse wrap and a low skin-coloured bounce keep detail in shadow.
-    SPECULAR = mix(0.23, 0.30, surface_definition);
+    SPECULAR = mix(0.23, 0.27, surface_definition);
     ALBEDO *= vec3(1.04, 1.0, 0.97);
     EMISSION += ALBEDO * mix(mix(0.082, 0.029, surface_definition), 0.023, night);
 #elif defined(EYE)
-    SPECULAR = 0.32;
+    SPECULAR = mix(0.26, 0.46, iris);
     RIM = 0.0;
-    ROUGHNESS = mix(0.27, 0.43, smoothstep(0.40, 0.78, radius));
+    ROUGHNESS = mix(0.40, 0.22, iris);
 #elif defined(HAIR_CARDS)
     SPECULAR = 0.22;
     EMISSION += ALBEDO * 0.035;
     ANISOTROPY = 0.55;
     ANISOTROPY_FLOW = vec2(0.0, 1.0);
 #elif defined(HAIR_SCALP)
-    SPECULAR = 0.27;
+    SPECULAR = 0.23;
 #else
     SPECULAR = 0.32;
 #endif

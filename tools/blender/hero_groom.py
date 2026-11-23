@@ -15,6 +15,47 @@ from garment_kit import _dilate, iso_cut, raster_uv
 from wardrobe_quality import fit_headphone_band, smooth
 
 
+def wound_gather(centre, radius, material):
+    """Build a gathered style out of overlapping, UV-directed lock meshes."""
+    points, faces, texels = [], [], []
+    sectors, sides = 56, 9
+    for ring, (height, reach, bulk) in enumerate((
+            (-.53, .55, .29), (-.29, .69, .30), (-.02, .70, .31),
+            (.25, .64, .28), (.48, .49, .26), (.61, .29, .23), (.65, .11, .19))):
+        start = len(points)
+        for i in range(sectors + 1):
+            t = i / sectors
+            angle = math.tau * t
+            outward = Vector((math.cos(angle), math.sin(angle), 0))
+            curl = .09 * math.sin(angle + ring * .88) + .07 * math.sin(2 * angle + ring)
+            root = centre + radius * (outward * (reach + .042 * math.cos(angle * 3 + ring))
+                                      + Vector((.058 * height, 0, height + curl)))
+            for j in range(sides):
+                section = math.tau * j / sides
+                grooves = 1 + .045 * math.cos(section * 3 + angle * 4 + ring)
+                offset = outward * math.cos(section) + Vector((0, 0, .70 * math.sin(section)))
+                points.append(root + radius * bulk * grooves * offset)
+                texels.append((j / sides + ring * .115, t))
+        for row in range(sectors):
+            for j in range(sides):
+                a = start + row * sides + j
+                b = start + row * sides + (j + 1) % sides
+                faces.append((a, a + sides, b + sides, b))
+    mesh = bpy.data.meshes.new('Wrapped lock surfaces')
+    mesh.from_pydata(points, [], faces)
+    mesh.materials.append(material)
+    layout = mesh.uv_layers.new(name='SurfaceUV')
+    for p in mesh.polygons:
+        p.use_smooth = True
+        across = [texels[i][0] for i in p.vertices]
+        for loop, vertex in zip(p.loop_indices, p.vertices):
+            u, v = texels[vertex]
+            layout.data[loop].uv = (u + float(max(across) - u > .5), v)
+    locks = bpy.data.objects.new('Wound bun', mesh)
+    bpy.context.collection.objects.link(locks)
+    return locks
+
+
 @dataclass(frozen=True)
 class Cut:
     clearance: float
@@ -401,6 +442,22 @@ def bound_lengths(batch, base, style, rng):
             ribbon(batch, roots, normals, rng.uniform(.0022, .0041), lock % 8)
 
 
+def portrait_locks(batch, eye):
+    """Two temple guides break away from the crown and curl past the jaw."""
+    for side in (-1, 1):
+        for layer in range(4):
+            centres = []
+            for row in range(12):
+                t = row / 11
+                wave = math.sin(t * math.tau + .38 * side)
+                x = .033 + .034 * math.sin(t * math.pi / 2) + .008 * wave * t
+                y = eye.y - .012 + .031 * math.sin(t * math.pi * .96) - .020 * t * t
+                centres.append(Vector((side * (x + .0018 * layer), y + .0023 * layer,
+                                       eye.z + .088 - (.190 + .004 * layer) * t)))
+            normal = Vector((side * .56, .83, 0)).normalized()
+            ribbon(batch, centres, [normal] * len(centres), .012 - layer * .0018, (layer + 2) % 8)
+
+
 def build_cards(obj, base, eye, ears, skull, style, seed):
     """Make narrow swept ribbons with roots on the fitted scalp."""
     cut = CUTS[style]
@@ -498,6 +555,8 @@ def build_cards(obj, base, eye, ears, skull, style, seed):
         faces.extend((start+i, start+i+1, start+i+3, start+i+2) for i in range(0, 8, 2))
     if style in ('ponytail', 'bun'):
         bound_lengths(batch, base, style, rng)
+    if obj.name == 'Groom_bun_jules':
+        portrait_locks(batch, eye)
     previous = obj.data
     me = bpy.data.meshes.new(obj.name + '_Strands')
     me.from_pydata(points, [], faces)
@@ -613,6 +672,8 @@ def groom_hero(meshes, output, body, legacy_skin_paint=False):
     first = faces[0]
     pony = objects[f'Hair_ponytail_{first}']
     lengths = next((m for m in pony.data.materials if m.name.startswith('hero_hair_lengths')), None)
+    if lengths is None and body == 'b':
+        lengths = bpy.data.materials.get('hero_hair_lengths_b')
     if lengths is None:
         lengths = length_material(pony.data.materials[0], output, 'hair_lengths_b' if body == 'b' else 'hair_lengths')
     atlas_image(objects[f'Groom_crop_{first}'].data.materials[0], output)

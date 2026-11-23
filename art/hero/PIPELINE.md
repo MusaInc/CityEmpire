@@ -15,9 +15,8 @@ python3 tools/character_review/review.py capture <milestone> --quick   # Godot +
 ## Conventions
 
 **Skeleton.** Gameplay bone names are `b_<name>` from `CharacterRig.BONES`.
-Build B adds two clavicle deform bones. Godot reads shoulder pivots and arm
-lengths from the imported rest pose and rotates the clavicles with arm swing.
-Both builds use the same bind
+Godot reads shoulder pivots and arm lengths from the imported rest pose.
+Both builds use the same bone hierarchy and bind
 pose with arms 42 degrees out (`ARM_A`), legs 5 degrees (`LEG_A`). The
 gameplay rig drives world-space foot contact. Its blend shapes close the
 sculpted lids, flex the individual fingers, and restore fabric volume at the
@@ -25,10 +24,12 @@ elbows and knees from the active joint rotation. Fingers retain the source hand'
 Blender bake and use the existing two hand blend shapes in Godot.
 
 **Body.** MakeHuman hm08 (CC0), retargeted and sculpted around the exported
-joints. Build B uses a lower acromion and a continuous slope from the neck,
-shorter upper arms, and a fuller pelvis and seat. Body, garment and trim
-meshes use the same shoulder weights and proportional fit. Shoulder
-correctives maintain the deltoid as the arm advances.
+joints. Build B's female anatomy is formed before pattern cutting in
+`tools/blender/female_character.py`. The neck and shoulders have their own
+landmarks, and the torso, pelvis, and limb proportions feed the same garment
+and trim fitting tools as Build A. Shoulder correctives keep the cap seated
+against the new body as the arm advances. Build B uses its own measured
+necklines and retains the shirt as a separate garment.
 
 **Garments** (`tools/blender/garment_kit.py`, used by `empire_wardrobe.py`):
 1. Cut the garment's region from the body (same vertices, same weights: it
@@ -88,11 +89,22 @@ material name to the rig's tint table and `FABRIC_DETAIL`, rebuild, capture.
 
 ## Review
 
+WorldState runs two fixed identities. The Blender authoring files retain the
+source meshes, but the exported gameplay models include only Ade and Jules,
+plus the fitted meshes needed by their accessories and wardrobe. The face
+wraps use the model UVs. Jules's reference contributes photographed skin
+colour and detail, with separate lit materials for hair, brows and eyes.
+
 `tools/character_lab.tscn` renders the hero through the real look path under the
 game's atmosphere from fixed cameras (and a neutral studio light with
 `neutral`); `tools/blender/render_character_review.py` renders Cycles material
 and clay passes; `review.py` builds before/after pairs and the dashboard at
 `art/character_review/index.html`.
+
+Build B's editable `courier_b.blend` also contains a hidden, rigged anatomy
+study. The Blender reviewer accepts the authoring file directly. Use
+`anatomy` with `front,side,rear` for neutral clay and `jules_seated` with
+`seated,side` to review the midi skirt on the bent-leg pose.
 
 The stage opens the same look path as the game. Use `catalog` to review all
 eight tops on both builds. The lab outfits a_denim through b_shorts cover

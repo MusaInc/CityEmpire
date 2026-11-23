@@ -433,6 +433,17 @@ _ys = [RB[j].y for j in _nk_ids if abs(RB[j].x) < .02 and 1.585 < RB[j].z < 1.61
 if len(_ys) < 2:   # (body type b: a slimmer, shorter neck - widen the band)
     _ys = [RB[j].y for j in _nk_ids if abs(RB[j].x) < .03 and 1.56 < RB[j].z < 1.64 and wsum(j, 'head') < .8]
 NECK_CY = (max(_ys) + min(_ys)) / 2
+if BODY == 'b':
+    # Measure both sides of the actual neck at matching heights. Pooling
+    # source vertices mixed the seam behind the shoulder with the throat.
+    _neck_centres = []
+    for _height in (1.567, 1.578, 1.589, 1.600):
+        _front = _nk_tree.ray_cast(Vector((0,.26,_height)), Vector((0,-1,0)), .44)[0]
+        _back = _nk_tree.ray_cast(Vector((0,-.20,_height)), Vector((0,1,0)), .44)[0]
+        if _front is not None and _back is not None and .05 < _front.y - _back.y < .145:
+            _neck_centres.append((_front.y + _back.y) * .5)
+    if _neck_centres:
+        NECK_CY = float(np.median(_neck_centres))
 _NK_A = [math.tau * k / 72 for k in range(72)]
 
 
@@ -452,19 +463,20 @@ def _periodic(vals):
 # Sides/back: the neck at 1.62 (lower, the trapezius flares and the collar
 # would stand wide). Front: the throat over the stand's own height (1.565 to
 # 1.60), which is fuller than at 1.62 - else the throat shows through.
+COLLAR_LEVEL = -.051 if BODY == 'b' else 0.0
 _nr = []
 for a in _NK_A:
     fw = max(0.0, math.cos(a)) ** 2
-    r_hi = _neck_ray(a, 1.62)
-    r_th = max(_neck_ray(a, z) for z in (1.565, 1.575, 1.585, 1.595, 1.605))
+    r_hi = _neck_ray(a, 1.62 + COLLAR_LEVEL)
+    r_th = max(_neck_ray(a, z + COLLAR_LEVEL) for z in (1.565, 1.575, 1.585, 1.595, 1.605))
     _nr.append(r_hi + (max(r_hi, r_th) - r_hi) * fw)
 _nr = [(_nr[k] + _nr[-k]) / 2 for k in range(72)]          # mirror-symmetric (left = right)
 STAND_R = _periodic(fourier_smooth([r + .0065 + .0025 * max(0.0, math.cos(a)) ** 2 for r, a in zip(_nr, _NK_A)], 3))
-STAND_Z0 = _periodic([1.598 - .03 * max(0.0, math.cos(a)) ** 1.5 for a in _NK_A])   # base: lower at the throat
+STAND_Z0 = _periodic([1.598 + COLLAR_LEVEL - .03 * max(0.0, math.cos(a)) ** 1.5 for a in _NK_A])   # base: lower at the throat
 STAND_H = _periodic([.026 - .003 * max(0.0, math.cos(a)) for a in _NK_A])
 neck_r = lambda a, z: STAND_R(a) - .0065
 COLLAR_EASE = (.0065, .0045)
-SHIRT_NECK = 1.584 if BODY=='b' else 1.595
+SHIRT_NECK = 1.595 + COLLAR_LEVEL
 SHIRT_OVAL = (STAND_R(math.pi / 2), STAND_R(0), STAND_R(math.pi))
 SHIRT_NECK_DROP = .03 / STAND_R(0)
 print('NECK centre y', round(NECK_CY, 4), 'stand radii side/front/back', [round(x, 4) for x in SHIRT_OVAL], flush=True)
@@ -716,9 +728,10 @@ def open_front(ob):
 
 # The same shirt, closed, for wearing under the jacket with a tie (trimmed to
 # the front panel in the blazer section).
-shirt_closed = shirt.copy()
-shirt_closed.data = shirt.data.copy()
-bpy.context.collection.objects.link(shirt_closed)
+if BODY == 'a':
+    shirt_closed = shirt.copy()
+    shirt_closed.data = shirt.data.copy()
+    bpy.context.collection.objects.link(shirt_closed)
 open_front(shirt)
 print('SHIRT tucked: pulled in', tuck_into(shirt, pants, WAIST_TOP, .007), flush=True)
 follow_layer(shirt, pants, WAIST_TOP + .02, .04, k_max=1.0)
@@ -1129,8 +1142,18 @@ def plain_albedo(P, N, H, textile='joggers', grain=.72):
     return np.repeat(np.clip(a, .74, .995)[:, None], 3, 1).astype(np.float32)
 
 
+def leather_grain(points):
+    x, y, z = points.T
+    layer = np.sin(2120 * x + 780 * y + 880 * z + 1.4 * np.sin(3090 * y - 1910 * z))
+    across = np.sin(2870 * z - 1850 * x + .9 * np.sin(1380 * y + 870 * x))
+    return layer * across
+
+
 def everyday_top(name, matname, layer, lim, sleeve_end, neck, ease, hem=TEE_HEM, tail=.04, sleeve_ease=(.016, .014),
                  cuff=None, base_rgb=(.16, .17, .19), rough=.78, textile='joggers', texture_name=None):
+    if BODY == 'b':
+        neck = (neck[0] + COLLAR_LEVEL, neck[1] + COLLAR_LEVEL + (.004 if name == 'Top_Tee' else 0.0))
+        sleeve_ease = tuple(amount * .78 for amount in sleeve_ease)
     R_, Z_ = neck_ring_fit(neck[0], neck[1], ease)
     ob = tailored_top(name, hem, neck[0], (neck[0] - neck[1]) / R_(0), (R_(math.pi / 2), R_(0), R_(math.pi)), layer,
                       sleeve_end=sleeve_end, cuff=cuff, neck_cy=NECK_CY, lim=lim, taper_front=.12, taper_side=.3, neck_curve=Z_,
@@ -1146,6 +1169,8 @@ def everyday_top(name, matname, layer, lim, sleeve_end, neck, ease, hem=TEE_HEM,
         hit = st_.ray_cast(c + d * .25, -d)
         rr.append(max(R_(a), (Vector((hit[0].x - c.x, hit[0].y - c.y, 0)).length + .001) if hit[0] is not None else R_(a)))
     rr = [(rr[k] + rr[-k]) / 2 for k in range(72)]
+    if BODY == 'b':
+        rr = [min(radius, R_(a) + .0055) for radius, a in zip(rr, _NK_A)]
     R_ = _periodic(list(fourier_smooth(rr, 3)))
     snap_neckline(ob, R=R_, Z0=Z_, reach=.044)
     shirttail(ob, hem, tail, tail, rows=3, flare=.004)
@@ -1166,9 +1191,16 @@ def everyday_top(name, matname, layer, lim, sleeve_end, neck, ease, hem=TEE_HEM,
     # waistband and belt loops through the tee's hem in motion)
     follow_layer(ob, pants, PANTS_TOP + .03, .055, k_max=1.0)
     pack_uvs(ob)
-    colour = lambda P,N,H: plain_albedo(P,N,H,textile)
-    nrm, alb = bake_detail(ob, texture_name or name.lower(), 1024,
-                           seams_fn(lambda a: hem-tail, sleeve_end if cuff is None else None), colour)
+    seams = seams_fn(lambda a: hem-tail, sleeve_end if cuff is None else None)
+    if textile == 'leather':
+        relief = lambda P,N: seams(P,N) + .00011 * leather_grain(P)
+        def colour(P, N, H):
+            grain = np.clip(.91 + 22 * H + .014 * leather_grain(P), .76, .98)
+            return grain[:, None] * np.array([1, .983, .969])
+    else:
+        relief = seams
+        colour = lambda P,N,H: plain_albedo(P,N,H,textile)
+    nrm, alb = bake_detail(ob, texture_name or name.lower(), 1024, relief, colour)
     mat = material(matname, base_rgb, rough, alb, nrm)
     mat.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = 1.0
     finish(ob, [mat], rim=.0018)
@@ -1211,7 +1243,7 @@ SHORT_T = .36       # short sleeves end at ArmFrame t (about mid upper arm)
 # Tee
 tee, _tR, _tZ = everyday_top('Top_Tee', 'hero_tee', 'shirt', .78, SHORT_T, (1.577, 1.540), .004,
                             sleeve_ease=(.013,.014), tail=.047)
-tee_trim = [rib_band('Topx_Tee_Rib', lambda a: _tR(a)+.0019, _tZ, .010, tee, lean=.0017)]
+tee_trim = [rib_band('Topx_Tee_Rib', lambda a: _tR(a)+.0019, _tZ, .007 if BODY == 'b' else .010, tee, lean=.0017)]
 tee_hull = tree_of(tee)
 for side, af in frames()[1].items():
     def sleeve_opening(_, angle, af=af):
@@ -1319,8 +1351,8 @@ def folded_hood(shell, neck_radius, neck_height):
 def fleece_hoodie():
     hem = PANTS_TOP-.037
     cuff_start = .927
-    neck_r, neck_z = neck_ring_fit(1.581,1.542,.010)
-    hood = tailored_top('Top_Hoodie',hem,1.581,1.0,
+    neck_r, neck_z = neck_ring_fit(1.581 + COLLAR_LEVEL, 1.542 + COLLAR_LEVEL, .010)
+    hood = tailored_top('Top_Hoodie',hem,1.581 + COLLAR_LEVEL,1.0,
         (neck_r(math.pi/2),neck_r(0),neck_r(math.pi)),'knit',
         sleeve_end=cuff_start,cuff=(.80,cuff_start,lambda sd,a: cuff_radius(sd,a)+.001),
         neck_cy=NECK_CY,neck_curve=neck_z,taper_front=.09,taper_side=.21,
@@ -1442,157 +1474,158 @@ zipper_trim(bomber, 'Bomber', 1.54, PANTS_TOP-.035, .009)
 # wrist, a straight hem covering the seat, a deep V from the neck to the
 # button with a cutaway below it, notch lapels laid on the fronts, and a
 # jacket collar round the back of the neck meeting the lapels.
-JK_R = _periodic([STAND_R(a) + .011 for a in _NK_A])
-JK_Z0 = _periodic([STAND_Z0(a) + .003 for a in _NK_A])
-JK_HEM = PANTS_TOP - .03
-BTN_Z = 1.06
-blazer = tailored_top('Top_Blazer', JK_HEM, SHIRT_NECK, SHIRT_NECK_DROP, (JK_R(math.pi / 2), JK_R(0), JK_R(math.pi)), 'jacket',
-                      sleeve_end=.965, cuff=(.85, .965, lambda sd, a: cuff_radius(sd, a) + .007), neck_cy=NECK_CY, taper_front=.1,
-                      taper_side=.24, sleeve_ease=(.024, .02), sleeve_taper=.1, shoulder_ease=.008)
-snap_neckline(blazer, R=JK_R, Z0=JK_Z0)
-shirttail(blazer, JK_HEM, .135, .125, rows=4, flare=.01)
-weights_below(blazer, JK_HEM)
-clear_layer(blazer, pants, .009, zmax=PANTS_TOP + .04)
-follow_layer(blazer, pants, PANTS_TOP, .12, k_max=.5)
-_V_TOP = (.082, 1.455)                 # where the lapel's edge meets the gorge
-_CUT_BOT = (.10, JK_HEM - .135)       # the cutaway's end at the hem
+if BODY == 'a':
+    JK_R = _periodic([STAND_R(a) + .011 for a in _NK_A])
+    JK_Z0 = _periodic([STAND_Z0(a) + .003 for a in _NK_A])
+    JK_HEM = PANTS_TOP - .03
+    BTN_Z = 1.06
+    blazer = tailored_top('Top_Blazer', JK_HEM, SHIRT_NECK, SHIRT_NECK_DROP, (JK_R(math.pi / 2), JK_R(0), JK_R(math.pi)), 'jacket',
+                          sleeve_end=.965, cuff=(.85, .965, lambda sd, a: cuff_radius(sd, a) + .007), neck_cy=NECK_CY, taper_front=.1,
+                          taper_side=.24, sleeve_ease=(.024, .02), sleeve_taper=.1, shoulder_ease=.008)
+    snap_neckline(blazer, R=JK_R, Z0=JK_Z0)
+    shirttail(blazer, JK_HEM, .135, .125, rows=4, flare=.01)
+    weights_below(blazer, JK_HEM)
+    clear_layer(blazer, pants, .009, zmax=PANTS_TOP + .04)
+    follow_layer(blazer, pants, PANTS_TOP, .12, k_max=.5)
+    _V_TOP = (.082, 1.455)                 # where the lapel's edge meets the gorge
+    _CUT_BOT = (.10, JK_HEM - .135)       # the cutaway's end at the hem
 
 
-def _jk_vw(z):
-    if z >= _V_TOP[1]:
-        return _V_TOP[0]
-    if z >= BTN_Z:
-        t = (z - BTN_Z) / (_V_TOP[1] - BTN_Z)
-        return .011 + (_V_TOP[0] - .011) * t
-    t = (BTN_Z - z) / (BTN_Z - _CUT_BOT[1])
-    return .011 + (_CUT_BOT[0] - .011) * t ** 1.4
+    def _jk_vw(z):
+        if z >= _V_TOP[1]:
+            return _V_TOP[0]
+        if z >= BTN_Z:
+            t = (z - BTN_Z) / (_V_TOP[1] - BTN_Z)
+            return .011 + (_V_TOP[0] - .011) * t
+        t = (BTN_Z - z) / (BTN_Z - _CUT_BOT[1])
+        return .011 + (_CUT_BOT[0] - .011) * t ** 1.4
 
 
-bm = bmesh.new()
-bm.from_mesh(blazer.data)
-iso_cut(bm, lambda co: max(abs(co.x) - _jk_vw(co.z), .022 - (co.y - NECK_CY) * FRONT))
-bm.to_mesh(blazer.data)
-bm.free()
-blazer.data.update()
-pack_uvs(blazer)
-_jn, _ja = bake_detail(blazer, 'top_blazer', 1024, seams_fn(lambda a: JK_HEM - .13), plain_albedo)
-wool_mat = material('hero_blazer', (.16, .17, .19), .74, _ja, _jn)
-wool_mat.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = 1.0
-finish(blazer, [wool_mat], rim=.004)
-add(blazer)
-bt = tree_of(blazer)
+    bm = bmesh.new()
+    bm.from_mesh(blazer.data)
+    iso_cut(bm, lambda co: max(abs(co.x) - _jk_vw(co.z), .022 - (co.y - NECK_CY) * FRONT))
+    bm.to_mesh(blazer.data)
+    bm.free()
+    blazer.data.update()
+    pack_uvs(blazer)
+    _jn, _ja = bake_detail(blazer, 'top_blazer', 1024, seams_fn(lambda a: JK_HEM - .13), plain_albedo)
+    wool_mat = material('hero_blazer', (.16, .17, .19), .74, _ja, _jn)
+    wool_mat.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = 1.0
+    finish(blazer, [wool_mat], rim=.004)
+    add(blazer)
+    bt = tree_of(blazer)
 
 
-def lapel(sx):
-    """A notch lapel lying on the front: from the roll point at the button up
-    the V edge to the gorge, widening to 7 cm, its top cut at the notch."""
-    P, U = [], []
-    n_s, n_w = 22, 5
-    for i in range(n_w):
-        t = i / (n_w - 1)
-        row, urow = [], []
-        for k in range(n_s + 1):
-            s_ = k / n_s
-            z = BTN_Z + (_V_TOP[1] - BTN_Z) * s_
-            w = .072 * min(1.0, s_ / .8) ** .9
-            if s_ > .9:                     # the notch: the outer top corner cut back
-                w *= 1 - .45 * (s_ - .9) / .1 * t
-            x_edge = _jk_vw(z)
-            x = sx * (x_edge + w * t - .0008)
-            sample_x = sx * (x_edge + max(.007, w * t))
-            o = Vector((sample_x, NECK_CY + FRONT * .4, z))
-            hit = bt.ray_cast(o, Vector((0, -FRONT, 0)))
-            depth = hit[0].y if hit[0] is not None and (hit[0].y - NECK_CY)*FRONT > .028 else NECK_CY + FRONT * .112
-            roll = .0035 * (1 - t) ** 2 + .0055
-            row.append(Vector((x, depth + FRONT*roll, z)))
-            urow.append((s_ * .45 / .30, TRIM_ROWS['plain'] + .25 * (.05 + .9 * t)))
-        P.append(row)
-        U.append(urow)
-    ob = grid_mesh('lapel', P, U)
-    face_out(ob, lambda c: Vector((0, FRONT, 0)))
-    so = ob.modifiers.new('Cloth', 'SOLIDIFY')
-    so.thickness = .002
-    so.offset = -1
-    so.use_rim_only = True
-    apply(ob, so)
-    crisp(ob)
-    ob.data.materials.append(lapel_mat)
-    weights_from(ob, blazer)
-    return ob
+    def lapel(sx):
+        """A notch lapel lying on the front: from the roll point at the button up
+        the V edge to the gorge, widening to 7 cm, its top cut at the notch."""
+        P, U = [], []
+        n_s, n_w = 22, 5
+        for i in range(n_w):
+            t = i / (n_w - 1)
+            row, urow = [], []
+            for k in range(n_s + 1):
+                s_ = k / n_s
+                z = BTN_Z + (_V_TOP[1] - BTN_Z) * s_
+                w = .072 * min(1.0, s_ / .8) ** .9
+                if s_ > .9:                     # the notch: the outer top corner cut back
+                    w *= 1 - .45 * (s_ - .9) / .1 * t
+                x_edge = _jk_vw(z)
+                x = sx * (x_edge + w * t - .0008)
+                sample_x = sx * (x_edge + max(.007, w * t))
+                o = Vector((sample_x, NECK_CY + FRONT * .4, z))
+                hit = bt.ray_cast(o, Vector((0, -FRONT, 0)))
+                depth = hit[0].y if hit[0] is not None and (hit[0].y - NECK_CY)*FRONT > .028 else NECK_CY + FRONT * .112
+                roll = .0035 * (1 - t) ** 2 + .0055
+                row.append(Vector((x, depth + FRONT*roll, z)))
+                urow.append((s_ * .45 / .30, TRIM_ROWS['plain'] + .25 * (.05 + .9 * t)))
+            P.append(row)
+            U.append(urow)
+        ob = grid_mesh('lapel', P, U)
+        face_out(ob, lambda c: Vector((0, FRONT, 0)))
+        so = ob.modifiers.new('Cloth', 'SOLIDIFY')
+        so.thickness = .002
+        so.offset = -1
+        so.use_rim_only = True
+        apply(ob, so)
+        crisp(ob)
+        ob.data.materials.append(lapel_mat)
+        weights_from(ob, blazer)
+        return ob
 
 
-_lap = [lapel(-1), lapel(1)]
-_jgap = math.atan2(_V_TOP[0], JK_R(0)) + .1
-jst, jlf, _, _, _ = shirt_collar('Top_Blazer', gap=_jgap, leaf_w=(.034, .04), spread=.12, mat=wool_mat, garment=blazer, R=JK_R, Z0=JK_Z0,
-                                 H=_periodic([.014 for a in _NK_A]), closed=False, button=False)
-reweight(jst)
-weights_from(jst, blazer, lambda co: .85)
-weights_from(jlf, blazer)
-_hit = bt.ray_cast(Vector((0, NECK_CY + FRONT * .4, BTN_Z - .012)), Vector((0, -FRONT, 0)))
-jbtn = button_mesh('jbtn', (_hit[0] if _hit[0] is not None else Vector((0, .12, BTN_Z))) + Vector((0, FRONT * .004, 0)),
-                   Vector((0, FRONT, 0)), r=.0085, h=.003, mat=dark_button_mat)
-weights_from(jbtn, blazer)
-add(join_as('Topx_Blazer_Collar', [jst, jlf] + _lap + [jbtn]), False)
-# The shirt inside the V: the real tailored shirt (closed, collar-snapped,
-# tucked), trimmed to its front panel with clean plane cuts.
-sfront = shirt_closed
-tuck_into(sfront, pants, WAIST_TOP, .005)
-follow_layer(sfront, pants, WAIST_TOP + .02, .04, k_max=1.0)
-sfront.name = 'Topx_Blazer_Shirt'
-sfront.data.name = 'Topx_Blazer_Shirt'
-bm = bmesh.new()
-bm.from_mesh(sfront.data)
-for co, no in (((.15, 0, 0), (1, 0, 0)), ((-.15, 0, 0), (1, 0, 0))):
-    bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], plane_co=co, plane_no=no)
-bmesh.ops.delete(bm, geom=[f for f in bm.faces if abs(f.calc_center_median().x) > .15 or (f.calc_center_median().y - NECK_CY) * FRONT < -.01
-                           or f.calc_center_median().z < PANTS_TOP - .045], context='FACES')
-bm.to_mesh(sfront.data)
-bm.free()
-sfront.data.update()
-sfront.data.materials.clear()
-sfront.data.materials.append(white_mat)
-add(sfront, False)
-sft = tree_of(sfront)
-# The shirt under the jacket wears the closed, buttoned collar (with a tie).
-white_trim = material('hero_shirt_white_trim', (.86, .87, .88), .6, TRIM_A, TRIM_N)
-white_trim.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = 1.0
-bst, blf, _, _, bbtn = shirt_collar('Top_BlazerShirt', mat=white_trim, garment=shirt,
-                                    gap=.10, leaf_w=(.029,.057), H=lambda a: STAND_H(a)*.74)
-reweight(bst)
-weights_from(bst, sfront, lambda co: .8)
-for o_ in [blf, bbtn]:
-    weights_from(o_, sfront)
-add(join_as('Topx_Blazer_ShirtCollar', [bst, blf, bbtn]), False)
-def tie_piece(name, rows, lift):
-    """A narrow silk blade and knot on a common smooth centreline."""
-    P, U = [], []
-    last_y = None
-    for i, (z, width) in enumerate(rows):
-        hit, _, _, _ = sft.ray_cast(Vector((0, NECK_CY + FRONT * .4, z)), Vector((0, -FRONT, 0)))
-        depth = hit.y if hit is not None else NECK_CY + FRONT*(STAND_R(0) + .013)
-        if last_y is not None:
-            depth = min(last_y + .013, max(last_y - .013, depth))
-        last_y = depth
-        P.append([Vector((t*width*.5, depth + FRONT*(lift + .004*(1-abs(t))), z)) for t in (-1, 0, 1)])
-        U.append([(t, i / max(1, len(rows) - 1)) for t in (0.0, .5, 1.0)])
-    ob = grid_mesh(name, P, U)
-    face_out(ob, lambda co: Vector((0, FRONT, 0)))
-    solid = ob.modifiers.new('Silk edges', 'SOLIDIFY')
-    solid.thickness = .0016
-    solid.offset = -1
-    solid.use_rim_only = True
-    apply(ob, solid)
-    ob.data.materials.append(tie_mat)
-    lay_on_front(ob, sfront, FRONT, lift)
-    weights_from(ob, sfront)
-    add(ob, False)
+    _lap = [lapel(-1), lapel(1)]
+    _jgap = math.atan2(_V_TOP[0], JK_R(0)) + .1
+    jst, jlf, _, _, _ = shirt_collar('Top_Blazer', gap=_jgap, leaf_w=(.034, .04), spread=.12, mat=wool_mat, garment=blazer, R=JK_R, Z0=JK_Z0,
+                                     H=_periodic([.014 for a in _NK_A]), closed=False, button=False)
+    reweight(jst)
+    weights_from(jst, blazer, lambda co: .85)
+    weights_from(jlf, blazer)
+    _hit = bt.ray_cast(Vector((0, NECK_CY + FRONT * .4, BTN_Z - .012)), Vector((0, -FRONT, 0)))
+    jbtn = button_mesh('jbtn', (_hit[0] if _hit[0] is not None else Vector((0, .12, BTN_Z))) + Vector((0, FRONT * .004, 0)),
+                       Vector((0, FRONT, 0)), r=.0085, h=.003, mat=dark_button_mat)
+    weights_from(jbtn, blazer)
+    add(join_as('Topx_Blazer_Collar', [jst, jlf] + _lap + [jbtn]), False)
+    # The shirt inside the V: the real tailored shirt (closed, collar-snapped,
+    # tucked), trimmed to its front panel with clean plane cuts.
+    sfront = shirt_closed
+    tuck_into(sfront, pants, WAIST_TOP, .005)
+    follow_layer(sfront, pants, WAIST_TOP + .02, .04, k_max=1.0)
+    sfront.name = 'Topx_Blazer_Shirt'
+    sfront.data.name = 'Topx_Blazer_Shirt'
+    bm = bmesh.new()
+    bm.from_mesh(sfront.data)
+    for co, no in (((.15, 0, 0), (1, 0, 0)), ((-.15, 0, 0), (1, 0, 0))):
+        bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], plane_co=co, plane_no=no)
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if abs(f.calc_center_median().x) > .15 or (f.calc_center_median().y - NECK_CY) * FRONT < -.01
+                               or f.calc_center_median().z < PANTS_TOP - .045], context='FACES')
+    bm.to_mesh(sfront.data)
+    bm.free()
+    sfront.data.update()
+    sfront.data.materials.clear()
+    sfront.data.materials.append(white_mat)
+    add(sfront, False)
+    sft = tree_of(sfront)
+    # The shirt under the jacket wears the closed, buttoned collar (with a tie).
+    white_trim = material('hero_shirt_white_trim', (.86, .87, .88), .6, TRIM_A, TRIM_N)
+    white_trim.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = 1.0
+    bst, blf, _, _, bbtn = shirt_collar('Top_BlazerShirt', mat=white_trim, garment=shirt,
+                                        gap=.10, leaf_w=(.029,.057), H=lambda a: STAND_H(a)*.74)
+    reweight(bst)
+    weights_from(bst, sfront, lambda co: .8)
+    for o_ in [blf, bbtn]:
+        weights_from(o_, sfront)
+    add(join_as('Topx_Blazer_ShirtCollar', [bst, blf, bbtn]), False)
+    def tie_piece(name, rows, lift):
+        """A narrow silk blade and knot on a common smooth centreline."""
+        P, U = [], []
+        last_y = None
+        for i, (z, width) in enumerate(rows):
+            hit, _, _, _ = sft.ray_cast(Vector((0, NECK_CY + FRONT * .4, z)), Vector((0, -FRONT, 0)))
+            depth = hit.y if hit is not None else NECK_CY + FRONT*(STAND_R(0) + .013)
+            if last_y is not None:
+                depth = min(last_y + .013, max(last_y - .013, depth))
+            last_y = depth
+            P.append([Vector((t*width*.5, depth + FRONT*(lift + .004*(1-abs(t))), z)) for t in (-1, 0, 1)])
+            U.append([(t, i / max(1, len(rows) - 1)) for t in (0.0, .5, 1.0)])
+        ob = grid_mesh(name, P, U)
+        face_out(ob, lambda co: Vector((0, FRONT, 0)))
+        solid = ob.modifiers.new('Silk edges', 'SOLIDIFY')
+        solid.thickness = .0016
+        solid.offset = -1
+        solid.use_rim_only = True
+        apply(ob, solid)
+        ob.data.materials.append(tie_mat)
+        lay_on_front(ob, sfront, FRONT, lift)
+        weights_from(ob, sfront)
+        add(ob, False)
 
 
-knot_top = STAND_Z0(0) + .008
-knot_bottom = knot_top - .034
-tie_piece('Topx_Blazer_Tie', [(knot_bottom - (knot_bottom - 1.101)*i/18, .031+.041*i/18) for i in range(19)]
-          + [(1.084, .009)], .012)
-tie_piece('Topx_Blazer_Knot', [(knot_top, .038), (knot_top-.014, .036), (knot_bottom-.003, .022)], .016)
+    knot_top = STAND_Z0(0) + .008
+    knot_bottom = knot_top - .034
+    tie_piece('Topx_Blazer_Tie', [(knot_bottom - (knot_bottom - 1.101)*i/18, .031+.041*i/18) for i in range(19)]
+              + [(1.084, .009)], .012)
+    tie_piece('Topx_Blazer_Knot', [(knot_top, .038), (knot_top-.014, .036), (knot_bottom-.003, .022)], .016)
 
 # ---------------------------------------------------------------- trouser waistband
 # A finished 3.6 cm band round the trousers' cut top (it was a raw edge),
@@ -1694,7 +1727,8 @@ for style in ('jeans','joggers','shorts'):
         add(piece, False)
 add_short_skin()
 fit_over_waist(shirt, chinos, _wbo, True, .004)
-fit_over_waist(blazer, chinos, _wbo, False, .009)
+if BODY == 'a':
+    fit_over_waist(blazer, chinos, _wbo, False, .009)
 finish_trainer(shoes)
 for component in trainer_construction(shoes):
     add(component,False)
@@ -1703,7 +1737,9 @@ if lace_mesh is not None:
     add(lace_mesh, False)
 # Keep the high-resolution tailoring through fit, transfer and baking. The
 # final render shells keep the openings and remove interior density.
-for garment_, ratio in ((tee, .59), (polo, .59), (shirt, .58), (jumper, .57),
-                        (bomber, .62), (blazer, .60), (sfront, .66)):
+shells = [(tee, .59), (polo, .59), (shirt, .58), (jumper, .57), (bomber, .62)]
+if BODY == 'a':
+    shells.extend([(blazer, .60), (sfront, .66)])
+for garment_, ratio in shells:
     simplify_surface(garment_, ratio)
 print('WARDROBE', [o.name for o in wardrobe], flush=True)

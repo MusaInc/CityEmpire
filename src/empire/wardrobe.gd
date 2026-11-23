@@ -39,7 +39,9 @@ static func owned(flags: Dictionary) -> Array:
 	return flags["wardrobe"]
 
 
-static func owns(flags: Dictionary, item: String) -> bool:
+static func owns(flags: Dictionary, item: String, body := "a") -> bool:
+	if body == "b" and item == "top_shirt" and "top_blazer" in owned(flags):
+		return true
 	return item in FREE or not PRICES.has(item) or item in owned(flags)
 
 
@@ -52,7 +54,7 @@ static func unpaid(flags: Dictionary, look: Dictionary) -> Array:
 	var out: Array = []
 	for k in ["top", "shoes", "head", "eyewear"]:
 		var it := String(look.get(k, ""))
-		if it != "" and not owns(flags, it):
+		if it != "" and not owns(flags, it, String(look.get("body", "a"))):
 			out.append(it)
 	return out
 
@@ -74,10 +76,8 @@ static func buy(e: Empire, items: Array, store: String) -> String:
 
 static func save_outfit(flags: Dictionary, look: Dictionary) -> void:
 	var outs: Array = flags.get("outfits", [])
-	var keep := {"trousers": look.get("trousers", "auto"), "footwear": look.get("footwear", "trainers")}
-	if String(look.get("top", "")).begins_with("top_fashion_") or String(keep["footwear"]) != "trainers" \
-			or HeroLook.FASHION_BOTTOMS.any(func(entry): return entry[0] == keep["trousers"]):
-		keep["body"] = "b"
+	var keep := {"body": look.get("body", "a"), "trousers": look.get("trousers", "auto"),
+		"footwear": look.get("footwear", "trainers")}
 	for k in ["top", "top_col", "pants_col", "shoes", "head", "eyewear"]:
 		keep[k] = look.get(k, "")
 	outs.push_front(keep)

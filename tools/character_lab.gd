@@ -43,7 +43,7 @@ const OUTFITS := {
 		"pants_col": "#1f2d4a", "shoes": "shoes_classic", "head": "head_bare", "eyewear": "face_none"},
 	"rio_bare": {"body": "b", "face": "hero_rio", "hair": "hair_natural", "top": "top_tee", "top_col": "#c96f92",
 		"pants_col": "#1f2d4a", "shoes": "shoes_classic", "head": "head_bare", "eyewear": "face_none"},
-	"sam_blazer": {"body": "b", "face": "hero_sam", "hair": "hair_pixie", "top": "top_blazer", "top_col": "#3b3f46",
+	"sam_shirt": {"body": "b", "face": "hero_sam", "hair": "hair_pixie", "top": "top_shirt", "top_col": "#3b3f46",
 		"pants_col": "#25304a", "shoes": "shoes_blackout", "head": "head_bare", "eyewear": "face_none"},
 	"noa_hood": {"body": "b", "face": "hero_noa", "hair": "hair_ponytail", "top": "top_hoodie", "top_col": "#c9c4b8",
 		"pants_col": "#3b3f46", "shoes": "shoes_gum", "head": "head_bare", "eyewear": "face_none"},
@@ -164,7 +164,7 @@ func _go() -> void:
 	if outfits == ["catalog"]:
 		outfits.clear()
 		for body in ["a", "b"]:
-			for top in HeroLook.TOPS:
+			for top in HeroLook.tops_for(body):
 				outfits.append(body + "_" + top[0])
 	var poses: Array = Array(args[2].split(",")) if args.size() > 2 and args[2] != "all" else POSE_VIEWS.keys().filter(func(k): return k not in ["collar", "head", "portrait", "neck_turn"])
 	neutral = args.size() > 3 and args[3] == "neutral"
@@ -273,7 +273,7 @@ func _city_review(outfits: Array) -> void:
 		await get_tree().physics_frame
 	game.ui.open_style()
 	for o: String in outfits:
-		game.ui._style_tab = "clothes" if o.begins_with("a_") or o.begins_with("b_") else "you"
+		game.ui._style_tab = "clothes" if o.begins_with("a_") or o.begins_with("b_") else "character"
 		game.ui._style_set(_look(o))
 		for view in [["portrait", true, 0.24], ["outfit", false, -0.22], ["rear", false, PI - 0.3]]:
 			if not view_filter.is_empty() and not view[0] in view_filter:

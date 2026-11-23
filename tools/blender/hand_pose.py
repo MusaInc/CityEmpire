@@ -49,11 +49,16 @@ def bend_corrective(ob, kind):
     for side in ('l','r'):
         name = 'Bend_' + kind + '_' + side
         key = ob.shape_key_add(name=name)
-        joints = {'Knee': ('shin_','thigh_'), 'Elbow': ('forearm_','upper_arm_'),
-                  'Shoulder': ('upper_arm_','clavicle_')}
-        pivot_name, parent_name = joints[kind]
-        pivot = J[pivot_name+side]
-        axis = (pivot-J[parent_name+side]).normalized()
+        if kind == 'Shoulder':
+            pivot = J['upper_arm_' + side]
+            # The sternoclavicular landmark is useful for drafting the cap
+            # even though the common game rig parents the arm to the chest.
+            collar = Vector((.043 if side == 'r' else -.043, pivot.y + .010, 1.525))
+            axis = (pivot - collar).normalized()
+        else:
+            pivot_name, parent_name = ('shin_', 'thigh_') if kind == 'Knee' else ('forearm_', 'upper_arm_')
+            pivot = J[pivot_name + side]
+            axis = (pivot - J[parent_name + side]).normalized()
         for vert in ob.data.vertices:
             pos = vert.co
             if (pos.x<0)!=(side=='l'):

@@ -4,6 +4,9 @@ This file is loaded by the character builder after its body, fitting tools,
 wardrobe materials and skinning weights have been built.
 """
 
+from wardrobe_quality import smooth
+
+
 FASHION_FABRICS = {
     'jersey': (.83, 'joggers', .82),
     'rib': (.88, 'joggers', .93),
@@ -12,6 +15,7 @@ FASHION_FABRICS = {
     'satin': (.43, 'joggers', .30),
     'crepe': (.71, 'shorts', .56),
     'linen': (.89, 'shorts', .83),
+    'leather': (.49, 'shorts', .24),
 }
 
 
@@ -22,7 +26,8 @@ def fashion_material(ob, slot, fabric, hem, sleeve):
     sewing = seams_fn(lambda _: hem, sleeve)
     def relief(pos, normal):
         z = pos[:,2]
-        return sewing(pos,normal)+seam_height(z-hem-.011,pos[:,0],stitch_off=.0026)*np.clip((hem+.044-z)/.03,0,1)
+        grain = .000081 * leather_grain(pos) if fabric == 'leather' else 0
+        return sewing(pos,normal)+seam_height(z-hem-.011,pos[:,0],stitch_off=.0026)*np.clip((hem+.044-z)/.03,0,1)+grain
     def albedo(pos, normal, value):
         tone = .94 + grain*textile_grain(swatch,pos,normal) + np.clip(value*25,-.10,.04)
         tone = np.clip(tone,.76,.995)
@@ -86,6 +91,8 @@ def fit_cardigan_hem(ob):
 def women_top(name, fabric, hem, neck, sleeve, shell_layer='shirt',
               shape='ordinary', tuck=False, drape=.003):
     """Cut real armholes and necklines, then transfer seam and trim weights."""
+    if BODY == 'b' and shape != 'cami':
+        neck = (neck[0] - .020, neck[1] - .012)
     R,Z = neck_ring_fit(neck[0],neck[1],.0044)
     sleeveless = sleeve is None
     ob = tailored_top(name,hem,neck[0],1.0,(R(math.pi/2),R(0),R(math.pi)),shell_layer,
@@ -94,7 +101,7 @@ def women_top(name, fabric, hem, neck, sleeve, shell_layer='shirt',
                      sleeve_ease=(.010,.012),sleeve_taper=.115)
     if not sleeveless:
         snap_neckline(ob,R=R,Z0=Z,reach=.026)
-    if sleeveless or shape in ('open','cami','jacket'):
+    if sleeveless or shape in ('open','cami','jacket','racer'):
         bm = bmesh.new()
         bm.from_mesh(ob.data)
 
@@ -108,8 +115,14 @@ def women_top(name, fabric, hem, neck, sleeve, shell_layer='shirt',
                 result = 1.0
             if shape=='cami':
                 result = min(result,1.435-.066*(abs(x)/.175)**1.7-z)
-            if shape in ('open','jacket'):
+            if shape == 'one_shoulder':
+                result = min(result, 1.430 - .76*x - z)
+            if shape == 'square_neck':
+                result = min(result, max(abs(x) - .068, 1.398-z, .009-(y-NECK_CY)*FRONT))
+            if shape in ('open','jacket','racer'):
                 gap = .024 + .057*max(0,min(1,(z-1.23)/.23))
+                if shape=='racer':
+                    gap = .054 + .024 * np.clip((z - 1.21) / .28, 0, 1)
                 if shape=='jacket':
                     gap *= .75
                 result = min(result,max(abs(x)-gap,.037-(y-NECK_CY)*FRONT))
@@ -168,7 +181,7 @@ def shoulder_straps(body_piece, name):
     return join_as(name,out)
 
 
-def skirt_pattern(name, slot, fabric, waist, hem, flare, panel_split=False):
+def skirt_pattern(name, slot, fabric, waist, hem, flare, panel_split=False, slit_angle=-.52, waist_ease=.016):
     """Fit the skirt where it meets the hip, keeping a free hem and slit."""
     tf,_ = frames()
     rows,uv = [],[]
@@ -181,11 +194,11 @@ def skirt_pattern(name, slot, fabric, waist, hem, flare, panel_split=False):
         row, texcoords = [], []
         for i in range(columns):
             u = i/(columns-1)
-            slit = (.135 if panel_split else .006)*max(0,(t-.50)/.50)
-            a = slit+(math.tau-2*slit)*u
+            slit = (.081 if panel_split else .0)*max(0,(t-.59)/.41)
+            a = slit + (math.tau - 2 * slit) * u + (slit_angle if panel_split else 0.0)
             hip = tf.sample(tf.hull,(sample_z-tf.Z0)/tf.DZ,a)
             # Crown the cloth at the seat. The free hem has long gored folds.
-            ease = .016 + flare*t**1.31
+            ease = waist_ease + (.016-waist_ease)*min(1,t*6) + flare*t**1.31
             folds = (.003+.014*flare/.15)*t*t*math.cos(a*7+.4*math.sin(a*3))
             r = hip+ease+folds
             z = z0 + t*t*(.008*math.sin(a*4+.2)+.004*math.cos(a*9))
@@ -219,7 +232,7 @@ def fit_skirt_motion(skirt, waist, hem):
         p.y += math.copysign(seat*panel*(.046 if depth>0 else .022),depth)
         side = max(0,min(1,(abs(p.x)-.025)/.112))
         below_hip = max(0,min(1,(.966-p.z)/.232))
-        share = (.46 if short else .29)*below_hip*side
+        share = (.36 if short else .23)*below_hip*side
         groups['hips'].add([v.index],1-share,'REPLACE')
         if share > .0001:
             groups['thigh_l' if p.x<0 else 'thigh_r'].add([v.index],share,'REPLACE')
@@ -240,7 +253,7 @@ def fit_skirt_motion(skirt, waist, hem):
 
 
 def fitted_bottom(style):
-    base_name = {'fitjeans':'jeans','tailoredshorts':'shorts','leggings':'joggers'}[style]
+    base_name = {'fitjeans':'jeans','tailoredshorts':'shorts','leggings':'joggers','widejeans':'jeans','bikershorts':'shorts'}[style]
     base = next(ob for ob in wardrobe if ob.name=='Lower_'+base_name)
     cloth = base.copy()
     cloth.data = base.data.copy()
@@ -255,14 +268,19 @@ def fitted_bottom(style):
         else:
             axis = knee.lerp(hip,(c.z-knee.z)/(hip.z-knee.z))
         taper = max(0,min(1,(.94-c.z)/.23))
-        value = .16 if style=='leggings' else .075 if style=='fitjeans' else .035
+        value = {'leggings': .16, 'fitjeans': .075, 'tailoredshorts': .035,
+                 'widejeans': -.24, 'bikershorts': .26}[style]
+        if style == 'widejeans':
+            c.z -= .040 * (1 - smooth(.12, .36, c.z))
+        elif style == 'bikershorts':
+            c.z += .015 * (1 - smooth(.57, .76, c.z))
         gain = 1-value*taper
         c.x = axis.x+(c.x-axis.x)*gain
         c.y = axis.y+(c.y-axis.y)*gain
     enforce_skin_clearance(cloth,lambda c:c.z<.92,.007 if style=='leggings' else .012,.031)
     pack_uvs(cloth)
-    fabric = 'denim' if style=='fitjeans' else 'linen' if style=='tailoredshorts' else 'rib'
-    bottom = .59 if style=='tailoredshorts' else .106
+    fabric = 'denim' if style in ('fitjeans', 'widejeans') else 'linen' if style=='tailoredshorts' else 'rib'
+    bottom = min(v.co.z for v in cloth.data.vertices)
     mat = fashion_material(cloth,'bottom',fabric,bottom,None)
     cloth.data.materials.clear()
     cloth.data.materials.append(mat)
@@ -400,8 +418,31 @@ def refit_vest():
 
 def build_fashion():
     add(fashion_skin('Fashion_Legs',.055,.81,False),False)
+    for name, low in (('Fashion_Biker_Legs', .055), ('Fashion_Biker_Barefeet', -.019)):
+        leg = fashion_skin(name, low, .744, False)
+        for vertex in leg.data.vertices:
+            point = vertex.co
+            side = 'l' if point.x < 0 else 'r'
+            blend = .29 * smooth(.645, .740, point.z)
+            knee, hip = J['shin_' + side], J['thigh_' + side]
+            axis = knee.lerp(hip, (point.z - knee.z) / (hip.z - knee.z))
+            point.x += (axis.x - point.x) * blend
+            point.y += (axis.y - point.y) * blend
+        add(leg, False)
+    socks = fashion_skin('Fashion_Lounge_Socks', .045, .160, False)
+    for vertex in socks.data.vertices:
+        p = vertex.co
+        side = 'l' if p.x < 0 else 'r'
+        ankle, knee = J['foot_' + side], J['shin_' + side]
+        axis = ankle.lerp(knee, (p.z - ankle.z) / (knee.z - ankle.z))
+        p += Vector((p.x - axis.x, p.y - axis.y, 0)).normalized() * .003
+    socks.data.materials.clear()
+    socks.data.materials.append(material('hero_lounge_sock', (.79, .77, .73), .86, normal=TRIM_N))
+    add(socks, False)
     add(fashion_skin('Fashion_Feet',-.019,.141,False),False)
     add(fashion_skin('Fashion_Barefoot_Legs',-.019,.81,False),False)
+    add(fashion_skin('Fashion_Cropped_Ankles',.023,.34,False),False)
+    add(fashion_skin('Fashion_Cropped_Barefeet',-.019,.34,False),False)
     base = next(ob for ob in wardrobe if ob.name=='Lower_shorts')
     slip = base.copy()
     slip.data = base.data.copy()
@@ -409,7 +450,7 @@ def build_fashion():
     bpy.context.collection.objects.link(slip)
     bm = bmesh.new()
     bm.from_mesh(slip.data)
-    _bisect(bm,(0,0,.786),(0,0,1),lambda v:v.z<.78599)
+    _bisect(bm,(0,0,.808),(0,0,1),lambda v:v.z<.80799)
     bm.to_mesh(slip.data)
     bm.free()
     slip.data.update()
@@ -427,9 +468,19 @@ def build_fashion():
         'Jacket': ('denim',PANTS_TOP+.042,(1.559,1.498),.95,'jacket','jacket',False,.0037),
         'Fitteddress': ('crepe',PANTS_TOP-.025,(1.535,1.480),None,'shirt','ordinary',True,.0022),
         'Loosedress': ('linen',PANTS_TOP-.032,(1.550,1.474),.35,'knit','ordinary',False,.006),
+        'Onedress': ('satin',PANTS_TOP-.024,(1.554,1.510),None,'shirt','one_shoulder',True,.003),
+        'Squareneck': ('satin',PANTS_TOP-.012,(1.539,1.509),None,'shirt','square_neck',True,.0025),
     }
+    dress_hem = {'Fitteddress': (.616, .033), 'Loosedress': (.464, .115), 'Onedress': (.641, .046)}
     for cut,spec in top_specs.items():
         top = women_top('Top_Fashion_'+cut,*spec)
+        if cut in dress_hem:
+            # Keep both halves of the dress on the same waist through hip flex.
+            from build_b_fit import blend_weights
+            for vertex in top.data.vertices:
+                pin = 1 - smooth(PANTS_TOP + .015, PANTS_TOP + .080, vertex.co.z)
+                if pin > 0:
+                    blend_weights(top, vertex, {'hips': 1}, pin)
         if cut=='Cardigan':
             fit_cardigan_hem(top)
         add(top,False)
@@ -439,6 +490,7 @@ def build_fashion():
         if cut in ('Cardigan','Jacket'):
             under = women_top(prefix+'Under','jersey',PANTS_TOP-.035,(1.542,1.473),None,'skin','ordinary',True)
             fit_layered_insert(under,cut=='Jacket')
+            weights_from(under, top, lambda p: .78 if p.z > 1.33 else .63)
             add(under,False)
         if cut in ('Vest','Cardigan','Jacket'):
             tree = tree_of(top)
@@ -454,17 +506,127 @@ def build_fashion():
                 buttons_.append(ob)
             if buttons_:
                 add(join_as(prefix+'Buttons',buttons_),False)
-        if cut in ('Fitteddress','Loosedress'):
-            fitted = cut=='Fitteddress'
-            add(skirt_pattern(prefix+'Skirt','top',spec[0],PANTS_TOP+.015,
-                              .616 if fitted else .464,.033 if fitted else .115,
-                              panel_split=not fitted),False)
+        if cut in dress_hem:
+            hem, flare = dress_hem[cut]
+            add(skirt_pattern(prefix + 'Skirt', 'top', spec[0], PANTS_TOP + .015, hem, flare,
+                              panel_split=cut == 'Loosedress'), False)
 
-    for style,fabric,hem,flare in [('miniskirt','denim',.638,.047),('midiskirt','crepe',.381,.108),
+    for style,fabric,hem,flare in [('miniskirt','denim',.638,.047),('midiskirt','crepe',.381,.060),
                                    ('maxiskirt','satin',.109,.138)]:
+        midi = style == 'midiskirt'
         add(skirt_pattern('Lower_'+style,'bottom',fabric,PANTS_TOP+.016,hem,flare,
-                          panel_split=style!='miniskirt'),False)
-    for style in ('leggings','fitjeans','tailoredshorts'):
+                          panel_split=style!='miniskirt', slit_angle=-.13 if midi else -.52,
+                          waist_ease=.006 if midi else .016),False)
+    for style in ('leggings','fitjeans','tailoredshorts','widejeans','bikershorts'):
         add(fitted_bottom(style),False)
     for style in ('heels','boots','sandals','streettrainers'):
         add(fashion_shoes(style),False)
+    # A sewn, fitted leather jacket for the turnaround's everyday look.
+    moto, radius, collar = everyday_top('Top_Fashion_Moto', 'hero_fashion_top_leather',
+        'jacket', 9.0, .968, (1.611, 1.580), .0048, hem=PANTS_TOP + .013,
+        tail=.045, sleeve_ease=(.010, .011),
+        cuff=(.86, .968, lambda side, angle: cuff_radius(side, angle) + .001),
+        rough=.49, textile='leather', texture_name='top_fashion_moto')
+    add(rib_band('Topx_Fashion_Moto_Collar', radius, collar, .034, moto, lean=.0016), False)
+    zipper_trim(moto, 'Fashion_Moto', collar(0) + .026, PANTS_TOP - .038, .007)
+    simplify_surface(moto, .63)
+
+
+def casual_reference_outfits():
+    racer = women_top('Top_Fashion_Racer', 'leather', 1.103, (1.574, 1.489),
+                      .968, 'jacket', 'racer', False, .0064)
+    add(racer, False)
+    crop = women_top('Topx_Fashion_Racer_Under', 'jersey', 1.150, (1.532, 1.455),
+                     None, 'skin', 'square_neck', True, .0018)
+    crop.data.materials[0].name = 'hero_racer_cotton'
+    add(crop, False)
+    shell = tree_of(racer)
+    flaps = []
+    for side in (-1, 1):
+        points = []
+        for row, (z, half) in enumerate(((1.356, .026), (1.334, .019), (1.325, .012))):
+            line = []
+            for column in (-1, 1):
+                x = side * .117 + column * half
+                hit = shell.ray_cast(Vector((x, .24, z)), Vector((0, -1, 0)))[0]
+                if hit is None:
+                    line = []
+                    break
+                line.append(hit + Vector((0, .0037, 0)))
+            if not line:
+                break
+            points.append(line)
+        if len(points) == 3:
+            flap = grid_mesh('Leather pocket flap', points, [[(0, i/2), (1, i/2)] for i in range(3)])
+            face_out(flap, lambda _: Vector((0, 1, 0)))
+            weights_from(flap, racer)
+            finish(flap, [racer.data.materials[0]], rim=.0018)
+            flaps.append(flap)
+    if flaps:
+        add(join_as('Topx_Fashion_Racer_Pockets', flaps), False)
+
+    jumper, radius, height = everyday_top(
+        'Top_Fashion_Pullover', 'hero_fashion_top_fleece', 'knit', 9.0, .963,
+        (1.591, 1.535), .011, hem=PANTS_TOP - .025, tail=.043,
+        sleeve_ease=(.021, .021), cuff=(.86,.963,lambda side,a: cuff_radius(side,a)+.006),
+        rough=.86)
+    hood = folded_hood(jumper, radius, height)
+    hood.name = 'Topx_Fashion_Pullover_Hood'
+    add(hood, False)
+    cuffs = []
+    for side in ('l', 'r'):
+        cuff, _ = shirt_cuff(side,.927,1.006,mat=rib_trim,
+            radius=lambda sd,a: cuff_radius(sd,a)+.003, trim_row='rib', btn=False)
+        weights_from(cuff, jumper)
+        cuffs.append(cuff)
+    add(join_as('Topx_Fashion_Pullover_Cuffs', cuffs), False)
+    shell = tree_of(jumper)
+    cords = []
+    cord_mat = material('hero_fashion_top_drawcord', (.24, .24, .25), .88)
+    for side in (-1, 1):
+        rows, uvs = [], []
+        for i in range(11):
+            t = i / 10
+            z = 1.485 - (.123 if side > 0 else .151) * t
+            x = side * (.023 + .031 * t + .004 * math.sin(t * math.pi))
+            hit = shell.ray_cast(Vector((x, .25, z)), Vector((0, -1, 0)))[0]
+            if hit is None:
+                continue
+            centre = hit + Vector((0, .0048 + .004 * math.sin(t * math.pi), 0))
+            angles = [math.tau * j / 6 for j in range(7)]
+            rows.append([centre + Vector((.0021 * math.cos(a), .0021 * math.sin(a), 0)) for a in angles])
+            uvs.append([(j/6, t) for j in range(7)])
+        if len(rows) < 4:
+            continue
+        cord = grid_mesh('Fleece hood drawcord', rows, uvs)
+        face_out(cord, lambda p: Vector((p.x - side*.04, 1, 0)))
+        weights_from(cord, jumper)
+        finish(cord, [cord_mat], rim=0)
+        cords.append(cord)
+    if cords:
+        add(join_as('Topx_Fashion_Pullover_Drawcords', cords), False)
+    rows, uv = [], []
+    for i in range(6):
+        t = i / 5
+        z = 1.009 + .121 * t
+        half = .095 - .035 * t
+        row = []
+        for k in range(11):
+            u = k / 10
+            x = (u * 2 - 1) * half
+            hit = shell.ray_cast(Vector((x, .27, z)), Vector((0,-1,0)))[0]
+            if hit is None:
+                break
+            row.append(hit + Vector((0, .0027 + .006 * math.sin(t * math.pi) * math.sin(u * math.pi), 0)))
+        if len(row) != 11:
+            continue
+        rows.append(row)
+        uv.append([(k / 10, t) for k in range(11)])
+    if len(rows) >= 3:
+        pocket = grid_mesh('Topx_Fashion_Pullover_Pocket', rows, uv)
+        face_out(pocket, lambda _: Vector((0, 1, 0)))
+        weights_from(pocket, jumper)
+        mat = fashion_material(pocket, 'top', 'jersey', 1.01, None)
+        finish(pocket, [mat], rim=.0022)
+        add(pocket, False)
+    simplify_surface(jumper, .67)

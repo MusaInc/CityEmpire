@@ -28,6 +28,8 @@ for imp in sorted((ROOT / 'assets/models').glob('character_*.png.import')) + [RO
     cap = 512 if any(k in stem for k in CAP_512) else 1024
     if 'hair_locks_atlas' in stem:
         cap = 1024
+    if stem.endswith(('face_jules_albedo', 'face_ade_albedo', 'face_jules_normal', 'face_ade_normal')):
+        cap = 2048
     if stem in ('fabric_weave_normal', 'skin_pore_normal'):
         cap = 0
     want = {'compress/mode': '2', 'compress/normal_map': '1' if normal else '0', 'mipmaps/generate': 'true',

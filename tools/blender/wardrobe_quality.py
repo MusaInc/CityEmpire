@@ -12,6 +12,7 @@ SKIRTS = {
     'Lower_maxiskirt': .109,
     'Topx_Fashion_Fitteddress_Skirt': .616,
     'Topx_Fashion_Loosedress_Skirt': .464,
+    'Topx_Fashion_Onedress_Skirt': .641,
 }
 HEADPHONE_HAIRS = ('buzz', 'crop', 'fade', 'curls', 'pixie', 'ponytail', 'bun')
 
@@ -155,18 +156,53 @@ def skin_matrices(obj, transforms):
         yield blend, offset
 
 
-def fit_skirt_correctives(obj, joints, hem, layers):
+def seated_midi(drape, fall, lap, knee_depth, seam):
+    """Turn the free length over the knees and let it fall towards the floor."""
+    roll = smooth(.286, .394, fall)
+    after_knee = max(0.0, fall - .324)
+    over_knee = max(0.0, drape.y - knee_depth)
+    drape.y -= lap * roll * over_knee * .60
+    drape.y += lap * roll * .033
+    drape.z -= lap * (.023 * roll + .30 * after_knee)
+    # A little diagonal slack keeps the slit and side seam from resting on
+    # the same perfectly horizontal cross-section.
+    drape.z -= .014 * roll * lap * seam
+    drape.x *= 1 - .06 * roll * lap
+    return drape
+
+
+def fit_midi_stride(obj):
+    """Keep the front quarter of the hem outside the lifting knee."""
+    keys = obj.data.shape_keys.key_blocks
+    waist = max(v.co.z for v in obj.data.vertices)
+    for vertex in obj.data.vertices:
+        p = vertex.co
+        fall = max(0, waist - p.z)
+        angle = math.atan2(p.x, p.y - .02)
+        forward = smooth(-.16, .78, math.cos(angle))
+        side = math.sin(angle)
+        knee = smooth(.145, .34, fall)
+        volume = smooth(.055, .285, fall)
+        key = keys['Hem_Front'].data[vertex.index]
+        key.co.y += .082 * forward * knee
+        key.co.x += .048 * side * volume * (.28 + .72 * forward)
+        key.co.z += .019 * forward * knee * smooth(.36, .56, fall)
+
+
+def fit_skirt_correctives(obj, joints, hem, layers, seated_only=False):
     """Limit stride deformation and form the seated drape over the bent leg mesh."""
     keys = obj.data.shape_keys.key_blocks
     waist = max(v.co.z for v in obj.data.vertices)
     transforms = seated_leg_transforms(joints)
+    thigh = transforms['b_thigh_l']
+    knee_depth = (thigh[0] @ joints['shin_l'] + thigh[1]).y + .063
     lining = []
     for layer in layers:
         posed = [matrix @ vertex.co + offset for vertex, (matrix, offset)
                  in zip(layer.data.vertices, skin_matrices(layer, transforms))]
         lining.append(BVHTree.FromPolygons(posed, [p.vertices[:] for p in layer.data.polygons]))
 
-    seated_key = obj.shape_key_add(name='Hem_Seated')
+    seated_key = keys.get('Hem_Seated') or obj.shape_key_add(name='Hem_Seated')
     for vertex, (matrix, offset) in zip(obj.data.vertices, skin_matrices(obj, transforms)):
         p = vertex.co
         fall = max(0.0, waist - p.z)
@@ -175,45 +211,64 @@ def fit_skirt_correctives(obj, joints, hem, layers):
         seam = math.sin(angle)
         front_stretch = smooth(.025, .19, fall)
         knee_release = 1 - (.43 if hem < .52 else .18) * smooth(.32, .66, fall)
-        for name in ('Hem_Front', 'Hem_Back'):
-            key = keys[name].data[vertex.index]
-            delta = key.co - p
-            delta.y *= (.94 if name == 'Hem_Front' else .83) * knee_release
-            if name == 'Hem_Front':
-                delta.z += .028 * front_stretch * smooth(.22, .83, forward)
-            key.co = p + delta
+        if not seated_only:
+            for name in ('Hem_Front', 'Hem_Back'):
+                key = keys[name].data[vertex.index]
+                delta = key.co - p
+                delta.y *= (.94 if name == 'Hem_Front' else .83) * knee_release
+                if name == 'Hem_Front':
+                    delta.z += .028 * front_stretch * smooth(.22, .83, forward)
+                key.co = p + delta
 
-        lap = smooth(-.76, .32, forward)
-        lap_length = min(fall, .455)
-        below_knee = max(0.0, fall - .455)
+        lap = smooth(-.86, .03, forward)
+        lap_length = min(fall, .417)
+        below_knee = max(0.0, fall - .417)
         weight = smooth(.052, .177, fall)
         drape = p.copy()
         drape.y += lap_length * (.82 * lap - .10) * weight + .094 * smooth(.25, .72, fall) * (1 - lap)
         drape.z += lap_length * (.94 * lap + .12) * weight
-        drape.z -= .031 * lap * smooth(.22, .43, fall)
+        drape.z -= .021 * lap * smooth(.22, .43, fall)
+        drape.z -= .32 * below_knee * lap
         drape.z = min(drape.z, waist - .008 + .015 * (1 - lap))
         drape.z -= .022 * smooth(.27, .50, fall) * (1 - lap)
         drape.z += .20 * below_knee * (1 - lap)
-        drape.x += .022 * seam * weight * (1 - .75 * abs(forward))
+        drape.x += .027 * seam * weight * (1 - .64 * abs(forward))
         drape.y += .028 * lap * smooth(.07, .29, fall)
+        if obj.name == 'Lower_midiskirt':
+            drape = seated_midi(drape, fall, lap, knee_depth, seam)
 
         # The thigh and slip define the raised fabric surface. Use the same
         # envelope on both sides of the slit to keep neighboring panels level.
-        contact = smooth(.04, .103, fall) * smooth(.30, .80, lap)
+        contact = smooth(.035, .095, fall) * smooth(.13, .76, lap)
         if contact > 0 and .04 < drape.y < .47 and drape.z > .85:
             rise = 0.0
             for layer in lining:
-                for dx in (-.009, 0.0, .009):
+                for dx in (-.014, 0.0, .014):
                     query = Vector((drape.x + dx, drape.y, 1.13))
                     hit = layer.ray_cast(query, Vector((0, 0, -1)), .22)[0]
                     if hit is not None:
-                        rise = max(rise, hit.z + .011 - drape.z)
-            drape.z += min(rise, .095) * contact
+                        rise = max(rise, hit.z + (.019 if obj.name == 'Lower_midiskirt' else .014) - drape.z)
+            drape.z += min(rise, .115) * contact
+            # The bent thigh has a side as well as a lap. Keep the side
+            # panels outside both legs in the seat as the fabric falls.
+            side_contact = smooth(.24, .76, abs(seam)) * smooth(.045, .105, fall)
+            if side_contact > 0:
+                sign = 1 if drape.x >= 0 else -1
+                clearance = 0
+                for layer in lining:
+                    for dz in (-.012, 0, .012):
+                        hit = layer.ray_cast(Vector((sign * .36, drape.y, drape.z + dz)),
+                                             Vector((-sign, 0, 0)), .37)[0]
+                        if hit is not None:
+                            clearance = max(clearance, abs(hit.x) + .011 - abs(drape.x))
+                drape.x += sign * min(clearance, .105) * side_contact
 
         # Convert the drafted surface into a pre-skin morph to preserve the
         # sewn waist and avoid applying thigh rotation twice.
         target = matrix.inverted_safe() @ (drape - offset)
         seated_key.data[vertex.index].co = p.lerp(target, smooth(.025, .103, fall))
+    if obj.name == 'Lower_midiskirt' and not seated_only:
+        fit_midi_stride(obj)
 
 
 def fit_headphone_band(obj, scalp, hair_by_style, axis_height=1.719):

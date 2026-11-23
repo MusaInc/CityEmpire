@@ -2,21 +2,21 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://q84orgtthj17"
-path.s3tc="res://.godot/imported/character_b_top_blazer_normal.png-e5e51953b6e6974bc480936ca900ea8e.s3tc.ctex"
-path.etc2="res://.godot/imported/character_b_top_blazer_normal.png-e5e51953b6e6974bc480936ca900ea8e.etc2.ctex"
+uid="uid://byujjlrv4rq53"
+path.s3tc="res://.godot/imported/character_b_top_fashion_racer_albedo.png-8292640b3ae54d213e7b457e2782355e.s3tc.ctex"
+path.etc2="res://.godot/imported/character_b_top_fashion_racer_albedo.png-8292640b3ae54d213e7b457e2782355e.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "6784845f7c1b557a82445330cf03d3c2"
+"md5": "d35cc34b4aea8635f3e0a0e8a3f0ba12"
 }
 
 [deps]
 
-source_file="res://assets/models/character_b_top_blazer_normal.png"
-dest_files=["res://.godot/imported/character_b_top_blazer_normal.png-e5e51953b6e6974bc480936ca900ea8e.s3tc.ctex", "res://.godot/imported/character_b_top_blazer_normal.png-e5e51953b6e6974bc480936ca900ea8e.etc2.ctex"]
+source_file="res://assets/models/character_b_top_fashion_racer_albedo.png"
+dest_files=["res://.godot/imported/character_b_top_fashion_racer_albedo.png-8292640b3ae54d213e7b457e2782355e.s3tc.ctex", "res://.godot/imported/character_b_top_fashion_racer_albedo.png-8292640b3ae54d213e7b457e2782355e.etc2.ctex"]
 
 [params]
 
@@ -26,7 +26,7 @@ compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
-compress/normal_map=1
+compress/normal_map=0
 compress/channel_pack=0
 mipmaps/generate=true
 mipmaps/limit=-1

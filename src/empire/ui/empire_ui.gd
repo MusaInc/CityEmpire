@@ -2176,7 +2176,7 @@ func _swatch(a: Color, b: Color, on: bool, cb: Callable) -> Button:
 ## Your character: the camera turns to face the hero (left of the screen),
 ## the choices sit on the right and every tap shows straight away. `first`:
 ## straight after the welcome, with a "Start" button.
-var _style_tab := "you"
+var _style_tab := "character"
 var _style_orbit := 0.0
 var _style_portrait := true
 var _style_first := false
@@ -2212,7 +2212,7 @@ func open_style(first := false) -> void:
 	var vp := _panel_root.get_viewport_rect().size
 	var ins := _safe_insets()
 	var W := clampf(vp.x * 0.47, 440.0, 600.0)
-	var H := minf(860.0, vp.y - ins[1] - ins[3] - 48.0)
+	var H := minf(290.0 if first else 860.0, vp.y - ins[1] - ins[3] - 48.0)
 	_style_inner = W - 60.0
 	_panel = PanelContainer.new()
 	_panel.custom_minimum_size = Vector2(W, H)
@@ -2224,7 +2224,7 @@ func open_style(first := false) -> void:
 	var shop := style_shop
 	var title := "Your wardrobe"
 	if first:
-		title = "Make your character"
+		title = "Choose your character"
 	elif shop != "":
 		title = _style_store_name if not _style_store_name.is_empty() else (
 			Wardrobe.boutique_name if shop == "clothes_boutique" else String(Wardrobe.STORES[shop]["name"]))
@@ -2236,29 +2236,24 @@ func open_style(first := false) -> void:
 	var tabs := HFlowContainer.new()  # (wraps on narrow panels instead of running off screen)
 	tabs.add_theme_constant_override("h_separation", 8)
 	tabs.add_theme_constant_override("v_separation", 8)
-	var tab_list := [["you", "Face & hair"], ["clothes", "Clothes"], ["extras", "Shoes & hats"]]
-	if shop != "":
-		tab_list = [["clothes", "Clothes"], ["extras", "Shoes & more"]]
-		if _style_tab == "you":
-			_style_tab = "clothes"
-	elif not first:
-		tab_list.append(["outfits", "Outfits"])
-	for tb in tab_list:
-		tabs.add_child(S.button(tb[1], func():
-			_style_tab = tb[0]
-			_style_portrait = _style_tab == "you"
-			open_style(_style_first), _style_tab == tb[0], 0.0))
-	v.add_child(tabs)
+	var tab_list := [["character", "Character"], ["clothes", "Clothes"], ["extras", "Shoes & accessories"], ["outfits", "Saved outfits"]]
+	if first:
+		_style_tab = "character"
+	elif shop != "":
+		tab_list = [["clothes", "Clothes"], ["extras", "Shoes & accessories"]]
+	if not first:
+		if not tab_list.any(func(tab): return tab[0] == _style_tab):
+			_style_tab = String(tab_list[0][0])
+		for tb in tab_list:
+			tabs.add_child(S.button(tb[1], func():
+				_style_tab = tb[0]
+				_style_portrait = false
+				open_style(false), _style_tab == tb[0], 0.0))
+		v.add_child(tabs)
 	var body := S.vbox(10)
 	match _style_tab:
-		"you":
-			if HeroLook.BODY_B_ENABLED:
-				_style_choices(body, "BODY", HeroLook.BODIES, l, "body", 2)
-			_style_choices(body, "FACE", HeroLook.faces_for(String(l.get("body", "a"))), l, "face", 3)
-			var fc := HeroLook.face_colors(l["face"])
-			_style_colours(body, "SKIN", HeroLook.SKIN, l, "skin", fc["skin"])
-			_style_choices(body, "HAIRCUT", HeroLook.HAIRS, l, "hair", 3)
-			_style_colours(body, "HAIR COLOUR", HeroLook.HAIR, l, "hair_col", fc["hair"])
+		"character":
+			_style_choices(body, "" if first else "PLAYABLE CHARACTER", HeroLook.CHARACTERS, l, "body", 2)
 		"clothes":
 			var build_b := String(l["body"]) == "b"
 			if build_b and shop == "":
@@ -2269,8 +2264,7 @@ func open_style(first := false) -> void:
 					presets.add_child(S.button(outfit[0], func(): _style_set(outfit[1]), false, (_style_inner - 16.0) / 3.0))
 				body.add_child(presets)
 				_style_choices(body, "DRESSES", HeroLook.DRESSES, l, "top", 2)
-			var tops := HeroLook.TOPS + HeroLook.FASHION_TOPS if build_b else HeroLook.TOPS
-			_style_choices(body, "TOP", _style_list(tops, first), l, "top", 3)
+			_style_choices(body, "TOP", _style_list(HeroLook.separates_for(l["body"]), first, l["body"]), l, "top", 3)
 			_style_colours(body, "GARMENT COLOUR", HeroLook.CLOTH, l, "top_col")
 			if not HeroLook.is_dress(l["top"]):
 				_style_choices(body, "BOTTOMS", HeroLook.bottoms_for(l["body"]), l, "trousers", 3)
@@ -2288,7 +2282,9 @@ func open_style(first := false) -> void:
 				body.add_child(S.label("Dress up, then save the look here to wear it again in one tap.", 16, S.MUTED))
 			for o in outs:
 				var od: Dictionary = o
-				body.add_child(_row([_fixed("%s · %s" % [HeroLook.label(HeroLook.tops_for("b"), String(od.get("top", ""))),
+				var outfit_body := String(od.get("body", l["body"]))
+				var outfit_top := HeroLook.top_for(outfit_body, String(od.get("top", "")))
+				body.add_child(_row([_fixed("%s · %s" % [HeroLook.label(HeroLook.tops_for(outfit_body), outfit_top),
 					HeroLook.label(HeroLook.SHOES, String(od.get("shoes", "")))], 300, 17, S.PAPER, "bold"), S.spacer(),
 					S.button("Wear", func(): _style_set({"trousers": "auto", "footwear": "trainers"}.merged(od, true)), true, 110)]))
 			body.add_child(S.button("Save what I'm wearing", func():
@@ -2310,21 +2306,6 @@ func open_style(first := false) -> void:
 		_update_style_zoom(), false, 100)
 	zoom.name = "StyleZoom"
 	foot.add_child(zoom)
-	foot.add_child(S.button("Random", func():
-		var rng := RandomNumberGenerator.new()
-		rng.randomize()
-		var r := {}
-		r["body"] = String(HeroLook.BODIES[rng.randi() % HeroLook.BODIES.size()][0]) if HeroLook.BODY_B_ENABLED else "a"
-		for pair in [["face", HeroLook.faces_for(r["body"])], ["hair", HeroLook.HAIRS], ["top", HeroLook.tops_for(r["body"])], ["trousers", HeroLook.bottoms_for(r["body"])], ["shoes", HeroLook.SHOES]]:
-			var lst: Array = pair[1]
-			r[pair[0]] = lst[rng.randi() % lst.size()][0]
-		r["top_col"] = HeroLook.CLOTH[rng.randi() % HeroLook.CLOTH.size()]
-		r["pants_col"] = HeroLook.TROUSERS[rng.randi() % HeroLook.TROUSERS.size()]
-		r["hair_col"] = ""
-		r["skin"] = ""
-		r["head"] = "head_bare"
-		r["eyewear"] = "face_none"
-		_style_set(r), false, 85))
 	var unpaid := Wardrobe.unpaid(e.flags, l) if (shop != "" and not first) else []
 	if not unpaid.is_empty():
 		# Second row for Buy + Leave (one row would run off a narrow panel).
@@ -2367,16 +2348,16 @@ func _safe_insets() -> Array:
 
 ## The choices for a list: the store's stock (priced) in a store, what you
 ## own in your wardrobe, everything when making your character.
-func _style_list(list: Array, first: bool) -> Array:
+func _style_list(list: Array, first: bool, body := "a") -> Array:
 	var flags := game.empire.flags
 	var out: Array = []
 	for it in list:
 		var id := String(it[0])
-		if first or style_shop == "" and Wardrobe.owns(flags, id):
+		if first or style_shop == "" and Wardrobe.owns(flags, id, body):
 			out.append(it)
 		elif style_shop != "" and (id in Wardrobe.STORES[style_shop]["items"] or id in Wardrobe.FREE):
 			var lbl := String(it[1])
-			if not Wardrobe.owns(flags, id):
+			if not Wardrobe.owns(flags, id, body):
 				lbl += " · " + EmpireData.money(float(Wardrobe.price(id)))
 			else:
 				lbl += " ✓"
@@ -2395,16 +2376,15 @@ func open_store(store: String, display_name := "") -> void:
 
 func _style_set(changes: Dictionary) -> void:
 	var e := game.empire
-	var l := HeroLook.current(e.flags)
-	l.merge(changes, true)
-	e.flags["look"] = l
+	HeroLook.change(e.flags, changes)
 	game.apply_hero_look()
 	Sfx.play("click", -12.0)
 	open_style(_style_first)
 
 
 func _style_choices(v: VBoxContainer, title: String, list: Array, l: Dictionary, key: String, cols: int) -> void:
-	v.add_child(S.label(title, 14, S.AMBER, "black"))
+	if not title.is_empty():
+		v.add_child(S.label(title, 14, S.AMBER, "black"))
 	var g := GridContainer.new()
 	g.columns = cols
 	g.add_theme_constant_override("h_separation", 8)
@@ -2415,17 +2395,13 @@ func _style_choices(v: VBoxContainer, title: String, list: Array, l: Dictionary,
 	v.add_child(g)
 
 
-## A row of colour swatches; `own` (when given) is a first swatch meaning
-## "the face's own colour" (stored as "").
-func _style_colours(v: VBoxContainer, title: String, list: Array, l: Dictionary, key: String, own = null) -> void:
+func _style_colours(v: VBoxContainer, title: String, list: Array, l: Dictionary, key: String) -> void:
 	v.add_child(S.label(title, 14, S.AMBER, "black"))
 	var g := GridContainer.new()
 	g.columns = maxi(4, int((_style_inner + 8.0) / 76.0))  # 68 px swatches
 	g.add_theme_constant_override("h_separation", 8)
 	g.add_theme_constant_override("v_separation", 8)
 	var cur := String(l.get(key, ""))
-	if own is Color:
-		g.add_child(_swatch(own, own.lightened(0.5), cur == "", func(): _style_set({key: ""})))
 	for hx in list:
 		var c := Color(String(hx))
 		g.add_child(_swatch(c, c, cur != "" and Color(cur).is_equal_approx(c), func(): _style_set({key: hx})))
@@ -2483,7 +2459,7 @@ func _close_style() -> void:
 		# Left the store without paying: back into what you came in wearing.
 		var back := HeroLook.current(e.flags)
 		for k in ["top", "shoes", "head", "eyewear"]:
-			if not Wardrobe.owns(e.flags, String(back[k])):
+			if not Wardrobe.owns(e.flags, String(back[k]), String(back["body"])):
 				back[k] = _style_entry.get(k, HeroLook.DEFAULT[k])
 		e.flags["look"] = back
 		game.apply_hero_look()

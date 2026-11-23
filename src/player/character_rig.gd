@@ -118,7 +118,14 @@ var _forearm_length := 0.26
 var _cloth_materials: Array[ShaderMaterial] = []
 var _face_mesh: MeshInstance3D
 var _blink_index := -1
+var _smile_index := -1
+var _focus_index := -1
+var _smile_amount := 0.0
+var _focus_amount := 0.0
+var _midi_lining: MeshInstance3D
+var _midi_lining_index := -1
 var _next_blink := 2.6
+var _blink_followup := false
 var _blink_phase := 0.0
 var wardrobe_preview := false
 var _glove_mesh: MeshInstance3D
@@ -188,6 +195,7 @@ var _carry := 0.0
 var _handle: Node3D
 var _handle_time := 0.0
 var vehicle_pose := 0.0
+var vehicle_entry_side := 0.0
 var vehicle_facing := Vector3.FORWARD
 var vehicle_grip: Node3D
 var vehicle_grip_weight := 0.0
@@ -371,7 +379,8 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			material.set_shader_parameter("base_color", source.albedo_color * 0.79)
 		if (build_b and not face_skin) or is_hair:
 			material.set_shader_parameter("surface_definition", 1.0)
-		if build_b and name_key.begins_with("hero_skin_face"):
+		if name_key.begins_with("hero_skin_face"):
+			material.set_shader_parameter("surface_definition", 1.0)
 			material.set_shader_parameter("rim_strength", 0.095)
 		if build_b and name_key == "hero_skin_body":
 			material.set_shader_parameter("roughness", 0.57)
@@ -416,6 +425,8 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 		if name_key.begins_with("hero_fashion_top_"):
 			region = "lining" if name_key.ends_with("_under") else "suit"
 			reference = source.albedo_color
+		elif name_key == "hero_racer_cotton":
+			material.set_shader_parameter("base_color", Color(0.87, 0.86, 0.82))
 		elif name_key.begins_with("hero_fashion_bottom_"):
 			region = "pants"
 			reference = source.albedo_color
@@ -434,7 +445,8 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 		if is_hair:
 			var stubble := name_key == "hero_hair_buzz"
 			material.set_shader_parameter("hair_fibres", 0.25 if stubble else 0.57)
-			material.set_shader_parameter("normal_strength", 0.89 if mapped else 0.0)
+			material.set_shader_parameter("normal_strength", 0.74 if mapped else 0.0)
+			material.set_shader_parameter("roughness", maxf(source.roughness, 0.49))
 			material.set_shader_parameter("rim_strength", 0.10 if stubble else 0.14)
 			region = "hair"  # per-style strand textures (build_character.hair_material)
 			reference = source.albedo_color
@@ -609,6 +621,7 @@ func set_gadget_active(on: bool) -> void:
 
 
 const COMPRESSION_CUTS := ["long", "tq", "short", "vest"]
+const CROPPED_TROUSERS := ["cargo", "chinos", "jeans", "joggers", "fitjeans", "leggings"]
 
 
 ## Which of the character model's variant meshes are drawn: the top's cut
@@ -624,7 +637,8 @@ func _show_variants() -> void:
 	var lower: String = look_state.get("trousers", "cargo")
 	var footwear: String = look_state.get("footwear", "trainers")
 	var bare_legs := lower in ["dress", "miniskirt", "midiskirt", "maxiskirt", "tailoredshorts"]
-	var fitted_denim := body_type == "b" and lower in ["jeans", "fitjeans"]
+	var fitted_denim := body_type == "b" and lower in ["jeans", "fitjeans", "widejeans"]
+	var cropped := body_type == "b" and lower in CROPPED_TROUSERS
 	var barefoot_legs := footwear == "sandals" and (bare_legs or lower == "shorts")
 	var mask: String = look_state.get("mask", "")
 	var hat: String = look_state.get("head", "")
@@ -639,6 +653,12 @@ func _show_variants() -> void:
 	_moving_hems.clear()
 	_face_mesh = null
 	_blink_index = -1
+	_smile_index = -1
+	_focus_index = -1
+	if is_instance_valid(_midi_lining):
+		_midi_lining.set_blend_shape_value(_midi_lining_index, 0.0)
+	_midi_lining = null
+	_midi_lining_index = -1
 	for mi in _hero_meshes:
 		var n := String(mi.name)
 		if n == "Top_Collar":
@@ -665,15 +685,27 @@ func _show_variants() -> void:
 		elif n.begins_with("Footwear_"):
 			mi.visible = n == "Footwear_" + footwear
 		elif n == "Ankle_Liner":
-			mi.visible = not bare_legs and lower != "shorts" and footwear != "sandals"
+			mi.visible = not cropped and not bare_legs and lower not in ["shorts", "bikershorts"] and footwear != "sandals"
 			if body_type == "b" and footwear == "boots":
 				mi.visible = false
+		elif n == "Fashion_Cropped_Ankles":
+			mi.visible = cropped and footwear != "sandals"
+		elif n == "Fashion_Cropped_Barefeet":
+			mi.visible = cropped and footwear == "sandals"
 		elif n == "Fashion_Feet":
-			mi.visible = footwear == "sandals" and not barefoot_legs
+			mi.visible = footwear == "sandals" and not barefoot_legs and not cropped and lower != "bikershorts"
+		elif n == "Fashion_Biker_Legs":
+			mi.visible = lower == "bikershorts" and footwear != "sandals"
+		elif n == "Fashion_Biker_Barefeet":
+			mi.visible = lower == "bikershorts" and footwear == "sandals"
+		elif n == "Fashion_Lounge_Socks":
+			mi.visible = lower == "bikershorts" and footwear in ["trainers", "streettrainers"]
 		elif n == "Fashion_Barefoot_Legs":
 			mi.visible = barefoot_legs
 		elif n == "Fashion_Torso_Skin":
-			mi.visible = cut == "vest" or (cut.begins_with("fashion_") and cut != "fashion_crop")
+			mi.visible = cut == "vest" or (cut.begins_with("fashion_") and cut not in ["fashion_crop", "fashion_moto", "fashion_pullover", "fashion_racer"])
+		elif n == "Fashion_Racer_Midriff":
+			mi.visible = cut == "fashion_racer"
 		elif n == "Fashion_Crop_Skin":
 			mi.visible = cut == "fashion_crop"
 		elif n == "Fashion_Legs":
@@ -687,6 +719,8 @@ func _show_variants() -> void:
 			if mi.visible:
 				_face_mesh = mi
 				_blink_index = mi.find_blend_shape_by_name("Blink")
+				_smile_index = mi.find_blend_shape_by_name("Smile")
+				_focus_index = mi.find_blend_shape_by_name("Focus")
 		elif n.begins_with("Hair_") or n.begins_with("Groom_"):
 			var style_face := "%s_%s" % [style, face]
 			mi.visible = n.ends_with("_" + style_face) and not mask in Shop.HAIR_MASKS and (hat != "beanie" or hat_fitted)
@@ -703,10 +737,18 @@ func _show_variants() -> void:
 		elif n.begins_with("Mask_"):
 			mi.visible = mask != "" and (n == "Mask_" + mask or n.begins_with("Mask_%s_" % mask))
 		if mi.visible and mi.mesh.get_blend_shape_count() > 0:
+			if lower == "midiskirt" and n in ["Fashion_Legs", "Fashion_Barefoot_Legs"]:
+				_midi_lining_index = mi.find_blend_shape_by_name("MidiSeatClearance")
+				if _midi_lining_index >= 0:
+					_midi_lining = mi
 			var front := mi.find_blend_shape_by_name("Hem_Front")
 			var back := mi.find_blend_shape_by_name("Hem_Back")
 			if front >= 0 and back >= 0:
-				_moving_hems.append({"mesh": mi, "front": front, "back": back, "seated": mi.find_blend_shape_by_name("Hem_Seated"), "long": n in ["Lower_midiskirt", "Lower_maxiskirt"] or n.contains("Loosedress")})
+				_moving_hems.append({"mesh": mi, "front": front, "back": back, "seated": mi.find_blend_shape_by_name("Hem_Seated"),
+					"long": n in ["Lower_midiskirt", "Lower_maxiskirt"] or n.contains("Loosedress"),
+					"front_right": mi.find_blend_shape_by_name("Hem_Front_Right"),
+					"back_right": mi.find_blend_shape_by_name("Hem_Back_Right"),
+					"front_range": 1.0 if n == "Lower_midiskirt" else 0.78})
 			for shape in GARMENT_BENDS:
 				var index := mi.find_blend_shape_by_name(shape)
 				if index >= 0:
@@ -885,6 +927,11 @@ func _fit_body_pivots() -> void:
 	if chest < 0:
 		return
 	var centre := skeleton.get_bone_global_rest(chest).origin
+	var spine := skeleton.find_bone("b_spine")
+	if body_type == "b" and spine >= 0:
+		(bones["chest"] as Node3D).position = centre - skeleton.get_bone_global_rest(spine).origin
+	else:
+		(bones["chest"] as Node3D).position = BONES["chest"][1]
 	var neck := skeleton.find_bone("b_neck")
 	var head := skeleton.find_bone("b_head")
 	if neck >= 0 and head >= 0:
@@ -966,24 +1013,37 @@ func _pose_hems(pivots: Dictionary) -> void:
 	var knee_depth := Vector2.ZERO
 	var foot_depth := Vector2.ZERO
 	var paired_depth := INF
+	var leg_depths: Array[Vector2] = []
 	for side in ["l", "r"]:
 		var knee: Transform3D = pivots["shin_" + side]
 		var foot: Transform3D = pivots["foot_" + side]
 		var kn := (inv * knee.origin).z
 		var ft := (inv * foot.origin).z
+		leg_depths.append(Vector2(maxf(-kn, -ft * 0.83), maxf(kn, ft * 0.83)))
 		paired_depth = minf(paired_depth, -kn)
 		knee_depth.x = maxf(knee_depth.x, -kn)
 		knee_depth.y = maxf(knee_depth.y, kn)
 		foot_depth.x = maxf(foot_depth.x, -ft)
 		foot_depth.y = maxf(foot_depth.y, ft)
+	if is_instance_valid(_midi_lining):
+		_midi_lining.set_blend_shape_value(_midi_lining_index, smoothstep(0.19, 0.36, paired_depth))
 	for hem in _moving_hems:
 		var depth := knee_depth.max(foot_depth * 0.83) if hem.long else knee_depth
 		var seated := 0.0
 		if hem.seated >= 0:
 			seated = smoothstep(0.19, 0.36, paired_depth)
 			hem.mesh.set_blend_shape_value(hem.seated, seated)
-		hem.mesh.set_blend_shape_value(hem.front, (1.0 - seated) * 0.78 * smoothstep(0.044, 0.316, depth.x))
-		hem.mesh.set_blend_shape_value(hem.back, (1.0 - seated) * 0.71 * smoothstep(0.038, 0.275, depth.y))
+		if hem.front_right >= 0 and hem.back_right >= 0:
+			_apply_hem_stride(hem, Vector2i(hem.front, hem.back), leg_depths[0], 1.0 - seated)
+			_apply_hem_stride(hem, Vector2i(hem.front_right, hem.back_right), leg_depths[1], 1.0 - seated)
+		else:
+			_apply_hem_stride(hem, Vector2i(hem.front, hem.back), depth, 1.0 - seated)
+
+
+func _apply_hem_stride(hem: Dictionary, indices: Vector2i, depth: Vector2, weight: float) -> void:
+	var mesh: MeshInstance3D = hem.mesh
+	mesh.set_blend_shape_value(indices.x, weight * hem.front_range * smoothstep(0.044, 0.316, depth.x))
+	mesh.set_blend_shape_value(indices.y, weight * 0.71 * smoothstep(0.038, 0.275, depth.y))
 
 
 func _add_fallback_mesh(name: String, pivot: Node3D, length: float) -> void:
@@ -1413,6 +1473,7 @@ func _process(dt: float) -> void:
 	_set_grip(web_side, player.line_state != Player.Line.IDLE or (fists and not wing))
 	_set_grip(free_side, (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0 and _lgrip > 0.5) or (fists and not wing))
 	_update_blink(dt)
+	_update_expression(dt)
 	posed.emit()
 
 
@@ -1426,10 +1487,28 @@ func _update_blink(dt: float) -> void:
 	if _blink_phase >= 0.15:
 		_face_mesh.set_blend_shape_value(_blink_index, 0.0)
 		_blink_phase = 0.0
-		_next_blink = 2.1 + 2.4 * (0.5 + 0.5 * sin(_time * 2.71))
+		if not _blink_followup and sin(_time * 2.73) > 0.84:
+			_blink_followup = true
+			_next_blink = 0.13
+		else:
+			_blink_followup = false
+			_next_blink = 2.1 + 2.4 * (0.5 + 0.5 * sin(_time * 2.71))
 		return
 	var closed := smoothstep(0.0, 0.047, _blink_phase) * (1.0 - smoothstep(0.067, 0.15, _blink_phase))
 	_face_mesh.set_blend_shape_value(_blink_index, closed)
+
+
+func _update_expression(dt: float) -> void:
+	if _face_mesh == null or (_smile_index < 0 and _focus_index < 0):
+		return
+	var effort := 0.0 if wardrobe_preview else maxf(vehicle_pose * 0.43, smoothstep(2.3, 6.5, player.speed()))
+	var breathing := smoothstep(0.65, 0.97, sin(_time * 0.31) + 0.13 * sin(_time * 0.77))
+	_smile_amount = lerpf(_smile_amount, (1.0 - effort) * breathing * 0.38, 1.0 - exp(-dt * 2.8))
+	_focus_amount = lerpf(_focus_amount, effort * 0.69, 1.0 - exp(-dt * 4.3))
+	if _smile_index >= 0:
+		_face_mesh.set_blend_shape_value(_smile_index, _smile_amount)
+	if _focus_index >= 0:
+		_face_mesh.set_blend_shape_value(_focus_index, _focus_amount)
 
 
 ## Pop guard: no joint's rotation speed may change faster than POP_ACCEL, so
@@ -3059,16 +3138,19 @@ func _pose_vehicle_access(dt: float) -> void:
 		q[bone] = Quaternion.IDENTITY
 	var sit := vehicle_pose
 	var lift := sin(sit * PI)
-	q["spine"] = _rx(-0.20 * lift)
-	q["chest"] = _rx(-0.14 * lift)
-	q["neck"] = _rx(0.22 * lift)
+	var settle := smoothstep(0.62, 1.0, sit)
+	q["spine"] = _rx(-0.19 * lift - 0.055 * settle)
+	q["chest"] = _ry(-0.17 * vehicle_entry_side * lift) * _rx(-0.12 * lift + 0.035 * settle)
+	q["neck"] = _ry(0.12 * vehicle_entry_side * lift) * _rx(0.23 * lift)
+	q["head"] = _rx(0.08 * lift - 0.035 * settle)
 	for sd in ["l", "r"]:
 		var sign_x := 1.0 if sd == "r" else -1.0
-		q["thigh_" + sd] = _rx(1.42 * sit + lift * (0.17 if sd == "r" else 0.03)) * _rz(sign_x * 0.12 * sit)
-		q["shin_" + sd] = _rx(-1.52 * sit - 0.22 * lift)
-		q["foot_" + sd] = _rx(0.20 * sit)
-		q["upper_arm_" + sd] = _rx(0.67 * sit) * _rz(sign_x * 0.10)
-		q["forearm_" + sd] = _rx(1.10 * sit + lift * 0.21)
+		var lead := -sign_x * vehicle_entry_side
+		q["thigh_" + sd] = _rx(1.45 * sit + (0.11 + 0.14 * lead) * lift) * _rz(sign_x * (0.08 * sit + 0.06 * lift))
+		q["shin_" + sd] = _rx(-1.46 * sit - (0.23 + 0.15 * lead) * lift)
+		q["foot_" + sd] = _rx(0.12 * sit + 0.15 * lead * lift)
+		q["upper_arm_" + sd] = _rx(0.63 * sit) * _rz(sign_x * (0.10 - 0.045 * settle))
+		q["forearm_" + sd] = _rx(1.02 * sit + lift * 0.21)
 	if is_instance_valid(vehicle_grip) and vehicle_grip_weight > 0.001:
 		var at := vehicle_grip.global_position
 		var left := (bones["upper_arm_l"] as Node3D).global_position

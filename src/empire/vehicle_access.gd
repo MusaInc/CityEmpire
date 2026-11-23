@@ -176,6 +176,7 @@ func start(body: PhysicsBody3D, board: bool, found: Dictionary, done: Callable, 
 	game.player.s.velocity = Vector3.ZERO
 	game.player.foot_velocity = Vector3.ZERO
 	game.rig.vehicle_pose = 0.0
+	game.rig.vehicle_entry_side = side
 	game.rig.show()
 	game.camera.hide_body = false
 	game.camera.cine = _camera
@@ -284,6 +285,7 @@ func _release() -> void:
 	acting = false
 	vehicle = null
 	game.rig.vehicle_pose = 0.0
+	game.rig.vehicle_entry_side = 0.0
 	game.rig.vehicle_grip = null
 	game.camera.cine = Callable()
 	game.player.scripted = false

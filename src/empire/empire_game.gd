@@ -652,13 +652,13 @@ func _after_start() -> void:
 			var fs2 := CityLife.firms_for_sale(empire)
 			ui.open_firm(unit_by_id[(fs2[0] if not fs2.is_empty() else empire.firms[0])["unit"]])
 		elif pn == "phonestyle":
-			# (captures: the real path – light phone → Edit appearance)
+			# (captures: the real path – light phone → Character & wardrobe)
 			Glass.mode = "light"
 			ui.open_phone("character")
 			await get_tree().process_frame
 			ui.open_style()
 		elif pn.begins_with("style"):
-			ui._style_tab = pn.get_slice(":", 1) if ":" in pn else "you"
+			ui._style_tab = pn.get_slice(":", 1) if ":" in pn else "character"
 			ui.open_style()
 		elif pn == "brand":
 			ui.open_brand()

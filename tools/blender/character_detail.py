@@ -256,7 +256,8 @@ def sculpt_head(points, fid):
             dx,dz = x-centre.x,z-centre.z
             if abs(dx) < .022 and y > centre.y+.005 and abs(dz)<.023:
                 orbit = math.exp(-(dx/.0145)**4-(dz/.016)**4)
-                p.z += orbit*dz*(.26 if dz>0 else .22)
+                opening = (.07 if dz > 0 else .06) if BODY == 'b' else (.26 if dz > 0 else .22)
+                p.z += orbit * dz * opening
                 p.y += .0014*orbit*math.exp(-((dz+.006)/.005)**2)
         if ax > .067 and eye.y-.112 < y < eye.y-.03:
             ear = math.exp(-((z-eye.z+.012)/.025)**2-((y-eye.y+.065)/.026)**2)

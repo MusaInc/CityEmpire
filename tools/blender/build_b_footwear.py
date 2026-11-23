@@ -246,6 +246,44 @@ def street_trainer(target, parts):
         bpy.data.meshes.remove(destination)
 
 
+def street_trainer_panels(target, joints):
+    """Separate the perforated toe and heel insert from the dyed upper."""
+    mesh = target.data
+    shell = mesh.materials.find('hero_streettrainer_upper')
+    if shell < 0 or mesh.materials.find('hero_streettrainer_insert') >= 0:
+        return
+    insert = mesh.materials[shell].copy()
+    insert.name = 'hero_streettrainer_insert'
+    shader = insert.node_tree.nodes.get('Principled BSDF')
+    base = shader.inputs['Base Color']
+    tone = (.62, .65, .67, 1)
+    if base.links:
+        tree = insert.node_tree
+        source = base.links[0].from_socket
+        multiplier = tree.nodes.new('ShaderNodeMixRGB')
+        multiplier.blend_type = 'MULTIPLY'
+        multiplier.inputs[0].default_value = 1
+        multiplier.inputs[2].default_value = tone
+        tree.links.new(source, multiplier.inputs[1])
+        tree.links.new(multiplier.outputs[0], base)
+    else:
+        base.default_value = tone
+    shader.inputs['Roughness'].default_value = .73
+    mesh.materials.append(insert)
+    slot = len(mesh.materials) - 1
+    for polygon in mesh.polygons:
+        if polygon.material_index != shell:
+            continue
+        p = polygon.center
+        sign = 1 if p.x > 0 else -1
+        ankle = joints['foot_r' if sign > 0 else 'foot_l'].x
+        centre = ankle - sign * .014 * smooth(.050, .187, p.y)
+        toe = ((p.x - centre) / .033) ** 2 + ((p.y - .145) / .041) ** 2 < 1
+        heel = p.y < -.026 and abs(p.x - ankle) < .023 and p.z > .066
+        if (toe and p.z > .043 and polygon.normal.z > .35) or heel:
+            polygon.material_index = slot
+
+
 def fitted_leather_shoe(obj, joints, skin, style):
     """Loft separate leather uppers, turned openings and beveled rubber soles."""
     boot = style == 'boots'
@@ -349,7 +387,9 @@ def fit_build_b_footwear(meshes, joints):
     insert_parts(tongue, collar_parts(upper, joints, trim))
     rubber = sole.data.materials.get('hero_outsole')
     insert_parts(sole, sole_parts(sole, joints, trim, rubber))
-    street_trainer(wardrobe['Footwear_streettrainers'], trainer)
+    street = wardrobe['Footwear_streettrainers']
+    street_trainer(street, trainer)
+    street_trainer_panels(street, joints)
     for style in ('boots', 'heels'):
         fitted_leather_shoe(wardrobe['Footwear_' + style], joints, wardrobe['Fashion_Legs'], style)
     for name in ('hero_fashion_shoe_sandals', 'hero_fashion_sole_sandals'):

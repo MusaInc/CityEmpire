@@ -13,7 +13,7 @@ const SLOTS := [
 	["hero", "Faces"], ["hair", "Hair"], ["top", "Tops"], ["suit", "Colours"], ["pants", "Trousers"], ["shoes", "Shoes"],
 	["gloves", "Gloves"], ["head", "Hats"], ["face", "Masks"], ["web", "Webs"], ["gadget", "Gadgets"],
 ]
-const DEFAULTS := {"hero": "hero_kai", "hair": "hair_natural", "top": "top_long", "suit": "ember", "pants": "pants_navy",
+const DEFAULTS := {"hero": "hero_ade", "hair": "hair_natural", "top": "top_long", "suit": "ember", "pants": "pants_navy",
 	"shoes": "shoes_classic", "gloves": "gloves_black", "head": "head_bare", "face": "mask_courier",
 	"web": "web_classic", "gadget": "gadget_none"}
 ## The classic web glow (gauntlet LEDs, spool rings, visor) is teal under a
@@ -39,7 +39,7 @@ const OTHER_ITEMS := [
 	# colours are tints. All free: who you are isn't for sale.
 	{"id": "hero_kai", "slot": "hero", "name": "Kai", "face": "kai", "style": "buzz", "skin": Color(0.6, 0.42, 0.3),
 		"hair": Color(0.06, 0.045, 0.035), "eyes": Color(0.28, 0.17, 0.08), "price": 0},
-	{"id": "hero_ade", "slot": "hero", "name": "Ade", "face": "ade", "style": "crop", "skin": Color(0.32, 0.2, 0.14),
+	{"id": "hero_ade", "slot": "hero", "name": "Ade", "face": "ade", "style": "crop", "skin": Color(0.52, 0.36, 0.265),
 		"hair": Color(0.075, 0.06, 0.052), "eyes": Color(0.16, 0.09, 0.05), "price": 0},
 	{"id": "hero_ren", "slot": "hero", "name": "Ren", "face": "ren", "style": "crop", "skin": Color(0.84, 0.66, 0.52),
 		"hair": Color(0.04, 0.035, 0.035), "eyes": Color(0.2, 0.12, 0.06), "price": 0},
@@ -57,7 +57,7 @@ const OTHER_ITEMS := [
 	{"id": "hero_remy", "slot": "hero", "name": "Remy", "face": "remy", "style": "pixie", "body": "b", "skin": Color(0.5, 0.33, 0.22),
 		"hair": Color(0.08, 0.06, 0.045), "eyes": Color(0.22, 0.13, 0.06), "price": 0},
 	{"id": "hero_jules", "slot": "hero", "name": "Jules", "face": "jules", "style": "bun", "body": "b", "skin": Color(0.72, 0.53, 0.4),
-		"hair": Color(0.24, 0.15, 0.09), "eyes": Color(0.25, 0.18, 0.08), "price": 0},
+		"hair": Color(0.112, 0.073, 0.055), "eyes": Color(0.29, 0.22, 0.115), "price": 0},
 	# Hair (character.glb Hair_<style>_<face>: every cut is fitted to every
 	# face's own scalp). Natural = the face's own cut; the colour stays the
 	# face's. Hidden under the beanie, the balaclava and the courier hood.
@@ -92,6 +92,11 @@ const OTHER_ITEMS := [
 	{"id": "top_fashion_jacket", "slot": "top", "name": "Denim Jacket", "cut": "fashion_jacket", "price": 0},
 	{"id": "top_fashion_fitteddress", "slot": "top", "name": "Fitted Dress", "cut": "fashion_fitteddress", "price": 0},
 	{"id": "top_fashion_loosedress", "slot": "top", "name": "Loose Dress", "cut": "fashion_loosedress", "price": 0},
+	{"id": "top_fashion_onedress", "slot": "top", "name": "One-Shoulder Dress", "cut": "fashion_onedress", "price": 0},
+	{"id": "top_fashion_squareneck", "slot": "top", "name": "Square-Neck Top", "cut": "fashion_squareneck", "price": 0},
+	{"id": "top_fashion_moto", "slot": "top", "name": "Leather Zip Jacket", "cut": "fashion_moto", "price": 0},
+	{"id": "top_fashion_racer", "slot": "top", "name": "Cropped Leather Jacket", "cut": "fashion_racer", "price": 0},
+	{"id": "top_fashion_pullover", "slot": "top", "name": "Fleece Pullover", "cut": "fashion_pullover", "price": 0},
 	# Trousers
 	{"id": "pants_navy", "slot": "pants", "name": "Graphite", "color": Color(0.24, 0.26, 0.28), "price": 0},
 	{"id": "pants_black", "slot": "pants", "name": "Black", "color": Color(0.05, 0.05, 0.06), "price": 150},
@@ -183,6 +188,10 @@ static func item(id: String) -> Dictionary:
 
 
 static func in_slot(slot: String) -> Array:
+	if slot == "hero":
+		return [item("hero_ade"), item("hero_jules")]
+	if slot == "hair":
+		return [item("hair_natural")]
 	return items().filter(func(it): return it["slot"] == slot)
 
 
@@ -264,11 +273,11 @@ static func look(preview := {}) -> Dictionary:
 	var suit: Color = pick["suit"]["color"]
 	var shoes: Dictionary = pick["shoes"]
 	var web: Dictionary = pick["web"]
-	var hero: Dictionary = pick["hero"]
+	var hero := item("hero_jules" if pick["hero"].get("body", "a") == "b" else "hero_ade")
 	return {
 		"hero": hero["face"],
 		"body": String(hero.get("body", "a")),
-		"hair_style": pick["hair"]["style"] if pick["hair"]["style"] != "" else hero["style"],
+		"hair_style": hero["style"],
 		"skin": hero["skin"],
 		"hair": hero["hair"],
 		"eyes": hero["eyes"],

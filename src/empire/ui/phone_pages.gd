@@ -1121,7 +1121,7 @@ static func character(ph: Phone, body: VBoxContainer) -> void:
 		var it := String(look.get(k, ""))
 		if it != "" and not it in Wardrobe.FREE:
 			parts.append(it.get_slice("_", 1).capitalize())
-	hv.add_child(G.text("Your look", "footnote", G.LABEL2, "medium"))
+	hv.add_child(G.text("Jules · Build B" if look["body"] == "b" else "Ade · Build A", "footnote", G.LABEL2, "medium"))
 	hv.add_child(G.para(" · ".join(parts) if not parts.is_empty() else "Everyday clothes", "title2", G.LABEL))
 	var paid := 0
 	for it in owned:
@@ -1129,7 +1129,7 @@ static func character(ph: Phone, body: VBoxContainer) -> void:
 	var nout := (e.flags.get("outfits", []) as Array).size()
 	hv.add_child(G.para("%d items in your wardrobe · %s of clothes · %d saved outfit%s" % [owned.size(), EmpireData.money(float(paid)), nout, "" if nout == 1 else "s"], "subhead"))
 	var hb := G.hbox(10)
-	var eb := G.button("Edit appearance", func(): ui.open_style(), "filled", "large", null, "person")
+	var eb := G.button("Character & wardrobe", func(): ui.open_style(), "filled", "large", null, "person")
 	eb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hb.add_child(eb)
 	hv.add_child(hb)
