@@ -112,6 +112,22 @@ def light(name, kind, loc, rot, energy, size=1.0, color=(1, 1, 1)):
 light('key', 'SUN', (0, 0, 5), (50, 0, 145), 3.2, color=(1, 0.96, 0.9))
 light('fill', 'AREA', (-2.5, 2.5, 1.6), (70, 0, -135), 120, 3, (0.85, 0.9, 1))
 light('rim', 'AREA', (1.5, -2.5, 2.2), (-60, 0, 30), 160, 2)
+editorial = os.environ.get('REVIEW_EDITORIAL') == '1'
+if editorial:
+    world.node_tree.nodes['Background'].inputs[1].default_value = .31
+    target = Vector((0, 0, 1.12))
+    for name, location, power, width in (
+        ('key', (2.4, 3.3, 3.4), 420, 2.1),
+        ('fill', (-2.0, 2.45, 2.0), 145, 1.65),
+        ('rim', (1.3, -1.7, 2.75), 260, 1.25),
+    ):
+        ob = bpy.data.objects[name]
+        ob.data.type = 'AREA'
+        ob.data.energy = power
+        ob.data.size = width
+        ob.location = location
+        ob.rotation_euler = (target - ob.location).to_track_quat('-Z', 'Y').to_euler()
+
 bpy.ops.mesh.primitive_plane_add(size=30)
 floor = bpy.context.object
 fm = bpy.data.materials.new('floor')
@@ -134,6 +150,7 @@ sc.camera = cam
 VIEWS = {
     'front': (Vector((0, 4.2, 0.1)), Vector((0, 0, 0.92)), 50),
     'three_quarter': (Vector((2.9, 3.0, 0.3)), Vector((0, 0, 0.92)), 50),
+    'editorial': (Vector((1.56, 3.27, 0.11)), Vector((0, .025, .85)), 65),
     'side': (Vector((4.2, 0, 0.1)), Vector((0, 0, 0.92)), 50),
     'rear': (Vector((0, -4.2, 0.2)), Vector((0, 0, 0.92)), 50),
     'face': (Vector((0.22, 0.95, 0.03)), Vector((0, 0.05, 1.61)), 85),

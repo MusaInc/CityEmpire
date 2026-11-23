@@ -47,7 +47,7 @@ def detail_nodes(material):
     return colour, normal, normal.inputs['Color'].links[0].from_node
 
 
-def surface_detail(obj, output, field, strength, index=0, replace=False):
+def surface_detail(obj, output, field, strength, index=0, replace=False, texture_key=None):
     """Lay spatial dye and relief over the garment's existing UV seams."""
     colour, mapping, normal = detail_nodes(obj.data.materials[index])
     original = colour.image
@@ -85,8 +85,10 @@ def surface_detail(obj, output, field, strength, index=0, replace=False):
     xyz[..., 0] -= du
     xyz[..., 1] -= dv
     xyz /= np.maximum(np.linalg.norm(xyz, axis=-1, keepdims=True), .01)
-    colour.image = packed_image(output / Path(original.filepath).name, albedo)
-    normal.image = packed_image(output / Path(original_normal.filepath).name, xyz * .5 + .5, True)
+    colour_name = f'{texture_key}_albedo.png' if texture_key else Path(original.filepath).name
+    normal_name = f'{texture_key}_normal.png' if texture_key else Path(original_normal.filepath).name
+    colour.image = packed_image(output / colour_name, albedo)
+    normal.image = packed_image(output / normal_name, xyz * .5 + .5, True)
     mapping.inputs['Strength'].default_value = strength
 
 

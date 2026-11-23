@@ -51,6 +51,7 @@ const GARMENT_BENDS := {
 	"Bend_Knee_l": "shin_l", "Bend_Knee_r": "shin_r",
 	"Bend_Elbow_l": "forearm_l", "Bend_Elbow_r": "forearm_r",
 	"Bend_Shoulder_l": "upper_arm_l", "Bend_Shoulder_r": "upper_arm_r",
+	"Reach_Shoulder_l": "upper_arm_l", "Reach_Shoulder_r": "upper_arm_r",
 }
 ## Gear pieces that ride a bone other than the head (gadgets).
 const GEAR_BONES := {"jet_l": "foot_l", "jet_r": "foot_r", "jet_l_fire": "foot_l", "jet_r_fire": "foot_r",
@@ -385,7 +386,11 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			material.set_shader_parameter("surface_definition", 1.0)
 			material.set_shader_parameter("rim_strength", 0.095)
 		if build_b and name_key == "hero_skin_body":
-			material.set_shader_parameter("roughness", 0.57)
+			material.set_shader_parameter("roughness", 0.61)
+			material.set_shader_parameter("rim_strength", 0.14)
+			material.set_shader_parameter("inside_shade", 0.82)
+		if build_b and name_key.begins_with("hero_fashion_top_satin_"):
+			material.set_shader_parameter("rim_strength", 0.19)
 		if source.roughness_texture:
 			material.set_shader_parameter("has_roughness_map", true)
 			material.set_shader_parameter("roughness_map", source.roughness_texture)
@@ -446,8 +451,8 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			reference = source.albedo_color
 		if is_hair and not scan_hair:
 			var stubble := name_key == "hero_hair_buzz"
-			material.set_shader_parameter("hair_fibres", 0.25 if stubble else 0.57)
-			material.set_shader_parameter("normal_strength", 0.74 if mapped else 0.0)
+			material.set_shader_parameter("hair_fibres", 0.25 if stubble else (0.43 if build_b else 0.57))
+			material.set_shader_parameter("normal_strength", (0.88 if build_b else 0.74) if mapped else 0.0)
 			material.set_shader_parameter("roughness", maxf(source.roughness, 0.49))
 			material.set_shader_parameter("rim_strength", 0.10 if stubble else 0.14)
 			region = "hair"  # per-style strand textures (build_character.hair_material)
@@ -766,7 +771,8 @@ func _show_variants() -> void:
 			for shape in GARMENT_BENDS:
 				var index := mi.find_blend_shape_by_name(shape)
 				if index >= 0:
-					_garment_bends.append({"mesh": mi, "index": index, "bone": GARMENT_BENDS[shape]})
+					_garment_bends.append({"mesh": mi, "index": index, "bone": GARMENT_BENDS[shape],
+						"forward_reach": shape.begins_with("Reach_")})
 		if mi.visible and (n.begins_with("Top") or n.begins_with("Hair_") or n.begins_with("Groom_")):
 			for entry: Dictionary in mi.get_meta(&"hero_surfaces", []):
 				var material: ShaderMaterial = entry.material
@@ -1017,6 +1023,10 @@ func _sync_skeleton() -> void:
 		skeleton.set_bone_pose_rotation(index, rest.basis.get_rotation_quaternion() * Quaternion(up.normalized(), protract))
 	for correction in _garment_bends:
 		var rotation: Quaternion = rots[correction.bone]
+		if correction.forward_reach:
+			var forward := -(rotation * Vector3.DOWN).z
+			correction.mesh.set_blend_shape_value(correction.index, smoothstep(0.21, 0.67, forward))
+			continue
 		var bend := 2.0 * acos(clampf(absf(rotation.w), 0.0, 1.0))
 		var shoulder := String(correction.bone).begins_with("upper_arm_")
 		var onset := 0.26 if player != null and player.everyday and shoulder else 0.38

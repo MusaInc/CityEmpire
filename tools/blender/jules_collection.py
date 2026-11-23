@@ -4,9 +4,31 @@ import math
 import bmesh
 import bpy
 from mathutils import Vector
+from mathutils.geometry import barycentric_transform
 
-from garment_kit import iso_cut, weights_from
+from garment_kit import SkinSurface, iso_cut, weights_from
 from wardrobe_quality import adjust_basis, smooth, surface_tree
+
+
+def project_trim_uv(mesh, donor=None):
+    """Give a sewn detail tangent coordinates and match the fabric on pockets."""
+    uv = mesh.uv_layers.active or mesh.uv_layers.new(name='UVMap')
+    surface = SkinSurface(donor) if donor is not None else None
+    if surface is not None:
+        donor_uv = donor.data.uv_layers.active
+        donor_faces = donor.data.loop_triangles
+    for polygon in mesh.polygons:
+        normal_axis = max(range(3), key=lambda axis: abs(polygon.normal[axis]))
+        axes = [axis for axis in range(3) if axis != normal_axis]
+        for index in polygon.loop_indices:
+            point = mesh.vertices[mesh.loops[index].vertex_index].co
+            if surface is None:
+                uv.data[index].uv = tuple(point[axis] for axis in axes)
+                continue
+            hit, _, triangle, _ = surface.tree.find_nearest(point)
+            corners = [Vector((*donor_uv.data[i].uv, 0)) for i in donor_faces[triangle].loops]
+            positions = [surface.positions[i] for i in surface.triangles[triangle]]
+            uv.data[index].uv = barycentric_transform(hit, *positions, *corners).xy
 
 
 class Collection:
@@ -112,6 +134,7 @@ class Collection:
         mesh.materials.append(material)
         for polygon in mesh.polygons:
             polygon.use_smooth = True
+        project_trim_uv(mesh)
         obj = bpy.data.objects.new(name, mesh)
         shell.users_collection[0].objects.link(obj)
         obj.parent = self.rig

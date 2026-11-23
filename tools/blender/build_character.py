@@ -19,7 +19,8 @@ from portrait_hd import bake_portrait_hd
 from hero_finish import finish_fixed_hero
 from hero_realism import finish_realism
 from hero_tailoring import refine_wardrobe
-from jules_collection import build_jules_collection
+from jules_collection import Collection, build_jules_collection
+from jules_finish import finish_jules_collection
 from casual_fit import finish_casual_fit
 from build_b_footwear import fit_build_b_footwear
 from hero_groom import groom_hero, wound_gather
@@ -1347,6 +1348,7 @@ finish_realism(rig, all_meshes, identity, TEX)
 refine_wardrobe(rig, all_meshes, identity)
 if identity == "jules":
     build_jules_collection(rig, all_meshes)
+    finish_jules_collection(Collection(rig, all_meshes), TEX)
 # Retain editable meshes, original garment UVs, weights and material nodes.
 for im in bpy.data.images:
     if im.source=='FILE':im.pack()
