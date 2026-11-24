@@ -371,6 +371,33 @@ jobs:
                                {"data": [{"type": "betaTesters", "id": tid} for tid, _ in emails]})
                       print(f"  added {len(emails)} tester(s):", "yes" if r is not None else "FAILED")
               groups = call(f"/v1/apps/{app}/betaGroups?limit=50")["data"]
+          # Xcode's internal-only binary needs explicit build assignment.
+          audience = call(f"/v1/builds/{bid}?fields[builds]=buildAudienceType")
+          if audience and audience["data"]["attributes"].get("buildAudienceType") == "INTERNAL_ONLY":
+              group_name = "WorldState Rendering Lab"
+              manual = next((g for g in groups if g["attributes"]["name"] == group_name
+                             and g["attributes"]["isInternalGroup"]), None)
+              source_ids = set()
+              for source in groups:
+                  if source["attributes"]["isInternalGroup"] and source["attributes"]["name"] == "Musa Team":
+                      testers = call(f"/v1/betaGroups/{source['id']}/betaTesters?limit=50") or {}
+                      source_ids.update(t["id"] for t in testers.get("data", []))
+              if not manual:
+                  created = call("/v1/betaGroups", "POST", {"data": {
+                      "type": "betaGroups", "attributes": {"name": group_name,
+                          "isInternalGroup": True, "hasAccessToAllBuilds": False},
+                      "relationships": {"app": {"data": {"type": "apps", "id": app}}}}})
+                  if not created:
+                      sys.exit("Could not create the internal rendering group")
+                  manual = created["data"]
+                  groups.append(manual)
+              gid = manual["id"]
+              current = call(f"/v1/betaGroups/{gid}/betaTesters?limit=50") or {}
+              added = source_ids - {t["id"] for t in current.get("data", [])}
+              if added and call(f"/v1/betaGroups/{gid}/relationships/betaTesters", "POST",
+                                {"data": [{"type": "betaTesters", "id": t} for t in sorted(added)]}) is None:
+                  sys.exit("Could not add the existing internal testers")
+              groups = [manual]
           for g in groups:
               ga = g["attributes"]
               print(f"group '{ga['name']}': internal={ga['isInternalGroup']} autoDistribute={ga.get('hasAccessToAllBuilds')}")
