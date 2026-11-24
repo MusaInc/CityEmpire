@@ -252,11 +252,20 @@ func _process(dt: float) -> void:
 	_apply(dt, false)
 
 
-## Mostly fair: clear and cloudy most of the time, rain now and then, the
-## odd storm or fog bank (fog favours the night and early morning).
+## Mostly fair: bright, clear and warm skies most of the time, occasional
+## passing showers, rare storms or coastal morning fog.
 func _next_weather() -> String:
-	var foggy := 0.12 if hour < 9.0 or hour > 21.0 else 0.04
-	var opts := {"clear": 0.26, "bright": 0.14, "haze": 0.06, "cloudy": 0.24, "rain": 0.16, "storm": 0.06, "fog": foggy}
+	var foggy := 0.09 if hour < 9.0 or hour > 21.0 else 0.03
+	var wet_now := weather in ["rain", "storm"]
+	var opts := {
+		"clear": 0.30,
+		"bright": 0.24,
+		"haze": 0.12,
+		"cloudy": 0.18,
+		"rain": 0.0 if wet_now else 0.09,
+		"storm": 0.0 if wet_now else 0.03,
+		"fog": foggy,
+	}
 	var total := 0.0
 	for k in opts:
 		total += opts[k] if k != weather else 0.0
@@ -276,10 +285,10 @@ func _apply(dt: float, instant: bool) -> void:
 	var k := 1.0 if instant else 1.0 - exp(-dt / 9.0)
 	for key in w:
 		w[key] = lerpf(w[key], target[key], k)
-	# Streets soak in a minute of rain and take a few minutes to dry.
+	# Streets soak in a minute of rain and dry out in ~2 minutes once it clears.
 	var wet_to := clampf(float(w["rain"]) * 1.3, 0.0, 1.0)
 	if not instant:
-		var rate := 1.0 / 45.0 if wet_to > wetness else 1.0 / 200.0
+		var rate := 1.0 / 45.0 if wet_to > wetness else 1.0 / 110.0
 		wetness = move_toward(wetness, wet_to, rate * dt)
 	# Lightning: a bright double flicker every 6–20 s in a storm.
 	if float(w["storm"]) > 0.5 and live:
@@ -303,8 +312,10 @@ func _apply(dt: float, instant: bool) -> void:
 	var day_light := smoothstep(-3.0, 8.0, el)
 	if el > -3.0:
 		sun.rotation_degrees = Vector3(-maxf(el, 1.5), ang.y, 0.0)
-		sun.light_color = _ramp(el, [[0.0, Color(1.0, 0.48, 0.22)], [8.0, Color(1.0, 0.72, 0.46)],
-			[25.0, Color(1.0, 0.91, 0.78)], [60.0, Color(1.0, 0.97, 0.91)]])
+		# Cinematic sunset without washing the entire city in heavy orange:
+		# warm golden-peach sunlight paired with cool indigo-slate sky shadows.
+		sun.light_color = _ramp(el, [[0.0, Color(1.0, 0.66, 0.42)], [8.0, Color(1.0, 0.80, 0.62)],
+			[25.0, Color(1.0, 0.92, 0.82)], [60.0, Color(1.0, 0.97, 0.92)]])
 		sun.light_energy = day_light * _rampf(el, [[0.0, 1.55], [10.0, 2.08], [25.0, 2.48], [60.0, 2.62]])
 		sky_mat.set_shader_parameter("sun_glow", 1.05)
 		sky_mat.set_shader_parameter("disc_size", 0.999989)
@@ -331,12 +342,12 @@ func _apply(dt: float, instant: bool) -> void:
 	sun.shadow_opacity = lerpf(1.0 - 0.52 * overcast, 0.98 - 0.65 * cloud_softness, day_light)
 
 	# --- sky colours by sun height, moody slate-blue under rain/storm.
-	var zen := _ramp(el, [[-18.0, Color(0.018, 0.032, 0.075)], [-6.0, Color(0.06, 0.10, 0.26)],
-		[0.0, Color(0.12, 0.21, 0.48)], [8.0, Color(0.16, 0.34, 0.62)], [25.0, ZENITH], [60.0, Color(0.15, 0.40, 0.76)]])
-	var hor := _ramp(el, [[-18.0, Color(0.065, 0.095, 0.165)], [-6.0, Color(0.36, 0.28, 0.40)],
-		[0.0, Color(0.98, 0.58, 0.36)], [8.0, Color(0.92, 0.78, 0.66)], [25.0, HORIZON], [60.0, Color(0.72, 0.82, 0.92)]])
-	var haze := _ramp(el, [[-18.0, Color(0.07, 0.09, 0.15)], [-6.0, Color(0.52, 0.28, 0.30)],
-		[0.0, Color(1.0, 0.48, 0.22)], [8.0, Color(1.0, 0.64, 0.36)], [25.0, Color(1.0, 0.72, 0.46)],
+	var zen := _ramp(el, [[-18.0, Color(0.018, 0.032, 0.075)], [-6.0, Color(0.06, 0.11, 0.28)],
+		[0.0, Color(0.13, 0.25, 0.52)], [8.0, Color(0.17, 0.35, 0.64)], [25.0, ZENITH], [60.0, Color(0.15, 0.40, 0.76)]])
+	var hor := _ramp(el, [[-18.0, Color(0.065, 0.095, 0.165)], [-6.0, Color(0.32, 0.28, 0.42)],
+		[0.0, Color(0.92, 0.66, 0.50)], [8.0, Color(0.88, 0.80, 0.74)], [25.0, HORIZON], [60.0, Color(0.72, 0.82, 0.92)]])
+	var haze := _ramp(el, [[-18.0, Color(0.07, 0.09, 0.15)], [-6.0, Color(0.46, 0.30, 0.34)],
+		[0.0, Color(0.96, 0.64, 0.42)], [8.0, Color(0.98, 0.74, 0.54)], [25.0, Color(1.0, 0.78, 0.58)],
 		[60.0, Color(0.96, 0.88, 0.78)]])
 	var grey := 0.26 + 0.52 * day_light
 	var grey_c := Color(grey * 0.82, grey * 0.89, grey * 0.98) * lerpf(1.0, 0.54, float(w["dark"]))

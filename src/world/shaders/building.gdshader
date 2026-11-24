@@ -1159,9 +1159,10 @@ void fragment() {
 				}
 			}
 		}
-		// Lit faces get a faint warm/cool drift by block of facade (repaints,
-		// different batches of brick) so long walls aren't one flat colour.
-		albedo *= 1.0 + (vnoise_b(uv * vec2(0.08, 0.03) + seed * 5.0) - 0.5) * 0.1 * detail;
+		// Lit faces get per-floor & broad-block tonal drift (repaints, concrete
+		// pours, weathered brick batches) so walls never look procedurally uniform.
+		float floor_var = (hash12(vec2(floor(uv.y / 3.6), seed * 19.3)) - 0.5) * 0.065;
+		albedo *= 1.0 + ((vnoise_b(uv * vec2(0.08, 0.03) + seed * 5.0) - 0.5) * 0.14 + floor_var) * detail;
 	}
 	if ((v_kind == KIND_STONE || v_kind == KIND_WALL) && uv.y >= 0.0 && uv.y < 0.78 && abs(v_world_normal.y) < 0.18) {
 		float base_contact = 1.0 - smoothstep(0.02, 0.78, uv.y);

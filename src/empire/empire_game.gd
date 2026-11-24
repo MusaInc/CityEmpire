@@ -931,11 +931,27 @@ func occupier(unit_id: String) -> Dictionary:
 	return {}
 
 
-## Today's sky follows the Empire's weather.
+## Today's sky follows the Empire's weather with natural intra-day breaks so
+## rain and fog don't lock the city into one mood all day.
 func _sync_weather() -> void:
 	if args.has("weather") or state == "title":
 		return
 	var sky := String(CityLife.weather_def(empire.weather).get("sky", "clear"))
+	var h := empire.hour()
+	match empire.weather:
+		"rain":
+			if h < 10.0:
+				sky = "cloudy"
+			elif h >= 15.5 and h < 19.5:
+				sky = "clear"
+		"storm":
+			if h < 10.5:
+				sky = "cloudy"
+			elif h >= 16.5 and h < 18.5:
+				sky = "rain"
+		"foggy":
+			if h >= 11.0 and h < 20.5:
+				sky = "clear"
 	if atmosphere.weather != sky:
 		atmosphere.set_weather(sky, state != "play")
 

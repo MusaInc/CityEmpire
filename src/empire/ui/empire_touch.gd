@@ -38,8 +38,8 @@ const LIFT_PX := 18.0        # below the landing point: lift off
 const BRAKE_PX := 38.0       # further down: brake, progressive to PAD_R
 const KICK_PX := 56.0        # up this far: full throttle + kickdown
 const DRIFT_PX := 66.0       # sideways this far: handbrake drift (Never Stop smart stick)
-const SIDE_DEAD_PX := 21.0
-const SIDE_FULL_PX := 101.0
+const SIDE_DEAD_PX := 28.0   # generous deadzone prevents unintended steering from minor right-stick wobble
+const SIDE_FULL_PX := 104.0
 const HOLD_THROTTLE := 0.68
 const DRIFT_SPEED := 8.0     # m/s (~18 mph): matches Never Stop's drift threshold
 var _pad_id := -1
@@ -285,7 +285,7 @@ static func read_pad(o: Vector2, k: float) -> Dictionary:
 
 static func read_pad_steer(offset: float, scale: float) -> float:
 	var travel := clampf((absf(offset) / scale - SIDE_DEAD_PX) / (SIDE_FULL_PX - SIDE_DEAD_PX), 0.0, 1.0)
-	return signf(offset) * travel * lerpf(0.24, 1.0, travel)
+	return signf(offset) * pow(travel, 1.55)
 
 
 func _apply_pad() -> void:
@@ -306,7 +306,9 @@ func _apply_pad() -> void:
 	di.touch_gas = pad["gas"]
 	di.touch_brake = pad["brake"]
 	di.touch_kickdown = pad["kick"]
-	di.touch_pad_steer = read_pad_steer(_pad_p.x - _pad_o.x, ui_k()) if _pad_id >= 0 and car != null else 0.0
+	# Never let minor right-stick wobble steer while left stick is active or while braking.
+	var allow_pad_steer := _pad_id >= 0 and car != null and _stick_id < 0 and float(pad["brake"]) < 0.05
+	di.touch_pad_steer = read_pad_steer(_pad_p.x - _pad_o.x, ui_k()) if allow_pad_steer else 0.0
 
 
 func _physics_process(_dt: float) -> void:

@@ -81,15 +81,27 @@ static func _weather_tip(w: String) -> String:
 
 static func _roll_weather(e: Empire) -> String:
 	var ws: Dictionary = cfg().get("weather", {})
+	var prev := e.forecast if e.forecast != "" else e.weather
+	var prev_wet := prev in ["rain", "storm"]
+	var weights := {}
 	var total := 0.0
 	for k in ws:
-		total += float(ws[k].get("weight", 1.0))
+		var w := float(ws[k].get("weight", 1.0))
+		# Avoid back-to-back rainy/stormy days and gently discourage identical repeats.
+		if prev_wet and k in ["rain", "storm"]:
+			w = 0.0
+		elif k == prev:
+			w *= 0.35
+		weights[k] = w
+		total += w
+	if total <= 0.0:
+		return "clear"
 	var r := e.rng.randf() * total
 	for k in ws:
-		r -= float(ws[k].get("weight", 1.0))
+		r -= float(weights.get(k, 0.0))
 		if r <= 0.0:
 			return k
-	return "cloudy"
+	return "clear"
 
 
 static func _roll_event(e: Empire) -> void:

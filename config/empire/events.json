@@ -4,7 +4,7 @@
     "sunny": {
       "name": "Sunny",
       "icon": "☀",
-      "weight": 0.34,
+      "weight": 0.32,
       "sky": "bright",
       "footfall": 1.08,
       "mix": {
@@ -12,10 +12,18 @@
         "sweets": 1.1
       }
     },
+    "clear": {
+      "name": "Clear",
+      "icon": "🌤",
+      "weight": 0.22,
+      "sky": "clear",
+      "footfall": 1.04,
+      "mix": {}
+    },
     "cloudy": {
       "name": "Cloudy",
       "icon": "☁",
-      "weight": 0.26,
+      "weight": 0.16,
       "sky": "cloudy",
       "footfall": 1.0,
       "mix": {}
@@ -23,7 +31,7 @@
     "rain": {
       "name": "Rain",
       "icon": "☂",
-      "weight": 0.2,
+      "weight": 0.09,
       "sky": "rain",
       "footfall": 0.82,
       "mix": {
@@ -35,7 +43,7 @@
     "storm": {
       "name": "Storm",
       "icon": "⚡",
-      "weight": 0.06,
+      "weight": 0.03,
       "sky": "storm",
       "footfall": 0.62,
       "mix": {
@@ -47,7 +55,7 @@
     "heatwave": {
       "name": "Heatwave",
       "icon": "🔥",
-      "weight": 0.1,
+      "weight": 0.13,
       "sky": "haze",
       "footfall": 1.15,
       "mix": {
@@ -59,7 +67,7 @@
     "foggy": {
       "name": "Foggy",
       "icon": "☁",
-      "weight": 0.06,
+      "weight": 0.05,
       "sky": "fog",
       "footfall": 0.93,
       "mix": {

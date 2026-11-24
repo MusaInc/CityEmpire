@@ -285,11 +285,14 @@ func _car_fx(c: Car, dt: float) -> void:
 		var p := c.wheel_contact_point(i)
 		if slip > 0.35 and sp > 4.0:
 			if _rng.randf() < slip * dt * 30.0:
-				# Low and wide, hugging the road: a drift trail you can see
-				# past, not a wall between the camera and the car.
-				var v := -c.linear_velocity * 0.1 + Vector3(_rng.randf_range(-1.4, 1.4), _rng.randf_range(0.3, 1.0), _rng.randf_range(-1.4, 1.4))
+				# Distinguish wet-road spray mist from dry-road rubber tyre smoke.
+				var wet := clampf(CarVisual.visible_wetness, 0.0, 1.0)
+				var v := -c.linear_velocity * lerpf(0.1, 0.22, wet) + Vector3(_rng.randf_range(-1.4, 1.4), _rng.randf_range(0.3, 1.0), _rng.randf_range(-1.4, 1.4))
 				var g := _rng.randf_range(0.8, 0.9)
-				smoke.emit(p + Vector3.UP * 0.25, v, _rng.randf_range(1.0, 1.7), 0.6, 2.4 + slip * 1.2, Color(g, g * 0.99, g * 0.97, 0.24 * slip))
+				var dry_col := Color(g, g * 0.99, g * 0.97, 0.24 * slip)
+				var wet_col := Color(0.58, 0.66, 0.73, 0.18 * slip)
+				smoke.emit(p + Vector3.UP * lerpf(0.25, 0.14, wet), v, _rng.randf_range(lerpf(1.0, 0.35, wet), lerpf(1.7, 0.65, wet)),
+					lerpf(0.6, 0.24, wet), lerpf(2.4 + slip * 1.2, 0.95 + slip * 0.5, wet), dry_col.lerp(wet_col, wet))
 			_skid(id * 4 + i, p, c.linear_velocity, slip)
 		else:
 			_skid_last.erase(id * 4 + i)
