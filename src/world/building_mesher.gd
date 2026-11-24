@@ -375,6 +375,8 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 		_facade_tier(t, col, wall_kind, shell_style, seed, base, opening)
 		if street_front and detailed:
 			_street_front_proxy(t, apt, col, seed)
+		if detailed and i == 0 and b["kind"] == "normal" and _on_ground(b, t):
+			_frontage_courses(t, int(style), seed, col, trim, apt)
 		if b["kind"] == "bridge" or _overhangs(tiers, i) or not _on_ground(b, t) and i == 0:
 			# Underside: sky bridges, cantilevered tiers, towers' first tier
 			# (hidden on their podium, but they never show a hole).
@@ -405,6 +407,48 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 
 static func _facade_seed(seed: float) -> float:
 	return floorf(clampf(seed, 0.0, 0.999999) * 256.0) / 256.0
+
+
+## Projecting courses and piers on the two main elevations. They are
+## shallow enough to sit outside the window reveals and above the room
+## openings. Their faces join the chunk's existing detailed building mesh.
+func _frontage_courses(t: Array, style: int, seed: float, col: Color, trim: Color, unit: Dictionary) -> void:
+	if style in [CityLayout.Style.WAREHOUSE, CityLayout.Style.GLASS, CityLayout.Style.DARK_GLASS]:
+		return
+	var base := float(t[4])
+	var ground_room := bool(unit.get("ground", false))
+	var bottom := maxf(base + 3.8, float(unit["y1"]) + 0.59) if ground_room else base + 3.8
+	var top_y := minf(base + 2.0 * facade_storey(style, seed) - 0.18, float(t[5]) - 0.58)
+	if top_y - bottom < 0.56:
+		return
+	var long_side := 0 if float(t[2]) - float(t[0]) >= float(t[3]) - float(t[1]) else 1
+	var masonry := style != CityLayout.Style.MODERN
+	var dressed := col.lerp(trim, 0.72 if masonry else 0.37).darkened(0.12)
+	var projection := 0.13 if masonry else 0.076
+	for side in [long_side, long_side + 2]:
+		var face := _face(t, side)
+		var span: float = face[3]
+		if span < 10.0:
+			continue
+		var grid := facade_bays(style, span, seed)
+		var rail := _fbox(face, 0.08, span - 0.08, -0.008, projection, top_y - 0.105, top_y + 0.075)
+		_trim_box(rail, dressed)
+		# Pilasters break the elevation into groups of two or three bays.
+		var pitch := 2 + int(fposmod(seed * 29.3, 1.0) > 0.48)
+		var step_bays := maxi(pitch, ceili(grid.z / 5.0))
+		for bay in range(step_bays, int(grid.z), step_bays):
+			var centre := grid.x + grid.y * bay
+			var half_width := minf(grid.y * 0.115, 0.22)
+			var pier := _fbox(face, centre - half_width, centre + half_width, -0.006, projection * 0.72, bottom, top_y - 0.085)
+			_fin(pier, face[2], dressed.darkened(0.11))
+
+
+func _trim_box(b: AABB, c: Color) -> void:
+	var p := b.position
+	var e := b.end
+	walls(p.x, p.z, e.x, e.z, p.y, e.y, c, KIND_TRIM, 0.0, 0.0)
+	top(p.x, p.z, e.x, e.z, e.y, c.lightened(0.09), KIND_TRIM, 0.0, 0.0)
+	bottom(p.x, p.z, e.x, e.z, p.y, c.darkened(0.18), KIND_TRIM, 0.0, 0.0)
 
 
 static func facade_storey(style: int, seed: float) -> float:
@@ -565,8 +609,10 @@ static func base_course(b: Dictionary) -> AABB:
 	if base - foot < 0.05 or b["kind"] not in ["normal", "landmark", "frame"]:
 		return AABB()
 	var t: Array = b["tiers"][0]
-	var o := PLINTH_OUT + 0.05
-	return _aabb(t[0] - o, t[1] - o, t[2] + o, t[3] + o, foot - 0.3, base + CityTerrain.KERB)
+	var storefront := bool(b.get("apt", {}).get("ground", false))
+	var o := 0.025 if storefront else PLINTH_OUT + 0.05
+	var cap := base if storefront else base + CityTerrain.KERB
+	return _aabb(t[0] - o, t[1] - o, t[2] + o, t[3] + o, foot - 0.3, cap)
 
 
 ## True if tier i sticks out past the tier below it (a cantilever): its

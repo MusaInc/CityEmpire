@@ -34,8 +34,8 @@ extends Node3D
 const LAND_Y := 3.0
 const SEA_Y := -1.6
 const DETAIL_RANGE := 650.0
-const NEAR_LOAD := 600.0     # (the island sits right by both cities now: detail only as you near it)
-const NEAR_FREE := 900.0
+const NEAR_LOAD := 850.0     # stream detail early enough for fast aircraft approaches
+const NEAR_FREE := 1150.0
 const FAR_RANGE := 5200.0
 const BRIDGE_ISLAND_X := 1560.0        # Skyport Avenue's first junction east of Bridge Road (local)
 const QUAY_X := 1424.0                 # local: the north quay the bridges land on (world z ≈ 992)
@@ -269,6 +269,9 @@ var near_root: Node3D           # near content, when loaded
 var _target: Node = self        # where _mesh puts meshes
 var _steps: Array = []          # near content still to build (one a frame)
 var _check_t := 0.0
+var ground_mat: ShaderMaterial  # shared island ground/road/bridge ShaderMaterial
+var _lamp_heads := PackedVector3Array()
+var _lamp_heads_built := false
 ## Point the streaming measures from (the game sets it; else the camera).
 var viewer: Callable
 
@@ -1721,6 +1724,8 @@ func _process(_dt: float) -> void:
 
 
 func _ground_mat() -> ShaderMaterial:
+	if ground_mat != null:
+		return ground_mat
 	var m := ShaderMaterial.new()
 	m.shader = load("res://src/world/shaders/island_ground.gdshader")
 	m.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/worldstate_street_asphalt.png"))
@@ -1730,7 +1735,58 @@ func _ground_mat() -> ShaderMaterial:
 	var edge := w(Vector3(0.0, 0.0, 180.0))
 	var into_airfield := wd(Vector3.BACK)
 	m.set_shader_parameter("airfield_edge", Vector3(into_airfield.x, into_airfield.z, -into_airfield.dot(edge)))
-	return m
+	ground_mat = m
+	return ground_mat
+
+
+## World-space streetlamp lantern positions along Skyport's main roads and
+## bridge approaches so LampLights illuminates Skyport at night just like the
+## Commercial Island and Westbank.
+func lamp_heads() -> PackedVector3Array:
+	if _lamp_heads_built:
+		return _lamp_heads
+	_lamp_heads_built = true
+	if plan_data.is_empty():
+		return _lamp_heads
+	var out := PackedVector3Array()
+	for r in plan_data.get("roads", []):
+		var rname := String(r[0])
+		if rname in ["Airside Service Road", "Parking Access", "Fuel Farm Road"]:
+			continue
+		var pts: PackedVector3Array = r[1]
+		var hw := float(r[2]) * 0.5
+		var tot := _length(pts)
+		var step := 28.0 if hw >= 10.0 else 34.0
+		var s := step * 0.5
+		var side_toggle := 1.0
+		while s < tot - 6.0:
+			var pa := _point_at(pts, s)
+			var pb := _point_at(pts, minf(s + 1.0, tot))
+			var dv := pb - pa
+			dv.y = 0.0
+			if dv.length_squared() > 0.0001:
+				var nv := Vector3(-dv.z, 0.0, dv.x).normalized()
+				var q := pa + nv * (hw + 0.8) * side_toggle + Vector3.UP * 6.8
+				out.append(w(q))
+				side_toggle = -side_toggle
+			s += step
+	for B: Dictionary in plan_data.get("bridges", []):
+		var bpts: PackedVector3Array = B["pts"]
+		var btot := _length(bpts)
+		var bs := 18.0
+		var bside := 1.0
+		while bs < btot - 12.0:
+			var pa := _point_at(bpts, bs)
+			var pb := _point_at(bpts, minf(bs + 1.0, btot))
+			var dv := pb - pa
+			dv.y = 0.0
+			if dv.length_squared() > 0.0001:
+				var nv := Vector3(-dv.z, 0.0, dv.x).normalized()
+				out.append(pa + nv * (BRIDGE_W * 0.5 - 0.5) * bside + Vector3.UP * 6.8)
+				bside = -bside
+			bs += 36.0
+	_lamp_heads = out
+	return _lamp_heads
 
 
 ## A flat polygon at height y, kind k (UV = world x/z).
@@ -2145,6 +2201,9 @@ func _build_ground(street: StaticBody3D) -> void:
 	mi.name = "GroundMesh"
 	mi.mesh = st.commit()
 	mi.material_override = _ground_mat()
+	# The grass, apron and markings share a layered mesh. Casting shadows
+	# from those nearly coplanar layers creates bands across the airfield.
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.visibility_range_end = FAR_RANGE
 	add_child(mi)
 	# Collision: the land as solid slabs (one convex prism per triangle of

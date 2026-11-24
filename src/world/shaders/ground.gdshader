@@ -114,7 +114,7 @@ float street_age(vec2 p) {
 // the mirror point on the local road plane and broaden it along the line
 // of sight for the wet aggregate. The material's ordinary lighting stays
 // in use for diffuse light and for all other surfaces.
-float wet_lamp_reflection(vec4 lamp, vec3 road, vec3 cam) {
+float wet_lamp_reflection(vec4 lamp, vec3 road, vec3 cam, float puddle, float aggregate) {
 	float lamp_height = lamp.y - road.y;
 	float eye_height = cam.y - road.y;
 	if (lamp.w == 0.0 || lamp_height < 1.0 || eye_height < 0.35) {
@@ -127,10 +127,14 @@ float wet_lamp_reflection(vec4 lamp, vec3 road, vec3 cam) {
 	vec2 delta = road.xz - mirror;
 	float across = dot(delta, vec2(-axis.y, axis.x));
 	float along = dot(delta, axis);
-	float length_scale = 1.7 + 0.072 * separation;
-	vec2 ellipse = vec2(across / 0.62, along / length_scale);
+	float length_scale = 0.9 + 0.061 * separation;
+	float core_width = mix(0.44, 0.21, puddle);
+	across += (aggregate - 0.5) * (0.14 - 0.10 * puddle);
+	vec2 ellipse = vec2(across / core_width, along / length_scale);
 	float fade = 1.0 - smoothstep(27.0, 59.0, separation);
-	return exp2(-1.4 * dot(ellipse, ellipse)) * fade;
+	float core = exp2(-1.65 * dot(ellipse, ellipse));
+	float fringe = exp2(-1.8 * dot(ellipse * vec2(0.58, 0.74), ellipse * vec2(0.58, 0.74)));
+	return (core + 0.15 * fringe) * fade;
 }
 
 void fragment() {
@@ -208,7 +212,7 @@ void fragment() {
 			// linear: it read chalky in full sun) with a faint warm/cool drift,
 			// and aggregate: stones at two scales, faded with their pixel size so
 			// they never shimmer.
-			albedo = vec3(0.092, 0.089, 0.084) * (0.82 + 0.36 * drift) * (1.0 + 0.12 * grain);
+			albedo = vec3(0.080, 0.078, 0.075) * (0.82 + 0.36 * drift) * (1.0 + 0.12 * grain);
 			float fpx = fwidth(p.x) + fwidth(p.y);
 			float st1 = hash12(floor(p * 9.0));
 			float st2 = hash12(floor(p * 23.0) + 5.0);
@@ -225,7 +229,10 @@ void fragment() {
 			float crack = (1.0 - smoothstep(0.0, 0.01 + cfw, abs(cn - 0.5))) * (0.01 / (0.01 + cfw))
 				* smoothstep(0.55, 0.75, vnoise(p * 0.035 + 7.0));
 			albedo *= 1.0 - 0.3 * crack * sa * near;
-			if (on && other > 0.0) {
+			if (on) {
+				// Smooth blend into junction boxes so tyre wear/gutter never
+				// cut a hard polygonal seam across intersections (Westbank fix).
+				float j_smooth = smoothstep(-0.6, 2.6, other);
 				float across = rf.x;
 				float avenue = rf.y < 0.0 ? 1.0 : 0.0;
 				// rf.z = metres along the road (mod 64) + a roundabout flag: +64 or
@@ -239,7 +246,7 @@ void fragment() {
 				float from_j = other;               // metres past the junction mouth
 				// Tyre tracks: two polished bands per 3.5 m lane.
 				float lane_d = abs(fract(a / 3.5) - 0.5) * 3.5;
-				float tracks = band(lane_d - 0.85, 0.32, 0.3) * step(0.9, hw - a) * mix(0.6, 1.0, near);
+				float tracks = band(lane_d - 0.85, 0.32, 0.3) * step(0.9, hw - a) * mix(0.6, 1.0, near) * j_smooth;
 				// Tyre-polished: darker, smoother, a little oil (a sun sheen runs
 				// along the lanes like on a real road).
 				albedo *= 1.0 - 0.16 * tracks;
@@ -248,13 +255,14 @@ void fragment() {
 				// The wheel paths stay relatively clean. Sediment collects
 				// beside the kerb and thickens where runoff reaches the drains.
 				float kerb_in = hw - a;
-				float gutter = 1.0 - smoothstep(0.07, 0.77 + 0.52 * n, kerb_in);
+				float gutter = (1.0 - smoothstep(0.07, 0.77 + 0.52 * n, kerb_in)) * j_smooth;
 				float silt = gutter * (0.25 + 0.75 * smoothstep(0.25, 0.79, n));
 				float grit = (0.69 + 0.31 * st1) * (1.0 - smoothstep(0.045, 0.23, fpx));
 				albedo = mix(albedo, albedo * vec3(0.49, 0.45, 0.39), silt * (0.40 + 0.55 * sa));
 				albedo = mix(albedo, vec3(0.13, 0.105, 0.076), gutter * grit * (0.09 + 0.24 * sa));
 				shoulder_depression = band(a - (hw - 0.75), 0.67, max(0.18, aa))
 					* smoothstep(0.0, 4.0, from_j);
+			if (other > 0.0) {
 				float drain_along = fract(along / 16.0 + 0.5) * 16.0 - 8.0;
 				float grate = band(drain_along, 0.45, aa) * band(kerb_in - 0.45, 0.25, aa);
 				float drain_runoff = (1.0 - smoothstep(0.06, 1.0, abs(drain_along) * 0.46 + abs(kerb_in - 0.24) * 0.56));
@@ -378,8 +386,7 @@ void fragment() {
 				paint_coverage = max(max(max(centre, divider), max(edge, arrow)),
 					max(max(max(zebra, stop), max(giveway, ghost)), max(max(ring_edge, apron_line), max(bay_edge, bay_tick))));
 				rough = mix(rough, 0.7, max(max(centre, edge), max(max(zebra, stop), max(giveway, ring_edge))));
-			} else if (on) {
-				albedo *= 1.03;  // junctions: a touch lighter, worn smooth
+			}
 			}
 		} else if (pave) {
 			c *= vec3(0.76, 0.77, 0.77);
@@ -402,15 +409,16 @@ void fragment() {
 				float ka = street_age(p);
 				albedo *= 1.0 - 0.22 * ka * step(0.72, hash12(floor(p / 0.9) + 5.0)) * near;
 				albedo *= 1.0 - 0.1 * ka * vnoise(p * 2.3);
-			} else if (kerb < 3.3) {
+			} else if (kerb < 3.15) {
 				// Pavement flagstones by the road, each a slightly different tone.
-				vec2 courses = p / vec2(1.2, 0.8);
+				vec2 slab_size = vec2(0.72, 0.48);
+				vec2 courses = p / slab_size;
 				courses.x += mod(floor(courses.y), 2.0) * 0.5;
 				vec2 f = fract(courses);
 				vec2 id = floor(courses);
-				vec2 seam = min(f, 1.0 - f) * vec2(1.2, 0.8);
-				float joint = 1.0 - smoothstep(0.016, 0.033 + aa, min(seam.x, seam.y));
-				float grout_dark = 0.23 + 0.10 * wetness;
+				vec2 seam = min(f, 1.0 - f) * slab_size;
+				float joint = (1.0 - smoothstep(0.006, 0.018 + aa, min(seam.x, seam.y))) * (0.021 / (0.021 + aa));
+				float grout_dark = 0.28 + 0.10 * wetness;
 				albedo = c * mix(0.83, 1.02, hash12(id)) * (1.0 - grout_dark * joint * near);
 				rough = mix(0.81, 0.95, hash12(id + 11.0));
 				albedo *= 1.0 - 0.08 * step(0.97, hash12(id + 3.0)) * near;  // the odd stained slab
@@ -479,6 +487,11 @@ void fragment() {
 			}
 			// Foot traffic cleans the middle of the pavement. Rain leaves a
 			// patchy skirt of dust near the kerb, with isolated darker stains.
+			// The kerbside furnishing strip and the frontage apron read as
+			// separate surfaces, even on the city's broad pedestrian blocks.
+			float furnishing = smoothstep(0.30, 0.43, kerb) * (1.0 - smoothstep(0.97, 1.08, kerb));
+			float boundary = band(kerb - 3.11, 0.043, aa) * (1.0 - smoothstep(0.07, 0.29, aa));
+			albedo *= (1.0 - 0.22 * furnishing - 0.19 * boundary);
 			float foot_age = street_age(p);
 			float edge_dust = (1.0 - smoothstep(0.26, 1.27, kerb)) * (0.28 + n * 0.72);
 			float drip_stains = smoothstep(0.61, 0.84, n * 0.46 + vnoise(p * 0.57 + 97.0) * 0.54);
@@ -519,16 +532,16 @@ void fragment() {
 		// Porous asphalt darkens before any standing water forms. A road
 		// crown drains toward its edges; wheel tracks break up the water.
 		surface_wet = wetness * (asphalt ? 1.0 : 0.72);
-		float flatness = smoothstep(0.984, 0.998, normalize(v_wn).y);
-		float basin = n * 0.16 + vnoise(p * 0.23 + 46.0) * 0.84;
-		basin += 0.18 * shoulder_depression - 0.10 * wheel_tracks;
-		float threshold = mix(0.84, 0.58, surface_wet);
+		float flatness = smoothstep(0.981, 0.997, normalize(v_wn).y);
+		float basin = n * 0.27 + vnoise(p * vec2(0.31, 0.22) + 46.0) * 0.73;
+		basin += 0.24 * shoulder_depression - 0.13 * wheel_tracks;
+		float threshold = mix(0.86, 0.52, surface_wet);
 		puddle = smoothstep(threshold, threshold + max(0.085, aa * 0.14), basin)
 			* flatness * smoothstep(0.24, 0.86, surface_wet);
 		puddle *= 1.0 - smoothstep(115.0, 250.0, camera_distance);
-		albedo *= (1.0 - 0.29 * surface_wet) * (1.0 - 0.20 * puddle);
-		rough = mix(rough, asphalt ? 0.39 : 0.51, surface_wet);
-		rough = mix(rough, 0.12, puddle);
+		albedo *= (1.0 - 0.39 * surface_wet) * (1.0 - 0.18 * puddle);
+		rough = mix(rough, asphalt ? 0.36 : 0.51, surface_wet);
+		rough = mix(rough, 0.10, puddle);
 	} else if (!shore && flat_top && grass) {
 		albedo *= 1.0 - wetness * 0.11;
 	}
@@ -550,22 +563,34 @@ void fragment() {
 	if (asphalt && has_streets && flat_top && !shore) {
 		EMISSION = albedo * vec3(0.13, 0.16, 0.20) * night;
 		if (puddle > 0.02) {
-			// Broad sky tint under overcast light, strongest at grazing
-			// angles and broken up by the exposed grain at puddle edges.
-			float facing = clamp(dot(normalize(v_wn), normalize(CAMERA_POSITION_WORLD - v_world)), 0.0, 1.0);
+			// Water sheets reflect the sky along the local road grade.
+			// Only the shallow, resolved foreground picks up rain ripples.
+			vec3 plane_normal = normalize(v_wn);
+			vec3 to_eye = normalize(CAMERA_POSITION_WORLD - v_world);
+			float facing = clamp(dot(plane_normal, to_eye), 0.0, 1.0);
 			float grazing = (1.0 - facing) * (1.0 - facing);
-			EMISSION += sky_horizon * puddle * grazing * (0.03 + 0.039 * (1.0 - night));
+			vec3 reflected = reflect(-to_eye, plane_normal);
+			float ripple = 1.0;
+			if (camera_distance < 19.0 && aa < 0.12) {
+				float rip = sin(dot(p, vec2(11.0, 8.3)) + TIME * 9.0 + n * 9.0);
+				ripple += rip * 0.11 * (1.0 - smoothstep(7.0, 19.0, camera_distance)) * (1.0 - smoothstep(0.025, 0.12, aa));
+			}
+			vec3 rain_sky = mix(sky_horizon * 0.18, max(sky_horizon * 0.33, vec3(0.040, 0.047, 0.060)), night);
+			float hemisphere = mix(0.42, 1.0, smoothstep(-0.04, 0.22, reflected.y));
+			EMISSION += rain_sky * puddle * grazing * hemisphere * ripple;
 		}
 		if (surface_wet > 0.18 && night > 0.24 && camera_distance < 55.0) {
-			float glint = 0.0;
+			vec3 glint = vec3(0.0);
 			for (int i = 0; i < 4; i++) {
-				glint += wet_lamp_reflection(wet_road_lamps[i], v_world, CAMERA_POSITION_WORLD);
+				vec4 lamp = wet_road_lamps[i];
+				vec3 light_colour = mix(vec3(1.0, 0.61, 0.29), vec3(0.78, 0.87, 1.0), lamp.w);
+				glint += light_colour * wet_lamp_reflection(lamp, v_world, CAMERA_POSITION_WORLD, puddle, n);
 			}
 			float coat = smoothstep(0.18, 0.9, surface_wet);
-			float texture_breakup = mix(0.48 + 0.55 * n, 1.0, puddle);
+			float texture_breakup = mix(0.23 + 0.75 * n, 1.0, puddle);
 			float fade = 1.0 - smoothstep(32.0, 55.0, camera_distance);
-			EMISSION += vec3(1.0, 0.65, 0.35) * min(glint, 1.0) * coat * fade
-				* texture_breakup * (0.071 + 0.16 * puddle) * smoothstep(0.24, 0.7, night);
+			EMISSION += min(glint, vec3(1.25)) * coat * fade
+				* texture_breakup * (0.08 + 0.28 * puddle) * smoothstep(0.24, 0.7, night);
 		}
 	}
 	ALBEDO = albedo;

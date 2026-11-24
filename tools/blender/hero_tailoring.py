@@ -37,13 +37,18 @@ def refine_wardrobe(rig, meshes, identity):
         torso = 1 - smooth(.16, .26, side)
         waist_fill = bell(z - waist, .115)
         hip_fill = bell(z - hips, .105)
-        waist_fit = .125 * waist_fill if ade else -.115 * waist_fill * smooth(hips + .055, hips + .135, z)
-        dx = x * torso * (waist_fit + (.055 * hip_fill if ade else 0))
-        depth = .115 * waist_fill + .055 * hip_fill if ade else .62 * waist_fit
-        dy = (y - .025) * torso * depth
-        shoulder_zone = bell(side - (shoulder.x + .038), .068) * bell(z - (shoulder.z + .015), .079)
-        dx -= sign * (.011 if ade else .014) * shoulder_zone
-        dz = -(.016 if ade else .018) * shoulder_zone
+        # Clean natural athletic male V-taper for Ade (smooth drape, no waist pinch); balanced waist for Jules.
+        if ade:
+            chest_build = bell(z - (chest + .07), .105)
+            dx = x * torso * (-.014 * waist_fill + .018 * chest_build + .008 * hip_fill)
+            dy = (y - .025) * torso * (-.020 * waist_fill + .014 * chest_build)
+            shoulder_zone = bell(side - (shoulder.x + .035), .065) * bell(z - (shoulder.z + .015), .075)
+            dx -= sign * .005 * shoulder_zone
+            dz = -.007 * shoulder_zone
+        else:
+            dx = x * torso * (-.016 * waist_fill)
+            dy = (y - .025) * torso * (-.012 * waist_fill)
+            dz = 0.0
         if side > .15 and z > elbow.z - .12:
             local = Vector((side, y, z)) - shoulder
             along = local.dot(arm_axis)
@@ -51,7 +56,7 @@ def refine_wardrobe(rig, meshes, identity):
             radial.x *= sign
             sleeve = smooth(.15, .22, side) * bell(along - .068, .115)
             forearm = bell(along - (elbow - shoulder).length - .073, .077)
-            amount = (.125 if ade else .17) * sleeve + .04 * forearm
+            amount = (.11 if ade else .08) * sleeve + .035 * forearm
             dx -= radial.x * amount
             dy -= radial.y * amount
             dz -= radial.z * amount
@@ -62,34 +67,29 @@ def refine_wardrobe(rig, meshes, identity):
         delta = body(p)
         side = abs(x)
         torso = 1 - smooth(.162, .234, side)
-        # The panels hang from chest to hem. Relief is broad and falls away
-        # toward the collar, cuffs, and the centre of a zipped or buttoned top.
         below_chest = bell(z - (waist + .005), .138)
         front = smooth(.025, .093, y)
         back = smooth(.024, -.055, y)
         fitted = cut in ('vest', 'fashion_tank', 'fashion_crop', 'fashion_bodysuit', 'fashion_squareneck')
         outer = cut in ('bomber', 'blazer', 'hoodie', 'fashion_jacket', 'fashion_racer', 'fashion_moto', 'fashion_pullover', 'fashion_cardigan')
-        ease = .009 if fitted else (.031 if outer else .023)
+        ease = .006 if fitted else (.013 if outer else .010)
         if not ade:
-            ease *= .27
+            ease *= .25
         delta.x += x * torso * below_chest * ease / .16
-        delta.y += (front - .64 * back) * ease * .62 * torso * below_chest
-        across = smooth(.019, .08, side)
-        fold = math.cos(side * 50 + (z - waist) * 18) * bell(z - (waist - .04), .10)
-        delta.y += front * torso * across * fold * (.0015 if fitted else .0038)
-        # A deeper sleeve above the elbow leaves usable bend clearance.
+        delta.y += (front - .64 * back) * ease * .55 * torso * below_chest
+        # Subtle natural drape folds without washboard vertical accordion stripes on the belly.
         local = Vector((side, y, z)) - shoulder
         along = local.dot(arm_axis)
         radial = local - arm_axis * along
         radial.x *= math.copysign(1, x)
         sleeve = smooth(.18, .25, side) * smooth(-.015, .05, along)
         sleeve *= 1 - smooth((elbow - shoulder).length + .085, (wrist - shoulder).length - .025, along)
-        delta += radial * sleeve * (.12 if outer else .07)
+        delta += radial * sleeve * (.025 if outer else .020)
         if outer and radial.length_squared > 1e-8:
             bend = along - (elbow - shoulder).length
             compression = bell(bend + .018 + radial.y * .3, .056)
-            ridges = math.sin(bend * 176 + radial.y * 31) * compression
-            delta += radial.normalized() * ridges * sleeve * .0033
+            ridges = math.sin(bend * 140 + radial.y * 24) * compression
+            delta += radial.normalized() * ridges * sleeve * .0016
         return delta
 
     def lower_fit(p, name):
@@ -158,6 +158,8 @@ def refine_wardrobe(rig, meshes, identity):
 
     if ade:
         add_derbies(rig, meshes)
+        from aaa_ade_wardrobe import refine_ade_wardrobe
+        refine_ade_wardrobe(rig, meshes)
     garments = {obj.name: obj for obj in meshes}
     if not ade:
         hip = bones['b_thigh_r'].head_local
@@ -174,7 +176,7 @@ def refine_wardrobe(rig, meshes, identity):
                 centre.x *= math.copysign(1, p.x)
                 weight = .70 * smooth(.635, .765, p.z)
                 adjusted.co = p + Vector((centre.x - p.x, centre.y - p.y, -.007)) * weight
-    seams = [('Top_Bomber', 'Topx_Bomber_Topstitch', 1.11, 1.46, .082, .038)] if ade else [
+    seams = [] if ade else [
         ('Top_Fashion_Moto', 'Topx_Fashion_Moto_Topstitch', 1.045, 1.38, .074, .039),
         ('Top_Fashion_Racer', 'Topx_Fashion_Racer_Topstitch', 1.18, 1.395, .104, .023)]
     for shell, name, hem, chest_height, width, flare in seams:

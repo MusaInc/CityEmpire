@@ -92,12 +92,21 @@ func place(xf: Transform3D) -> void:
 	_pitch = 0.0
 	_roll = 0.0
 	velocity = Vector3.ZERO
+	speed = 0.0
+	forward_speed = 0.0
+	altitude = 0.0
 	_vy = 0.0
 	if kind == "boat":
 		global_position.y = SEA_Y
 	state = "moored" if kind == "boat" else ("parked" if kind == "plane" else "landed")
 	crashed_t = 0.0
 	throttle = 0.0
+	gear_down = 1.0
+	if _gear:
+		_gear.scale = Vector3.ONE
+		_gear.show()
+	moored_at = -1
+	over_water = false
 	_apply_basis()
 	rest_xf = global_transform
 
@@ -112,10 +121,15 @@ func _apply_basis() -> void:
 		_visual.basis = Basis.from_euler(Vector3(_pitch, 0.0, _roll))
 
 
+## Ground (or deck/roof) hit dict under p, within `reach` below; empty if none.
+func _ground_hit(p: Vector3, reach := 400.0) -> Dictionary:
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 1.0, p + Vector3.DOWN * reach, GROUND_MASK, [get_rid()])
+	return get_world_3d().direct_space_state.intersect_ray(q)
+
+
 ## Ground (or deck/roof) height under p, within `reach` below; NAN if none.
 func ground_below(p: Vector3, reach := 400.0) -> float:
-	var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 1.0, p + Vector3.DOWN * reach, GROUND_MASK, [get_rid()])
-	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	var hit := _ground_hit(p, reach)
 	return float((hit["position"] as Vector3).y) if not hit.is_empty() else NAN
 
 
@@ -230,16 +244,34 @@ func _heli(dt: float) -> void:
 			var target := forward() * want_f
 			hv = hv.move_toward(target, dt * float(spec.get("accel", 9.0)))
 			var turn := float(input["steer"]) * float(spec.get("yaw", 1.1))
-			_yaw += turn * dt
+			_yaw = wrapf(_yaw - turn * dt, -PI, PI)
 			_pitch = lerpf(_pitch, -0.18 * clampf(want_f / cruise, 0.0, 1.0) + 0.05 * float(input["brake"]), 1.0 - exp(-3.0 * dt))
 			_roll = lerpf(_roll, -turn * 0.35 * clampf(hv.length() / 10.0, 0.25, 1.0), 1.0 - exp(-3.0 * dt))
-			velocity = Vector3(hv.x, _vy, hv.z)
-			move_and_slide()
+			var pre_v := Vector3(hv.x, _vy, hv.z)
+			velocity = pre_v
+			var col := move_and_slide()
+			if col and get_slide_collision_count() > 0:
+				for i in get_slide_collision_count():
+					var n := get_slide_collision(i).get_normal()
+					if n.y < 0.55:
+						var into := maxf(-pre_v.dot(n), 0.0)
+						if into > 12.0:
+							_crash()
+							return
+						var hn := Vector3(n.x, 0.0, n.z)
+						if hn.length_squared() > 0.01:
+							hn = hn.normalized()
+							velocity = velocity.slide(n) + hn * clampf(into * 0.45, 2.0, 6.0)
+							global_position += hn * 0.15
+						if n.y < -0.5:
+							_vy = minf(_vy, -1.5)
+							velocity.y = _vy
+			var post_hv := Vector3(velocity.x, 0.0, velocity.z)
 			# Settles onto the ground when low, slow and coming down.
 			if over_water and altitude < 1.0:
 				_vy = maxf(_vy, 0.0)
 				global_position.y = maxf(global_position.y, g)
-			elif altitude < 1.2 and _vy <= 0.2 and hv.length() < 6.0:
+			elif altitude < 1.2 and _vy <= 0.2 and post_hv.length() < 6.0:
 				state = "landed"
 				velocity = Vector3.ZERO
 				_vy = 0.0
@@ -254,6 +286,34 @@ func _heli(dt: float) -> void:
 
 
 # --------------------------------------------------------------- plane
+## True only when the surface beneath the plane's gear and wingspan is dry,
+## level (<= ~16 deg slope) and wide enough for a runway/road touchdown.
+func _can_land_plane(g: float) -> bool:
+	if is_nan(g) or absf(_roll) >= 0.45:
+		return false
+	var sz: Vector3 = spec.get("size", Vector3(11.0, 3.0, 8.0))
+	var fwd := forward()
+	var right := Vector3(cos(_yaw), 0.0, -sin(_yaw))
+	var half_l := clampf(sz.z * 0.45, 3.0, 8.0)
+	var span := clampf(sz.x * 0.35, 3.0, 6.0)
+	var probes := [
+		global_position,
+		global_position + fwd * half_l,
+		global_position - fwd * half_l,
+		global_position + right * span,
+		global_position - right * span,
+	]
+	for pt: Vector3 in probes:
+		var hit := _ground_hit(pt + Vector3.UP * 2.0, 8.0)
+		if hit.is_empty():
+			return false
+		var n: Vector3 = hit["normal"]
+		var hy: float = (hit["position"] as Vector3).y
+		if n.y < 0.96 or _wet_below(pt, hy) or absf(hy - g) > 0.65:
+			return false
+	return true
+
+
 func _plane(dt: float) -> void:
 	var g := ground_below(global_position + Vector3.UP * 2.0, 800.0)
 	over_water = _wet_below(global_position, g)
@@ -288,7 +348,7 @@ func _plane(dt: float) -> void:
 				v = minf(v, 14.0) if want_t > 0.0 else v
 			v = maxf(v + acc * dt, 0.0)
 			var steer_k := clampf(1.2 - v / 30.0, 0.15, 1.0)
-			_yaw += float(input["steer"]) * 0.7 * steer_k * dt * clampf(v / 3.0, 0.0, 1.0)
+			_yaw = wrapf(_yaw - float(input["steer"]) * 0.7 * steer_k * dt * clampf(v / 3.0, 0.0, 1.0), -PI, PI)
 			_roll = lerpf(_roll, 0.0, dt * 4.0)
 			state = "parked" if v < 0.3 and throttle < 0.05 else ("roll" if throttle > 0.6 else "taxi")
 			# Rotate at Vr with full power: the assisted takeoff.
@@ -297,7 +357,12 @@ func _plane(dt: float) -> void:
 				state = "air"
 				_vy = 3.0
 			velocity = fwd * v + Vector3.UP * -2.0
-			move_and_slide()
+			var gcol := move_and_slide()
+			if gcol and get_slide_collision_count() > 0 and v > 22.0:
+				for i in get_slide_collision_count():
+					if get_slide_collision(i).get_normal().y < 0.5:
+						_crash()
+						return
 			if not is_nan(g) and global_position.y > g + 0.05:
 				global_position.y = maxf(g, global_position.y - dt * 6.0)
 		"air", "stall":
@@ -321,23 +386,27 @@ func _plane(dt: float) -> void:
 			_vy = move_toward(_vy, want_vy, dt * 5.0)
 			var bank := float(input["steer"]) * 0.6
 			_roll = lerpf(_roll, -bank, 1.0 - exp(-2.5 * dt))
-			_yaw += -_roll * 9.8 / maxf(v, 20.0) * dt * 1.6
+			_yaw = wrapf(_yaw + _roll * 9.8 / maxf(v, 20.0) * dt * 1.6, -PI, PI)
 			_pitch = lerpf(_pitch, clampf(_vy / maxf(v, 20.0), -0.3, 0.35), 1.0 - exp(-3.0 * dt))
 			velocity = fwd * v + Vector3.UP * _vy
 			var col := move_and_slide()
-			# Touching down: low, slow enough, not dropping fast, on something flat.
+			# Touching down: low, slow enough, not dropping fast, on a flat wide surface.
 			if altitude < 2.5 and _vy < 1.0 and over_water:
 				_crash()   # (ditched: no landing on the water)
 			elif altitude < 2.5 and _vy < 1.0:
-				if v < float(spec.get("land_max", 62.0)) and _vy > -6.0:
+				var land_max: float = float(spec.get("land_max", 62.0))
+				var flat_ok := _can_land_plane(g)
+				if flat_ok and v < land_max and _vy > -6.0:
 					state = "landing_roll"
 					_vy = 0.0
 					_pitch = 0.0
 					_roll = 0.0
 					if not is_nan(g):
 						global_position.y = g
-				elif _vy <= -6.0 or v >= float(spec.get("land_max", 62.0)):
-					_vy = 2.0   # (a firm bounce: too fast to land)
+				elif not flat_ok and (altitude < 1.0 or _vy <= -3.5 or v >= land_max * 0.85):
+					_crash()   # (steep cliff, narrow roof or uneven ground)
+				elif not flat_ok or _vy <= -6.0 or v >= land_max:
+					_vy = maxf(2.5, absf(_vy) * 0.5)   # (a firm bounce: too fast or unsuitable surface)
 			if col and get_slide_collision_count() > 0 and v > 25.0:
 				var n := get_slide_collision(0).get_normal()
 				if n.y < 0.5:
@@ -351,12 +420,43 @@ func _crash() -> void:
 
 
 # ---------------------------------------------------------------- boat
+## Multi-point hull shoreline probe (bow, bow shoulders, midship, stern).
+## Returns {hits: int, push: Vector3} where push points back toward open water.
+func _hull_land_probe(pos: Vector3, yaw: float) -> Dictionary:
+	if not water_check.is_valid():
+		return {"hits": 0, "push": Vector3.ZERO}
+	var sz: Vector3 = spec.get("size", Vector3(2.4, 1.3, 8.0))
+	var hl := sz.z * 0.5
+	var hw := sz.x * 0.45
+	var f := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var r := Vector3(cos(yaw), 0.0, -sin(yaw))
+	var offsets := [
+		f * hl,
+		f * (hl * 0.65) + r * hw,
+		f * (hl * 0.65) - r * hw,
+		r * hw,
+		-r * hw,
+		-f * (hl * 0.85) + r * (hw * 0.85),
+		-f * (hl * 0.85) - r * (hw * 0.85),
+		-f * hl,
+	]
+	var hits := 0
+	var push := Vector3.ZERO
+	for off: Vector3 in offsets:
+		if not bool(water_check.call(pos + off)):
+			hits += 1
+			push -= off
+	push.y = 0.0
+	if push.length_squared() > 0.0001:
+		push = push.normalized()
+	return {"hits": hits, "push": push}
+
+
 func _boat(dt: float) -> void:
 	altitude = 0.0
 	var on := bool(input["active"])
 	var vmax: float = spec.get("vmax", 18.0)
 	var acc: float = spec.get("accel", 3.0)
-	var fwd := forward()
 	var v := forward_speed
 	var want := 0.0
 	if on and input["kick"]:
@@ -369,21 +469,43 @@ func _boat(dt: float) -> void:
 		v = move_toward(v, want, dt * (acc if absf(want) > absf(v) else acc * 1.6))
 	else:
 		v = move_toward(v, 0.0, dt * (0.35 + 0.04 * absf(v)))   # water drag
+	var cur_probe := _hull_land_probe(global_position, _yaw)
+	var cur_hits: int = int(cur_probe["hits"])
 	var steer := float(input["steer"])
-	_yaw += -steer * float(spec.get("turn", 0.6)) * clampf(absf(v) / 5.0, 0.15, 1.0) * signf(v if absf(v) > 0.2 else 1.0) * dt
+	var prev_yaw := _yaw
+	# Steer flips with the boat's direction like a real rudder.
+	_yaw = wrapf(_yaw - steer * float(spec.get("turn", 0.6)) * clampf(absf(v) / 5.0, 0.15, 1.0) * signf(v if absf(v) > 0.2 else 1.0) * dt, -PI, PI)
+	if cur_hits == 0 and int(_hull_land_probe(global_position, _yaw)["hits"]) > 0:
+		_yaw = prev_yaw
+	var fwd := forward()
 	_roll = lerpf(_roll, steer * 0.08 * clampf(absf(v) / vmax, 0.0, 1.0), dt * 3.0)
 	_pitch = lerpf(_pitch, 0.07 * clampf(v / vmax, 0.0, 1.0), dt * 2.0)
-	var next := global_position + fwd * v * dt * 4.0
-	if water_check.is_valid() and not bool(water_check.call(next)):
-		v = 0.0   # (ran into the shore)
-	velocity = fwd * v
-	move_and_slide()
+	var step_pos := global_position + fwd * v * maxf(dt * 3.0, 0.15)
+	var next_probe := _hull_land_probe(step_pos, _yaw)
+	var next_hits: int = int(next_probe["hits"])
+	var vel_vec := fwd * v
+	if next_hits > 0 and (cur_hits == 0 or next_hits >= cur_hits):
+		var push: Vector3 = next_probe["push"] if (next_probe["push"] as Vector3).length_squared() > 0.01 else (cur_probe["push"] as Vector3)
+		if push.length_squared() > 0.01 and vel_vec.dot(push) < 0.0:
+			var head_on := absf(fwd.dot(push))
+			vel_vec = Vector3.ZERO if head_on > 0.72 else vel_vec.slide(push) * 0.6
+			v = vel_vec.dot(fwd)
+		elif push.length_squared() <= 0.01:
+			vel_vec = Vector3.ZERO
+			v = 0.0
+	if cur_hits > 0 and (cur_probe["push"] as Vector3).length_squared() > 0.01:
+		vel_vec += (cur_probe["push"] as Vector3) * 1.4
+	velocity = Vector3(vel_vec.x, 0.0, vel_vec.z)
+	var col := move_and_slide()
+	if col and get_slide_collision_count() > 0:
+		velocity.y = 0.0
+		v = Vector3(velocity.x, 0.0, velocity.z).dot(fwd)
 	global_position.y = SEA_Y + float(spec.get("float", 0.0)) + 0.08 * sin(_t * 1.3) + 0.04 * sin(_t * 2.9)
 	state = "underway" if absf(v) > 0.5 else "moored"
 	# Docking assist: slow, close to a free berth and nobody on the throttle
-	# – the boat eases into the berth and lines up with it.
+	# – slide smoothly into the berth via collision-checked motion.
 	moored_at = -1
-	if absf(v) < 1.8 and not bool(input.get("active", false)):
+	if absf(v) < 1.8 and not on:
 		var best := -1
 		var bd := 12.0
 		for i in berths.size():
@@ -395,11 +517,17 @@ func _boat(dt: float) -> void:
 		if best >= 0:
 			var bp2: Vector3 = berths[best][0]
 			var k := 1.0 - exp(-1.2 * dt)
-			global_position.x = lerpf(global_position.x, bp2.x, k)
-			global_position.z = lerpf(global_position.z, bp2.z, k)
-			_yaw = lerp_angle(_yaw, float(berths[best][1]), k)
-			if bd < 1.2:
+			var step := Vector3(bp2.x - global_position.x, 0.0, bp2.z - global_position.z) * k
+			var cand_yaw := wrapf(lerp_angle(_yaw, float(berths[best][1]), k), -PI, PI)
+			var after_hits := int(_hull_land_probe(global_position + step, cand_yaw)["hits"])
+			if after_hits <= cur_hits:
+				var dcol := move_and_collide(step)
+				if dcol:
+					var rem := dcol.get_remainder().slide(dcol.get_normal())
+					rem.y = 0.0
+					if rem.length_squared() > 1e-6:
+						move_and_collide(rem)
+				_yaw = cand_yaw
+			if Vector2(bp2.x - global_position.x, bp2.z - global_position.z).length() < 1.2:
 				moored_at = best
-	# Steer flips with the boat's direction like a real rudder.
-	_yaw = wrapf(_yaw, -PI, PI)
-	velocity = fwd * v
+	velocity = Vector3(velocity.x, 0.0, velocity.z)

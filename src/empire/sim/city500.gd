@@ -211,6 +211,8 @@ static func empire_value(e: Empire) -> Dictionary:
 	var liab := debt + od
 	# Operating profit: the last 7 reported days (losses count in full,
 	# so a bad week lowers the earnings value to nothing, not below it).
+	# Early saves ramp smoothly over the first 7 trading days toward the
+	# 7-day rolling average so 1-3 strong days cannot cause a 1,168x spike.
 	var rs: Array = e.day_reports.slice(maxi(e.day_reports.size() - 7, 0))
 	var prof := 0.0
 	var rev := 0.0
@@ -219,6 +221,8 @@ static func empire_value(e: Empire) -> Dictionary:
 		rev += float(r.get("revenue", 0.0))
 	var n := maxf(1.0, float(rs.size()))
 	var daily := prof / n
+	var track_k := clampf(float(rs.size()) / 7.0, 0.0, 1.0)
+	var rolling_daily := daily * track_k
 	var rep := 50.0
 	if not e.businesses.is_empty():
 		rep = 0.0
@@ -226,10 +230,10 @@ static func empire_value(e: Empire) -> Dictionary:
 			rep += b.reputation
 		rep /= float(e.businesses.size())
 	var rep_k := lerpf(0.8, 1.2, clampf(rep / 100.0, 0.0, 1.0))
-	var earn := maxf(0.0, daily) * 365.0 * EARN_MULTIPLE * rep_k
+	var earn := maxf(0.0, rolling_daily) * 365.0 * EARN_MULTIPLE * rep_k
 	var val := maxf(0.0, assets - liab + earn)
 	return {"value": val, "assets": assets, "debt": liab, "earnings_value": earn, "profit_day": daily,
-		"revenue_year": rev / n * 365.0, "profit_year": daily * 365.0, "reputation": rep,
+		"revenue_year": rev / n * 365.0, "profit_year": rolling_daily * 365.0, "reputation": rep,
 		"staff": int(e.stat("staff")), "sites": e.businesses.size() + e.offices.size()}
 
 

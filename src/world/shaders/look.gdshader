@@ -83,38 +83,23 @@ vec3 bright(vec3 c, float th) {
 }
 
 // Light added by the lens around uv (linear HDR in, linear out).
+// Mobile-optimised 8-tap budget (down from 39 taps): 4 horizontal anamorphic
+// streak taps at lod 2 + 4 diagonal glare halo taps at lod 3.
 vec3 lens_light(sampler2D stex, vec2 uv, vec2 px, float th, vec3 tint, float t_night) {
 	vec3 acc = vec3(0.0);
 	float aspect = px.y / px.x;
-	// Anamorphic streak: a long horizontal smear of the lights (lod 2 taps).
-	for (int i = 1; i <= 6; i++) {
-		float d = float(i) * float(i) * 0.0045;
-		float w = exp(-float(i) * 0.55);
-		acc += (bright(textureLod(stex, uv + vec2(d, 0.0), 2.0).rgb, th)
-			+ bright(textureLod(stex, uv - vec2(d, 0.0), 2.0).rgb, th)) * w * tint * 0.34;
-	}
-	// Starburst: six thin spikes (aperture blades), short.
-	for (int k = 0; k < 3; k++) {
-		float a = float(k) * 1.0472 + 0.35;
-		vec2 dir = vec2(cos(a), sin(a) * aspect) * 0.006;
-		for (int i = 1; i <= 3; i++) {
-			float w = 0.16 / float(i * i);
-			acc += (bright(textureLod(stex, uv + dir * float(i), 0.0).rgb, th)
-				+ bright(textureLod(stex, uv - dir * float(i), 0.0).rgb, th)) * w;
-		}
-	}
-	// Glare: a soft halo (one blurred lookup) and a ghost on the far side
-	// of the frame centre (the classic flare reflection), faint.
-	// (Eight lod-3 taps on a ring, not one lod-5 lookup: on device a deep
-	// mip came back as big hard-edged squares round every wet glint.)
-	vec3 halo = vec3(0.0);
-	for (int k = 0; k < 8; k++) {
-		float a = float(k) * 0.7854 + 0.39;
-		halo += bright(textureLod(stex, uv + vec2(cos(a), sin(a) * aspect) * 0.018, 3.0).rgb, th * 0.8);
-	}
-	acc += halo * (0.6 / 8.0);
-	vec2 ghost = vec2(1.0) - uv;
-	acc += bright(textureLod(stex, mix(uv, ghost, 0.6), 3.0).rgb, th) * vec3(0.5, 0.8, 1.0) * 0.1 * t_night;
+	// Anamorphic streak: two symmetric tap pairs at lod 2.
+	acc += (bright(textureLod(stex, uv + vec2(0.008, 0.0), 2.0).rgb, th)
+		+ bright(textureLod(stex, uv - vec2(0.008, 0.0), 2.0).rgb, th)) * tint * 0.28;
+	acc += (bright(textureLod(stex, uv + vec2(0.022, 0.0), 2.0).rgb, th)
+		+ bright(textureLod(stex, uv - vec2(0.022, 0.0), 2.0).rgb, th)) * tint * 0.16;
+	// Soft glare halo: 4 diagonal lod-3 taps around the bright source.
+	vec2 h_off = vec2(0.013, 0.013 * aspect);
+	vec3 halo = bright(textureLod(stex, uv + h_off, 3.0).rgb, th * 0.85)
+		+ bright(textureLod(stex, uv - h_off, 3.0).rgb, th * 0.85)
+		+ bright(textureLod(stex, uv + vec2(-h_off.x, h_off.y), 3.0).rgb, th * 0.85)
+		+ bright(textureLod(stex, uv + vec2(h_off.x, -h_off.y), 3.0).rgb, th * 0.85);
+	acc += halo * (0.14 * mix(0.65, 1.0, t_night));
 	return acc;
 }
 
@@ -190,13 +175,16 @@ vec3 kuwahara_small(sampler2D stex, vec2 uv, vec2 px) {
 	return best;
 }
 
-// AMD-style contrast-adaptive sharpening on a 5-tap cross, display space.
+// AMD-style contrast-adaptive sharpening on a 5-tap cross, HDR-preserving:
+// clamps to local neighbourhood [mn, mx] instead of [0, 1] so sunlit speculars,
+// sky highlights and night lamps survive into Godot's AgX tonemapper and bloom.
 vec3 cas(vec3 c, vec3 n, vec3 s, vec3 e, vec3 w, float amount) {
 	vec3 mn = min(c, min(min(n, s), min(e, w)));
 	vec3 mx = max(c, max(max(n, s), max(e, w)));
-	vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0));
+	vec3 headroom = max(max(mx, vec3(1.0)) - mx, vec3(0.0));
+	vec3 amp = sqrt(clamp(min(mn, headroom) / max(mx, vec3(1e-4)), 0.0, 1.0));
 	vec3 wt = -amp * mix(0.125, 0.2, amount);
-	return clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0);
+	return clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), mn, mx);
 }
 
 vec3 cinematic(sampler2D stex, sampler2D smip, vec2 uv, vec2 px, vec2 fragcoord, vec3 centre) {
@@ -211,10 +199,11 @@ vec3 cinematic(sampler2D stex, sampler2D smip, vec2 uv, vec2 px, vec2 fragcoord,
 	// against a ~4 px blur; limited in the darks and brights (no halos there).
 	float lc = luma(c);
 	float lb = luma(pow(max(textureLod(smip, uv, 2.0).rgb, 0.0), g));
-	c *= 1.0 + clamp(lc - lb, -0.12, 0.12) * clarity * 4.0 * smoothstep(0.04, 0.3, lc) * (1.0 - smoothstep(0.75, 1.0, lc));
-	// Filmic S-curve on luminance (hue kept), gentle toe.
+	c *= 1.0 + clamp(lc - lb, -0.12, 0.12) * clarity * 4.0 * smoothstep(0.04, 0.3, lc) * (1.0 - smoothstep(0.75, 1.05, lc));
+	// Filmic S-curve on SDR range only (0..1) so HDR luminance > 1 passes through cleanly.
 	float l = luma(c);
-	float ls = l + film_contrast * (l - l * l) * (2.0 * l - 1.0) * 2.0;
+	float l_sdr = min(l, 1.0);
+	float ls = l_sdr + film_contrast * (l_sdr - l_sdr * l_sdr) * (2.0 * l_sdr - 1.0) * 2.0 + max(l - 1.0, 0.0);
 	c *= max(ls, 0.0) / max(l, 1e-4);
 	c = c * (1.0 - film_toe) + film_toe;
 	return c;
@@ -227,9 +216,9 @@ void fragment() {
 	vec3 col = texture(screen_tex, uv).rgb;
 	if (style == 5) {
 		vec3 c5 = cinematic(screen_tex, screen_mip, uv, px, FRAGCOORD.xy, col);
-		if (lens > 0.0) {
+		if (lens > 0.01) {
 			float th5 = mix(lens_threshold * 2.2, lens_threshold, night);
-			c5 += pow(max(lens_light(screen_mip, uv, px, th5, streak_tint, night), 0.0), vec3(1.0 / 2.2)) * lens * mix(0.35, 0.8, night);
+			c5 += pow(max(lens_light(screen_mip, uv, px, th5, streak_tint, night), 0.0), vec3(1.0 / 2.2)) * lens * mix(0.32, 0.78, night);
 		}
 		c5 = saturate_col(c5, saturation);
 		float l5 = luma(c5);

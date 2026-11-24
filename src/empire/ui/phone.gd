@@ -45,6 +45,7 @@ var _back_btn: Control
 var _built_size := Vector2.ZERO
 var _was_hud := false
 var _was_touch := false
+var _restore_hud := true
 
 
 static func st(sec: String) -> Dictionary:
@@ -86,14 +87,22 @@ func _ready() -> void:
 	_build()
 
 
+## Hands off pre-phone HUD/touch visibility synchronously so deferred
+## _exit_tree() never fights with a replacement overlay (e.g. Wardrobe).
+func consume_hud_state() -> Array[bool]:
+	_restore_hud = false
+	return [_was_hud, _was_touch]
+
+
 func _exit_tree() -> void:
 	save_scroll()
-	if is_instance_valid(ui):
+	if _restore_hud and is_instance_valid(ui):
 		ui.hud.visible = _was_hud
 		ui.touch.visible = _was_touch
 	# (The HUD and the windows opened in the street are always dark glass:
 	# back to the dark palette for anything built from here on.)
-	Glass.set_dark(true)
+	if not is_instance_valid(ui) or ui.phone == null:
+		Glass.set_dark(true)
 
 
 ## (WORLDSTATE is landscape-only: the phone never turns upright. The
@@ -154,10 +163,13 @@ func _build() -> void:
 func _safe_insets(vs: Vector2) -> Vector4:
 	var sr := DisplayServer.get_display_safe_area()
 	var ss := Vector2(DisplayServer.screen_get_size())
-	if ss.x <= 0 or sr.size.x <= 0 or not OS.get_name() in ["iOS", "Android"]:
+	if ss.x <= 0.0 or ss.y <= 0.0 or sr.size.x <= 0 or sr.size.y <= 0 or not OS.get_name() in ["iOS", "Android"]:
 		return Vector4.ZERO
-	var k := vs.x / ss.x
-	return Vector4(sr.position.x * k, sr.position.y * k, (ss.x - sr.end.x) * k, (ss.y - sr.end.y) * k)
+	if (vs.x > vs.y) != (ss.x > ss.y):
+		ss = Vector2(ss.y, ss.x)
+	var kx := vs.x / ss.x
+	var ky := vs.y / ss.y
+	return Vector4(maxf(sr.position.x * kx, 0.0), maxf(sr.position.y * ky, 0.0), maxf((ss.x - sr.end.x) * kx, 0.0), maxf((ss.y - sr.end.y) * ky, 0.0))
 
 
 func _sidebar() -> Control:

@@ -293,6 +293,10 @@ static func _wheel_finish(name: String, offroad: bool) -> Material:
 	return _wheel_mats[key]
 
 
+var has_clear_cabin := false
+var driver_seat := Vector3.ZERO
+
+
 func setup(p_car: Car) -> void:
 	car = p_car
 	var spec := car.spec
@@ -329,6 +333,7 @@ func setup(p_car: Car) -> void:
 		for i in mesh.get_surface_count():
 			var src := mesh.surface_get_material(i)
 			var n := src.resource_name if src else ""
+			has_clear_cabin = has_clear_cabin or n == "glass_clear"
 			var m: Material
 			match n:
 				"paint": m = paint_mat
@@ -347,6 +352,8 @@ func setup(p_car: Car) -> void:
 					m = beacon_mat
 				_: m = shared_mat(n)
 			body.set_surface_override_material(i, m)
+	if has_clear_cabin:
+		driver_seat = VehicleAccess.geometry(car)["seat"]
 	# Wheels.
 	var wheel_style := String(spec.get("wheel", "five"))
 	var wmesh := load_mesh("wheel_" + wheel_style)
@@ -509,14 +516,14 @@ func enable_headlights(_shadows := false) -> void:
 	mid /= float(heads.size())
 	var main := SpotLight3D.new()
 	main.name = "Headlight"
-	main.light_color = Color(1.0, 0.95, 0.86)
-	main.spot_range = 75.0
-	main.spot_angle = 42.0
-	main.spot_angle_attenuation = 0.35
-	main.spot_attenuation = 0.65
-	main.light_specular = 0.35
-	main.position = Vector3(0.0, mid.y + 0.12, mid.z - 0.8)
-	main.rotation = Vector3(deg_to_rad(-4.5), 0.0, 0.0)
+	main.light_color = Color(0.95, 0.96, 1.0)
+	main.spot_range = 63.0
+	main.spot_angle = 34.0
+	main.spot_angle_attenuation = 0.8
+	main.spot_attenuation = 0.85
+	main.light_specular = 0.56
+	main.position = Vector3(0.0, mid.y, mid.z - 0.54)
+	main.rotation = Vector3(deg_to_rad(-5.3), 0.0, 0.0)
 	main.light_energy = 0.0
 	main.shadow_enabled = false
 	main.visible = false
@@ -581,6 +588,20 @@ func _process(dt: float) -> void:
 		if i < 2:
 			p.rotation.y = -car.wheel_steering(i)
 		_spins[i].rotation.x = -car.wheel_spin[i]
+	# Subtle chassis weight-transfer pitch & roll (dive on braking, squat on
+	# acceleration, lean in high-speed corners) while keeping wheels planted.
+	var flex_on := not _showroom and _access_nodes == null and not (car.park_lock and not car.occupied)
+	var bp := car.body_pitch if flex_on else 0.0
+	var br := car.body_roll if flex_on else 0.0
+	if body:
+		body.rotation = Vector3(bp, 0.0, br)
+	if flares:
+		flares.rotation = Vector3(bp, 0.0, br)
+	if _mods:
+		_mods.rotation = Vector3(bp, 0.0, br)
+	for f: Node3D in _frames:
+		if is_instance_valid(f):
+			f.rotation = Vector3(bp, 0.0, br)
 	# Running lights, service brake and reverse are separate circuits.
 	var rise := 1.0 - exp(-dt * 30.0)
 	_brake_level = lerpf(_brake_level, 1.0 if car.brake_lamps else 0.0, rise)
@@ -605,7 +626,7 @@ func _process(dt: float) -> void:
 	if not head_lights.is_empty():
 		var on := night_lights > 0.05
 		head_lights[0].visible = on
-		head_lights[0].light_energy = 18.0 * night_lights
+		head_lights[0].light_energy = 16.0 * night_lights
 		if head_lights.size() > 1:
 			head_lights[1].visible = on
 			head_lights[1].light_energy = 3.0 * night_lights

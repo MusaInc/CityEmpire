@@ -53,26 +53,32 @@ void fragment() {
 	vec3 r = reflect(-v, n);
 	float ao = mix(0.78, 1.0, smoothstep(0.12, 0.73, v_y)) * mix(0.60, 1.0, smoothstep(-0.74, 0.20, n.y));
 	float facing = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
-	float fresnel = pow(1.0 - facing, 4.0);
-	vec3 shade = base * mix(vec3(0.75), vec3(1.0), sqrt(clamp(base, vec3(0.0), vec3(1.0))));
-	ALBEDO = mix(base, shade, metallic * fresnel * 0.82) * ao;
+	// Realistic Schlick clearcoat Fresnel + metallic flop (deeper at grazing
+	// angles, crisp metallic sheen face-on without plastic over-saturation).
+	float fresnel = pow(1.0 - facing, 5.0);
+	float flop = pow(1.0 - facing, 2.2);
+	vec3 shade = base * mix(vec3(0.68, 0.70, 0.74), vec3(0.92), sqrt(clamp(base, vec3(0.0), vec3(1.0))));
+	ALBEDO = mix(base, shade, metallic * flop * 0.65) * ao;
 	METALLIC = metallic * (1.0 - wear * 0.51);
-	ROUGHNESS = clamp(roughness + wear * 0.32 - rain_film * 0.081, 0.16, 0.84);
-	SPECULAR = 0.47;
-	CLEARCOAT = clamp((gloss * 0.62 + rain_film * 0.20) * (1.0 - wear), 0.0, 1.0);
-	CLEARCOAT_ROUGHNESS = clamp(roughness * 0.52 + wear * 0.35 - rain_film * 0.056, 0.095, 0.60);
+	ROUGHNESS = clamp(roughness + wear * 0.32 - rain_film * 0.081, 0.14, 0.84);
+	SPECULAR = 0.52;
+	CLEARCOAT = clamp((gloss * 0.64 + rain_film * 0.21) * (1.0 - wear), 0.0, 1.0);
+	CLEARCOAT_ROUGHNESS = clamp(roughness * 0.48 + wear * 0.34 - rain_film * 0.041, 0.09, 0.56);
 	if (!showroom) {
 		vec3 world_at = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 		vec3 env = paint_reflection(r, world_at, sky_top, sky_horizon, sun_dir, night);
 		float sd = max(dot(r, normalize(sun_dir)), 0.0);
-		float glint = pow(sd, mix(110.0, 165.0, rain_film)) * 0.56 + pow(sd, 21.0) * 0.053;
+		float glint = pow(sd, mix(105.0, 170.0, rain_film)) * 0.40 + pow(sd, 24.0) * 0.047;
 		// Flakes must resolve on screen to sparkle. Avoid stipple on a
 		// moving bonnet or at the van's large, shallow side angles.
-		vec3 cell = v_p * 190.0;
+		vec3 cell = v_p * 195.0;
 		float resolve = (1.0 - smoothstep(0.7, 1.9, length(fwidth(cell)))) *
-			(1.0 - smoothstep(2.1, 5.1, distance_to_lens));
-		glint += step(0.968, hash3(floor(cell))) * resolve * pow(sd, 30.0) * flake * metallic * 0.097;
-		float coat = mix(0.055, 0.28, fresnel) * (gloss + rain_film * 0.16) * (1.0 - wear);
-		EMISSION = min(env * coat + vec3(glint * gloss * (1.0 - wear)), vec3(1.27)) * (1.0 - night * 0.67);
+			(1.0 - smoothstep(2.2, 5.6, distance_to_lens));
+		float fhash = hash3(floor(cell));
+		float fine_sparkle = step(0.955, fhash) * pow(sd, 44.0) * 0.14;
+		float broad_shimmer = smoothstep(0.72, 0.99, fhash) * pow(sd, 15.0) * 0.045;
+		vec3 flake_col = mix(base, vec3(1.0), 0.68) * (fine_sparkle + broad_shimmer) * resolve * flake * metallic * (1.0 - wear);
+		float coat = mix(0.04, 0.34, fresnel) * (gloss + rain_film * 0.18) * (1.0 - wear);
+		EMISSION = min(env * coat + vec3(glint * gloss * (1.0 - wear)) + flake_col, vec3(1.35)) * (1.0 - night * 0.67);
 	}
 }

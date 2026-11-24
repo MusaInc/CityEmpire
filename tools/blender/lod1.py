@@ -34,6 +34,7 @@ for name in NAMES:
     dec.ratio = min(1.0, TARGET / max(tris, 1))
     dec.use_collapse_triangulate = True
     bpy.ops.object.modifier_apply(modifier="dec")
+    ob.data.validate(clean_customdata=False)
     out = sum(len(p.vertices) - 2 for p in ob.data.polygons)
     bpy.ops.object.select_all(action="DESELECT")
     ob.select_set(True)

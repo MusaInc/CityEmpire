@@ -375,7 +375,9 @@ def top_lamps(surf, m, out):
         for (i, j) in ((3, 3), (6, 3)):
             c = g[j][i]
             if c:
-                out.append(K.disc_on("projector", c[0] + c[1] * 0.004, c[1], 0.028, 0.006, m["head"], 16))
+                centre, nrm = c[:2]
+                out.append(K.disc_on("projector_bezel", centre + nrm * 0.006, nrm, 0.031, 0.002, m["trim"], 16))
+                out.append(K.disc_on("projector", centre + nrm * 0.008, nrm, 0.019, 0.004, m["head"], 16))
 
 
 def bus_interior(m, out):
@@ -1309,6 +1311,7 @@ def build_car(name):
     bpy.ops.object.modifier_apply(modifier=dt.name)
     bpy.data.objects.remove(clean, do_unlink=True)
     ob = kit.join(name, [body] + [o for o in out if o is not None])
+    ob.data.validate(clean_customdata=False)
     kit.export(name + ".glb", [ob])
     tris = sum(len(p.vertices) - 2 for p in ob.data.polygons)
     print("CAR", name, "tris", tris, "materials", len(ob.data.materials))

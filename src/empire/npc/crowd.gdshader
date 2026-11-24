@@ -54,7 +54,12 @@ void vertex() {
 	v_surface = VERTEX;
 	vec3 v = VERTEX;
 	vec3 n = NORMAL;
-	person_pose_w(v, n, person_limb(UV), UV2.x, 1.0 - UV2.y, INSTANCE_CUSTOM.x / 0.72 * 3.14159, INSTANCE_CUSTOM.z, 0.0, INSTANCE_CUSTOM.w);
+	int limb = person_limb(UV);
+	// Match stride length to this instance's scaled leg excursion (zero foot slip across height scales).
+	float z_scale = max(length(MODEL_MATRIX[2].xyz), 0.5);
+	float ph = INSTANCE_CUSTOM.x / (0.82 * z_scale) * 3.14159;
+	person_pose_w(v, n, limb, UV2.x, 1.0 - UV2.y, ph, INSTANCE_CUSTOM.z, 0.0, INSTANCE_CUSTOM.w);
+	person_pose_idle(v, n, limb, UV2.x, 1.0 - UV2.y, INSTANCE_CUSTOM.z, 0.0, TIME, seed);
 	VERTEX = v;
 	NORMAL = n;
 	// Someone right in front of the lens dissolves instead of filling the

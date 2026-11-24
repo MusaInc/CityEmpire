@@ -15,6 +15,8 @@ const GAP := 9.0          # m to the car ahead on the same lane
 const LEN := 4.6
 
 var lanes: Array = []      # [{pts, len, cum, speed, next, city_start, city_end}]
+var _city_starts: Array[int] = []
+var _city_start_rr := 0
 var cars: Array = []       # {lane, s, v, kind, col, wait}
 var _mm: Array = []        # MultiMesh per car kind
 var _rng := RandomNumberGenerator.new()
@@ -37,8 +39,11 @@ func setup(layout: CityLayout, p_world: Node) -> void:
 		var cum := PackedFloat32Array([0.0])
 		for i in range(1, pts.size()):
 			cum.append(cum[i - 1] + pts[i].distance_to(pts[i - 1]))
+		var li_new := lanes.size()
 		lanes.append({"pts": pts, "len": cum[-1], "cum": cum, "speed": float(l["speed"]) * 0.8, "next": l["next"],
 			"city_start": l["city_start"], "city_end": l["city_end"]})
+		if l["city_start"]:
+			_city_starts.append(li_new)
 	# (one MultiMesh per kind over the whole island, so no per-car LOD: the
 	# ~1.2k-triangle mid models; the full ones are for the city's near band)
 	var meshes: Array = world.get("car_mid_meshes") if world else []
@@ -136,11 +141,11 @@ func _process(dt: float) -> void:
 				var gap := float(lst[i + 1]["s"]) - float(c["s"]) - LEN
 				want = minf(want, maxf((gap - GAP * 0.5) * 0.8, 0.0))
 			if blocker.x < INF:
-				# Your vehicle in the lane ahead: stop short of it.
+				# Your vehicle or walking player in the lane ahead: stop short of it.
 				var sp0 := _sample(L, float(c["s"]))
 				var to: Vector3 = blocker - (sp0[0] as Vector3)
 				var ahead := to.dot(sp0[1] as Vector3)
-				if ahead > 0.0 and ahead < 30.0 and (to - (sp0[1] as Vector3) * ahead).length() < 2.6:
+				if absf(to.y) < 3.5 and ahead > 0.0 and ahead < 30.0 and (to - (sp0[1] as Vector3) * ahead).length() < 2.6:
 					want = minf(want, maxf((ahead - LEN - 2.5) * 0.8, 0.0))
 			if not crossing_people.is_empty():
 				var sp := _sample(L, float(c["s"]))
@@ -166,15 +171,15 @@ func _process(dt: float) -> void:
 
 
 ## At a lane end: on into a lane leaving the junction (one with room at its
-## start), or into the city (and back later on the island-bound lane).
+## start), or into the city (and back later, balanced across all city bridges).
 func _next_lane(c: Dictionary, L: Dictionary) -> void:
-	if L["city_end"]:
-		for li in lanes.size():
-			if lanes[li]["city_start"]:
-				c["lane"] = li
-				c["s"] = 0.0
-				c["wait"] = _rng.randf_range(4.0, 14.0)   # (in the city a while)
-				return
+	if L["city_end"] and not _city_starts.is_empty():
+		var li: int = _city_starts[_city_start_rr % _city_starts.size()]
+		_city_start_rr = (_city_start_rr + 1) % _city_starts.size()
+		c["lane"] = li
+		c["s"] = 0.0
+		c["wait"] = _rng.randf_range(4.0, 14.0)   # (in the city a while)
+		return
 	var nxt: Array = L["next"]
 	if nxt.is_empty():
 		c["s"] = float(L["len"])

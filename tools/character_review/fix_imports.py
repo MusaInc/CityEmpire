@@ -26,7 +26,7 @@ for imp in sorted((ROOT / 'assets/models').glob('character_*.png.import')) + [RO
     stem = imp.name[:-len('.png.import')]
     normal = stem.endswith(('_normal', '_norm')) or 'normals' in stem
     cap = 512 if any(k in stem for k in CAP_512) else 1024
-    if 'hair_locks_atlas' in stem:
+    if 'hair_locks_atlas' in stem or stem.endswith(('hair_bun_albedo', 'hair_bun_normal', 'hair_ade_crop_albedo', 'hair_ade_crop_normal', 'hair_ade_coils')):
         cap = 1024
     if stem.endswith(('face_jules_albedo', 'face_ade_albedo', 'face_jules_normal', 'face_ade_normal')):
         cap = 2048

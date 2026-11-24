@@ -97,18 +97,14 @@ func _ready() -> void:
 var _safe_root: Control
 
 
-## Insets the HUD by the display's safe area (none on desktop or in a window).
+## Insets the HUD by the display's safe area (none on desktop in a window).
 func _apply_safe_area() -> void:
 	if _safe_root == null:
 		return
-	var inset := [0.0, 0.0, 0.0, 0.0]  # left, top, right, bottom
-	var sa := DisplayServer.get_display_safe_area()
-	var win := DisplayServer.window_get_size()
-	if sa.size.x > 0 and win.x > 0 and DisplayServer.screen_get_size() == win:
-		var k := _safe_root.size / Vector2(win)
-		inset = [sa.position.x * k.x, sa.position.y * k.y, (win.x - sa.end.x) * k.x, (win.y - sa.end.y) * k.y]
-		# The home indicator inset is tall; the HUD only needs a little of it.
-		inset[3] = minf(inset[3], 14.0)
+	var inset := _safe_insets(_safe_root.size)
+	# Cap the bottom inset so controls/prompts clear the iPhone home indicator
+	# cleanly without wasting vertical space on iPad.
+	inset[3] = minf(float(inset[3]), 28.0)
 	# (Only the HUD: panels and the title are centred, with full-screen dims
 	# that must still reach the edges; floating labels track 3-D points.)
 	hud.offset_left = inset[0]
@@ -550,12 +546,14 @@ func _open(title: String, width := 860.0, height := 560.0) -> VBoxContainer:
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	_panel_root.add_child(dim)
 	var vs := get_viewport().get_visible_rect().size
-	width = minf(width * 1.08, vs.x - 48.0)
-	height = minf(height * 1.08, vs.y - 32.0)
+	var ins := _safe_insets(vs)
+	width = minf(width * 1.08, vs.x - float(ins[0]) - float(ins[2]) - 48.0)
+	height = minf(height * 1.08, vs.y - float(ins[1]) - float(ins[3]) - 32.0)
 	_panel = PanelContainer.new()
 	_panel.add_theme_stylebox_override("panel", Glass.box(Glass.CARD, 34, 26))
 	_panel.custom_minimum_size = Vector2(width, height)
-	_anchor(_panel, 0.5, 0.5, -Vector2(width, height) * 0.5, Vector2(width, height))
+	var shift := Vector2((float(ins[0]) - float(ins[2])) * 0.5, (float(ins[1]) - float(ins[3])) * 0.5)
+	_anchor(_panel, 0.5, 0.5, -Vector2(width, height) * 0.5 + shift, Vector2(width, height))
 	_panel_root.add_child(_panel)
 	var v := S.vbox(14)
 	_panel.add_child(v)
@@ -577,20 +575,19 @@ func deal_done() -> void:
 		close_panel(true)
 
 
-func close_panel(resume := true) -> void:
-	# The phone (light or dark) puts the street palette back in its
+func close_panel(resume := true, keep_style := false) -> void:
+	# The phone (light or dark) puts the street palette and HUD/touch back in its
 	# _exit_tree, but queue_free runs that a frame later – after the next
-	# window is already built in the phone's palette (black labels on the
-	# street's dark controls: the wardrobe opened from the phone). Switch now.
-	if phone != null and not Glass.dark:
-		Glass.set_dark(true)
-	if resume and game and game.rig and game.rig.wardrobe_preview:
-		_style_pose(false)
-		game.camera.cam.transform = _style_camera_transform
-		game.camera.cam.fov = _style_camera_fov
-		hud.visible = _style_had_hud
-		touch.visible = _style_had_touch
-		game.studio_light(false)
+	# window is already built (causing black labels on dark controls and inverted
+	# HUD/touch visibility on Wardrobe). Hand off synchronously before freeing.
+	if phone != null and is_instance_valid(phone):
+		var prev_hud := phone.consume_hud_state()
+		hud.visible = prev_hud[0]
+		touch.visible = prev_hud[1]
+		if not Glass.dark:
+			Glass.set_dark(true)
+	if not keep_style:
+		_end_style_preview()
 	for c in _panel_root.get_children():
 		c.queue_free()
 	_panel = null
@@ -599,6 +596,29 @@ func close_panel(resume := true) -> void:
 		get_tree().paused = false
 		if game and game.state == "play" and not touch.visible and not game.args.has("shot"):
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _end_style_preview() -> void:
+	if not (game and game.rig and game.rig.wardrobe_preview):
+		return
+	_style_pose(false)
+	if game.rig.vehicle_seated:
+		game.player.global_position = _style_player_position
+	game.camera.cam.transform = _style_camera_transform
+	game.camera.cam.fov = _style_camera_fov
+	game.player.visible = _style_had_player_visible
+	if _style_prev_cam != null and is_instance_valid(_style_prev_cam):
+		_style_prev_cam.make_current()
+	elif game.driving != "" and game.chase and is_instance_valid(game.chase.cam):
+		game.chase.cam.make_current()
+	elif game.skyport_play and game.skyport_play.piloting != "" and game.skyport_play.cam and is_instance_valid(game.skyport_play.cam.cam):
+		game.skyport_play.cam.cam.make_current()
+	else:
+		game.camera.cam.make_current()
+	_style_prev_cam = null
+	hud.visible = _style_had_hud
+	touch.visible = _style_had_touch
+	game.studio_light(false)
 
 
 func panel_open() -> bool:
@@ -666,12 +686,7 @@ func show_title(has_save: bool) -> void:
 	var stack := S.vbox(16)
 	stack.custom_minimum_size.x = 520.0
 	center.add_child(stack)
-	var title := S.label("WORLDSTATE", 60, Color("f3eee5"), "bold")
-	var title_font := FontVariation.new()
-	title_font.base_font = S.font("bold")
-	title_font.spacing_glyph = 4
-	title.add_theme_font_override("font", title_font)
-	stack.add_child(title)
+	stack.add_child(MenuParts.Logo.new())
 	var rule := ColorRect.new()
 	rule.color = Color("e8b961")
 	rule.custom_minimum_size = Vector2(57, 2)
@@ -1595,8 +1610,9 @@ func _phone_shell(tab: String) -> VBoxContainer:
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	_panel_root.add_child(dim)
 	var vpsz := get_viewport().get_visible_rect().size
-	var W := minf(1220.0, vpsz.x - 40.0)
-	var H := minf(700.0, vpsz.y - 24.0)
+	var ins := _safe_insets(vpsz)
+	var W := minf(1220.0, vpsz.x - float(ins[0]) - float(ins[2]) - 40.0)
+	var H := minf(700.0, vpsz.y - float(ins[1]) - float(ins[3]) - 24.0)
 	_panel = PanelContainer.new()
 	var psb := (S.theme().get_stylebox("panel", "PanelContainer") as StyleBoxFlat).duplicate() as StyleBoxFlat
 	psb.content_margin_left = 0
@@ -2182,22 +2198,34 @@ var _style_portrait := false
 var _style_first := false
 var _style_camera_transform := Transform3D.IDENTITY
 var _style_camera_fov := 0.0
+var _style_prev_cam: Camera3D = null
+var _style_had_player_visible := true
+var _style_player_position := Vector3.ZERO
 var _style_had_hud := false
 var _style_had_touch := false
 
 
 func open_style(first := false) -> void:
 	_style_first = first
-	close_panel(false)
+	close_panel(false, true)
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var e := game.empire
 	var l := HeroLook.current(e.flags)
 	if not game.rig.wardrobe_preview:
+		_style_prev_cam = get_viewport().get_camera_3d()
 		_style_camera_transform = game.camera.cam.transform
 		_style_camera_fov = game.camera.cam.fov
+		_style_had_player_visible = game.player.visible
+		_style_player_position = game.player.global_position
+		if game.rig.vehicle_seated:
+			var car := game.vehicle_node()
+			if is_instance_valid(car):
+				game.player.global_position = car.global_position + Vector3.UP * 1.5
 		_style_had_hud = hud.visible
 		_style_had_touch = touch.visible
+		game.player.visible = true
+		game.camera.cam.make_current()
 		hud.hide()
 		touch.hide()
 		game.rig.position = Vector3.ZERO
@@ -2322,14 +2350,42 @@ var _style_inner := 540.0  # usable width inside the Style panel
 var _style_zoom_button: Button
 
 
-## Safe-area insets (left, top, right, bottom) in canvas px; zero in a window.
-func _safe_insets() -> Array:
+## Safe-area insets (left, top, right, bottom) in canvas px; zero in a desktop window.
+## Maps proportionally from the display safe-area coordinate space so scaled or
+## orientation-swapped iOS viewports never silently drop Dynamic Island insets to 0.
+func _safe_insets(canvas_size := Vector2.ZERO) -> Array:
 	var sa := DisplayServer.get_display_safe_area()
-	var win := DisplayServer.window_get_size()
-	if sa.size.x <= 0 or win.x <= 0 or DisplayServer.screen_get_size() != win:
+	var win := Vector2(DisplayServer.window_get_size())
+	if sa.size.x <= 0 or sa.size.y <= 0 or win.x <= 0.0 or win.y <= 0.0:
 		return [0.0, 0.0, 0.0, 0.0]
-	var k := _panel_root.get_viewport_rect().size / Vector2(win)
-	return [sa.position.x * k.x, sa.position.y * k.y, (win.x - sa.end.x) * k.x, (win.y - sa.end.y) * k.y]
+	var scr := Vector2(DisplayServer.screen_get_size())
+	var mobile := OS.get_name() in ["iOS", "Android"]
+	if not mobile:
+		var mode := DisplayServer.window_get_mode()
+		var fullscreen := mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+		if not fullscreen and (scr.x <= 0.0 or absf(scr.x - win.x) > 2.0 or absf(scr.y - win.y) > 2.0):
+			return [0.0, 0.0, 0.0, 0.0]
+	if scr.x > 0.0 and scr.y > 0.0 and (win.x > win.y) != (scr.x > scr.y):
+		scr = Vector2(scr.y, scr.x)
+	var basis := Vector2.ZERO
+	if float(sa.end.x) <= win.x + 2.0 and float(sa.end.y) <= win.y + 2.0 and float(sa.size.x) >= win.x * 0.5 and float(sa.size.y) >= win.y * 0.5:
+		basis = win
+	elif scr.x > 0.0 and scr.y > 0.0 and float(sa.end.x) <= scr.x + 2.0 and float(sa.end.y) <= scr.y + 2.0 and float(sa.size.x) >= scr.x * 0.5 and float(sa.size.y) >= scr.y * 0.5:
+		basis = scr
+	else:
+		return [0.0, 0.0, 0.0, 0.0]
+	var csz := canvas_size
+	if csz.x <= 0.0 or csz.y <= 0.0:
+		csz = _panel_root.get_viewport_rect().size if _panel_root != null else get_viewport().get_visible_rect().size
+	if csz.x <= 0.0 or csz.y <= 0.0:
+		return [0.0, 0.0, 0.0, 0.0]
+	var k := csz / basis
+	return [
+		maxf(float(sa.position.x) * k.x, 0.0),
+		maxf(float(sa.position.y) * k.y, 0.0),
+		maxf((basis.x - float(sa.end.x)) * k.x, 0.0),
+		maxf((basis.y - float(sa.end.y)) * k.y, 0.0),
+	]
 
 
 func _style_width(view_width: float) -> float:
@@ -2466,7 +2522,10 @@ func _style_pose(on: bool) -> void:
 		p.velocity = Vector3.ZERO
 		p.s.velocity = Vector3.ZERO
 	game.rig.wardrobe_preview = on
-	game.rig.process_mode = Node.PROCESS_MODE_ALWAYS if on else Node.PROCESS_MODE_INHERIT
+	if on:
+		game.rig.process_mode = Node.PROCESS_MODE_ALWAYS
+	else:
+		game.rig.process_mode = Node.PROCESS_MODE_PAUSABLE if game.rig.vehicle_seated else Node.PROCESS_MODE_INHERIT
 
 
 ## The camera in front of the hero (orbiting with ⟲ ⟳), the hero on the left
@@ -2479,9 +2538,13 @@ func _update_style_zoom() -> void:
 
 func _style_frame() -> void:
 	var p: Player = game.player
+	if not p.visible:
+		p.visible = true
 	var fwd: Vector3 = game.rig._facing.rotated(Vector3.UP, _style_orbit)
 	var side := fwd.cross(Vector3.UP).normalized()
 	var cam: Camera3D = game.camera.cam
+	if not cam.current:
+		cam.make_current()
 	var target := p.global_position + Vector3.UP * (0.65 if _style_portrait else 0.015)
 	var eye := target + fwd * (1.03 if _style_portrait else 2.63) + Vector3.UP * (0.055 if _style_portrait else 0.21)
 	var vp := get_viewport().get_visible_rect().size

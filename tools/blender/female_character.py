@@ -556,7 +556,7 @@ def fit_jules_shoulders(rig, meshes, output):
     size = colour.image.size[0]
     pos, _, used = raster_uv(face, size, material_index=face.data.materials.find('hero_skin_face_jules'))
     rgb = pixels(colour.image)[..., :3].copy()
-    lower = used & (pos[..., 2] < 1.482)
-    weight = (1 - falloff(1.431, 1.482, pos[..., 2][lower]))[:, None]
+    lower = used & (pos[..., 2] < 1.515)
+    weight = (1 - falloff(1.425, 1.515, pos[..., 2][lower]))[:, None]
     rgb[lower] += (target - rgb[lower]) * weight
     colour.image = packed_image(output / 'face_jules_albedo.png', _dilate(rgb, used, 8))

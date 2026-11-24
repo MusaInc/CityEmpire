@@ -82,6 +82,7 @@ var _km_acc := 0.0
 var _clean_t := 0.0
 var _tutorial := 0
 var _warm := false
+var _cloud_sync := Callable()
 
 
 func _ready() -> void:
@@ -240,6 +241,8 @@ func _ready() -> void:
 	ll.setup([world, world.mainland], func() -> Vector3:
 		var c := get_viewport().get_camera_3d()
 		return c.global_position if c else player.global_position)
+	if skyport and ll.has_method("add_island_lamps"):
+		ll.call("add_island_lamps", skyport)
 	car_audio = CarAudio.new()
 	car_audio.name = "CarAudio"
 	add_child(car_audio)
@@ -287,11 +290,11 @@ func _ready() -> void:
 			return c.global_position if c else player.global_position
 		var skym: ShaderMaterial = atmosphere.sky_mat if "sky_mat" in atmosphere else null
 		clouds.set_process(true)
-		var sync := func():
-			if skym:
+		_cloud_sync = func():
+			if is_instance_valid(clouds) and skym:
 				clouds.cover = float(skym.get_shader_parameter("cloud_cover"))
 				clouds.dark = float(skym.get_shader_parameter("cloud_dark"))
-		get_tree().process_frame.connect(sync)
+		get_tree().process_frame.connect(_cloud_sync)
 	# City reflections in glass, paint and wet streets (off on Low).
 	# (The probe is replaced by fake reflections in the shaders: kept for
 	# comparisons with --probe; it re-rendered the city 6 times per capture.)
@@ -730,7 +733,51 @@ func _phone_shots(dir: String, secs: String) -> void:
 
 
 # ---------------------------------------------------------------- game
+func _reset_vehicle_state() -> void:
+	if vehicle_access:
+		vehicle_access.interrupt()
+	if driving != "":
+		var c: Car = cars.get(driving)
+		if c and is_instance_valid(c):
+			c.occupied = false
+			c.throttle = 0.0
+			c.brake = 1.0
+			c.handbrake = true
+			c.power_slide = 0.0
+		driving = ""
+	if skyport_play:
+		skyport_play.force_exit_for_reset()
+	if chase:
+		chase.target = null
+	if drive_input:
+		drive_input.enabled = false
+		drive_input.car = null
+	if car_audio:
+		car_audio.set_car(null)
+	if speed_fx:
+		speed_fx.player = null
+	if rig:
+		rig.vehicle_seated = false
+		rig.vehicle_steer = 0.0
+		rig.process_mode = Node.PROCESS_MODE_INHERIT
+	if player:
+		player.scripted = false
+		player.process_mode = Node.PROCESS_MODE_INHERIT
+		player.visible = true
+		player.collision_layer = 1 << 2
+		player.input_enabled = state == "play"
+	if camera and camera.cam:
+		camera.cam.make_current()
+	if world and camera:
+		world.set_viewer(camera)
+	_end_floor()
+	_car_safe.clear()
+	_pending_vehicle_deliveries.clear()
+	_km_acc = 0.0
+
+
 func new_game() -> void:
+	_reset_vehicle_state()
 	empire = Empire.new()
 	empire.market = _market()
 	var start := starter_unit()
@@ -1150,7 +1197,8 @@ func toggle_fast() -> void:
 
 # ----------------------------------------------------------- interiors
 func _stream_interiors() -> void:
-	var focus := player.global_position if driving == "" else (cars[driving] as Node3D).global_position
+	var dc: Node3D = cars.get(driving) if driving != "" else null
+	var focus := dc.global_position if dc and is_instance_valid(dc) else player.global_position
 	for u in units:
 		if u.has("street_use"):
 			continue
@@ -1572,7 +1620,9 @@ func _update_spot() -> void:
 			best = sk
 			best_d = float(sk["d"])
 	var changed: bool = best.get("kind", "") != spot.get("kind", "") or best.get("slot", -9) != spot.get("slot", -9) \
-		or best.get("vehicle", "") != spot.get("vehicle", "") or best.get("interior") != spot.get("interior")
+		or best.get("vehicle", "") != spot.get("vehicle", "") or best.get("interior") != spot.get("interior") \
+		or best.get("site") != spot.get("site") or best.get("model") != spot.get("model") \
+		or best.get("venue_spot") != spot.get("venue_spot")
 	spot = best
 	if changed:
 		spot_changed.emit(spot)
@@ -2207,7 +2257,11 @@ func _finish_vehicle_entry(_stand: Vector3, _from: Transform3D, _fov: float, vid
 	c.occupied = true
 	c.freeze = false
 	player.input_enabled = false
-	player.visible = false
+	rig.vehicle_seated = c.visual != null and c.visual.has_clear_cabin
+	if rig.vehicle_seated:
+		_update_driver_pose(c)
+		rig.process_mode = Node.PROCESS_MODE_PAUSABLE
+	player.visible = rig.vehicle_seated
 	player.process_mode = Node.PROCESS_MODE_DISABLED
 	player.collision_layer = 0
 	drive_input.car = c
@@ -2268,6 +2322,9 @@ func _finish_vehicle_exit(stand: Vector3, from: Transform3D, fov: float, vid: St
 
 
 func _finish_on_foot(stand: Vector3, yaw: float, from: Transform3D, fov: float) -> void:
+	rig.vehicle_seated = false
+	rig.vehicle_steer = 0.0
+	rig.process_mode = Node.PROCESS_MODE_INHERIT
 	player.process_mode = Node.PROCESS_MODE_INHERIT
 	player.visible = true
 	player.collision_layer = 1 << 2
@@ -2290,6 +2347,11 @@ func restore_vehicle_view() -> void:
 	if driving != "":
 		var car: Car = cars.get(driving)
 		if car:
+			rig.vehicle_seated = car.visual != null and car.visual.has_clear_cabin
+			if rig.vehicle_seated:
+				_update_driver_pose(car)
+				rig.process_mode = Node.PROCESS_MODE_PAUSABLE
+				player.visible = true
 			drive_input.car = car
 			drive_input.enabled = true
 			chase.set_target(car, true)
@@ -2298,6 +2360,12 @@ func restore_vehicle_view() -> void:
 	elif skyport_play and skyport_play.piloting != "":
 		skyport_play.cam.cam.make_current()
 		world.set_viewer(skyport_play.cam)
+
+
+func _update_driver_pose(car: Car) -> void:
+	player.global_position = car.visual.body.to_global(car.visual.driver_seat)
+	rig.vehicle_facing = -car.global_basis.z
+	rig.vehicle_steer = car.steer
 
 
 func _track_driving(dt: float) -> void:
@@ -2312,7 +2380,10 @@ func _track_driving(dt: float) -> void:
 		_km_acc = 0.0
 	vfx.wet_tyre_spray(c, atmosphere.wetness, dt, _spray_on_pavement)
 	# Keep the hero with the car (streaming, interaction distances).
-	player.global_position = p + Vector3.UP * 1.5
+	if rig.vehicle_seated:
+		_update_driver_pose(c)
+	else:
+		player.global_position = p + Vector3.UP * 1.5
 	if c.in_water and c.water_t > 2.0:
 		_recover_car(c)
 	elif c.upside_time > 2.0:
@@ -2504,7 +2575,8 @@ func unstick() -> String:
 		return ""
 	if not gps.ready_net():
 		return "Finding the roads…"
-	var here := player.global_position if driving == "" else (cars[driving] as Node3D).global_position
+	var dc_u: Car = cars.get(driving) if driving != "" else null
+	var here := dc_u.global_position if dc_u and is_instance_valid(dc_u) else player.global_position
 	var near := {}
 	for r: float in [40.0, 120.0, 400.0]:
 		near = gps.net.nearest(here, Vector3.ZERO, r, -1, true)
@@ -2962,19 +3034,39 @@ func save_game() -> void:
 		if c and is_instance_valid(c):
 			v["pos"] = [c.global_position.x, c.global_position.y, c.global_position.z]
 			v["yaw"] = c.global_basis.get_euler().y
+	var yaw := view_yaw()
 	var d := {"empire": empire.to_dict(), "player": [player.global_position.x, player.global_position.y,
-		player.global_position.z, camera.view_yaw()], "driving": driving, "saved_at": Time.get_datetime_string_from_system()}
+		player.global_position.z, yaw], "driving": driving, "saved_at": Time.get_datetime_string_from_system()}
 	if driving != "":
-		var c2: Car = cars[driving]
-		var side := c2.global_transform * Vector3(-c2.spec["size"].x * 0.5 - 0.9, 0.9, 0.0)
-		d["player"] = [side.x, side.y, side.z, camera.view_yaw()]
-		if empire.vehicle(driving).get("test", false):
+		var c2: Car = cars.get(driving)
+		if c2 and is_instance_valid(c2):
+			var is_test_car := bool(empire.vehicle(driving).get("test", false))
+			if is_test_car:
+				d["driving"] = ""
+				if skyport_play and skyport_play._test_return != Vector3.INF:
+					var ret: Vector3 = skyport_play._test_return + Vector3.UP + SkyportIsland.wd(Vector3(0, 0, 3.0))
+					d["player"] = [ret.x, ret.y, ret.z, yaw]
+				else:
+					var side := c2.global_transform * Vector3(-c2.spec["size"].x * 0.5 - 0.9, 0.9, 0.0)
+					d["player"] = [side.x, side.y, side.z, yaw]
+			else:
+				var side := c2.global_transform * Vector3(-c2.spec["size"].x * 0.5 - 0.9, 0.9, 0.0)
+				d["player"] = [side.x, side.y, side.z, yaw]
+		else:
 			d["driving"] = ""
 	elif skyport_play and skyport_play.piloting != "":
 		var cr2: Craft = skyport_play.crafts.get(skyport_play.piloting)
-		if cr2:
+		var is_test_craft := bool(empire.vehicle(skyport_play.piloting).get("test", false))
+		if is_test_craft:
+			if skyport_play._test_return != Vector3.INF:
+				var ret2: Vector3 = skyport_play._test_return + Vector3.UP + SkyportIsland.wd(Vector3(0, 0, 3.0))
+				d["player"] = [ret2.x, ret2.y, ret2.z, yaw]
+			else:
+				var sp := _start_point()
+				d["player"] = [sp.x, sp.y, sp.z, yaw]
+		elif cr2 and is_instance_valid(cr2):
 			var side2 := skyport_play.saved_pilot_point(cr2)
-			d["player"] = [side2.x, side2.y + 1.0, side2.z, camera.view_yaw()]
+			d["player"] = [side2.x, side2.y + 1.0, side2.z, yaw]
 	var err := SafeSave.write(save_path, d)
 	if err != "":
 		push_warning("WORLDSTATE: save failed – " + err)
@@ -3027,6 +3119,7 @@ func load_game() -> bool:
 		return false
 	if SafeSave.last_source == "backup" and ui:
 		ui.toast.call_deferred("Your last save was damaged – loaded the one before it.", "bad")
+	_reset_vehicle_state()
 	empire = Empire.from_dict(d["empire"])
 	empire.market = _market()
 	if not empire.flags.has("start_unit"):
@@ -3052,6 +3145,12 @@ func load_game() -> bool:
 	for id in interiors.keys():
 		rebuild_interior(id)
 	return true
+
+
+func _exit_tree() -> void:
+	if _cloud_sync.is_valid() and get_tree() and get_tree().process_frame.is_connected(_cloud_sync):
+		get_tree().process_frame.disconnect(_cloud_sync)
+	_cloud_sync = Callable()
 
 
 func _notification(what: int) -> void:

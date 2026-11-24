@@ -65,6 +65,12 @@ var _next := 35.0
 var _life := 0.0
 var _over_t := 0.0
 var _caught_t := 0.0
+var _pin_t := 0.0
+var _fail_count := 0
+var _last_fail_pos := Vector3.INF
+var _last_flow_pos := Vector3.INF
+var _last_flow_t := -100.0
+var _idle_t := 0.0
 var _trail := PackedVector3Array()
 var _route_lane := -1
 var _sirens: Array[AudioStreamPlayer3D] = []
@@ -107,16 +113,27 @@ func _physics_process(dt: float) -> void:
 	var fp: Vector3 = focus_fn.call()
 	match state:
 		"idle":
+			_idle_t += dt
 			if _force:
 				_next = minf(_next, 2.0)
 			elif not enabled:
 				return
+			# If the player moved well away from the last failed spot, reset backoff.
+			if _fail_count > 0 and _last_fail_pos.x < INF and fp.distance_squared_to(_last_fail_pos) > 80.0 * 80.0:
+				_fail_count = 0
+				_next = minf(_next, 8.0)
 			_next -= dt
 			if _next <= 0.0:
 				if _try_start(_force):
 					_force = false
+					_fail_count = 0
 				else:
-					_next = 2.0 if _force else 6.0   # try again shortly somewhere else
+					if _force:
+						_next = 2.0
+					else:
+						_fail_count += 1
+						_last_fail_pos = fp
+						_next = minf(6.0 * pow(2.0, float(mini(_fail_count, 4))), 60.0)
 		"chase":
 			_life += dt
 			_chase(dt, fp)
@@ -162,10 +179,17 @@ func _process(dt: float) -> void:
 
 func _try_start(forced: bool) -> bool:
 	var fp: Vector3 = focus_fn.call()
+	# Fast guard: skip full-graph flow_field if player is off the road graph or
+	# we recently ran a failed flow_field from essentially the same spot.
+	if net.nearest(fp, Vector3.ZERO, 90.0).is_empty():
+		return false
+	if not forced and _last_flow_pos.x < INF and _idle_t - _last_flow_t < 20.0 \
+			and fp.distance_squared_to(_last_flow_pos) < 60.0 * 60.0:
+		return false
 	var space := get_world_3d().direct_space_state
-	# The chase comes TO the player: its route runs down the road graph
-	# toward them (NEVER STOP's flow field), past them, then anywhere.
-	var field := net.flow_field(fp)
+	# Collect valid physical spawn candidates BEFORE paying for flow_field().
+	var candidates: Array = []
+	var gap := 24.0
 	for attempt in 16:
 		var ang := _rng.randf() * TAU
 		var d := _rng.randf_range(SPAWN_MIN, SPAWN_MAX) * (0.75 if forced else 1.0)
@@ -175,7 +199,6 @@ func _try_start(forced: bool) -> bool:
 			continue
 		var lane: int = n["lane"]
 		var s: float = n["s"]
-		var gap := 24.0
 		if s < gap * police_count + 4.0 or s > float(net.lane_len[lane]) - 30.0:
 			continue
 		var spots: Array = [net.lane_point(lane, s)]
@@ -186,8 +209,19 @@ func _try_start(forced: bool) -> bool:
 			if (not forced and _seen(p)) or not _ground(space, p):
 				ok = false
 				break
-		if not ok:
-			continue
+		if ok:
+			candidates.append([lane, s, spots])
+	if candidates.is_empty():
+		return false
+	# The chase comes TO the player: its route runs down the road graph
+	# toward them (NEVER STOP's flow field), past them, then anywhere.
+	_last_flow_pos = fp
+	_last_flow_t = _idle_t
+	var field := net.flow_field(fp)
+	for cand: Array in candidates:
+		var lane: int = cand[0]
+		var s: float = cand[1]
+		var spots: Array = cand[2]
 		var route := net.route(field, lane, s, 520.0)
 		var end := route[route.size() - 1] if route.size() > 0 else Vector3.INF
 		if route.size() < 20 or Vector2(end.x - fp.x, end.z - fp.z).length() > 60.0:
@@ -226,6 +260,8 @@ func _begin(spots: Array, dir: Vector3, route: PackedVector3Array) -> void:
 	_trail = PackedVector3Array([spots[min(2, spots.size() - 1)], spots[1], spots[0]])
 	_life = 0.0
 	_caught_t = 0.0
+	_pin_t = 0.0
+	_fail_count = 0
 	reason = ""
 	state = "chase"
 	started.emit(spots[0])
@@ -308,10 +344,19 @@ func _chase(dt: float, fp: Vector3) -> void:
 				pd.set_path(_trail_from(c.global_position))
 		pd.update(dt, space)
 	# Endings.
-	if (fp - sp).length() < _touch_radius() and suspect.speed > 2.0 \
-			and (not can_takedown.is_valid() or bool(can_takedown.call())):
-		_takedown()
-		return
+	var td_ok := not can_takedown.is_valid() or bool(can_takedown.call())
+	if td_ok:
+		if _touched_suspect(fp):
+			_takedown()
+			return
+		# Full-stop pin takedown: player (alone or with police) traps the suspect.
+		var pin_close := (fp - sp).length() <= 6.2 and absf(fp.y - sp.y) < 3.5 and suspect.speed < 2.5
+		_pin_t = _pin_t + dt if pin_close else maxf(_pin_t - dt * 2.0, 0.0)
+		if _pin_t >= 0.8:
+			_takedown()
+			return
+	else:
+		_pin_t = maxf(_pin_t - dt * 2.0, 0.0)
 	if suspect.disabled:
 		_finish("crashed")
 		return
@@ -337,11 +382,24 @@ func _chase(dt: float, fp: Vector3) -> void:
 		clear()
 
 
-## How close the player has to get to the getaway car to stop it: a car's
-## half length plus the player's reach (on foot / swinging this is landing
-## on it; in a car it's the bodies touching).
+## How close the player has to get to the getaway car to stop it: bumper-to-
+## bumper car hulls sit ~4.6-5.2 m centre-to-centre (and landing on the roof
+## from a swing is well within this radius).
 func _touch_radius() -> float:
-	return 3.4
+	return 5.2
+
+
+## True when the player (car or hero) makes bumper-to-bumper / roof contact
+## with the suspect without false-triggering from an adjacent traffic lane.
+func _touched_suspect(fp: Vector3) -> bool:
+	var sp := suspect.global_position
+	if absf(fp.y - sp.y) >= 3.5:
+		return false
+	if (fp - sp).length() > _touch_radius():
+		return false
+	var lp := suspect.global_transform.affine_inverse() * fp
+	var sz: Vector3 = suspect.spec.get("size", Vector3(2.0, 1.5, 4.6))
+	return absf(lp.x) <= sz.x * 0.5 + 2.4 and absf(lp.z) <= sz.z * 0.5 + 3.0
 
 
 ## Stops the getaway car on the spot (a ram, a hero landing on it).
@@ -401,6 +459,8 @@ func clear() -> void:
 	_air.clear()
 	_sirens.clear()
 	_trail = PackedVector3Array()
+	_pin_t = 0.0
+	_fail_count = 0
 	state = "idle"
 	_next = _rng.randf_range(interval.x, interval.y)
 

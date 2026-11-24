@@ -26,6 +26,7 @@ var _pool_i := 0
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_ensure_bus("Music")
 	_ensure_bus("SFX")
 	for name in LOOPS:
@@ -55,6 +56,11 @@ func _ready() -> void:
 		_pool.append(p)
 	apply_volumes()
 	Settings.changed.connect(apply_volumes)
+
+
+func _exit_tree() -> void:
+	if is_instance_valid(Settings) and Settings.changed.is_connected(apply_volumes):
+		Settings.changed.disconnect(apply_volumes)
 
 
 func _ensure_bus(name: String) -> void:
@@ -122,7 +128,8 @@ func attach_weather(a: Atmosphere) -> void:
 	atmosphere = a
 	a.thunder.connect(func(delay: float, strength: float):
 		get_tree().create_timer(delay).timeout.connect(func():
-			play("thunder", linear_to_db(0.35 + 0.5 * strength), randf_range(0.85, 1.1))))
+			if is_instance_valid(self):
+				play("thunder", linear_to_db(0.35 + 0.5 * strength), randf_range(0.85, 1.1))))
 
 
 func _on_landed(speed: float, _street: bool) -> void:
@@ -149,49 +156,71 @@ func play(name: String, db := 0.0, pitch := 1.0) -> void:
 ## WorldState supplies shelter from its live cabin and interior state.
 var shelter := 0.0
 var _shelter_blend := 0.0
+var _pause_blend := 0.0
+
+
+func _active_speed() -> float:
+	var parent := get_parent()
+	if parent != null and parent.has_method("vehicle_node"):
+		var v: Node3D = parent.call("vehicle_node")
+		if v != null and is_instance_valid(v):
+			var vspd = v.get("speed")
+			if vspd != null:
+				return absf(float(vspd))
+			if v is CharacterBody3D:
+				return (v as CharacterBody3D).velocity.length()
+			if v is RigidBody3D:
+				return (v as RigidBody3D).linear_velocity.length()
+	return player.speed()
 
 
 func _process(dt: float) -> void:
 	if player == null:
 		return
-	var spd := player.speed()
+	var paused := get_tree().paused
+	var spd := _active_speed()
 	var k := 1.0 - exp(-6.0 * dt)
 	_shelter_blend = lerpf(_shelter_blend, shelter, 1.0 - exp(-3.5 * dt))
+	_pause_blend = lerpf(_pause_blend, 1.0 if paused else 0.0, 1.0 - exp(-8.0 * dt))
 	var outside_gain := lerpf(1.0, 0.27, _shelter_blend)
+	var pause_env := lerpf(1.0, 0.32, _pause_blend)
+	var pause_wind := lerpf(1.0, 0.1, _pause_blend)
 	var wind: AudioStreamPlayer = _loops.get("wind_loop")
 	if wind:
 		var w := smoothstep(3.0, 50.0, spd)
-		wind.volume_db = lerpf(wind.volume_db, linear_to_db(maxf(w * 0.9, 0.003)), k)
+		wind.volume_db = lerpf(wind.volume_db, linear_to_db(maxf(w * 0.9 * outside_gain * pause_wind, 0.003)), k)
 		wind.pitch_scale = lerpf(wind.pitch_scale, 0.75 + 0.6 * w, k)
 	var rope: AudioStreamPlayer = _loops.get("rope_tension_loop")
 	if rope:
-		var load_ := clampf(player.s.tension / 55.0, 0.0, 1.0) if player.s.attached and player.s.taut else 0.0
+		var load_ := clampf(player.s.tension / 55.0, 0.0, 1.0) if (not paused and player.s.attached and player.s.taut) else 0.0
 		rope.volume_db = lerpf(rope.volume_db, linear_to_db(maxf(load_ * 0.55, 0.002)), 1.0 - exp(-12.0 * dt))
 		rope.pitch_scale = 0.85 + 0.4 * load_
 	var amb: AudioStreamPlayer = _loops.get("city_ambience")
 	if amb:
 		# The street hum fades as you climb above the rooftops.
 		var height := clampf(player.height_above_ground() / 120.0, 0.0, 1.0)
-		amb.volume_db = lerpf(amb.volume_db, linear_to_db((0.55 - 0.35 * height) * outside_gain), k)
+		amb.volume_db = lerpf(amb.volume_db, linear_to_db(maxf((0.55 - 0.35 * height) * outside_gain * pause_env, 0.002)), k)
 	var traffic: AudioStreamPlayer = _loops.get("traffic_loop")
 	if traffic:
 		# Street-level traffic: loud on the pavement, gone above the rooftops.
 		var low := 1.0 - clampf(player.height_above_ground() / 60.0, 0.0, 1.0)
-		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4 * outside_gain, 0.002)), k)
+		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4 * outside_gain * pause_env, 0.002)), k)
 	var rain: AudioStreamPlayer = _loops.get("rain_loop")
 	if rain:
 		var r: float = atmosphere.w["rain"] if atmosphere else 0.0
-		rain.volume_db = lerpf(rain.volume_db, linear_to_db(maxf(r * 0.5 * outside_gain, 0.001)), k)
-	_horn_in -= dt
-	if _horn_in <= 0.0:
-		_horn_in = randf_range(8.0, 24.0)
-		var above := player.height_above_ground()
-		if above < 50.0:
-			play("horn", linear_to_db((0.12 + 0.18 * (1.0 - above / 50.0)) * outside_gain), randf_range(0.9, 1.12))
-	_footsteps(dt)
+		rain.volume_db = lerpf(rain.volume_db, linear_to_db(maxf(r * 0.5 * outside_gain * pause_env, 0.001)), k)
+	if not paused:
+		_horn_in -= dt
+		if _horn_in <= 0.0:
+			_horn_in = randf_range(8.0, 24.0)
+			var above := player.height_above_ground()
+			if above < 50.0:
+				play("horn", linear_to_db((0.12 + 0.18 * (1.0 - above / 50.0)) * outside_gain), randf_range(0.9, 1.12))
+		_footsteps(dt)
 	var music: AudioStreamPlayer = _loops.get("music_loop")
 	if music:
-		music.volume_db = lerpf(music.volume_db, -9.0, 1.0 - exp(-0.5 * dt))
+		var target_db := lerpf(-9.0, -16.0, _pause_blend)
+		music.volume_db = lerpf(music.volume_db, target_db, 1.0 - exp(-(4.0 if paused else 0.8) * dt))
 
 
 ## One step per stride while running on the ground; the sound follows the

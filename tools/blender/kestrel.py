@@ -590,9 +590,9 @@ def mirror_fn(fn):
 def mats():
     M = kit.mat
     m = {
-        "paint": M("paint", (0.8, 0.8, 0.79), 0.25, 0.3),
-        "glass_clear": M("glass_clear", (0.06, 0.07, 0.08), 0.03, 0.0),
-        "lens": M("lens", (0.9, 0.92, 0.95), 0.02, 0.0),
+        "paint": M("paint", (0.76, 0.77, 0.76), 0.31, 0.3),
+        "glass_clear": M("glass_clear", (0.054, 0.072, 0.076), 0.065, 0.0),
+        "lens": M("lens", (0.84, 0.88, 0.91), 0.055, 0.0),
         "lens_red": M("lens_red", (0.45, 0.02, 0.02), 0.05, 0.0),
         "rubber": M("rubber", (0.02, 0.02, 0.022), 0.75),
         "plastic": M("plastic", (0.035, 0.035, 0.038), 0.62),
@@ -719,6 +719,12 @@ def head_lamp(surf, body, m, out, poly):
             return
         p, n = c[0], navg
         if kind == "projector":
+            if SEALED:
+                # A stepped optic reads from the road camera at a fraction
+                # of the triangles of the owned car's open lamp assembly.
+                out.append(disc_on("optic_trim", p - n * 0.04, n, r * 1.22, 0.012, m["reflector"], 14))
+                out.append(disc_on("optic", p - n * 0.026, n, r * 0.84, 0.009, m["head"], 14))
+                return
             out.append(disc_on("bowl", p - n * 0.068, n, r * 1.25, 0.012, m["reflector"], 28))
             out.append(disc_on("shroud", p - n * 0.06, n, r * 1.08, 0.038, m["trim"], 28))
             out.append(disc_on("shroud_ring", p - n * 0.024, n, r * 1.14, 0.004, m["chrome"], 28))
@@ -744,8 +750,12 @@ def head_lamp(surf, body, m, out, poly):
                 out.append(disc_on("facet", p - n * (0.066 - k * 0.012), n, rr, 0.006, m["reflector"], 10))
             out.append(disc_on("bulb", p - n * 0.05, n, r * 0.16, 0.012, m["head"], 12))
 
-    module(0.66, 0.42, 0.034, "projector")
-    module(0.34, 0.42, 0.03, "reflector")
+    # Scale optics to the actual lamp face so they stay behind the gasket
+    # on both shallow saloon blades and the deeper truck housings.
+    lamp_height = sum(poly[i][1] - poly[i - 2][1] for i in (2, 3)) * 0.5
+    optic_radius = min(0.042, max(0.015, lamp_height * 0.31))
+    module(0.66, 0.42, optic_radius, "projector")
+    module(0.34, 0.42, optic_radius * 0.79, "reflector")
     # Chrome bezel strip between the modules and the light guide.
     bez = [at(i / 18, 0.72) for i in range(2, 17)]
     bez = [c[0] - navg * 0.028 for c in bez if c]
@@ -755,7 +765,7 @@ def head_lamp(surf, body, m, out, poly):
     top = [at(i / 18, 0.86) for i in range(17, 1, -1)] + [at(0.1, t / 8) for t in (6, 5, 4, 3)]
     top = [c[0] - navg * 0.02 for c in top if c]
     if len(top) > 3:
-        out.append(tube_path("drl", top, 0.009, m["head"], 8))
+        out.append(tube_path("drl", top, min(0.007, optic_radius * 0.26), m["head"], 6))
     ind = [at(i / 18, 0.14) for i in range(9, 18)]
     ind = [c[0] - navg * 0.022 for c in ind if c]
     if len(ind) > 2:

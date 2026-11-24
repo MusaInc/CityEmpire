@@ -305,16 +305,15 @@ class Swatch:
 							draw_arc(c, s * 0.42, 0, TAU, 24, Color(1, 1, 1, 0.25), 2.0, true)
 
 
-## The City Swing wordmark (assets/brand/wordmark_stacked.png, rendered by
-## tools/brand/render.mjs). `k` = 1 is 470 px wide.
+## The WorldState wordmark. `k` = 1 is 470 px wide.
 class Logo:
 	extends TextureRect
 
 	func _init(k := 1.0) -> void:
-		texture = load("res://assets/brand/wordmark_stacked.png")
+		texture = preload("res://assets/brand/wordmark.png")
 		expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
-		var aspect := texture.get_height() / float(texture.get_width()) if texture else 0.42
+		var aspect := texture.get_height() / float(texture.get_width())
 		custom_minimum_size = Vector2(470.0, 470.0 * aspect) * k
 		size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		mouse_filter = Control.MOUSE_FILTER_IGNORE

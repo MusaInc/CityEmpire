@@ -27,7 +27,7 @@ const HEEL := 0.066
 const SETTLE_DIST := 0.15
 const SETTLE_TIME := 0.3
 const START_SPEED := 0.35   # m/s: below this (both feet down) the body stands
-const STAND_W := 0.1       # standing feet: half the stance width (m)
+const STAND_W := 0.088      # standing feet: half the stance width (m)
 
 
 class Foot:
@@ -81,6 +81,10 @@ var dir := Vector3.FORWARD  # travel direction (horizontal)
 var _settle_side := ""
 var _stand_t := 0.0
 var _prev_speed := 0.0
+var _prev_vh := Vector3.ZERO
+var _accel_h := Vector3.ZERO
+var _peak_speed := 0.0
+var _stop_grace := 0.0
 var _jolt := 0.0          # s: just stopped dead (wall, collision): feet come straight down
 
 
@@ -108,6 +112,10 @@ func reset() -> void:
 	active = false
 	moving = false
 	_settle_side = ""
+	_prev_vh = Vector3.ZERO
+	_accel_h = Vector3.ZERO
+	_peak_speed = 0.0
+	_stop_grace = 0.0
 
 
 ## Starts the gait from where the feet are now (landing, end of a get-up,
@@ -124,6 +132,10 @@ func begin(ankles: Dictionary, facing: Vector3, ground: Callable, vel: Vector3) 
 	speed = vh.length()
 	_style(speed)
 	_prev_speed = speed
+	_prev_vh = vh
+	_accel_h = Vector3.ZERO
+	_peak_speed = speed
+	_stop_grace = 0.0
 	_jolt = 0.0
 	_stand_t = 0.0
 	moving = speed > START_SPEED
@@ -201,11 +213,16 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 		crouch: float) -> void:
 	var vh := Vector3(vel.x, 0.0, vel.z)
 	speed = vh.length()
+	var raw_acc := (vh - _prev_vh) / maxf(dt, 0.001)
+	_prev_vh = vh
+	_accel_h = _accel_h.lerp(raw_acc.limit_length(25.0), 1.0 - exp(-10.0 * dt))
 	# A collision kills the speed far faster than any braking (>40 m/s²).
 	if _prev_speed - speed > 40.0 * dt:
 		_jolt = 0.3
 	_jolt = maxf(_jolt - dt, 0.0)
 	_prev_speed = speed
+	if speed > START_SPEED * 0.6:
+		_peak_speed = maxf(_peak_speed * exp(-1.8 * dt), speed)
 	if speed > 0.3:
 		var nd := dir.lerp(vh / speed, 1.0 - exp(-14.0 * dt))
 		dir = nd.normalized() if nd.length() > 0.2 else vh / speed
@@ -222,6 +239,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 	var swinging: bool = not (feet["l"] as Foot).planted or not (feet["r"] as Foot).planted
 
 	# --- start / stop ----------------------------------------------------
+	var braking_plant := false
 	if not moving:
 		if speed > START_SPEED:
 			_start(centre, ground)
@@ -229,18 +247,29 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			_stand(dt, facing, right, centre, ground, hips)
 			return
 	elif speed < START_SPEED * 0.6:
-		# Stopped (or stopped dead – a wall): a foot still in the air is put
-		# straight down, then the stance tidies up with settle steps.
-		moving = false
-		_stand_t = 0.0
-		_stand(dt, facing, right, centre, ground, hips)
-		return
+		# When decelerating smoothly from a walk/run (not a wall collision), let any
+		# in-flight swing foot finish a grounded braking plant step before standing settle.
+		if swinging and _jolt <= 0.0 and _peak_speed > 0.9 and _stop_grace < 0.26:
+			braking_plant = true
+			_stop_grace += dt
+			for sd in ["l", "r"]:
+				var bf: Foot = feet[sd]
+				if not bf.planted:
+					bf.rush = minf(bf.rush, 0.14)
+		else:
+			moving = false
+			_stop_grace = 0.0
+			_stand_t = 0.0
+			_stand(dt, facing, right, centre, ground, hips)
+			return
+	else:
+		_stop_grace = 0.0
 
 	# --- clock -----------------------------------------------------------
 	var steps := cadence(maxf(speed, 0.8))
 	if everyday:
 		steps = lerpf(1.62, 2.21, smoothstep(0.25, 2.0, speed)) + 1.83 * smoothstep(1.9, 6.4, speed)
-	freq = steps * 0.5
+	freq = maxf(steps * 0.5, 0.25)
 	var want_duty := lerpf(0.62, 0.43 if everyday else 0.38, run) - 0.1 * sprint
 	# Ground covered while a foot is down must fit the legs' reach.
 	var cover_max := reach_f + reach_b
@@ -251,7 +280,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 	# Walking lands well ahead (heel strike); running lands closer under the
 	# hips and pushes off further behind – no reaching, braking overstride.
 	var ahead := cover * lerpf(0.43 if everyday else reach_f / cover_max, 0.245 if everyday else 0.36, run)
-	var width := lerpf(0.083, 0.072, run) if everyday else lerpf(0.095, 0.035, run)
+	var width := lerpf(0.068, 0.056, run) if everyday else lerpf(0.095, 0.035, run)
 
 	for sd in ["l", "r"]:
 		var f: Foot = feet[sd]
@@ -276,8 +305,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				a += f.normal * (HEEL * sin(f.heel) + ANKLE_H * (cos(f.heel) - 1.0))
 				a -= f.heading * (ANKLE_H * sin(f.heel) + HEEL * (1.0 - cos(f.heel)))
 			f.cur = a
-			if not everyday or absf(f.heading.signed_angle_to(facing, Vector3.UP)) > 0.72:
-				_pivot(f, facing)
+			_pivot(f, facing, dt)
 			# Lift: the clock says so, or the body has run away from the foot
 			# (a sharp cut, a stop dead): then it's a step, never a skate or a
 			# leg hyper-extended behind the hip.
@@ -286,7 +314,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			var reach_limit := LEG_LEN + (0.043 if flat_support else 0.01)
 			var lost := a.distance_to(hip) > reach_limit or atan2(back, maxf(-rel.y, 0.05)) > 0.6 \
 				or Vector2(rel.x, rel.z).length() > LEG_LEN * 0.9
-			if u >= duty or lost:
+			if (u >= duty and not braking_plant) or lost:
 				f.planted = false
 				f.from = a
 				f.from_heading = f.heading
@@ -301,37 +329,57 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 		if not f.planted:
 			# Time left until this foot's touchdown (its phase wraps to 0). A
 			# foot that's late (forced lift, slowing clock) finishes quickly
-			# but still smoothly.
+			# but still smoothly without asymptotic hovering.
 			if u < f.last_u - 0.5:
 				f.due = true
+				f.rush = minf(f.rush, 0.06)
 			f.last_u = u
 			var left := 0.06 if f.due else (1.0 - u) / freq
-			if speed < (0.65 if everyday else 1.5) or _jolt > 0.0:
+			if _jolt > 0.0 or (not braking_plant and speed < (0.65 if everyday else 1.5)):
 				f.rush = minf(f.rush, 0.07 + 0.06 * minf(speed, 1.5))  # stopped dead mid-stride: come down now
 			if f.rush < INF:
 				f.rush -= dt
 				left = minf(left, f.rush)
 			left = maxf(left, dt)
 			f.w = clampf(f.w + (1.0 - f.w) * minf(dt / left, 1.0), 0.0, 1.0)
-			# Landing spot: where the hip will be at touchdown, plus half the
-			# stance ahead of it, out to this foot's side of the line.
+			# Landing spot: acceleration-aware hip prediction at touchdown, plus
+			# half the stance ahead of it, out to this foot's side of the line.
 			var side := right * f.sgn * width
-			var land := centre + vh * left + dir * ahead * clampf(speed / 1.0, 0.0, 1.0) + side
+			var pred_t := minf(left, 0.45)
+			var acc_eff := _accel_h
+			if speed > 0.05:
+				var v_dir := vh / speed
+				var a_along := acc_eff.dot(v_dir)
+				if a_along < 0.0 and speed + a_along * pred_t < 0.0:
+					# Braking predicts a stop rather than reversing backwards.
+					acc_eff -= v_dir * (a_along + speed / maxf(pred_t, 0.001))
+			var disp := vh * pred_t + 0.5 * acc_eff * pred_t * pred_t
+			var v_end := vh + acc_eff * pred_t
+			var end_speed := v_end.length()
+			var end_dir := v_end / end_speed if end_speed > 0.25 else dir
+			var brake_ahead := clampf(_peak_speed * 0.04, 0.04, 0.15) if braking_plant else 0.0
+			var step_ahead := maxf(ahead * clampf(end_speed / maxf(speed, 0.6), 0.15, 1.15) * clampf(speed / 1.0, 0.0, 1.0), brake_ahead)
+			var land := centre + disp + end_dir * step_ahead + side
 			land.y = f.from.y
 			# Straddling a kerb / step edge: move on until the whole sole is on
 			# one level (on the step going up, clear of the edge going down).
 			var hit := {}
 			for i in 4:
-				hit = _sole_hit(ground, land + Vector3.UP * 0.3, dir, everyday)
+				hit = _sole_hit(ground, land + Vector3.UP * 0.3, end_dir, everyday)
 				var mid: Dictionary = ground.call(land + Vector3.UP * 0.3)
 				if hit.is_empty() or mid.is_empty() or (hit.position as Vector3).y - (mid.position as Vector3).y < 0.03:
 					break
-				land += dir * 0.07
+				land += end_dir * 0.07
 			if not hit.is_empty():
 				land.y = (hit.position as Vector3).y + ANKLE_H
 				f.target_n = hit.normal
+			var sharp := _accel_h.length() > 2.5 or braking_plant
 			if f.w < 0.85 or f.target == Vector3.ZERO:
 				f.target = land  # (frozen for the last part: the foot comes down where it's going)
+			elif sharp and f.w < 0.92:
+				# Lightly adjust late in swing during sharp turns/braking to prevent skate.
+				var adj := (1.0 - smoothstep(0.85, 0.92, f.w)) * (1.0 - exp(-12.0 * dt))
+				f.target = f.target.lerp(land, adj)
 			# Horizontal: an ease from lift to landing with zero world speed at
 			# both ends. Relative to the moving hip that is the runner's path:
 			# the foot falls back behind as it lifts, passes under the hip
@@ -398,8 +446,9 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				travel = (dir + right * f.sgn * 0.08).normalized()
 			f.heading = _yaw_to(f.from_heading, travel, e)
 			f.toe = 0.0
-			if (f.due or f.rush < INF) and f.w > 0.98:
-				# Touchdown. (Brought down early: the clock follows this foot.)
+			if f.w >= 0.985 or ((f.due or f.rush < INF) and f.w > 0.98):
+				# Touchdown. (Brought down early or freq rose before wrap: align the clock
+				# so the newly planted foot begins stance cleanly without immediately lifting.)
 				if not f.due:
 					phase = 0.0 if f.side == "l" else 0.5
 				# (On the spot the landing search chose – never re-probed onto a
@@ -476,7 +525,8 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 			f.from_heading = f.heading
 			f.w = 0.0
 			_settle_side = sd
-	if _settle_side == "" and _stand_t > 0.12:
+	var settle_delay := 0.07 if _peak_speed > 0.9 else 0.12
+	if _settle_side == "" and _stand_t > settle_delay:
 		var worst := ""
 		var far := SETTLE_DIST
 		for sd in ["l", "r"]:
@@ -498,15 +548,18 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 			f.from_heading = f.heading
 			f.w = 0.0
 			_settle_side = worst
+		else:
+			_peak_speed = move_toward(_peak_speed, 0.0, dt * 4.0)
 	for sd in ["l", "r"]:
 		var f: Foot = feet[sd]
 		if f.planted:
-			f.toe = move_toward(f.toe, 0.0, dt * 3.0)
-			f.heel = move_toward(f.heel, 0.0, dt * 3.0)
+			f.toe = move_toward(f.toe, 0.0, dt * 4.0)
+			f.heel = move_toward(f.heel, 0.0, dt * 4.0)
 			f.cur = _roll(f.pos, f.heading, f.normal, f.toe)
 			f.stance_u = 0.5
 			continue
-		f.w = minf(f.w + dt / (0.1 if f.quick else SETTLE_TIME), 1.0)
+		var step_dur := (0.10 if _jolt > 0.0 else 0.16) if f.quick else SETTLE_TIME
+		f.w = minf(f.w + dt / step_dur, 1.0)
 		var rest := _standing_spot(centre, facing, right, f)
 		rest.y = f.from.y
 		var hit: Dictionary = _sole_hit(ground, rest + Vector3.UP * 0.3, facing, true) if everyday \
@@ -515,11 +568,11 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 			rest.y = (hit.position as Vector3).y + ANKLE_H
 		var e := smoothstep(0.0, 1.0, f.w)
 		var p := f.from.lerp(rest, e)
-		p.y = lerpf(f.from.y, rest.y, e) + sin(PI * f.w) * (0.03 if f.quick else 0.07)
+		p.y = lerpf(f.from.y, rest.y, e) + sin(PI * f.w) * (0.035 if f.quick else 0.06)
 		f.cur = p
 		var toe_out := facing.rotated(Vector3.UP, -.105 * f.sgn) if everyday else facing
 		f.heading = _yaw_to(f.from_heading, toe_out, e)
-		f.pitch = 0.15 * sin(PI * f.w)
+		f.pitch = 0.14 * sin(PI * f.w)
 		f.world_k = 1.0
 		f.toe = 0.0
 		if f.w >= 1.0:
@@ -527,6 +580,7 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 			f.settle = false
 			_settle_side = ""
 			_stand_t = 0.0
+			_peak_speed = move_toward(_peak_speed, 0.0, 1.2)
 
 
 func _standing_spot(centre: Vector3, facing: Vector3, right: Vector3, foot: Foot) -> Vector3:
@@ -534,13 +588,23 @@ func _standing_spot(centre: Vector3, facing: Vector3, right: Vector3, foot: Foot
 	return spot + facing * foot.sgn * 0.025 if everyday else spot
 
 
-## A locked foot keeps its heading while the body turns over it, pivoting on
-## the ball only past ~35° of twist.
-func _pivot(f: Foot, facing: Vector3) -> void:
-	var face := (facing - f.normal * facing.dot(f.normal)).normalized()
+## A locked foot keeps its heading while the body turns over it, smoothly
+## easing yaw realignment past ~35° of twist instead of snapping.
+func _pivot(f: Foot, facing: Vector3, dt: float) -> void:
+	var proj := facing - f.normal * facing.dot(f.normal)
+	if proj.length_squared() < 1e-6:
+		return
+	var face := proj.normalized()
 	var ang := f.heading.signed_angle_to(face, f.normal)
-	if absf(ang) > 0.6:
-		f.heading = f.heading.rotated(f.normal, ang - signf(ang) * 0.6)
+	var limit := 0.62 if everyday else 0.60
+	if absf(ang) > limit:
+		var excess := ang - signf(ang) * limit
+		var step := excess * (1.0 - exp(-12.0 * dt))
+		# Hard anatomical ceiling so extreme whip turns never hyper-twist the ankle.
+		var hard := 0.85
+		if absf(ang - step) > hard:
+			step = ang - signf(ang) * hard
+		f.heading = f.heading.rotated(f.normal, step)
 
 
 ## How far forward (+1) / back (-1) the left leg is in the cycle; the right

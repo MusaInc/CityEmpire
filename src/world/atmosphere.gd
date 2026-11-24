@@ -169,8 +169,19 @@ func configure(args: Dictionary, world: Node) -> void:
 	elif live:
 		_from_settings(true)
 	if live and _settings():
-		_settings().changed.connect(func(): _from_settings(false))
+		if not _settings().changed.is_connected(_on_settings_changed):
+			_settings().changed.connect(_on_settings_changed)
 	_apply(0.0, true)
+
+
+func _exit_tree() -> void:
+	var st := _settings()
+	if st and st.changed.is_connected(_on_settings_changed):
+		st.changed.disconnect(_on_settings_changed)
+
+
+func _on_settings_changed() -> void:
+	_from_settings(false)
 
 
 ## The Settings autoload (looked up, not named: tool scripts run without it).
@@ -268,7 +279,7 @@ func _apply(dt: float, instant: bool) -> void:
 		sun.rotation_degrees = Vector3(-maxf(el, 1.5), ang.y, 0.0)
 		sun.light_color = _ramp(el, [[0.0, Color(1.0, 0.5, 0.26)], [8.0, Color(1.0, 0.72, 0.48)],
 			[25.0, Color(1.0, 0.89, 0.76)], [60.0, Color(1.0, 0.97, 0.90)]])
-		sun.light_energy = day_light * _rampf(el, [[0.0, 1.3], [10.0, 1.65], [25.0, 1.85], [60.0, 1.95]])
+		sun.light_energy = day_light * _rampf(el, [[0.0, 1.35], [10.0, 1.75], [25.0, 2.02], [60.0, 2.14]])
 		sky_mat.set_shader_parameter("sun_glow", 1.0)
 		sky_mat.set_shader_parameter("disc_size", 0.999989)
 		sky_mat.set_shader_parameter("disc_k", 6.0)
@@ -342,8 +353,8 @@ func _apply(dt: float, instant: bool) -> void:
 	env.ambient_light_energy = _rampf(el, [[-15.0, 0.46], [-4.0, 0.49], [2.0, 0.57], [20.0, 0.67]]) \
 		* (1.0 + 0.16 * overcast + 0.08 * hz * day_light) + fl * 2.0
 	var direct_daylight := day_light * (1.0 - overcast)
-	env.ambient_light_energy *= 1.0 - 0.12 * direct_daylight
-	env.ambient_light_sky_contribution = 0.22 + 0.14 * direct_daylight
+	env.ambient_light_energy *= 1.0 - 0.24 * direct_daylight
+	env.ambient_light_sky_contribution = 0.28 + 0.20 * direct_daylight
 	# The non-sky share: light bounced off sunlit stone (warm-neutral by day,
 	# dusky at sunset, moonlit blue at night).
 	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
@@ -360,9 +371,9 @@ func _apply(dt: float, instant: bool) -> void:
 	# silhouette, the far shore a shape in the glare – background buildings
 	# read as far away instead of a flat cut-out against the sky.
 	var hk := lerpf(1.0, 0.55, hz)
-	env.fog_depth_begin = lerpf(70.0, 12.0, fog) * lerpf(1.0, 0.6, hz) * (1.0 + 0.8 * alt * (1.0 - fog))
-	env.fog_depth_end = lerpf(1350.0, 520.0, fog) * hk * (1.0 + 0.45 * alt * (1.0 - fog))
-	env.fog_density = lerpf(lerpf(0.84, 0.9, hz), 0.97, fog) * (1.0 - 0.12 * alt * (1.0 - fog))
+	env.fog_depth_begin = lerpf(115.0, 14.0, fog) * lerpf(1.0, 0.6, hz) * (1.0 + 0.8 * alt * (1.0 - fog))
+	env.fog_depth_end = lerpf(1650.0, 520.0, fog) * hk * (1.0 + 0.45 * alt * (1.0 - fog))
+	env.fog_density = lerpf(lerpf(0.62, 0.84, hz), 0.97, fog) * (1.0 - 0.12 * alt * (1.0 - fog))
 	env.fog_depth_curve = lerpf(1.35, 1.1, hz)
 	env.fog_light_color = fog_col
 	env.fog_light_energy = lerpf(1.0, 0.55, night)

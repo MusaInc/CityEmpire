@@ -12,11 +12,13 @@ render_mode diffuse_burley;
 
 global uniform float wetness;
 global uniform float night;
+global uniform vec3 sky_horizon;
 uniform sampler2D asph_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
-uniform sampler2D pave_tex : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D pave_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
 uniform bool pbr_on = false;
 uniform bool skyport_grass = false;
 uniform vec3 airfield_edge = vec3(1.0, 0.0, 0.0);
+uniform vec4 wet_road_lamps[4];
 #include "res://src/world/shaders/pbr_detail.gdshaderinc"
 uniform float strip_w = 20.0;   // (per-strip half widths come in UV2.x)
 
@@ -277,7 +279,55 @@ void fragment() {
 	if (pbr_n.y > 0.0) {
 		NORMAL = normalize((VIEW_MATRIX * vec4(pbr_n, 0.0)).xyz);
 	}
-	ALBEDO = albedo * (1.0 - 0.22 * wetness);
-	ROUGHNESS = mix(clamp(rough, 0.3, 1.0), 0.35, wetness * 0.7);
-	SPECULAR = 0.5 + 0.2 * sheen;
+	// Gate rain gloss & puddles strictly to hard paved/asphalt/airfield surfaces
+	// so Skyport grass, beaches and coastal rock stay naturally matte in rain.
+	bool is_shore = UV2.y < -0.5;
+	bool is_road = !is_shore && (v_kind == 2.0 || v_kind == 3.0 || v_kind == 4.0 || v_kind == 7.0);
+	bool is_paved = !is_shore && (v_kind == 0.0 || v_kind == 5.0 || v_kind == 6.0 || is_road);
+	float surface_wet = is_paved ? wetness * (is_road ? 1.0 : 0.72) : 0.0;
+	float puddle = 0.0;
+	if (surface_wet > 0.001 && v_wn.y > 0.9) {
+		float basin = vnoise(p * 0.21 + 46.0) * 0.8 + vnoise(p * 0.7) * 0.2;
+		float th = mix(0.84, 0.58, surface_wet);
+		puddle = smoothstep(th, th + 0.09, basin) * smoothstep(0.24, 0.86, surface_wet)
+			* (1.0 - smoothstep(120.0, 260.0, v_dist));
+		albedo *= (1.0 - 0.26 * surface_wet) * (1.0 - 0.18 * puddle);
+		rough = mix(rough, is_road ? 0.36 : 0.48, surface_wet);
+		rough = mix(rough, 0.12, puddle);
+	} else if (!is_shore && v_kind == 1.0) {
+		albedo *= 1.0 - 0.11 * wetness;
+	}
+	vec3 emit = vec3(0.0);
+	if (is_road) {
+		emit = albedo * vec3(0.11, 0.14, 0.18) * night;
+		if (puddle > 0.02) {
+			float facing = clamp(dot(normalize(v_wn), normalize(CAMERA_POSITION_WORLD - v_world)), 0.0, 1.0);
+			float grazing = (1.0 - facing) * (1.0 - facing);
+			emit += sky_horizon * puddle * grazing * (0.03 + 0.035 * (1.0 - night));
+		}
+		if (surface_wet > 0.18 && night > 0.24 && v_dist < 58.0) {
+			float glint = 0.0;
+			for (int i = 0; i < 4; i++) {
+				vec4 lamp = wet_road_lamps[i];
+				float lh = lamp.y - v_world.y;
+				float eh = CAMERA_POSITION_WORLD.y - v_world.y;
+				if (lamp.w > 0.0 && lh >= 1.0 && eh >= 0.35) {
+					vec2 ray = lamp.xz - CAMERA_POSITION_WORLD.xz;
+					float sep = length(ray);
+					vec2 axis = ray / max(sep, 0.1);
+					vec2 mir = CAMERA_POSITION_WORLD.xz + ray * eh / (eh + lh);
+					vec2 dlt = v_world.xz - mir;
+					vec2 ell = vec2(dot(dlt, vec2(-axis.y, axis.x)) / 0.62, dot(dlt, axis) / (1.7 + 0.072 * sep));
+					glint += exp2(-1.4 * dot(ell, ell)) * (1.0 - smoothstep(27.0, 59.0, sep));
+				}
+			}
+			float fade = 1.0 - smoothstep(32.0, 58.0, v_dist);
+			emit += vec3(1.0, 0.65, 0.35) * min(glint, 1.0) * smoothstep(0.18, 0.9, surface_wet)
+				* fade * (0.07 + 0.16 * puddle) * smoothstep(0.24, 0.7, night);
+		}
+	}
+	ALBEDO = albedo;
+	ROUGHNESS = clamp(rough, 0.12, 1.0);
+	SPECULAR = is_paved ? (0.30 + 0.18 * surface_wet + 0.32 * puddle + 0.15 * sheen) : 0.25;
+	EMISSION = emit;
 }

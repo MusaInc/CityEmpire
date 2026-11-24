@@ -151,8 +151,7 @@ func setup(p_unit: Dictionary, p_biz: Business, ground_fn := Callable(), p_rival
 				var p := transform * Vector3(W * (fx + 0.5) / 5.0, 0, -D * (fz + 0.5) / 5.0)
 				hi = maxf(hi, float(ground_fn.call(p.x, p.z)) - p.y)
 		lift = clampf(hi + 0.03, 0.0, 0.3)
-	# A building on a slope stands on a stone base course whose top (drawn and
-	# collided) is a kerb above the lot level: the shop floor sits on it.
+	# Keep the finish just above the solid foundation.
 	var bc := BuildingMesher.base_course(unit["b"])
 	if bc.has_volume():
 		lift = maxf(lift, bc.end.y - float(unit["y0"]) + 0.02)
@@ -315,6 +314,11 @@ func _build_shop(st: _Batch) -> void:
 	var feature_wall := wall.lerp(brand, 0.42) if type_id == "clothing" else wall.darkened(0.08)
 	_wall_finish(R(dw0 * 0.5, part_d - 0.007, H * 0.5), 0.0, Vector2(dw0 - 0.034, H - 0.015),
 		feature_wall, 7 if type_id == "clothing" else 5)
+	# A shallow perimeter trim closes the visual joint with the ceiling.
+	var cornice := wall.lerp(Color(0.87, 0.83, 0.76), 0.25)
+	st.box(R(0.03, 0.24, H - 0.13), R(0.095, part_d, H), cornice)
+	st.box(R(W - 0.095, 0.24, H - 0.13), R(W - 0.03, part_d, H), cornice)
+	st.box(R(0.095, part_d - 0.065, H - 0.13), R(W - 0.095, part_d, H), cornice)
 	# Shopfront: glass either side of the door, frame, fascia.
 	_shopfront(st, trim)
 	# Counter + tills on the right.
@@ -384,6 +388,7 @@ func _build_shop(st: _Batch) -> void:
 	# Ceiling lights (their kind follows the shop's).
 	var bright := 1.25 if biz and biz.has_upgrade("lighting") else 0.85
 	var tint: Color = look.get("tint", Color(1.0, 0.97, 0.92))
+	tint = tint.lerp(Color(1.0, 0.93, 0.83), 0.18)
 	if biz and biz.has_upgrade("lighting"):
 		tint = tint.lerp(Color(1.0, 0.9, 0.78), 0.4)
 	if unit.get("flagship", false):
@@ -457,6 +462,8 @@ func _fit_wall_bays() -> void:
 		return
 	var blocked: Array[Rect2] = []
 	for box: CollisionShape3D in _col.get_children():
+		if box.shape is not BoxShape3D:
+			continue  # the exterior grade does not occupy the sales floor
 		var size := (box.shape as BoxShape3D).size
 		var base := box.position - size * 0.5
 		if base.y > 2.35 or base.y + size.y < 0.23:
@@ -502,6 +509,8 @@ func _fit_wall_bays() -> void:
 func _furniture_contact() -> void:
 	var feet: Array[Rect2] = []
 	for fixture: CollisionShape3D in _col.get_children():
+		if fixture.shape is not BoxShape3D:
+			continue
 		var shape := (fixture.shape as BoxShape3D).size
 		var at := fixture.position - shape * 0.5
 		if absf(at.y) > 0.038 or shape.y < 0.26 or minf(shape.x, shape.z) < 0.22:
@@ -546,6 +555,8 @@ func _flagship_feature(st: _Batch, depth: float, tint: Color) -> void:
 	var at := R(x, d, 0.0)
 	var reserved := AABB(at + Vector3(-1.59, 0.25, -1.35), Vector3(3.18, 2.0, 2.7))
 	for cs: CollisionShape3D in _col.get_children():
+		if cs.shape is not BoxShape3D:
+			continue
 		var size := (cs.shape as BoxShape3D).size
 		if reserved.intersects(AABB(cs.position - size * 0.5, size)):
 			return
@@ -782,7 +793,7 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 		sf["frame"] = Color(0.31, 0.29, 0.26) if warm else Color(0.34, 0.37, 0.39)
 		sf["riser_col"] = (sf["frame"] as Color).darkened(0.24)
 		sf["panels"] = false
-	var fc: Color = sf["frame"]
+	var fc: Color = (sf["frame"] as Color).lerp(Color(0.18, 0.18, 0.16), 0.21)
 	var rh: float = sf["riser"]
 	var mw: float = sf["mullion"]
 	var th := oh - 0.62   # transom bar (and the door head)
@@ -899,8 +910,7 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 	# and just behind the pilaster bases' faces. Deeper than the step: streets
 	# slope along the shopfront.)
 	st.box(R(-0.04, -0.24, -street_drop - 1.2), R(W + 0.04, -0.005, 0.02), stone.darkened(0.3))
-	if street_drop > 0.02:
-		_entrance_steps(st, stone)
+	_entrance_approach(st, stone)
 	if trading_here:
 		_window_display(st, spans, gd)
 		_street_dressing(st, hsh, oh)
@@ -1093,50 +1103,69 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 
 ## A stall riser under a window: painted timber with raised and fielded
 ## panels, or a plain polished plinth (aluminium and steel fronts).
-## Up from the pavement to the door: a stone landing outside the lobby and a
-## flight of even steps (risers ≤ 17 cm, so you walk up them like stairs
-## instead of hopping onto a block), each a little wider than the one above,
-## with a nosing and a brass handrail beside a flight of three or more.
-const STEP_RISE := 0.17
+## A low threshold is graded into the pavement. Larger level changes
+## get an even flight of shallow steps ending at the surveyed street level.
+const STEP_RISE := 0.145
+const ENTRY_LANDING := 0.48
+const ENTRY_TREAD := 0.33
 
 
-func _entrance_steps(st: _Batch, stone: Color) -> void:
-	var n := ceili(street_drop / STEP_RISE - 0.15)
-	var landing := 0.5
-	var tread := clampf(1.3 / maxf(n - 1, 1), 0.27, 0.32) if n > 1 else 0.0
-	var top_c := stone.lightened(0.12)
-	var x0 := door.x - 0.35
-	var x1 := door.y + 0.35
-	var base := -street_drop - 0.05
+func _entrance_approach(st: _Batch, stone: Color) -> void:
+	var middle := (door.x + door.y) * 0.5
+	var x0 := door.x - 0.19
+	var x1 := door.y + 0.19
+	var top_c := stone.lerp(Color(0.51, 0.49, 0.46), 0.58)
+	if street_drop <= 0.19:
+		# Meet the crossfall at both ends without extruding a full-width
+		# step across the pavement. The threshold and ramp share collision.
+		var run := clampf(street_drop * 11.0, 0.42, 2.15)
+		var left := _street_y(x0, -run)
+		var right := _street_y(x1, -run)
+		if minf(left, right) >= -0.025:
+			return
+		if minf(left, right) >= -run * 0.15:
+			_entrance_ramp(st, top_c, x0, x1, run, left, right)
+			return
+	var drop := maxf(street_drop, -_street_y(middle, -ENTRY_LANDING))
+	var n := maxi(1, ceili(drop / STEP_RISE))
+	# Recheck the bottom where the flight will actually meet the pavement.
+	for i in 3:
+		var depth := ENTRY_LANDING + ENTRY_TREAD * (n - 1)
+		drop = maxf(drop, -_street_y(middle, -depth))
+		n = maxi(1, ceili(drop / STEP_RISE))
+	var base := -drop - 0.05
 	# The landing (the top step), level with the shop floor.
-	st.box(R(x0, -landing, base), R(x1, 0.0, 0.0), top_c)
-	st.box(R(x0 - 0.01, -landing - 0.02, -0.035), R(x1 + 0.01, -landing + 0.02, 0.0), top_c.lightened(0.1))  # nosing
-	_solid(R(x0, -landing, base), R(x1, 0.0, 0.0))
-	for i in range(1, n):
-		var top := -street_drop * float(i) / float(n)
-		var d0 := -landing - tread * float(i)
-		var d1 := d0 + tread
-		var wid := 0.05 * float(i)
-		var c := stone.lightened(0.1 - 0.012 * i)
-		st.box(R(x0 - wid, d0, base), R(x1 + wid, d1, top), c)
-		st.box(R(x0 - wid - 0.01, d0 - 0.02, top - 0.035), R(x1 + wid + 0.01, d0 + 0.02, top), c.lightened(0.1))
-		_solid(R(x0 - wid, d0, base), R(x1 + wid, d1, top))
+	for i in n:
+		var top := -drop * float(i) / float(n)
+		var d0 := -ENTRY_LANDING - ENTRY_TREAD * i
+		var d1 := 0.0 if i == 0 else d0 + ENTRY_TREAD
+		var c := top_c.darkened(0.018 * i)
+		st.box(R(x0, d0, base), R(x1, d1, top), c)
+		st.box(R(x0, d0 - 0.012, top - 0.025), R(x1, d0 + 0.02, top), c.lightened(0.1))
+		_solid(R(x0, d0, base), R(x1, d1, top))
 	if n >= 3:
-		# A handrail on the side away from the window display's best view.
-		var hx := x1 - 0.1  # (on the treads, inside their ends)
-		var brass := Color(0.78, 0.62, 0.3)
-		var far_d := -landing - tread * float(n - 1)
-		for d: float in [-0.1, far_d + 0.1]:
-			var fy := 0.0 if d > -landing else -street_drop * float(n - 1) / float(n)
-			st.box(R(hx - 0.025, d - 0.025, fy), R(hx + 0.025, d + 0.025, fy + 0.9), brass)
-		var low := -street_drop * float(n - 1) / float(n)
-		var segs := 8
-		for k in segs:
-			var da := lerpf(-0.1, far_d + 0.1, float(k) / segs)
-			var db := lerpf(-0.1, far_d + 0.1, float(k + 1) / segs)
-			var ya := lerpf(0.9, low + 0.9, float(k) / segs)
-			var yb := lerpf(0.9, low + 0.9, float(k + 1) / segs)
-			st.box(R(hx - 0.03, db, minf(ya, yb) - 0.025), R(hx + 0.03, da, maxf(ya, yb) + 0.025), brass)
+		var hx := x1 - 0.075
+		var metal := Color(0.25, 0.25, 0.22)
+		var far := -ENTRY_LANDING - ENTRY_TREAD * (n - 1) + 0.09
+		var low := -drop * float(n - 1) / float(n)
+		st.cylinder(R(hx, -0.13, 0.0), 0.018, 0.89, metal, 8)
+		st.cylinder(R(hx, far, low), 0.018, 0.89, metal, 8)
+		st.hull([R(hx - 0.022, -0.095, 0.87), R(hx + 0.022, -0.095, 0.87),
+			R(hx + 0.022, -0.095, 0.912), R(hx - 0.022, -0.095, 0.912),
+			R(hx - 0.022, far - 0.05, low + 0.87), R(hx + 0.022, far - 0.05, low + 0.87),
+			R(hx + 0.022, far - 0.05, low + 0.912), R(hx - 0.022, far - 0.05, low + 0.912)], metal)
+
+
+func _entrance_ramp(st: _Batch, col: Color, x0: float, x1: float, run: float, left: float, right: float) -> void:
+	var base := minf(left, right) - 0.055
+	var points := [R(x0, 0.025, base), R(x1, 0.025, base), R(x1, 0.025, 0.0), R(x0, 0.025, 0.0),
+		R(x0, -run, base), R(x1, -run, base), R(x1, -run, right), R(x0, -run, left)]
+	st.hull(points, col)
+	var shape := ConvexPolygonShape3D.new()
+	shape.points = PackedVector3Array(points)
+	var collider := CollisionShape3D.new()
+	collider.shape = shape
+	_col.add_child(collider)
 
 
 func _riser(st: _Batch, x0: float, x1: float, gd: float, rh: float, fc: Color, sf: Dictionary) -> void:
@@ -1536,9 +1565,15 @@ func update_signs(trading: bool, night := false) -> void:
 func _fixture_sites(part_d: float) -> Array:
 	var sites: Array = []
 	var x := 0.35
+	var bay_gap := 0.05
+	# When fitting rooms occupy the back corner, start the wall run beside
+	# them. Leaving an empty 1.9 m module here wastes the usable wall.
+	if _fitting_clear.has_area() and _fitting_clear.position.y <= -part_d + 0.02:
+		x = maxf(x, _fitting_clear.end.x + 0.025)
+		bay_gap = 0.025
 	while x + BAY <= W - 2.6:
 		sites.append({"back": R(x, part_d - 0.02, 0.0), "along": Vector3.RIGHT, "out": Vector3(0, 0, 1), "wall": "back"})
-		x += BAY + 0.05
+		x += BAY + bay_gap
 	if unit.get("flagship", false):
 		var aisle_ends: Array = []
 		var gx := 3.8
@@ -2412,8 +2447,7 @@ func _build_street(st: _Batch) -> void:
 		R(mid, -0.235, fascia_y), right - left - 0.42, ink, face, 0.0065)
 	_street_label(String(Premises.STREET_TITLES[use]).to_upper(), R(mid, D - 0.07, H * 0.68),
 		minf(W - 1.5, 6.8), Color(0.20, 0.23, 0.20))
-	if street_drop > 0.14:
-		_entrance_steps(st, floor_color)
+	_entrance_approach(st, floor_color)
 	if work:
 		for side: float in [0.6, W - 1.0]:
 			for row in range(1, maxi(2, int(D / 2.1))):
@@ -3461,6 +3495,11 @@ func _mesh_of(b: _Batch, mat: String) -> MeshInstance3D:
 static func _mat(k: String) -> Material:
 	if _mat_cache.has(k):
 		return _mat_cache[k]
+	if k == "glass":
+		var glazing := ShaderMaterial.new()
+		glazing.shader = preload("res://src/empire/world/storefront_glass.gdshader")
+		_mat_cache[k] = glazing
+		return glazing
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
 	match k:
@@ -3469,11 +3508,6 @@ static func _mat(k: String) -> Material:
 		"goods":
 			m.roughness = 0.45
 			m.vertex_color_use_as_albedo = true
-		"glass":
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			m.roughness = 0.17
-			m.metallic_specular = 0.42
-			m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		"glow":
 			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		"tag":
@@ -3521,6 +3555,8 @@ func _build_walk_grid() -> void:
 			walk[cell] = true
 	for cs: CollisionShape3D in _col.get_children():
 		var bs := cs.shape as BoxShape3D
+		if bs == null:
+			continue
 		if bs.size.y < 0.4 and cs.position.y < 0.0:
 			continue  # floor
 		var b := AABB(cs.position - bs.size * 0.5, bs.size).grow(0.28)

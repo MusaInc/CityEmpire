@@ -30,7 +30,7 @@ const JULES_STOCK := {
 const STORES := {
 	"clothes_everyday": {"name": "Threadline", "items": ["top_tee", "top_polo", "top_hoodie", "top_jumper", "top_long",
 		"shoes_classic", "shoes_blackout", "shoes_gum", "head_cap", "head_beanie"]},
-	"clothes_premium": {"name": "Maison Arden", "items": ["top_shirt", "top_blazer", "shoes_royal", "shoes_volt", "shoes_gold",
+	"clothes_premium": {"name": "Maison Arden", "items": ["top_shirt", "shoes_royal", "shoes_volt", "shoes_gold",
 		"head_phones", "face_shades"]},
 	# The city's independent boutiques (CityLife firms of type "clothing"):
 	# a mid-range edit of both; the name is the boutique's (boutique_name).
