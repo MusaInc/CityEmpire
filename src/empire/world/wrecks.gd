@@ -12,13 +12,13 @@ extends Node
 ## A wreck rolls to a stop, stays a while, then clears once you're away.
 
 const MAX := 8
-const LOOKAHEAD := 0.18       # s of relative motion checked ahead (swaps traffic before kinematic contact)
+const LOOKAHEAD := 0.24       # s of relative motion checked ahead (swaps traffic before kinematic contact)
 const CLEAR_AFTER := 45.0     # s, at most
 const CLEAR_AWAY := 110.0     # m: a settled wreck clears once you're this far
 
 var game: EmpireGame
-var wrecks: Array = []        # {car, t, traffic: id or -1, hit, spawn_y, parked: [CityWorld, key, xf, kind] or []}
-const UNTOUCHED_BACK := 1.2   # s: a swapped car nothing touched goes back to traffic / the kerb
+var wrecks: Array = []        # {car, t, traffic: id or -1, hit, spawn_y, parked: [CityWorld, key, xf, kind, col] or [], island: Dictionary or null}
+const UNTOUCHED_BACK := 1.6   # s: a swapped car nothing touched goes back to traffic / the kerb
 var _parked := {}             # [CityWorld, chunk key] -> [[Transform3D, kind]]
 var _rng := RandomNumberGenerator.new()
 
@@ -38,7 +38,7 @@ func _physics_process(dt: float) -> void:
 	if game == null or game.world == null:
 		return
 	var me := game.vehicle_node() as Car
-	if me and is_instance_valid(me) and not me.freeze and me.linear_velocity.length() > 0.35:
+	if me and is_instance_valid(me) and not me.freeze and (me.linear_velocity.length() > 0.15 or me.throttle > 0.05 or me.brake > 0.05):
 		_look_ahead(me)
 	var keep: Array = []
 	var here := game.vehicle_node().global_position if game.vehicle_node() else game.player.global_position
@@ -94,17 +94,29 @@ func _restore(w: Dictionary, tr: Traffic) -> void:
 			cw.refresh_parked(pk[1])
 			var ck := [cw, pk[1]]
 			if _parked.has(ck):
-				(_parked[ck] as Array).append([pk[2], pk[3]])
+				(_parked[ck] as Array).append([pk[2], pk[3], pk[4]] if pk.size() > 4 else [pk[2], pk[3]])
+	var ic = w.get("island")
+	if ic is Dictionary:
+		(ic as Dictionary)["wait"] = 0.0
 
 
 func _free(w: Dictionary, tr: Traffic) -> void:
 	if tr and int(w["traffic"]) >= 0:
 		tr.release(int(w["traffic"]))
+	var ic = w.get("island")
+	if ic is Dictionary and float((ic as Dictionary).get("wait", 0.0)) > 12.0:
+		(ic as Dictionary)["wait"] = 4.0
+
+
+func _hits_swept(me: Car, mp: Vector3, rel_v: Vector3, mh: Vector2, xf: Transform3D, oh: Vector2) -> bool:
+	return _hits(me, mp, mh, xf, oh) \
+		or _hits(me, mp + rel_v * (LOOKAHEAD * 0.5), mh, xf, oh) \
+		or _hits(me, mp + rel_v * LOOKAHEAD, mh, xf, oh)
 
 
 func _look_ahead(me: Car) -> void:
 	var size: Vector3 = me.spec["size"]
-	var mh := Vector2(size.x * 0.5 + 0.36, size.z * 0.5 + 0.36)
+	var mh := Vector2(size.x * 0.5 + 0.55, size.z * 0.5 + 0.55)
 	var mp := me.global_position
 	var mv := me.linear_velocity
 	var tb: TrafficBodies = game.traffic_bodies
@@ -114,14 +126,26 @@ func _look_ahead(me: Car) -> void:
 			var id: int = it[0]
 			var xf: Transform3D = it[1]
 			var ov := -xf.basis.z * tr.car_speed(id)
-			if absf(xf.origin.y - mp.y) > 2.5 or xf.origin.distance_to(mp) > 24.0:
+			if absf(xf.origin.y - mp.y) > 2.5 or xf.origin.distance_to(mp) > 28.0:
 				continue
 			var k := int(tr.c_kind[id])
 			var oh := _half(game.world, k)
-			if _hits(me, mp, mh, xf, oh) or _hits(me, mp + (mv - ov) * LOOKAHEAD, mh, xf, oh):
+			if _hits_swept(me, mp, mv - ov, mh, xf, oh):
 				tb.drop(id, tr)
 				tr.knock(id)
 				_spawn(k, xf, ov, tr.c_col[id], id, [], tr)
+		for it in tb.island_cars():
+			var ic: Dictionary = it[0]
+			var xf: Transform3D = it[1]
+			var ov := -xf.basis.z * float(ic.get("v", 0.0))
+			if absf(xf.origin.y - mp.y) > 2.5 or xf.origin.distance_to(mp) > 28.0:
+				continue
+			var k := int(ic.get("kind", 0))
+			var oh := _half(game.world, k)
+			if _hits_swept(me, mp, mv - ov, mh, xf, oh):
+				tb.drop_island(ic)
+				ic["wait"] = CLEAR_AFTER
+				_spawn(k, xf, ov, ic.get("col", Color(0.7, 0.7, 0.7)), -1, [], null, ic)
 	# Parked cars in the chunks round you (both landmasses).
 	for w2 in [game.world, game.world.mainland]:
 		var w: CityWorld = w2
@@ -140,15 +164,16 @@ func _look_ahead(me: Car) -> void:
 				for i in range(list.size() - 1, -1, -1):
 					var pc: Array = list[i]
 					var xf: Transform3D = pc[0]
-					if absf(xf.origin.y - mp.y) > 2.5 or xf.origin.distance_to(mp) > 18.0:
+					if absf(xf.origin.y - mp.y) > 2.5 or xf.origin.distance_to(mp) > 22.0:
 						continue
 					var oh := _half(w, int(pc[1]))
-					if _hits(me, mp, mh, xf, oh) or _hits(me, mp + mv * LOOKAHEAD, mh, xf, oh):
+					if _hits_swept(me, mp, mv, mh, xf, oh):
 						list.remove_at(i)
 						w.break_item(xf.origin)
 						w.refresh_parked(key)
-						_spawn(int(pc[1]), xf, Vector3.ZERO, CityWorld.kind_colour(int(pc[1]),
-							CityWorld.CAR_COLORS[_rng.randi() % CityWorld.CAR_COLORS.size()]), -1, [w, key, xf, int(pc[1])])
+						var col: Color = pc[2] if pc.size() > 2 else CityWorld.kind_colour(int(pc[1]),
+							CityWorld.CAR_COLORS[_rng.randi() % CityWorld.CAR_COLORS.size()])
+						_spawn(int(pc[1]), xf, Vector3.ZERO, col, -1, [w, key, xf, int(pc[1]), col])
 
 
 ## Half extents (x, z) of a traffic/parked car kind from its drawn model.
@@ -171,7 +196,7 @@ static func _hits(me: Car, at: Vector3, mh: Vector2, xf: Transform3D, oh: Vector
 	return true
 
 
-func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, parked := [], source: Traffic = null) -> void:
+func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, parked := [], source: Traffic = null, island = null) -> void:
 	while wrecks.size() >= MAX:
 		var old: Dictionary = wrecks.pop_front()
 		if is_instance_valid(old["car"]):
@@ -193,4 +218,4 @@ func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, 
 	var vis := CarVisual.new()
 	c.add_child(vis)
 	vis.setup(c)
-	wrecks.append({"car": c, "t": 0.0, "traffic": traffic_id, "source": source, "hit": false, "spawn_y": xf.origin.y, "parked": parked})
+	wrecks.append({"car": c, "t": 0.0, "traffic": traffic_id, "source": source, "hit": false, "spawn_y": xf.origin.y, "parked": parked, "island": island})

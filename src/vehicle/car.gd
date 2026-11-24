@@ -48,8 +48,8 @@ const KERB_CLEAR := 0.3
 const STEP_MAX := 0.62
 ## Arcade turning at town speeds (fading out by ~50 km/h): how far past plain
 ## tyre grip full lock may rotate the car, and the extra pivot (U-turns fit a street).
-const TURN := 2.3
-const LOW_SPEED_PIVOT := 1.6
+const TURN := 2.55
+const LOW_SPEED_PIVOT := 1.75
 ## How hard a held drift curves round (x tyre grip): a slide turns tighter than gripping.
 const DRIFT_PATH := 1.25
 
@@ -153,8 +153,8 @@ func setup(p_spec: Dictionary, p_role := "player") -> void:
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	center_of_mass = Vector3(0, spec.get("com_y", 0.25), 0)
 	var mat := PhysicsMaterial.new()
-	mat.friction = 0.35
-	mat.bounce = 0.05
+	mat.friction = 0.20
+	mat.bounce = 0.12
 	physics_material_override = mat
 	var size: Vector3 = spec["size"]  # width, height, length
 	var shape := CollisionShape3D.new()
@@ -304,13 +304,13 @@ func hydraulic_jump() -> bool:
 ## at ~60 % input above 100 km/h, then snapped the nose in and overshot).
 func max_steer_angle() -> float:
 	var lock := deg_to_rad(spec["steer_lock"])
-	var fast := deg_to_rad(spec["steer_fast"])
+	var fast := deg_to_rad(float(spec["steer_fast"]) + 1.5)
 	var v := maxf(absf(forward_speed), 1.0)
 	var grip_yaw: float = spec["grip"] * GRAVITY * 1.1 / maxf(v, 4.0)
 	# Arcade: full lock asks for well over what the tyres alone could do
 	# (the yaw assist and path-follow force below deliver it), so a full
 	# flick is a genuinely sharp turn at any speed.
-	var ideal := atan(float(spec["wheelbase"]) * grip_yaw * float(spec.get("turn", 1.7)) / v) + SLIP_PEAK * float(spec.get("steer_slip", 0.3))
+	var ideal := atan(float(spec["wheelbase"]) * grip_yaw * float(spec.get("turn", 1.9)) / v) + SLIP_PEAK * float(spec.get("steer_slip", 0.3))
 	return clampf(ideal, minf(fast, lock), lock)
 
 
@@ -373,7 +373,7 @@ func _physics_process(dt: float) -> void:
 	# Constant time from centre to full lock at any speed (~0.17 s, quicker
 	# on the sharper cars): fast enough to feel direct, slow enough that a
 	# flick at 150 km/h can't spike the yaw rate.
-	var steer_rate := max_steer_angle() / 0.09 * float(spec.get("steer_rate", 200.0)) / 200.0 * float(spec.get("turn_rate", 1.0))
+	var steer_rate := max_steer_angle() / 0.075 * float(spec.get("steer_rate", 200.0)) / 200.0 * float(spec.get("turn_rate", 1.0))
 	# Unwinding (back to centre or across to counter-steer) is quicker than
 	# winding on: catching a slide should never feel laggy.
 	if absf(target_steer) < absf(steer_angle) or signf(target_steer) != signf(steer_angle):
@@ -407,11 +407,12 @@ func _physics_process(dt: float) -> void:
 	var curve := clampf(1.0 - pow(sp_t, 3.0), 0.0, 1.0)
 	if forward_speed < 0.0 and drive > 0.0:
 		curve = 1.0
-	var engine_f: float = spec["engine"] * float(spec.get("engine_gain", 1.0)) * mass * drive * curve * power_scale
+	var launch := lerpf(1.0, lerpf(1.26, 1.0, smoothstep(0.0, 0.48, sp_t)), smoothstep(0.68, 1.0, absf(drive)))
+	var engine_f: float = spec["engine"] * float(spec.get("engine_gain", 1.0)) * 1.10 * launch * mass * drive * curve * power_scale
 	if kickdown and drive > 0.9 and not reversing:
 		# A lower gear: strongest in the middle of the rev range, fading
 		# toward top speed (a kickdown can't add speed the car doesn't have).
-		engine_f *= 1.0 + 0.22 * clampf(1.0 - sp_t, 0.0, 1.0) * clampf(sp_t * 4.0, 0.35, 1.0)
+		engine_f *= 1.0 + 0.34 * clampf(1.0 - sp_t, 0.0, 1.0) * clampf(sp_t * 4.0, 0.45, 1.0)
 	# Nitro is a straight shove (not through the tyres: on a RWD muscle car
 	# the rears were already spinning, so the boost just became wheelspin).
 	var nitro_f := 0.0
@@ -599,7 +600,7 @@ func _physics_process(dt: float) -> void:
 		# Arcade turning: the more you steer, the further past plain tyre grip
 		# the car is allowed to rotate (full lock ~1.7x).
 		var town := 1.0 - smoothstep(5.0, 14.0, speed)
-		var turn_k := lerpf(1.0, lerpf(float(spec.get("turn", 1.7)), TURN, town), clampf(absf(str_in), 0.0, 1.0))
+		var turn_k := lerpf(1.0, lerpf(float(spec.get("turn", 1.9)), TURN, town), clampf(absf(str_in), 0.0, 1.0))
 		# Braking hard: the extra arcade rotation backs off (the tyres are busy stopping).
 		turn_k = lerpf(turn_k, 1.0, clampf(brk, 0.0, 1.0) * 0.7)
 		# Arcade: at town speeds the car pivots tighter than its wheelbase
@@ -627,14 +628,14 @@ func _physics_process(dt: float) -> void:
 				assist = maxf(assist, float(spec.get("stability", 0.9)))
 			elif absf(str_in) > 0.2:
 				# Turning in: the assist brings the nose round quickly.
-				assist = maxf(assist, float(spec.get("turn_assist", 0.7)) * clampf(turn_rate_k, 0.85, 1.3))
+				assist = maxf(assist, float(spec.get("turn_assist", 0.85)) * clampf(turn_rate_k, 0.85, 1.35))
 			# Path follow: the direction of travel swings round with the nose
 			# instead of the car sliding wide (arcade grip). Stronger while
 			# steering; capped so a crash or a ramp still behaves.
 			var lat := vel.dot(right)
 			if speed > 3.0:
-				var pf := -lat * mass * float(spec.get("path_follow", 3.0)) * (0.35 + 0.65 * absf(str_in))
-				apply_central_force(right * clampf(pf, -mass * GRAVITY * 0.9, mass * GRAVITY * 0.9) * (1.0 - 0.88 * slide))
+				var pf := -lat * mass * float(spec.get("path_follow", 3.8)) * (0.38 + 0.62 * absf(str_in))
+				apply_central_force(right * clampf(pf, -mass * GRAVITY * 1.15, mass * GRAVITY * 1.15) * (1.0 - 0.88 * slide))
 		var drift_mix := 1.0 if handbrake_drift else slide
 		if drift_mix > 0.0:
 			var max_a := deg_to_rad(spec.get("drift_max", 44.0))

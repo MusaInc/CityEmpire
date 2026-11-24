@@ -1070,7 +1070,7 @@ func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front
 		var look: Array = looks[g]
 		(tools[g] as SurfaceTool).commit(out)
 		var sm := ShaderMaterial.new()
-		sm.shader = shader
+		sm.shader = preload("res://src/world/shaders/traffic_glass.gdshader") if g == "glass" else shader
 		sm.set_shader_parameter("tint", look[1])
 		sm.set_shader_parameter("use_instance_color", g == "paint")
 		sm.set_shader_parameter("finish", {"paint": 1, "paint2": 1, "glass": 2, "chrome": 3}.get(g, 0))
@@ -2481,8 +2481,13 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 		var k := _car_kind(kind_rng.randf(), layout.is_mainland) if i < moving else int(parked[i - moving][1])
 		if car_meshes[k] == null:
 			k = 0
-		var col: Color = CAR_COLORS[rng.randi() % CAR_COLORS.size()]
-		groups[k].append([xf[i], custom[i], kind_colour(k, col)])
+		var col: Color
+		if i < moving:
+			col = kind_colour(k, CAR_COLORS[rng.randi() % CAR_COLORS.size()])
+		else:
+			var pc: Array = parked[i - moving]
+			col = pc[2] if pc.size() > 2 else kind_colour(k, CAR_COLORS[rng.randi() % CAR_COLORS.size()])
+		groups[k].append([xf[i], custom[i], col])
 	# Cars only ever drive inside their chunk (lanes are clipped to it), so the
 	# chunk itself is an exact culling box for the GPU-moved instances.
 	var bounds := AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 70.0, CHUNK))  # (terrain)
@@ -2527,7 +2532,7 @@ static func _instance_buffer(items: Array) -> PackedFloat32Array:
 	for it in items:
 		var x: Transform3D = it[0]
 		var cu: Color = it[1]
-		var co: Color = it[2]
+		var co: Color = (it[2] as Color).srgb_to_linear()
 		for r in 3:
 			buf[j] = x.basis.x[r]
 			buf[j + 1] = x.basis.y[r]
@@ -2705,7 +2710,8 @@ func _generate_parked_cars(key: Vector2i) -> Array:
 		# The shader shifts a parked car 5 m back along its segment (see below).
 		var at := (t as Transform3D).origin - (t as Transform3D).basis.z * 5.0
 		var kind := _car_kind(rng.randf(), layout.is_mainland)   # (drawn first: the others keep theirs)
-		out.append([Transform3D((t as Transform3D).basis, at), kind])
+		var col := kind_colour(kind, CAR_COLORS[rng.randi() % CAR_COLORS.size()])
+		out.append([Transform3D((t as Transform3D).basis, at), kind, col])
 	return out
 
 

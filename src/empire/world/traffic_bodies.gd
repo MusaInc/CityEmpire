@@ -84,6 +84,30 @@ func city_cars() -> Array:
 	return out
 
 
+## Skyport/bridge traffic cars that currently have a body: [[car dict, Transform3D, IslandTraffic]].
+func island_cars() -> Array:
+	var out: Array = []
+	if _island_cache == null or not is_instance_valid(_island_cache):
+		return out
+	for src in _near:
+		if int(src[0]) == 1 and src[1] is Dictionary:
+			var ic: Dictionary = src[1]
+			if float(ic.get("wait", 0.0)) <= 0.0:
+				out.append([ic, _island_cache.car_xf(ic), _island_cache])
+	return out
+
+
+func drop_island(ic: Dictionary) -> void:
+	for i in _near.size():
+		var src: Array = _near[i]
+		if int(src[0]) == 1 and src[1] == ic:
+			_near[i] = [-1, 0]
+			var b: AnimatableBody3D = _bodies[i]
+			b.global_position = Vector3(0, -500, 0)
+			b.process_mode = Node.PROCESS_MODE_DISABLED
+			break
+
+
 func _traffic(source: int) -> Traffic:
 	if game == null or game.world == null:
 		return null

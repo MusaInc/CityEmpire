@@ -1324,8 +1324,11 @@ func _make_groups(meshes: Array, far_meshes: Array, mid_meshes: Array) -> void:
 				var old := m.surface_get_material(i) as ShaderMaterial
 				if old:
 					var sm := ShaderMaterial.new()
+					var finish_v = old.get_shader_parameter("finish")
+					var is_glass := not far and finish_v != null and int(finish_v) == 2
 					sm.shader = PATH_BEAM_SHADER if old.shader == CityWorld.BEAM_SHADER else \
-						(PATH_AO_SHADER if old.shader == CityWorld.AO_SHADER else PATH_SHADER)
+						(PATH_AO_SHADER if old.shader == CityWorld.AO_SHADER else \
+						(preload("res://src/world/shaders/traffic_path_glass.gdshader") if is_glass else PATH_SHADER))
 					# ("finish" was missing: moving cars lost their clear-coat
 					# paint, glass reflections and chrome – plain plastic.)
 					for p in ["tint", "use_instance_color", "emission", "roughness", "finish"]:
@@ -1460,7 +1463,7 @@ func _write(buf: PackedFloat32Array, j: int, id: int) -> void:
 	buf[j] = 1.0; buf[j + 1] = float(l_base[c_lane[id]]) / 65536.0; buf[j + 2] = c_s0[id] / 1024.0; buf[j + 3] = c_v[id]
 	buf[j + 4] = 0.0; buf[j + 5] = 1.0; buf[j + 6] = c_t0[id] / 1024.0; buf[j + 7] = c_stop[id]
 	buf[j + 8] = 0.0; buf[j + 9] = 0.0; buf[j + 10] = 1.0; buf[j + 11] = c_ease[id]
-	var col: Color = c_col[id]
+	var col: Color = c_col[id].srgb_to_linear()
 	buf[j + 12] = col.r; buf[j + 13] = col.g; buf[j + 14] = col.b; buf[j + 15] = 1.0
 	var brake_f := 1.0 if _is_braking(id) else 0.0
 	var lod_f := float(c_grp[id] % 3) * 0.5 if c_grp[id] >= 0 else 0.0

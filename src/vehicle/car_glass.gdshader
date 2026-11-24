@@ -1,6 +1,6 @@
 shader_type spatial;
-// Car glass: dark tint (you can just make out the cabin) with the same
-// fake sky reflection as the paint, strong at grazing angles.
+// Transparent tinted automotive glass for all vehicles: see-through head-on
+// with crisp sky reflections taking over at grazing angles.
 render_mode blend_mix, cull_back;
 
 uniform vec3 tint : source_color = vec3(0.035, 0.045, 0.06);
@@ -8,12 +8,13 @@ global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
 global uniform float night;
+global uniform float wetness;
 #include "res://src/world/shaders/fake_reflect.gdshaderinc"
 
 void fragment() {
 	ALBEDO = tint;
 	METALLIC = 0.04;
-	ROUGHNESS = 0.092;
+	ROUGHNESS = mix(0.088, 0.13, wetness);
 	SPECULAR = 0.52;
 	vec3 n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 v = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
@@ -29,4 +30,5 @@ void fragment() {
 	float sd = max(dot(r, normalize(sun_dir)), 0.0);
 	float glint = pow(sd, 240.0) * 0.58 + pow(sd, 36.0) * 0.055;
 	EMISSION = (env * mix(0.11, 0.68, fres) + vec3(glint)) * (1.0 - night * 0.46);
+	ALPHA = mix(0.30, 0.84, fres);
 }
