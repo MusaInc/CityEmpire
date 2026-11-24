@@ -17,6 +17,10 @@ func _run() -> void:
 		get_tree().quit(1)
 		return
 	game.ui.close_panel(true)
+	if game.args.has("review-panic"):
+		var alarm := await _panic_drive(true)
+		get_tree().quit(0 if alarm >= 0.42 else 1)
+		return
 	if game.args.has("review-poses"):
 		await _poses()
 		return
@@ -33,6 +37,11 @@ func _run() -> void:
 	var car := game._spawn_car(vf)
 	car.place(Transform3D(Basis(Vector3.UP, yaw), at))
 	await get_tree().physics_frame
+	if game.args.has("review-drive"):
+		game.enter_vehicle(id)
+		await _drive_review(car)
+		get_tree().quit()
+		return
 	# Hold the same car, view and sky while changing only the loaded material.
 	game.enter_vehicle(id)
 	car.freeze = true
@@ -96,19 +105,20 @@ func _run() -> void:
 	game.world.build_all_near(highway, 280.0)
 	await _frames(13)
 	await _shot("07_bridge_soffit")
-	await _drive_review(car)
 	get_tree().quit()
 
 
 func _drive_review(car: Car) -> void:
 	var site := Vector3(-765, CityLayout.approach_y(-765) + 0.07, CityLayout.BRIDGE_Z + 4.2)
+	print("DRIVE_REVIEW warming bridge chunks")
+	game.world.build_all_near(site, 240.0)
+	print("DRIVE_REVIEW relocating to the bridge")
 	car.place(Transform3D(Basis.looking_at(Vector3.RIGHT), site))
 	car.freeze = false
 	car.park_lock = false
 	game.chase.set_target(car, true)
 	game.chase.cam.make_current()
 	game.world.set_viewer(game.chase)
-	game.world.build_all_near(site, 300.0)
 	_weather(21.8, "rain")
 	await _frames(6)
 	car.linear_velocity = Vector3.RIGHT * 30.0
@@ -222,19 +232,30 @@ func _panic_drive(capture: bool) -> float:
 		await get_tree().physics_frame
 	var subject: Dictionary = {}
 	var lane := Vector2.ZERO
-	for pr in game.crowd._people:
-		var loop: Dictionary = game.crowd._loops[pr["loop"]]
-		if pr["state"] != "walk" or not (loop["crossings"] as Array).is_empty():
+	var length := 24.0
+	var at := Vector2(door.x, door.z)
+	for i in game.crowd._loops.size():
+		var loop: Dictionary = game.crowd._loops[i]
+		if not (loop["crossings"] as Array).is_empty():
 			continue
-		var ahead: Array = game.crowd._sample(loop, float(pr["s"]) + 4.0)
-		var behind: Array = game.crowd._sample(loop, float(pr["s"]) - 18.0)
-		if int(ahead[2]) == int(behind[2]):
-			subject = pr
-			lane = ahead[1]
-			break
-	if subject.is_empty() or lane == Vector2.ZERO:
+		var points: PackedVector2Array = loop["pts"]
+		for j in points.size():
+			var a := points[j]
+			var b := points[(j + 1) % points.size()]
+			var space := a.distance_to(b)
+			if space <= length or a.lerp(b, 0.5).distance_squared_to(at) > 55.0 * 55.0:
+				continue
+			length = space
+			lane = (b - a) / space
+			var cumulative: PackedFloat32Array = loop["cum"]
+			subject = {"loop": i, "s": cumulative[j] + space * 0.56}
+	if subject.is_empty():
 		print("PANIC_REVIEW could not select a clear sidewalk")
 		return 0.0
+	game.crowd._spawn(int(subject["loop"]), float(subject["s"]))
+	subject = game.crowd._people.back()
+	await get_tree().process_frame
+	await get_tree().process_frame
 	var origin: Vector3 = subject["pos"]
 	var dir := Vector3(lane.x, 0, lane.y)
 	var pos := origin - dir * 15.0
@@ -252,7 +273,7 @@ func _panic_drive(capture: bool) -> float:
 		await get_tree().physics_frame
 		fear = maxf(fear, float(subject.get("fear", 0.0)))
 		speed = maxf(speed, car.speed)
-		if capture and not is_zero_approx(fear) and i % 10 == 0:
+		if capture and i in [9, 19, 29, 39]:
 			await _shot("panic_%02d" % i)
 	print("PANIC_REVIEW peak_fear=", fear, " vehicle_peak_mps=", speed, " vehicle_displacement=", car.global_position.distance_to(pos))
 	return fear
