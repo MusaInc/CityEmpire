@@ -12,7 +12,7 @@ extends Node
 ## A wreck rolls to a stop, stays a while, then clears once you're away.
 
 const MAX := 8
-const LOOKAHEAD := 0.1        # s of relative motion checked ahead
+const LOOKAHEAD := 0.18       # s of relative motion checked ahead (swaps traffic before kinematic contact)
 const CLEAR_AFTER := 45.0     # s, at most
 const CLEAR_AWAY := 110.0     # m: a settled wreck clears once you're this far
 
@@ -38,7 +38,7 @@ func _physics_process(dt: float) -> void:
 	if game == null or game.world == null:
 		return
 	var me := game.vehicle_node() as Car
-	if me and is_instance_valid(me) and not me.freeze and me.linear_velocity.length() > 1.5:
+	if me and is_instance_valid(me) and not me.freeze and me.linear_velocity.length() > 0.35:
 		_look_ahead(me)
 	var keep: Array = []
 	var here := game.vehicle_node().global_position if game.vehicle_node() else game.player.global_position
@@ -104,7 +104,7 @@ func _free(w: Dictionary, tr: Traffic) -> void:
 
 func _look_ahead(me: Car) -> void:
 	var size: Vector3 = me.spec["size"]
-	var mh := Vector2(size.x * 0.5 + 0.15, size.z * 0.5 + 0.15)
+	var mh := Vector2(size.x * 0.5 + 0.36, size.z * 0.5 + 0.36)
 	var mp := me.global_position
 	var mv := me.linear_velocity
 	var tb: TrafficBodies = game.traffic_bodies
@@ -114,10 +114,11 @@ func _look_ahead(me: Car) -> void:
 			var id: int = it[0]
 			var xf: Transform3D = it[1]
 			var ov := -xf.basis.z * tr.car_speed(id)
-			if absf(xf.origin.y - mp.y) > 2.5 or xf.origin.distance_to(mp) > 20.0:
+			if absf(xf.origin.y - mp.y) > 2.5 or xf.origin.distance_to(mp) > 24.0:
 				continue
 			var k := int(tr.c_kind[id])
-			if _hits(me, mp + (mv - ov) * LOOKAHEAD, mh, xf, _half(game.world, k)):
+			var oh := _half(game.world, k)
+			if _hits(me, mp, mh, xf, oh) or _hits(me, mp + (mv - ov) * LOOKAHEAD, mh, xf, oh):
 				tb.drop(id, tr)
 				tr.knock(id)
 				_spawn(k, xf, ov, tr.c_col[id], id, [], tr)
@@ -139,9 +140,10 @@ func _look_ahead(me: Car) -> void:
 				for i in range(list.size() - 1, -1, -1):
 					var pc: Array = list[i]
 					var xf: Transform3D = pc[0]
-					if absf(xf.origin.y - mp.y) > 2.5 or xf.origin.distance_to(mp) > 15.0:
+					if absf(xf.origin.y - mp.y) > 2.5 or xf.origin.distance_to(mp) > 18.0:
 						continue
-					if _hits(me, mp + mv * LOOKAHEAD, mh, xf, _half(w, int(pc[1]))):
+					var oh := _half(w, int(pc[1]))
+					if _hits(me, mp, mh, xf, oh) or _hits(me, mp + mv * LOOKAHEAD, mh, xf, oh):
 						list.remove_at(i)
 						w.break_item(xf.origin)
 						w.refresh_parked(key)
@@ -187,8 +189,7 @@ func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, 
 	c.setup(spec, "civilian")
 	c.reverse_enabled = false
 	game.add_child(c)
-	c.global_transform = Transform3D(xf.basis.orthonormalized(), xf.origin + Vector3.UP * 0.05)
-	c.linear_velocity = vel
+	c.place(Transform3D(xf.basis.orthonormalized(), xf.origin + Vector3.UP * 0.05), vel)
 	var vis := CarVisual.new()
 	c.add_child(vis)
 	vis.setup(c)

@@ -93,8 +93,10 @@ void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, flo
 		n = normalize(mix(n, pitch_dir(n, rollover), foot));
 	} else if (limb == 3 || limb == 4) {
 		float side = limb == 3 ? -1.0 : 1.0;
-		float a = mix((sw * side - cos(ph) * side * walk * 0.16) * (0.32 + 0.21 * alarm), 0.30, carry);
-		float e = 0.13 + 0.12 * walk + 1.18 * carry + 0.55 * alarm + max(0.0, sw * side) * 0.24;
+		// Pendular forearm phase lag (~0.45 rad) for natural relaxed human arm swing.
+		float arm_lag = sin(ph - 0.45) * walk;
+		float a = mix((sw * side - cos(ph) * side * walk * 0.14) * (0.30 + 0.21 * alarm), 0.30, carry);
+		float e = 0.14 + 0.11 * walk + 1.18 * carry + 0.55 * alarm + max(0.0, arm_lag * side) * 0.26 - max(0.0, -arm_lag * side) * 0.05;
 		vec3 ve = pitch_about(v, vec3(0.0, 1.21, 0.0), e);
 		v = mix(v, ve, lw);
 		n = normalize(mix(n, pitch_dir(n, e), lw));
@@ -111,13 +113,14 @@ void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, flo
 	v = pitch_about(v, vec3(0.0, 0.94, 0.0), lean);
 	n = pitch_dir(n, lean);
 	float torso = smoothstep(0.89, 1.55, height);
-	float yaw = sw * (0.07 * torso - 0.025) * (1.0 - 0.75 * carry);
+	float yaw = sw * (0.078 * torso - 0.032) * (1.0 - 0.75 * carry);
 	float c = cos(yaw);
 	float s = sin(yaw);
 	v.xz = mat2(vec2(c, s), vec2(-s, c)) * v.xz;
 	n.xz = mat2(vec2(c, s), vec2(-s, c)) * n.xz;
-	v.y += (1.0 - cos(ph * 2.0)) * 0.007 * walk * smoothstep(0.06, 0.7, height);
-	v.x += cycle * 0.010 * walk * smoothstep(0.15, 1.0, height);
+	v.y += (1.0 - cos(ph * 2.0)) * 0.009 * walk * smoothstep(0.06, 0.7, height);
+	// Natural stance-side lateral hip weight transfer, counter-balanced by upper torso.
+	v.x += cycle * 0.015 * walk * smoothstep(0.15, 0.98, height) - cycle * 0.007 * walk * smoothstep(1.05, 1.62, height);
 }
 
 // Subtle standing life for stopped/browsing/waiting people: chest breathing,

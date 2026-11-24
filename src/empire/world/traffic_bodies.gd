@@ -207,6 +207,10 @@ func _physics_process(dt: float) -> void:
 			var ic: Dictionary = src[1]
 			xf = it.car_xf(ic)
 			body_name = _kind_body(int(ic.get("kind", -1)))
+		# Guard against teleporting an infinitely-heavy kinematic box directly inside
+		# the player's car (Wrecks swaps nearby traffic into real physical Cars).
+		if b.process_mode == Node.PROCESS_MODE_DISABLED and Vector2(xf.origin.x - here.x, xf.origin.z - here.z).length() < 2.8 and absf(xf.origin.y - here.y) < 2.2:
+			continue
 		var sh_entry := _shape_for(body_name)
 		var cs := _body_shapes[i]
 		if cs.shape != sh_entry[0]:

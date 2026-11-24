@@ -607,7 +607,9 @@ func _physics_process(dt: float) -> void:
 		var pivot := lerpf(1.0, LOW_SPEED_PIVOT, town)
 		var want := clampf(-forward_speed * tan(steer_angle) / wb * pivot, -grip_yaw * turn_k, grip_yaw * turn_k)
 		var assist: float = spec.get("yaw_assist", 0.35)
-		var handbrake_drift := handbrake and speed > 8.0
+		# Never Stop drift assist: handbrake or power-oversteer holds a controlled
+		# slide angle; centred steering or counter-steer straightens cleanly.
+		var handbrake_drift := (handbrake and speed > 8.0) or (drifting and thr > 0.3 and brk < 0.2)
 		# Centred steering while gripping: hold the heading firmly (planted
 		# on the straights; also cancels solver drift).
 		# (Blended in, so a touch of steering doesn't drop the car off a cliff
@@ -765,10 +767,10 @@ func _integrate(state: PhysicsDirectBodyState3D) -> void:
 		var n := state.get_contact_local_normal(i)
 		var at := state.get_contact_local_position(i)
 		var other := state.get_contact_collider_object(i)
-		# Low on the hull against the world: maybe a kerb or ledge to climb
-		# (checked against the obstacle's real height in _handle_impacts).
-		if j > mass * 0.05 and not (other is Car) and (at - base).dot(up) < STEP_MAX + 0.15 \
-				and n.dot(Vector3.UP) < 0.75:
+		# Low on the hull against static world geometry: maybe a kerb or ledge to climb.
+		# Never classify vehicle/kinematic-traffic/rigid-body impacts as climbable steps.
+		if j > mass * 0.05 and not (other is Car) and not (other is AnimatableBody3D) and not (other is RigidBody3D) \
+				and (at - base).dot(up) < STEP_MAX + 0.15 and n.dot(Vector3.UP) < 0.75:
 			_steps.append([at, n, j / mass])
 			continue
 		if j < mass * 1.2:

@@ -37,16 +37,17 @@ const PAD_R := 112.0
 const LIFT_PX := 18.0        # below the landing point: lift off
 const BRAKE_PX := 38.0       # further down: brake, progressive to PAD_R
 const KICK_PX := 56.0        # up this far: full throttle + kickdown
+const DRIFT_PX := 66.0       # sideways this far: handbrake drift (Never Stop smart stick)
 const SIDE_DEAD_PX := 21.0
 const SIDE_FULL_PX := 101.0
 const HOLD_THROTTLE := 0.68
-const DRIFT_SPEED := 9.0     # m/s (~20 mph): no handbrake turns while parking
+const DRIFT_SPEED := 8.0     # m/s (~18 mph): matches Never Stop's drift threshold
 var _pad_id := -1
 var _pad_o := Vector2.ZERO
 var _pad_p := Vector2.ZERO
 var _pad_zone := ""
 ## What the pad is doing now (drawn, and read by tests).
-var pad := {"gas": 0.0, "brake": 0.0, "kick": false, "zone": ""}
+var pad := {"gas": 0.0, "brake": 0.0, "kick": false, "drift": false, "zone": ""}
 ## Cached visual state so _process only queues redraws on actual changes.
 var _d_blocked := true
 var _d_driving := false
@@ -129,9 +130,7 @@ func _buttons() -> Dictionary:
 	var out := {}
 	if _driving():
 		var h := pad_home()
-		if _car() is Car:
-			out["drift"] = Rect2(h + Vector2(-PAD_R - 110.0, -42.0) * k, Vector2(80, 80) * k)
-		# OUT needs the car to be slow.
+		# OUT needs the car to be slow. Drift is controlled directly by sliding the right pad left/right (Never Stop style).
 		if action_text != "":
 			out["action"] = Rect2(h + Vector2(-PAD_R - 40.0, -PAD_R - 70.0) * k, Vector2(92, 92) * k)
 	else:
@@ -264,9 +263,9 @@ func _apply_stick() -> void:
 	Input.action_press("move_forward" if v.y < 0.0 else "move_back", absf(v.y))
 
 
-## Vertical travel on the right pad controls power and braking.
+## Vertical travel on the right pad controls power and braking; sideways travel past DRIFT_PX engages drift (Never Stop smart stick).
 static func read_pad(o: Vector2, k: float) -> Dictionary:
-	var out := {"gas": 0.0, "brake": 0.0, "kick": false, "zone": "G"}
+	var out := {"gas": 0.0, "brake": 0.0, "kick": false, "drift": false, "zone": "G"}
 	if o.y > BRAKE_PX * k:
 		var bt := clampf((o.y - BRAKE_PX * k) / ((PAD_R - BRAKE_PX) * k), 0.0, 1.0)
 		out["brake"] = 0.08 + 0.92 * pow(bt, 1.5)
@@ -278,6 +277,9 @@ static func read_pad(o: Vector2, k: float) -> Dictionary:
 		out["gas"] = lerpf(HOLD_THROTTLE, 1.0, up)
 		out["kick"] = -o.y >= KICK_PX * k
 		out["zone"] = "K" if out["kick"] else "G"
+	if absf(o.x) >= DRIFT_PX * k:
+		out["drift"] = true
+		out["zone"] = String(out["zone"]) + "D"
 	return out
 
 
@@ -292,7 +294,7 @@ func _apply_pad() -> void:
 		return
 	var car = _car()
 	if _pad_id < 0 or car == null:
-		pad = {"gas": 0.0, "brake": 0.0, "kick": false, "zone": ""}
+		pad = {"gas": 0.0, "brake": 0.0, "kick": false, "drift": false, "zone": ""}
 		_pad_zone = ""
 	else:
 		pad = read_pad(_pad_p - _pad_o, ui_k())
@@ -312,7 +314,7 @@ func _physics_process(_dt: float) -> void:
 	if di == null:
 		return
 	var car := _car() as Car
-	di.touch_handbrake = car != null and absf(car.forward_speed) > DRIFT_SPEED and _held.values().has("drift")
+	di.touch_handbrake = car != null and absf(car.forward_speed) > DRIFT_SPEED and bool(pad.get("drift", false))
 
 
 func release_all() -> void:
@@ -448,17 +450,25 @@ func _draw_pad(f: Font, k: float) -> void:
 	var a := 1.0 if live else 0.6
 	draw_circle(c, r, Color(EmpireStyle.INK, 0.28 * a))
 	draw_arc(c, r, 0, TAU, 56, Color(1, 1, 1, 0.3 * a), 1.5, true)
+	var car = _car()
+	var is_car := car is Car
+	var drifting := bool(pad.get("drift", false)) and is_car
 	var zones := [[-PI * 0.5, EmpireStyle.GREEN, bool(pad["kick"])],
 		[PI * 0.5, EmpireStyle.RED, float(pad["brake"]) > 0.0]]
+	if is_car:
+		zones.append([0.0, EmpireStyle.AMBER, drifting and (_pad_p.x - _pad_o.x) > 0.0])
+		zones.append([PI, EmpireStyle.AMBER, drifting and (_pad_p.x - _pad_o.x) < 0.0])
 	for z in zones:
 		var on: bool = z[2]
 		draw_arc(c, r + 4.0, float(z[0]) - 0.5, float(z[0]) + 0.5, 16, Color(z[1] as Color, 0.95 if on else 0.38 * a), 6.0 if on else 3.0, true)
 	var fs := maxi(11, int(13 * k))
-	var car = _car()
 	var prof := profile()
-	var rev := car is Car and float(pad["brake"]) > 0.5 and float(car.get("forward_speed")) < 1.5
+	var rev := is_car and float(pad["brake"]) > 0.5 and float(car.get("forward_speed")) < 1.5
 	_label(f, c + Vector2(0, -r - 12 * k), String(prof["up"]), fs, Color(1, 1, 1, 0.65 * a))
 	_label(f, c + Vector2(0, r + 22 * k), "REVERSE" if rev else String(prof["down"]), fs, Color(1, 1, 1, 0.65 * a))
+	if is_car:
+		_label(f, c + Vector2(-r - 30 * k, fs * 0.35), "DRIFT", fs, Color(1, 1, 1, 0.55 * a))
+		_label(f, c + Vector2(r + 30 * k, fs * 0.35), "DRIFT", fs, Color(1, 1, 1, 0.55 * a))
 	# Brake depth as a fill down the lower arc.
 	if float(pad["brake"]) > 0.0:
 		var bd := float(pad["brake"])
@@ -472,15 +482,18 @@ func _draw_pad(f: Font, k: float) -> void:
 	var kc := Color(1, 1, 1, 0.14)
 	var txt := String(prof["idle"])
 	if live:
-		if z.begins_with("B"):
+		if drifting:
+			kc = EmpireStyle.AMBER
+			txt = "DRIFT"
+		elif z.begins_with("B"):
 			kc = EmpireStyle.RED
 			txt = "REV" if rev else String(prof["down"]).get_slice(" ", 0)
 		elif z.begins_with("C"):
 			kc = EmpireStyle.MUTED
-			txt = "COAST" if car is Car else String(prof["idle"])
+			txt = "COAST" if is_car else String(prof["idle"])
 		elif z.begins_with("K"):
 			kc = EmpireStyle.GREEN
-			txt = "KICK" if car is Car else String(prof["up"]).get_slice(" ", 0)
+			txt = "KICK" if is_car else String(prof["up"]).get_slice(" ", 0)
 		else:
 			kc = EmpireStyle.AMBER
 			txt = String(prof["hold"])

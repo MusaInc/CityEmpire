@@ -2196,58 +2196,62 @@ func _pose_ground(q: Dictionary, dt: float, travel: Vector3, la: Vector3) -> flo
 	var sw_l := 0.0 if fl.planted else sin(PI * fl.w)
 	var sw_r := 0.0 if fr.planted else sin(PI * fr.w)
 	var ps := g.step_phase()
-	var brake := clampf(la.z * 0.03, 0.0, 0.5) * clampf(hs / 3.0, 0.0, 1.0)
-	var push := clampf(-la.z * 0.02, 0.0, 0.3) * (1.0 - spr)  # pulling away: weight forward
+	var brake := clampf(la.z * 0.042, 0.0, 0.55) * clampf(hs / 2.6, 0.0, 1.0)
+	var push := clampf(-la.z * 0.032, 0.0, 0.38) * (1.0 - spr * 0.65)  # pulling away: weighted forward drive
 	var pitch := asin(clampf(global_basis.y.normalized().dot(_facing), -0.6, 0.6))
+	# Ground slope along travel direction: lean naturally into uphill climbs/stairs, slightly back downhill.
+	var slope_y := clampf(((fl.pos.y - fr.pos.y) * lf) / maxf(fl.pos.distance_to(fr.pos), 0.25), -0.38, 0.38) * amp
+	var slope_lean := maxf(slope_y, 0.0) * 0.28 + minf(slope_y, 0.0) * 0.16
+	# Weighted banking into turns (GTA V / RDR2 cornering lean), counter-rolled at the head.
+	var turn_bank := clampf(_yaw_rate * 0.048 * clampf(hs / 3.2, 0.0, 1.25), -0.13, 0.13)
 
 	# --- pelvis: vertical rhythm, turn, list and side shift -----------------
 	# Walking the hips vault over the stance leg (highest mid-stance, lowest
 	# as the feet change); running they sink into the stance and rise in
 	# flight. Kept small: the body glides, it doesn't bounce.
 	var duty2 := minf(g.duty * 2.0, 1.0)
-	var bob_w := (0.014 if player.everyday else 0.018) * cos(TAU * (ps - 0.32)) - 0.016
-	var bob_r := -(0.022 if player.everyday else 0.026) * cos(TAU * (ps - duty2 * 0.5)) - 0.012
+	var bob_w := (0.013 if player.everyday else 0.017) * cos(TAU * (ps - 0.32)) - 0.015
+	var bob_r := -(0.021 if player.everyday else 0.025) * cos(TAU * (ps - duty2 * 0.5)) - 0.012
 	var bob := lerpf(bob_w, bob_r, run) * amp
-	var hip_yaw := ((0.095 if body_type == "b" else 0.078) if player.everyday else 0.09) + 0.04 * run - 0.03 * spr
+	var hip_yaw := ((0.092 if body_type == "b" else 0.076) if player.everyday else 0.088) + 0.042 * run - 0.028 * spr
 	hip_yaw *= amp
-	var list := (sw_l - sw_r) * (((0.056 if body_type == "b" else 0.040) if player.everyday else 0.055) * walk + 0.018 * run) * amp
-	_hip_shift = (sw_l - sw_r) * ((0.023 if body_type == "b" else 0.016) if player.everyday else 0.022) * walk * amp
-	q["hips"] = _ry(-lf * hip_yaw) * _rz(list)
+	var list := (sw_l - sw_r) * (((0.052 if body_type == "b" else 0.038) if player.everyday else 0.052) * walk + 0.018 * run) * amp
+	_hip_shift = (sw_l - sw_r) * ((0.021 if body_type == "b" else 0.015) if player.everyday else 0.020) * walk * amp
+	q["hips"] = _ry(-lf * hip_yaw) * _rz(list + turn_bank * 0.45)
 	# --- torso ---------------------------------------------------------------
 	# Forward bend (+ = forward; torso bones tilt back on +X): runners lean a
 	# little from the hips on top of the ankle lean; pulling away the weight
 	# goes forward, braking it sits back; landing folds.
-	var lean := (0.018 * walk + (0.105 if player.everyday else 0.18) * run + 0.10 * spr) * amp + push * 0.44 + _land_squash * 0.45 - brake * 0.4
-	var sh_yaw := (lerpf(0.072, 0.108, run) if player.everyday else 0.075 + 0.043 * run) * amp
-	q["spine"] = _rx(-lean * 0.55) * _ry(lf * hip_yaw * 0.62) * _rz(-list * 0.85)
-	q["chest"] = _rx(-lean * 0.45 + 0.025 * walk) * _ry(lf * (hip_yaw * 0.38 + sh_yaw)) \
-		* _rz(-list * 0.35 + lf * 0.028 * run * amp)
-	# Head steady: undo the shoulders' turn and the body's lean; a small nod
-	# to the step walking.
-	q["neck"] = _ry(-lf * sh_yaw * 0.55)
-	q["head"] = _ry(-lf * sh_yaw * 0.45) * _rx(lean * 0.85 + pitch * 0.8 + 0.015 + 0.010 * walk * amp * sin(TAU * ps)) \
-		* _rz(list * 0.55)
+	var lean := (0.022 * walk + (0.115 if player.everyday else 0.185) * run + 0.105 * spr) * amp + push * 0.46 + slope_lean + _land_squash * 0.45 - brake * 0.42
+	var sh_yaw := (lerpf(0.076, 0.114, run) if player.everyday else 0.078 + 0.045 * run) * amp
+	q["spine"] = _rx(-lean * 0.55) * _ry(lf * hip_yaw * 0.62) * _rz(-list * 0.85 + turn_bank * 0.55)
+	q["chest"] = _rx(-lean * 0.45 + 0.022 * walk) * _ry(lf * (hip_yaw * 0.38 + sh_yaw)) \
+		* _rz(-list * 0.35 + lf * 0.028 * run * amp + turn_bank * 0.35)
+	# Head steady: undo the shoulders' turn, turn bank and body lean; subtle step nod.
+	q["neck"] = _ry(-lf * sh_yaw * 0.55) * _rz(-turn_bank * 0.45)
+	q["head"] = _ry(-lf * sh_yaw * 0.45) * _rx(lean * 0.85 + pitch * 0.8 + 0.014 + 0.008 * walk * amp * sin(TAU * ps)) \
+		* _rz(list * 0.55 - turn_bank * 0.65)
 	# --- arms ------------------------------------------------------------------
-	# Opposite arm to leg, from the shoulder. Walking: loose, the elbow only
-	# softly bent (it flexes a little as the arm comes forward). Running: the
-	# elbow holds ~80–90°, opening on the back swing and closing coming
-	# through, the hand travelling hip → chest toward the midline.
-	var a_amp := (lerpf(0.24 if player.everyday else 0.25, 0.46 if player.everyday else 0.49, run) + 0.24 * spr) * amp
-	var a_base := lerpf(-0.015 if player.everyday else 0.02, -0.055 if player.everyday else -0.1, run) * amp
+	# Opposite arm to leg, with natural pendular forearm phase lag (~0.10 cycle)
+	# so arms swing with relaxed human inertia instead of stiff robotic hinges.
+	var a_amp := (lerpf(0.23 if player.everyday else 0.25, 0.47 if player.everyday else 0.50, run) + 0.24 * spr) * amp
+	var a_base := lerpf(-0.018 if player.everyday else 0.02, -0.055 if player.everyday else -0.1, run) * amp
+	var lf_lag := sin(TAU * (ps - 0.11)) * clampf(amp, 0.0, 1.0)
 	for sd in ["l", "r"]:
 		var sdg := 1.0 if sd == "r" else -1.0
 		var fwd := lf * sdg  # this arm forward when the opposite leg is
+		var fwd_lag := lerpf(fwd, lf_lag * sdg, 0.42 * walk)
 		var arm := a_base + fwd * a_amp
-		var fwd_n := maxf(fwd, 0.0)
-		var back_n := maxf(-fwd, 0.0)
-		var base_abd := (0.048 if body_type == "b" else 0.052) if player.everyday else 0.13
-		var abd := (base_abd + (0.042 if player.everyday else 0.065) * run - 0.042 * run * fwd_n) * sdg
-		q["upper_arm_" + sd] = _rx(arm) * _rz(abd) * _ry(-0.22 * sdg)
-		var elbow_w := (0.22 if player.everyday else 0.2) + 0.26 * fwd_n * amp
-		var elbow_r := (1.18 if player.everyday else 1.15) + 0.12 * spr + 0.24 * fwd_n - 0.24 * back_n
-		q["forearm_" + sd] = _rx(lerpf(elbow_w, elbow_r, run * amp) + 0.10 * amp * walk)
+		var fwd_n := maxf(fwd_lag, 0.0)
+		var back_n := maxf(-fwd_lag, 0.0)
+		var base_abd := (0.044 if body_type == "b" else 0.048) if player.everyday else 0.12
+		var abd := (base_abd + (0.040 if player.everyday else 0.062) * run - 0.042 * run * fwd_n) * sdg
+		q["upper_arm_" + sd] = _rx(arm) * _rz(abd) * _ry((-0.20 + fwd * 0.06 * walk) * sdg)
+		var elbow_w := (0.19 if player.everyday else 0.18) + 0.28 * fwd_n * amp - 0.06 * back_n * amp
+		var elbow_r := (1.18 if player.everyday else 1.15) + 0.12 * spr + 0.25 * fwd_n - 0.24 * back_n
+		q["forearm_" + sd] = _rx(lerpf(elbow_w, elbow_r, run * amp) + 0.09 * amp * walk)
 		if player.everyday:
-			q["hand_" + sd] = _rx(-0.07 - 0.05 * run + fwd * 0.04 * amp) * _rz(-sdg * 0.055)
+			q["hand_" + sd] = _rx(-0.06 - 0.05 * run + fwd_lag * 0.055 * amp) * _rz(-sdg * 0.05)
 		if brake > 0.05:
 			# Braking: arms come forward and out to balance the backward lean.
 			# (Elbows bent – balancing, not reaching.)
@@ -3288,20 +3292,32 @@ func _pose_vehicle_access(dt: float) -> void:
 		q[bone] = Quaternion.IDENTITY
 	var sit := vehicle_pose
 	var lift := sin(sit * PI)
-	var settle := smoothstep(0.41, 0.87, sit)
+	var settle := smoothstep(0.45, 0.90, sit)
 	var recline := _cabin_recline() * settle
-	q["spine"] = _rx(-0.24 * lift + recline)
-	q["chest"] = _ry(-0.17 * vehicle_entry_side * lift) * _rx(-0.12 * lift + 0.03 * settle)
-	q["neck"] = _ry(0.12 * vehicle_entry_side * lift) * _rx(0.18 * lift - recline * 0.28)
-	q["head"] = _rx(0.08 * lift - 0.03 * settle)
+	# Adaptive duck under the roof header: low sports cars require a real torso/head tuck,
+	# while tall SUVs/vans need only a light natural bow as you step up.
+	var low_roof := 0.0 if is_inf(vehicle_roof_room) else (1.0 - smoothstep(0.54, 0.94, vehicle_roof_room))
+	var duck := sin(smoothstep(0.14, 0.76, sit) * PI)
+	var seat_bounce := sin(smoothstep(0.68, 0.96, sit) * PI) * 0.018
+	q["hips"] = _ry(-0.14 * vehicle_entry_side * duck) * _rz(0.06 * vehicle_entry_side * duck)
+	q["spine"] = _rx(-(0.20 + 0.30 * low_roof) * duck + recline) * _rz(-0.05 * vehicle_entry_side * duck)
+	q["chest"] = _ry(-0.20 * vehicle_entry_side * duck) * _rx(-(0.10 + 0.18 * low_roof) * duck + 0.03 * settle)
+	q["neck"] = _ry(0.14 * vehicle_entry_side * duck) * _rx((0.10 - 0.16 * low_roof) * duck - recline * 0.28)
+	q["head"] = _rx((0.06 - 0.10 * low_roof) * duck - 0.03 * settle) * _ry(0.08 * vehicle_entry_side * duck)
+	# Asymmetric two-stage leg entry: lead leg (closer to cabin front) steps over the
+	# sill first while the trail leg stays planted outside pushing off, then swings in.
 	for sd in ["l", "r"]:
 		var sign_x := 1.0 if sd == "r" else -1.0
-		var lead := -sign_x * vehicle_entry_side
-		q["thigh_" + sd] = _rx(1.44 * sit + (0.11 + 0.14 * lead) * lift) * _rz(sign_x * (0.075 * sit + 0.06 * lift))
-		q["shin_" + sd] = _rx(-1.42 * sit - (0.23 + 0.15 * lead) * lift)
-		q["foot_" + sd] = _rx(0.11 * sit + 0.15 * lead * lift)
-		q["upper_arm_" + sd] = _rx(0.66 * sit) * _rz(sign_x * (0.11 - 0.04 * settle)) * _ry(-sign_x * 0.14 * settle)
-		q["forearm_" + sd] = _rx(1.04 * sit + lift * 0.20)
+		var is_lead := (sign_x * vehicle_entry_side) < 0.0
+		var leg_sit := smoothstep(0.14, 0.66, sit) if is_lead else smoothstep(0.40, 0.92, sit)
+		var leg_lift := sin(smoothstep(0.10, 0.62, sit) * PI) if is_lead else sin(smoothstep(0.36, 0.88, sit) * PI)
+		var sill_clear := (0.28 if is_lead else 0.22) * leg_lift
+		q["thigh_" + sd] = _rx(1.42 * leg_sit + sill_clear) * _rz(sign_x * (0.068 * leg_sit + 0.045 * leg_lift))
+		q["shin_" + sd] = _rx(-1.40 * leg_sit - (0.34 if is_lead else 0.28) * leg_lift)
+		q["foot_" + sd] = _rx(0.10 * leg_sit + (0.18 if is_lead else 0.12) * leg_lift)
+		# Keep non-gripping arm tucked close to the torso through the door aperture (no B-pillar clip).
+		q["upper_arm_" + sd] = _rx(0.64 * settle + 0.16 * duck) * _rz(sign_x * (0.08 - 0.03 * settle)) * _ry(-sign_x * (0.12 * settle + 0.10 * duck))
+		q["forearm_" + sd] = _rx(1.02 * settle + duck * 0.32 + 0.16 * (1.0 - settle))
 		q["hand_" + sd] = _rx(0.16 * settle) * _ry(sign_x * 0.24 * settle)
 	if is_instance_valid(vehicle_grip) and vehicle_grip_weight > 0.001:
 		var at := vehicle_grip.global_position
@@ -3333,27 +3349,30 @@ func _pose_vehicle_access(dt: float) -> void:
 			var wrist_roll := clampf(atan2(local_dir.x, maxf(-local_dir.y, 0.15)) * 0.5, -0.35, 0.35)
 			var wrist_q := _rx(wrist_pitch) * _ry(wrist_yaw) * _rz(wrist_roll)
 			q["hand_" + sd] = (q["hand_" + sd] as Quaternion).slerp(wrist_q, vehicle_grip_weight)
-	(bones["hips"] as Node3D).position.y = PELVIS_ABOVE_PLAYER_ROOT
+	(bones["hips"] as Node3D).position.y = PELVIS_ABOVE_PLAYER_ROOT - 0.055 * low_roof * duck - seat_bounce
 	_drive_springs(q, dt, false, false)
-	# Hold the soles on the actual street or dock while the player works the
-	# latch. As the body crosses the sill the shared pose takes over.
-	var foot_weight := 1.0 - smoothstep(0.04, 0.29, sit)
-	if foot_weight > 0.001:
-		var space := player.get_world_3d().direct_space_state
-		var hips := (bones["hips"] as Node3D).global_basis.orthonormalized()
-		for sd in ["l", "r"]:
-			var ankle := (bones["foot_" + sd] as Node3D).global_position
-			var ground := _ground_hit(space, ankle, 0.24)
-			if ground.is_empty() or (ground["normal"] as Vector3).y < 0.72:
-				continue
-			ankle.y = (ground["position"] as Vector3).y + ANKLE_H
-			var direction := ankle - (bones["thigh_" + sd] as Node3D).global_position
-			var knee := Vector3(-0.08 if sd == "l" else 0.08, 0.0, -1.0)
-			var solved := _two_bone(hips, direction.normalized(), direction.length(), knee, 0.45, 0.44, -1.0)
-			for i in 2:
-				var bone: String = ("thigh_" if i == 0 else "shin_") + sd
-				_set_bone(bone, (_rot[bone] as Quaternion).slerp(solved[i], foot_weight))
-	_fit_cabin_feet(smoothstep(0.41, 0.96, sit))
+	# Hold the soles on the actual street or dock while working the latch.
+	# Lead foot lifts first to step over the sill; trail foot stays planted longer supporting weight.
+	var space := player.get_world_3d().direct_space_state
+	var hips := (bones["hips"] as Node3D).global_basis.orthonormalized()
+	for sd in ["l", "r"]:
+		var sign_x := 1.0 if sd == "r" else -1.0
+		var is_lead := (sign_x * vehicle_entry_side) < 0.0
+		var foot_weight := 1.0 - (smoothstep(0.05, 0.24, sit) if is_lead else smoothstep(0.24, 0.50, sit))
+		if foot_weight <= 0.001:
+			continue
+		var ankle := (bones["foot_" + sd] as Node3D).global_position
+		var ground := _ground_hit(space, ankle, 0.28)
+		if ground.is_empty() or (ground["normal"] as Vector3).y < 0.72:
+			continue
+		ankle.y = (ground["position"] as Vector3).y + ANKLE_H
+		var direction := ankle - (bones["thigh_" + sd] as Node3D).global_position
+		var knee := Vector3(-0.08 if sd == "l" else 0.08, 0.0, -1.0)
+		var solved := _two_bone(hips, direction.normalized(), direction.length(), knee, 0.45, 0.44, -1.0)
+		for i in 2:
+			var bone: String = ("thigh_" if i == 0 else "shin_") + sd
+			_set_bone(bone, (_rot[bone] as Quaternion).slerp(solved[i], foot_weight))
+	_fit_cabin_feet(smoothstep(0.46, 0.96, sit))
 	_gait.reset()
 
 

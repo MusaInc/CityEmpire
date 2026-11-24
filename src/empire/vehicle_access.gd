@@ -213,7 +213,7 @@ func start(body: PhysicsBody3D, board: bool, found: Dictionary, done: Callable, 
 		driver_seat = entry_seat
 		_cross_cabin = false
 	seat = driver_seat
-	_duration = 1.68 if _cross_cabin else 1.42
+	_duration = 1.72 if _cross_cabin else 1.48
 	_walk_speed = clampf(Vector2(game.player.s.velocity.x, game.player.s.velocity.z).length(), 0.45, WALK_RATE)
 	if body is Craft:
 		craft_grip = Marker3D.new()
@@ -338,33 +338,33 @@ func tick(dt: float) -> void:
 	var closing := 0.0
 	if entering:
 		if _cross_cabin:
-			# Passenger-side entry: open from outside, arc into passenger seat, pull door shut
-			# from inside, then smoothly slide across to the driver's seat.
+			# Passenger-side entry: reach & open from outside, duck & step into passenger seat,
+			# pull door shut from inside, then smoothly slide across to the driver's seat.
 			door = smoothstep(0.06, 0.30, u) * (1.0 - smoothstep(0.66, 0.84, u))
-			board = smoothstep(0.28, 0.62, u)
-			slide = smoothstep(0.68, 0.96, u)
-			opening = smoothstep(0.02, 0.15, u) * (1.0 - smoothstep(0.28, 0.40, u))
+			board = smoothstep(0.27, 0.63, u)
+			slide = smoothstep(0.67, 0.96, u)
+			opening = smoothstep(0.02, 0.14, u) * (1.0 - smoothstep(0.28, 0.39, u))
 			closing = smoothstep(0.62, 0.72, u) * (1.0 - smoothstep(0.80, 0.86, u))
 		else:
-			door = smoothstep(0.08, 0.36, u) * (1.0 - smoothstep(0.76, 0.98, u))
-			board = smoothstep(0.34, 0.76, u)
-			opening = smoothstep(0.02, 0.18, u) * (1.0 - smoothstep(0.34, 0.46, u))
-			closing = smoothstep(0.72, 0.82, u) * (1.0 - smoothstep(0.92, 1.0, u))
+			door = smoothstep(0.07, 0.34, u) * (1.0 - smoothstep(0.74, 0.98, u))
+			board = smoothstep(0.30, 0.74, u)
+			opening = smoothstep(0.02, 0.16, u) * (1.0 - smoothstep(0.31, 0.43, u))
+			closing = smoothstep(0.70, 0.81, u) * (1.0 - smoothstep(0.92, 1.0, u))
 	else:
 		if _cross_cabin:
 			# Passenger-side exit: slide from driver seat to passenger seat, open door from
 			# inside before stepping out, then close door from outside.
 			slide = 1.0 - smoothstep(0.04, 0.28, u)
 			door = smoothstep(0.24, 0.46, u) * (1.0 - smoothstep(0.78, 0.98, u))
-			board = 1.0 - smoothstep(0.46, 0.76, u)
+			board = 1.0 - smoothstep(0.45, 0.76, u)
 			opening = smoothstep(0.20, 0.30, u) * (1.0 - smoothstep(0.42, 0.50, u))
 			closing = smoothstep(0.74, 0.84, u) * (1.0 - smoothstep(0.93, 1.0, u))
 		else:
 			# Driver-side exit: open door smoothly from inside before stepping out.
-			door = smoothstep(0.08, 0.34, u) * (1.0 - smoothstep(0.76, 0.98, u))
-			board = 1.0 - smoothstep(0.34, 0.74, u)
-			opening = smoothstep(0.02, 0.14, u) * (1.0 - smoothstep(0.28, 0.40, u))
-			closing = smoothstep(0.72, 0.82, u) * (1.0 - smoothstep(0.92, 1.0, u))
+			door = smoothstep(0.07, 0.33, u) * (1.0 - smoothstep(0.74, 0.98, u))
+			board = 1.0 - smoothstep(0.32, 0.74, u)
+			opening = smoothstep(0.02, 0.14, u) * (1.0 - smoothstep(0.28, 0.39, u))
+			closing = smoothstep(0.70, 0.81, u) * (1.0 - smoothstep(0.92, 1.0, u))
 	if vehicle is Car and (vehicle as Car).visual:
 		handle = (vehicle as Car).visual.pose_access(side, door, profile)
 		_ensure_interior_grip()

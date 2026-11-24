@@ -27,7 +27,7 @@ const HEEL := 0.066
 const SETTLE_DIST := 0.15
 const SETTLE_TIME := 0.3
 const START_SPEED := 0.35   # m/s: below this (both feet down) the body stands
-const STAND_W := 0.088      # standing feet: half the stance width (m)
+const STAND_W := 0.082      # standing feet: half the stance width (m)
 
 
 class Foot:
@@ -279,8 +279,9 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 	var cover := speed * duty / freq  # m travelled during one stance
 	# Walking lands well ahead (heel strike); running lands closer under the
 	# hips and pushes off further behind – no reaching, braking overstride.
-	var ahead := cover * lerpf(0.43 if everyday else reach_f / cover_max, 0.245 if everyday else 0.36, run)
-	var width := lerpf(0.068, 0.056, run) if everyday else lerpf(0.095, 0.035, run)
+	var ahead := cover * lerpf(0.42 if everyday else reach_f / cover_max, 0.24 if everyday else 0.35, run)
+	# Natural human foot track: narrow midline walk/jog, tighter still at a sprint (eliminates wide-legged stance).
+	var width := lerpf(0.056, 0.040, run) if everyday else lerpf(0.082, 0.032, run)
 
 	for sd in ["l", "r"]:
 		var f: Foot = feet[sd]
@@ -395,13 +396,14 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			var paw := (0.018 if everyday else 0.08) * run * smoothstep(0.55, 0.82, f.w) * (1.0 - smoothstep(0.82, 1.0, f.w))
 			var p := f.from.lerp(f.target, e) + dir * paw
 			# Height: an early heel kick at a run (the foot folds up behind),
-			# a low clearance arc walking; step up early, step down late.
+			# a low clearance arc walking; step up early with extra riser clearance on stairs/kerbs, step down late.
 			var up := f.target.y - f.from.y
-			var ey := smoothstep(0.0, 0.55, f.w) if up > 0.0 else smoothstep(0.45, 1.0, f.w)
+			var ey := smoothstep(0.0, 0.52, f.w) if up > 0.0 else smoothstep(0.46, 1.0, f.w)
 			p.y = f.from.y + up * ey
+			var step_clear := clampf(up * 0.42, 0.0, 0.09)
 			# (A sprint's heel comes up behind, but not tucked against the seat
 			# for half the stride: that read as running sitting down.)
-			var lift_h := lerpf(0.078 if everyday else 0.1, (0.29 if everyday else 0.26) + 0.05 * sprint, run) * clampf(speed / 1.2, 0.35, 1.0)
+			var lift_h := (lerpf(0.072 if everyday else 0.095, (0.28 if everyday else 0.25) + 0.05 * sprint, run) + step_clear) * clampf(speed / 1.2, 0.35, 1.0)
 			# (Peak skewed early running – the heel kicks up behind – with zero
 			# vertical speed at lift and touchdown: no pops.)
 			var wk := f.w + 0.15 * f.w * (1.0 - f.w)
