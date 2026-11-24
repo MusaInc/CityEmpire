@@ -17,7 +17,7 @@ const PRESETS := {
 		"msaa": Viewport.MSAA_2X, "fog": true, "props": 0.8, "traffic": 0.7, "glow": true,
 	},
 	Quality.HIGH: {
-		"fps": 60, "render_scale": 1.0, "pixels": 2.0e6, "shadows": true, "view_distance": 1300.0,
+		"fps": 60, "render_scale": 1.0, "pixels": 2.4e6, "shadows": true, "view_distance": 1350.0,
 		"msaa": Viewport.MSAA_4X, "fog": true, "props": 1.0, "traffic": 1.0, "glow": true,
 	},
 }

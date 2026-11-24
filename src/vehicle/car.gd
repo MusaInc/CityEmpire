@@ -433,7 +433,8 @@ func _physics_process(dt: float) -> void:
 	var c: float = spec["damper"] * mass * sqrt(susp_stiff)
 	var rest: float = spec["susp_len"]
 	var wr: float = spec["wheel_r"]
-	var mu: float = spec["grip"] * (1.0 - 0.25 * (1.0 - health)) * (1.0 - 0.28 * puncture)
+	var wet_grip := 1.0 - 0.11 * clampf(CarVisual.visible_wetness, 0.0, 1.0)
+	var mu: float = spec["grip"] * wet_grip * (1.0 - 0.25 * (1.0 - health)) * (1.0 - 0.28 * puncture)
 	var brake_scale: float = float(spec.get("brake_force", 1.0))
 	var rear_slip_k: float = float(spec.get("drift_slip", 1.0))
 	var roll_gain: float = float(spec.get("roll_gain", 1.0))

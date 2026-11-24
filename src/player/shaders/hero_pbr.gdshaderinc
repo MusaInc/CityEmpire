@@ -103,16 +103,19 @@ void fragment() {
     }
 #endif
     float surface_roughness = has_roughness_map ? texture(roughness_map, UV).g : roughness;
-    ROUGHNESS = mix(surface_roughness, max(0.3, surface_roughness - 0.18), wetness);
+    float wet_k = clamp(wetness, 0.0, 1.0);
+    ROUGHNESS = mix(surface_roughness, max(0.24, surface_roughness - 0.22), wet_k);
     METALLIC = metallic;
     EMISSION = surface_emission;
 #if defined(SKIN)
-    // Realistic human skin: warm dermal subsurface scatter, soft peach-fuzz grazing lift, natural satin-matte response.
+    // Realistic human skin: warm dermal subsurface scatter, soft peach-fuzz grazing lift, rain-wet sheen.
     float skin_ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
     float skin_fres = pow(max(1.0 - skin_ndv, 0.0001), 3.6);
-    SPECULAR = mix(0.24, 0.28, surface_definition);
-    ALBEDO = ALBEDO * vec3(1.01, 0.995, 0.98) + ALBEDO * vec3(0.052, 0.038, 0.030) * skin_fres;
-    BACKLIGHT = ALBEDO * vec3(0.40, 0.135, 0.060);
+    SPECULAR = mix(mix(0.24, 0.28, surface_definition), 0.52, wet_k * 0.7);
+    CLEARCOAT = wet_k * 0.42;
+    CLEARCOAT_ROUGHNESS = mix(0.22, 0.09, wet_k);
+    ALBEDO = ALBEDO * vec3(1.01, 0.995, 0.98) * (1.0 - 0.05 * wet_k) + ALBEDO * vec3(0.052, 0.038, 0.030) * skin_fres;
+    BACKLIGHT = ALBEDO * vec3(0.42, 0.14, 0.062);
     EMISSION += ALBEDO * mix(mix(0.020, 0.012, surface_definition), 0.010, night);
 #elif defined(EYE)
     // Wet dome cornea with crisp twin catchlights + subtle lower-meniscus moisture sheen.

@@ -7,6 +7,9 @@ render_mode cull_back, diffuse_burley;
 
 #include "res://src/world/shaders/person_pose.gdshaderinc"
 
+global uniform float wetness;
+global uniform float night;
+
 varying vec3 v_col;
 varying float v_rough;
 varying vec3 v_surface;
@@ -76,7 +79,22 @@ void fragment() {
 			discard;
 		}
 	}
-	ALBEDO = person_cloth(v_col, v_surface, 1.0 - smoothstep(7.0, 23.0, length(VERTEX)), v_part);
-	SPECULAR = v_part == 1 || v_part == 3 ? 0.32 : 0.24;
-	ROUGHNESS = v_rough;
+	vec3 albedo = person_cloth(v_col, v_surface, 1.0 - smoothstep(7.0, 23.0, length(VERTEX)), v_part);
+	// Glacier/RE4-style vertical ground-bounce AO: grounds feet and hems onto the street.
+	float foot_ao = mix(0.68, 1.0, smoothstep(0.02, 0.58, v_surface.y));
+	float wet = clamp(wetness, 0.0, 1.0);
+	// Wet rain darkening on clothing/hair and damp sheen on skin/fabric.
+	float cloth_wet = v_part == 1 ? 0.06 : 0.18;
+	ALBEDO = albedo * foot_ao * (1.0 - cloth_wet * wet);
+	SPECULAR = mix(v_part == 1 || v_part == 3 ? 0.34 : 0.24, 0.56, wet * 0.65);
+	ROUGHNESS = mix(v_rough, max(0.24, v_rough - 0.26), wet);
+	// Warm dermal subsurface scattering on skin so faces/hands don't look plastic.
+	if (v_part == 1 || v_part == 9) {
+		BACKLIGHT = ALBEDO * vec3(0.36, 0.13, 0.06);
+	}
+	// Subtle cool rim separation at night so walkers read cleanly against dark alleys.
+	float edge = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.6);
+	RIM = 0.18 + 0.24 * night;
+	RIM_TINT = 0.35;
+	EMISSION = vec3(0.45, 0.58, 0.80) * edge * 0.055 * night;
 }

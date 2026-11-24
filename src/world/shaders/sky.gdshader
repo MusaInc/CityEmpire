@@ -90,12 +90,12 @@ vec3 sky_colour(vec3 d, vec3 sun_dir, bool cubemap, vec3 cloud) {
 	vec3 col;
 	if (h >= 0.0) {
 		col = mix(horizon, zenith, pow(h, 0.45));
-		// Warm haze hugging the horizon, stronger toward the sun.
-		col = mix(col, haze, exp(-h * 12.0) * (0.15 + 0.6 * pow(sd, 3.0)));
+		// Warm Rayleigh/Mie scatter hugging the horizon, stronger toward the sun.
+		col = mix(col, haze, exp(-h * 11.0) * (0.18 + 0.65 * pow(sd, 3.0)));
 	} else {
 		col = mix(horizon * 0.9, ground, clamp(-h * 4.0, 0.0, 1.0));
 	}
-	col += sun_tint * (pow(sd, 6.0) * 0.35 + pow(sd, 64.0) * 0.6) * sun_glow;
+	col += sun_tint * (pow(sd, 6.0) * 0.36 + pow(sd, 24.0) * 0.22 + pow(sd, 72.0) * 0.68) * sun_glow;
 	float disc = 0.0;
 	if (cubemap) {
 		// The light probes only need the broad loss of sky colour under cloud.
@@ -113,9 +113,10 @@ vec3 sky_colour(vec3 d, vec3 sun_dir, bool cubemap, vec3 cloud) {
 			float st = step(0.985, r) * (1.0 - smoothstep(0.0, 0.09, length(f))) * (0.6 + 0.4 * sin(TIME * (1.0 + r * 3.0) + r * 40.0));
 			col += vec3(0.85, 0.9, 1.0) * st * stars * 1.6 * smoothstep(0.0, 0.25, h);
 		}
-		vec3 high_light = mix(cloud_shade, cloud_lit, 0.77 + pow(sd, 5.0) * sun_glow * 0.18);
+		vec3 high_light = mix(cloud_shade, cloud_lit, 0.78 + pow(sd, 5.0) * sun_glow * 0.22);
 		float lit_edge = clamp(cloud.b / max(cloud.r, 0.001), 0.0, 1.0);
-		vec3 low_light = mix(cloud_shade, cloud_lit, lit_edge) * mix(1.0, 0.58, cloud_dark);
+		float silver = pow(sd, 10.0) * sun_glow * (1.0 - cloud.r * 0.55) * 0.28;
+		vec3 low_light = mix(cloud_shade, cloud_lit, clamp(lit_edge + silver, 0.0, 1.0)) * mix(1.0, 0.52, cloud_dark);
 		low_light = mix(low_light, horizon, (1.0 - smoothstep(0.03, 0.42, h)) * 0.34);
 		low_light += vec3(0.75, 0.8, 1.0) * flash * 0.6;
 		col = mix(mix(col, high_light, cloud.g), low_light, cloud.r);

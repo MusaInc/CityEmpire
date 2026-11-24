@@ -13,9 +13,11 @@ void vertex() {
 
 void fragment() {
 	vec2 p = UV * 2.0 - 1.0;
-	// Elliptical (longer front to back, under the stride), soft edged.
-	float r = length(p * vec2(1.0, 0.8));
-	float a = (1.0 - smoothstep(0.25, 1.0, r)) * 0.42 * v_k;
-	ALBEDO = vec3(0.02, 0.025, 0.03);
+	// Tight inner foot-contact core + soft elliptical stride penumbra.
+	float r = length(p * vec2(1.05, 0.82));
+	float soft = 1.0 - smoothstep(0.18, 1.0, r);
+	float core = 1.0 - smoothstep(0.05, 0.55, r);
+	float a = clamp(soft * 0.42 + core * 0.34, 0.0, 0.72) * v_k;
+	ALBEDO = vec3(0.012, 0.015, 0.022);
 	ALPHA = a;
 }
