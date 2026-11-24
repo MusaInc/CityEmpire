@@ -199,43 +199,82 @@ def streetlight():
 
 # ------------------------------------------------------------- landmarks
 def clock_crown():
-    """Crown for a waterfront clock tower (loosely early-1900s Liverpool):
-    clock stage with four faces, colonnaded drum, ribbed dome, finial bird."""
+    """Crown for a waterfront clock tower (early-1900s Royal Liver Building inspired):
+    sculpted corner turrets, 4 detailed clock faces with bronze bezels, 12 hour markers
+    and hands, colonnaded drum, verdigris ribbed dome, lantern, and gilt finial bird."""
     reset()
-    stone = mat("stone_light", (0.78, 0.76, 0.72), 0.8)
-    dark = mat("stone_dark", (0.45, 0.44, 0.42), 0.8)
-    face = mat("clock_face", (0.95, 0.92, 0.82), 0.4, 0.0, emit=(0.4, 0.38, 0.3))
-    bronze = mat("bronze", (0.35, 0.5, 0.42), 0.4, 0.8)  # verdigris
-    gold = mat("gilt", (0.85, 0.66, 0.28), 0.3, 1.0)
-    p = [box("stage", (16, 16, 12), (0, 0, 6), stone, bevel=0.2)]
-    p.append(box("cornice", (17.2, 17.2, 0.9), (0, 0, 12.2), dark, bevel=0.1))
-    for ang in range(4):  # clock faces
+    stone = mat("stone_light", (0.76, 0.73, 0.68), 0.82)
+    dark = mat("stone_dark", (0.44, 0.42, 0.39), 0.84)
+    face = mat("clock_face", (0.94, 0.91, 0.82), 0.35, 0.0, emit=(0.55, 0.50, 0.38))
+    dial_ink = mat("clock_hands", (0.09, 0.10, 0.11), 0.35, 0.75)
+    bronze = mat("bronze", (0.30, 0.46, 0.40), 0.42, 0.72)  # verdigris copper
+    gold = mat("gilt", (0.82, 0.64, 0.26), 0.30, 0.95)
+    p = [box("stage", (16.0, 16.0, 12.2), (0, 0, 6.1), stone, bevel=0.22)]
+    p.append(box("base_plinth", (16.8, 16.8, 1.0), (0, 0, 0.5), dark, bevel=0.12))
+    p.append(box("cornice", (17.6, 17.6, 1.0), (0, 0, 12.4), dark, bevel=0.14))
+    # Corner baroque stone turret piers & finials
+    for sx in (-7.6, 7.6):
+        for sy in (-7.6, 7.6):
+            p.append(box("turret", (2.2, 2.2, 13.6), (sx, sy, 6.8), stone, bevel=0.12))
+            p.append(dome("turret_cap", 1.15, (sx, sy, 13.6), bronze, 10, 4, 1.3))
+    # Four detailed clock faces: bronze bezel, illuminated dial, 12 hour ticks, hands & hub
+    for ang in range(4):
         a = ang * math.pi / 2
-        c = cyl("clock", 3.6, 0.3, (0, 0, 0), face, 32)
+        nx, ny = math.sin(a), -math.cos(a)
+        tx, ty = math.cos(a), math.sin(a)
+        cz = 6.5
+        # Outer dark bronze bezel ring
+        bz = cyl("bezel", 3.95, 0.28, (0, 0, 0), dial_ink, 32)
+        bz.rotation_euler = (math.pi / 2, 0, a)
+        bz.location = (nx * 8.04, ny * 8.04, cz)
+        p.append(bz)
+        # Cream illuminated dial
+        c = cyl("clock", 3.55, 0.34, (0, 0, 0), face, 32)
         c.rotation_euler = (math.pi / 2, 0, a)
-        c.location = (math.sin(a) * 8.05, -math.cos(a) * 8.05, 6.5)
+        c.location = (nx * 8.08, ny * 8.08, cz)
         p.append(c)
-    p.append(cyl("drum", 6.2, 7.0, (0, 0, 12.6), stone, 24))
+        # 12 raised bronze hour markers (longer at 12, 3, 6, 9)
+        for h in range(12):
+            ha = h * (math.tau / 12.0)
+            r_in = 2.65 if h % 3 == 0 else 2.88
+            r_len = 0.68 if h % 3 == 0 else 0.42
+            r_mid = r_in + r_len * 0.5
+            w_t = 0.22 if h % 3 == 0 else 0.14
+            dx, dz = math.sin(ha) * r_mid, math.cos(ha) * r_mid
+            tk = box("tick", (w_t, 0.18, r_len), (nx * 8.24 + tx * dx, ny * 8.24 + ty * dx, cz + dz), dial_ink)
+            tk.rotation_euler = (0, ha, a)
+            p.append(tk)
+        # Hour hand (pointing ~10 o'clock) and minute hand (pointing ~2 o'clock)
+        for hand_a, h_len, h_w in ((-math.radians(58), 2.05, 0.24), (math.radians(52), 2.95, 0.18)):
+            hx = math.sin(hand_a) * (h_len * 0.45)
+            hz = math.cos(hand_a) * (h_len * 0.45)
+            hd = box("hand", (h_w, 0.18, h_len), (nx * 8.30 + tx * hx, ny * 8.30 + ty * hx, cz + hz), dial_ink)
+            hd.rotation_euler = (0, hand_a, a)
+            p.append(hd)
+        hub = cyl("hub", 0.34, 0.28, (0, 0, 0), gold, 12)
+        hub.rotation_euler = (math.pi / 2, 0, a)
+        hub.location = (nx * 8.32, ny * 8.32, cz)
+        p.append(hub)
+    p.append(cyl("drum", 6.2, 7.0, (0, 0, 12.8), stone, 24))
     for i in range(12):  # colonnade
         a = i / 12 * math.tau
-        p.append(cyl("col", 0.42, 6.6, (math.cos(a) * 6.9, math.sin(a) * 6.9, 12.8), stone, 8))
-    p.append(cyl("ring", 7.4, 0.8, (0, 0, 19.4), dark, 24))
-    p.append(dome("dome", 6.0, (0, 0, 20.2), bronze, 24, 6, 1.25))
+        p.append(cyl("col", 0.44, 6.6, (math.cos(a) * 6.95, math.sin(a) * 6.95, 13.0), stone, 8))
+    p.append(cyl("ring", 7.5, 0.85, (0, 0, 19.6), dark, 24))
+    p.append(dome("dome", 6.0, (0, 0, 20.4), bronze, 24, 8, 1.28))
     for i in range(8):  # dome ribs
         a = i / 8 * math.tau
-        rib = box("rib", (0.35, 0.35, 7.2), (0, 0, 0), dark)
-        rib.location = (math.cos(a) * 4.3, math.sin(a) * 4.3, 23.4)
-        rib.rotation_euler = (0, -0.75, a)
+        rib = box("rib", (0.32, 0.32, 7.2), (0, 0, 0), dark)
+        rib.location = (math.cos(a) * 4.3, math.sin(a) * 4.3, 23.6)
         rib.rotation_euler = (math.sin(a) * 0.75, -math.cos(a) * 0.75, 0)
         p.append(rib)
-    p.append(cyl("lantern", 1.3, 3.0, (0, 0, 27.4), stone, 12))
-    p.append(cyl("plinth", 0.9, 1.0, (0, 0, 30.4), dark, 12))
-    # Stylised mythical bird: body, neck, wings half-raised.
-    p.append(sphere("bird_body", 1.0, (0, 0, 32.4), gold, 12, 8, (0.7, 1.3, 0.9)))
-    p.append(sphere("bird_head", 0.45, (0, 1.2, 33.6), gold, 10, 6))
-    p.append(cyl("bird_neck", 0.3, 1.2, (0, 0.8, 32.6), gold, 8))
+    p.append(cyl("lantern", 1.35, 3.0, (0, 0, 27.6), stone, 12))
+    p.append(cyl("plinth", 0.95, 1.0, (0, 0, 30.6), dark, 12))
+    # Stylised Liver bird: body, neck, head, wings half-raised.
+    p.append(sphere("bird_body", 1.0, (0, 0, 32.6), gold, 12, 8, (0.7, 1.3, 0.9)))
+    p.append(sphere("bird_head", 0.45, (0, 1.2, 33.8), gold, 10, 6))
+    p.append(cyl("bird_neck", 0.3, 1.2, (0, 0.8, 32.8), gold, 8))
     for s in (-1, 1):
-        w = box("wing", (2.6, 1.2, 0.15), (s * 1.6, -0.1, 33.0), gold, bevel=0.05)
+        w = box("wing", (2.6, 1.2, 0.15), (s * 1.6, -0.1, 33.2), gold, bevel=0.05)
         w.rotation_euler = (0, s * 0.5, 0)
         p.append(w)
     export("clock_crown.glb", [join("clock_crown", p)])

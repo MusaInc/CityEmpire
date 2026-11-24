@@ -912,12 +912,10 @@ func _wholesale_page() -> void:
 	var unit := _cart_unit
 	var v := _open(String(unit.get("name", "Wholesale")), 1000, 660)
 	var e := game.empire
-	var cap := 0
-	var veh_name := "car"
-	for veh in e.vehicles:
-		if (veh["cargo"] as Stock).case_capacity > cap:
-			cap = (veh["cargo"] as Stock).case_capacity
-			veh_name = String(EmpireData.vehicle_model(veh["model"]).get("name", "car"))
+	var veh := game.wholesale_vehicle(unit)
+	var cap := (veh["cargo"] as Stock).case_capacity if not veh.is_empty() else 0
+	var veh_used := (veh["cargo"] as Stock).cases_used() if not veh.is_empty() else 0
+	var veh_name := String(EmpireData.vehicle_model(veh["model"]).get("name", "vehicle")) if not veh.is_empty() else "vehicle"
 	var waiting := 0
 	if e.pallets.has(unit.get("id", "")):
 		waiting = (e.pallets[unit["id"]] as Stock).cases_used()
@@ -932,12 +930,12 @@ func _wholesale_page() -> void:
 			who.add_child(S.chip_button(x.name, x == b, func(): _ws_for = x.id; _cart.clear(); _wholesale_page()))
 		v.add_child(who)
 	if not custom:
-		var free := maxi(cap - waiting, 0)
+		var free := maxi(cap - veh_used, 0)
 		var budget := maxf(e.company_cash, 0.0) + maxf(e.personal_cash, 0.0)
 		var tr := _in_transit()
 		var top := e.restock_plan(b, false, free, budget, tr)
 		var full := e.restock_plan(b, true, free, budget, tr)
-		var info := S.label("Pick a pack for %s: it works out every line the shop sells, counting what's on the shelves, in the stockroom and already bought. Goods wait at the collection bay outside: back your %s up to it and press LOAD, then UNLOAD outside your shop." % [b.name, veh_name], 16, S.MUTED)
+		var info := S.label("One-tap wholesale restock for %s. Purchased stock automatically loads straight into your %s parked outside (%d/%d cases free)." % [b.name, veh_name, free, cap], 16, S.MUTED)
 		info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		info.custom_minimum_size.x = 920
 		v.add_child(info)
@@ -947,16 +945,19 @@ func _wholesale_page() -> void:
 			if err != "":
 				toast(err, "bad")
 				return
-			toast("Paid. %d cases waiting at the collection bay: back your vehicle up to it and press LOAD." % int(plan["count"]), "good")
+			if game.last_wholesale_loaded > 0:
+				toast("Loaded %d cases straight into your %s!" % [game.last_wholesale_loaded, game.last_wholesale_veh], "good")
+			else:
+				toast("Paid. %d cases ready at the collection bay." % int(plan["count"]), "good")
 			close_panel(true)
 		if full["cases"] == top["cases"]:
 			# (Cut to the same load by the vehicle or the money: one card.)
-			packs.add_child(_pack_card("Restock pack", "A spread of every line the shop is short of, as much as you can take in one trip.", top, 0.0, "BUY",
+			packs.add_child(_pack_card("Restock pack", "A spread of every line the shop is short of, loaded straight into your vehicle.", top, 0.0, "BUY & LOAD",
 				func(): buy.call(top)))
 		else:
-			packs.add_child(_pack_card("Top up the shelves", "Enough to fill every shelf, fridge and counter in the shop.", top, 0.0, "BUY",
+			packs.add_child(_pack_card("Top up the shelves", "Enough to fill every shelf, fridge and counter in the shop.", top, 0.0, "BUY & LOAD",
 				func(): buy.call(top)))
-			packs.add_child(_pack_card("Full restock", "Full shelves and a refill of each line in the stockroom, so you don't need to come back tomorrow.", full, 0.0, "BUY",
+			packs.add_child(_pack_card("Full restock", "Full shelves and a refill of each line in the stockroom.", full, 0.0, "BUY & LOAD",
 				func(): buy.call(full)))
 		v.add_child(packs)
 		var why := ""
@@ -976,7 +977,8 @@ func _wholesale_page() -> void:
 		_sack_truck_button(foot0)
 		v.add_child(foot0)
 		return
-	var info2 := S.label("Trade prices by the case. Goods go to the collection bay outside — your biggest vehicle holds %d cases." % cap, 16, S.MUTED)
+	var free_veh := maxi(cap - veh_used, 0)
+	var info2 := S.label("Trade prices by the case. Purchases auto-load straight into your %s outside (%d/%d cases free)." % [veh_name, free_veh, cap], 16, S.MUTED)
 	info2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info2.custom_minimum_size.x = 900
 	v.add_child(info2)
@@ -993,19 +995,20 @@ func _wholesale_page() -> void:
 			var unit_cost := EmpireData.unit_cost(pid)
 			var swatch := ColorRect.new()
 			swatch.color = EmpireData.colour(pid)
-			swatch.custom_minimum_size = Vector2(18, 28)
+			swatch.custom_minimum_size = Vector2(24, 32)
 			var note := ""
 			if b != null:
-				note = "  · %d in the shop" % (b.shelf_qty(pid) + b.backroom.qty(pid))
+				note = "  · %d in shop" % (b.shelf_qty(pid) + b.backroom.qty(pid))
 			elif p["fixture"] == "fridge":
 				note = "  · fridge"
-			list.add_child(_row([swatch, _fixed(String(p["name"]) + note, 330),
-				_fixed("%d per case" % int(p["case_qty"]), 110, 15, S.MUTED),
-				_fixed(EmpireData.money(e.case_price(pid), true), 90, 17, S.PAPER, "bold"),
-				_fixed("%s each · RRP %s" % [EmpireData.money(unit_cost, true), EmpireData.money(float(p["rrp"]), true)], 210, 14, S.MUTED),
-				S.button("−", func(): _cart_add(pid, -1), false, 46),
+			list.add_child(_row([swatch, _fixed(String(p["name"]) + note, 290),
+				_fixed("%d/case" % int(p["case_qty"]), 88, 15, S.MUTED),
+				_fixed(EmpireData.money(e.case_price(pid), true), 86, 17, S.PAPER, "bold"),
+				_fixed("RRP %s" % EmpireData.money(float(p["rrp"]), true), 110, 14, S.MUTED),
+				S.button("−", func(): _cart_add(pid, -1), false, 44),
 				_fixed(str(n), 34, 20, S.AMBER if n > 0 else S.PAPER, "black"),
-				S.button("+", func(): _cart_add(pid, 1), false, 46)]))
+				S.button("+", func(): _cart_add(pid, 1), false, 44),
+				S.button("+5", func(): _cart_add(pid, 5), false, 52)]))
 	v.add_child(_scroll(list, 400))
 	var total := 0.0
 	var cases := 0
@@ -1013,21 +1016,23 @@ func _wholesale_page() -> void:
 		total += e.case_price(pid) * int(_cart[pid])
 		cases += int(_cart[pid])
 	var foot := S.hbox(14)
-	foot.add_child(S.label("%d case%s · %s" % [cases, "" if cases == 1 else "s", EmpireData.money(total, true)], 24, S.PAPER, "black"))
-	foot.add_child(S.label("You have %s + company %s" % [EmpireData.money(e.personal_cash), EmpireData.money(e.company_cash)], 15, S.MUTED))
+	foot.add_child(S.label("%d/%d cases · %s" % [cases, free_veh, EmpireData.money(total, true)], 22, S.AMBER if cases > free_veh else S.PAPER, "black"))
+	foot.add_child(S.label("Cash %s" % EmpireData.money(e.company_cash + e.personal_cash), 15, S.MUTED))
 	foot.add_child(S.spacer())
 	if b != null:
 		foot.add_child(S.button("Packs", func(): _ws_custom = false; _wholesale_page()))
-	_sack_truck_button(foot)
 	foot.add_child(S.button("Clear", func(): _cart.clear(); _wholesale_page()))
-	foot.add_child(S.button("PAY · %s" % EmpireData.money(total, true), func():
+	foot.add_child(S.button("BUY & LOAD · %s" % EmpireData.money(total, true), func():
 		var err := game.buy_wholesale(_cart_unit, _cart)
 		if err != "":
 			toast(err, "bad")
 			return
-		toast("Paid. %d case%s waiting at the collection bay." % [cases, "" if cases == 1 else "s"], "good")
+		if game.last_wholesale_loaded > 0:
+			toast("Loaded %d case%s straight into your %s!" % [game.last_wholesale_loaded, "" if game.last_wholesale_loaded == 1 else "s", game.last_wholesale_veh], "good")
+		else:
+			toast("Paid. %d case%s ready at the collection bay." % [cases, "" if cases == 1 else "s"], "good")
 		_cart.clear()
-		close_panel(true), true, 220))
+		close_panel(true), true, 240))
 	v.add_child(foot)
 
 

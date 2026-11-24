@@ -10,7 +10,7 @@ extends RefCounted
 ## Arrays as CityWorld._flatten_colors: [verts, normals, colours, indices].
 ## Colours are sRGB (the furniture material converts).
 
-const NO_COLLISION := ["litter", "tree_grate", "banner_cbd", "banner_midtown", "banner_waterfront", "banner_docks",
+const NO_COLLISION := ["litter", "tree_grate", "grass_tuft", "hedge_cluster", "banner_cbd", "banner_midtown", "banner_waterfront", "banner_docks",
 	"banner_georgian", "banner_shops"]
 ## Banner colours per district: [field, stripe].
 const BANNERS := {

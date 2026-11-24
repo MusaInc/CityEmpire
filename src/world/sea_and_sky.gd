@@ -157,82 +157,145 @@ static func _hull_outline(length: float, beam: float, bow := 0.18) -> PackedVect
 		Vector2(b * 0.85, h), Vector2(-b * 0.85, h), Vector2(-b, h - 2.0), Vector2(-b, -h + length * bow)])
 
 
+const CARGO_SHIP_GLB := "res://assets/models/cargo_ship.glb"
+static var _cargo_ship_scene: PackedScene
+
+
 # ------------------------------------------------------------ ships
-## A container ship facing -Z, waterline at y = 0: dark hull with a red
-## boot-top, a white superstructure and funnel aft, container stacks forward.
+## A detailed container ship (Blender GLB, canonical 100 m length) facing -Z,
+## waterline at y = 0, with navigation lights and speed-reactive water wake.
 func _container_ship(length: float) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Ship"
-	var beam := length * 0.15
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var hull: Color = HULLS[rng.randi() % HULLS.size()]
-	_prism(st, _hull_outline(length, beam + 0.3), -3.0, 1.2, Color(0.55, 0.12, 0.1))       # boot-top
-	_prism(st, _hull_outline(length, beam), 1.2, 9.0, hull, Color(0.32, 0.3, 0.28))        # topsides + deck
-	# Container stacks: bays of 12 m along the forward 70 %, rows across.
-	var bays := int(length * 0.62 / 13.0)
-	for i in bays:
-		var z := -length * 0.36 + i * 13.0
-		var tiers := rng.randi_range(2, 5)
-		var rows := int((beam - 2.0) / 2.6)
-		for r in rows:
-			var x := -beam * 0.5 + 1.0 + (r + 0.5) * 2.6
-			var hgt := rng.randi_range(maxi(1, tiers - 2), tiers)
-			for k in hgt:
-				var col: Color = BOX_COLORS[rng.randi() % BOX_COLORS.size()]
-				_box(st, Vector3(x, 9.0 + 1.3 + k * 2.6, z), Vector3(2.45, 2.5, 12.0), col.darkened(rng.randf_range(0.0, 0.2)))
-	# Superstructure aft: a tall white block, bridge wings, funnel.
-	var sz := length * 0.5 - length * 0.12
-	_box(st, Vector3(0, 9.0 + 9.0, sz), Vector3(beam * 0.8, 18.0, length * 0.09), WHITE)
-	_box(st, Vector3(0, 9.0 + 16.8, sz - length * 0.045 - 0.3), Vector3(beam * 0.78, 1.6, 0.4), Color(0.08, 0.1, 0.12))  # bridge windows
-	_box(st, Vector3(0, 9.0 + 17.2, sz - 2.0), Vector3(beam + 2.0, 1.2, 3.0), WHITE)  # bridge wings
-	_box(st, Vector3(0, 9.0 + 22.0, sz + length * 0.06), Vector3(4.5, 9.0, 6.0), hull)  # funnel
-	_box(st, Vector3(0, 9.0 + 26.8, sz + length * 0.06), Vector3(4.6, 1.2, 6.1), Color(0.85, 0.65, 0.12))
-	_box(st, Vector3(0, 9.0 + 24.0, sz - 3.0), Vector3(0.5, 10.0, 0.5), Color(0.8, 0.8, 0.78))  # mast
-	root.add_child(_mesh_node(st, _mat, "Hull"))
+	var scale_k := length / 100.0
+	var beam := 16.5 * scale_k
+	if _cargo_ship_scene == null and ResourceLoader.exists(CARGO_SHIP_GLB):
+		_cargo_ship_scene = load(CARGO_SHIP_GLB) as PackedScene
+	if _cargo_ship_scene:
+		var model := _cargo_ship_scene.instantiate() as Node3D
+		model.name = "Hull"
+		model.scale = Vector3(scale_k, scale_k, scale_k)
+		# Disable shadows on distant ocean vessels for mobile GPU efficiency.
+		for mi in model.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(model)
+	else:
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var hull: Color = HULLS[rng.randi() % HULLS.size()]
+		_prism(st, _hull_outline(length, beam + 0.3), -3.0, 1.2, Color(0.55, 0.12, 0.1))
+		_prism(st, _hull_outline(length, beam), 1.2, 7.0, hull, Color(0.32, 0.3, 0.28))
+		root.add_child(_mesh_node(st, _mat, "Hull"))
+	var sz := 29.0 * scale_k
 	var lamps := SurfaceTool.new()
 	lamps.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_box(lamps, Vector3(beam * 0.5 + 1.0, 9.0 + 17.6, sz - 2.0), Vector3(0.7, 0.7, 0.7), Color(0.1, 0.9, 0.2))   # starboard green
-	_box(lamps, Vector3(-beam * 0.5 - 1.0, 9.0 + 17.6, sz - 2.0), Vector3(0.7, 0.7, 0.7), Color(0.95, 0.1, 0.08))  # port red
-	_box(lamps, Vector3(0, 9.0 + 29.2, sz - 3.0), Vector3(0.8, 0.8, 0.8), Color(1, 1, 0.92))   # masthead
-	_box(lamps, Vector3(0, 10.0, length * 0.5 - 0.5), Vector3(0.8, 0.8, 0.5), Color(1, 1, 0.92))  # stern
-	_box(lamps, Vector3(0, 10.5, -length * 0.5 + 2.0), Vector3(0.6, 0.6, 0.6), Color(1, 1, 0.92))  # bow
+	_box(lamps, Vector3(beam * 0.5 + 1.1 * scale_k, 15.8 * scale_k, sz - 2.0 * scale_k), Vector3(0.6, 0.6, 0.6), Color(0.1, 0.9, 0.2))   # starboard green
+	_box(lamps, Vector3(-beam * 0.5 - 1.1 * scale_k, 15.8 * scale_k, sz - 2.0 * scale_k), Vector3(0.6, 0.6, 0.6), Color(0.95, 0.1, 0.08))  # port red
+	_box(lamps, Vector3(0, 20.1 * scale_k, sz - 1.2 * scale_k), Vector3(0.7, 0.7, 0.7), Color(1, 1, 0.92))   # masthead
+	_box(lamps, Vector3(0, 7.2 * scale_k, length * 0.49), Vector3(0.7, 0.7, 0.5), Color(1, 1, 0.92))  # stern
+	_box(lamps, Vector3(0, 13.5 * scale_k, -length * 0.45), Vector3(0.6, 0.6, 0.6), Color(1, 1, 0.92))  # bow
 	root.add_child(_mesh_node(lamps, _lamp_mat, "Lights"))
-	root.add_child(_wake(beam * 1.2, length * 1.6, length * 0.5))
+	root.add_child(_wake(beam * 1.15, length * 1.75, length * 0.48))
 	return root
 
 
-## A white V of foam trailing astern (z > 0 is behind).
+## A realistic dual-layer V foam wake (bow Kelvin wave + twin stern propwash)
+## trailing astern (z > 0 is behind). Scaled smoothly by vessel speed.
 func _wake(width: float, length: float, start: float) -> MeshInstance3D:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var a := Color(1, 1, 1, 0.32)
-	var b := Color(1, 1, 1, 0.0)
-	var y := 0.15
-	var pts := [Vector3(-width * 0.3, y, start - 2.0), Vector3(width * 0.3, y, start - 2.0),
-		Vector3(width * 1.4, y, start + length), Vector3(-width * 1.4, y, start + length)]
-	var cols := [a, a, b, b]
-	for idx in [0, 1, 2, 0, 2, 3]:
+	var a := Color(0.95, 0.98, 1.0, 0.34)
+	var mid := Color(0.92, 0.96, 1.0, 0.16)
+	var b := Color(0.90, 0.95, 1.0, 0.0)
+	var y := 0.16
+	# Outer Kelvin V wake
+	var pts := [
+		Vector3(-width * 0.38, y, start - 2.0), Vector3(width * 0.38, y, start - 2.0),
+		Vector3(width * 0.92, y, start + length * 0.45), Vector3(-width * 0.92, y, start + length * 0.45),
+		Vector3(width * 1.45, y, start + length), Vector3(-width * 1.45, y, start + length),
+	]
+	var cols := [a, a, mid, mid, b, b]
+	for idx in [0, 1, 2, 0, 2, 3, 3, 2, 4, 3, 4, 5]:
 		st.set_color(cols[idx])
 		st.set_normal(Vector3.UP)
 		st.add_vertex(pts[idx])
+	# Brighter inner stern propwash core
+	var c_in := Color(1.0, 1.0, 1.0, 0.42)
+	var c_out := Color(1.0, 1.0, 1.0, 0.0)
+	var p2 := [
+		Vector3(-width * 0.18, y + 0.03, start - 1.0), Vector3(width * 0.18, y + 0.03, start - 1.0),
+		Vector3(width * 0.34, y + 0.03, start + length * 0.65), Vector3(-width * 0.34, y + 0.03, start + length * 0.65),
+	]
+	var c2 := [c_in, c_in, c_out, c_out]
+	for idx in [0, 1, 2, 0, 2, 3]:
+		st.set_color(c2[idx])
+		st.set_normal(Vector3.UP)
+		st.add_vertex(p2[idx])
 	var mi := _mesh_node(st, _wake_mat, "Wake")
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi
 
 
-## A route is usable when every point along it (every 40 m) is open water
-## and well off the coast (the hull's half-beam + margin either side).
-func _route_ok(pts: PackedVector3Array, clear: float) -> bool:
+## Smooth Catmull-Rom maritime spline so ships follow realistic wide turning arcs.
+static func _smooth_path(pts: PackedVector3Array, step := 24.0) -> PackedVector3Array:
+	if pts.size() < 3:
+		return pts
+	var out := PackedVector3Array()
+	for i in pts.size() - 1:
+		var p0 := pts[maxi(i - 1, 0)]
+		var p1 := pts[i]
+		var p2 := pts[i + 1]
+		var p3 := pts[mini(i + 2, pts.size() - 1)]
+		var seg_len := p1.distance_to(p2)
+		var steps := maxi(2, int(ceil(seg_len / step)))
+		for k in steps:
+			var t := float(k) / float(steps)
+			var t2 := t * t
+			var t3 := t2 * t
+			var q := 0.5 * ((2.0 * p1) + (-p0 + p2) * t
+				+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+				+ (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
+			q.y = 0.0
+			out.append(q)
+	out.append(pts[-1])
+	return out
+
+
+## Full-hull clearance check: tests the ship's ENTIRE rectangular footprint
+## (bow, stern, port/starboard quarters + safety margin) against all landmasses
+## (Commercial Island, Westbank, Skyport Island, Landforms) AND suspension bridge piers.
+func _hull_water_ok(p: Vector3, yaw: float, length: float, beam: float, margin: float) -> bool:
+	var hl := length * 0.5 + margin
+	var hb := beam * 0.5 + margin
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
+	for zi: float in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+		for xi: float in [-1.0, 0.0, 1.0]:
+			var pt: Vector3 = p + fwd * (zi * hl) + right * (xi * hb)
+			if not layout.is_water(pt):
+				return false
+			# Keep clear of the suspension bridge tower piers at x = -80 and -340, z = -17.
+			if absf(pt.z - CityLayout.BRIDGE_Z) < 28.0:
+				for tx: float in CityLayout.BRIDGE_TOWERS:
+					if absf(pt.x - tx) < 24.0:
+						return false
+	return true
+
+
+## Validate an entire maritime route accounting for full hull dimensions + shoreline margin.
+func _route_ok_hull(pts: PackedVector3Array, length: float, beam: float, margin: float) -> bool:
 	for i in pts.size() - 1:
 		var a := pts[i]
 		var b := pts[i + 1]
-		var n := maxi(1, int(a.distance_to(b) / 40.0))
+		var d := b - a
+		if d.length_squared() < 0.01:
+			continue
+		var yaw := atan2(-d.x, -d.z)
+		var n := maxi(1, int(ceil(a.distance_to(b) / 20.0)))
 		for k in n + 1:
-			var p := a.lerp(b, k / float(n))
-			for o: Vector3 in [Vector3.ZERO, Vector3(clear, 0, 0), Vector3(-clear, 0, 0), Vector3(0, 0, clear), Vector3(0, 0, -clear)]:
-				if not layout.is_water(p + o):
-					return false
+			var p := a.lerp(b, float(k) / float(n))
+			if not _hull_water_ok(p, yaw, length, beam, margin):
+				return false
 	return true
 
 
@@ -242,39 +305,53 @@ func _add_ship(path: PackedVector3Array, length: float, mode: String, start_s :=
 	var total := 0.0
 	for i in path.size() - 1:
 		total += path[i].distance_to(path[i + 1])
-	_ships.append({"node": node, "path": path, "total": total, "s": start_s, "dir": 1.0, "state": "sail",
-		"t": 0.0, "mode": mode, "len": length, "yaw": 0.0, "phase": rng.randf() * TAU, "speed": SHIP_SPEED})
+	_ships.append({"node": node, "path": path, "total": total, "s": clampf(start_s, 0.0, total), "dir": 1.0, "state": "sail",
+		"t": 0.0, "mode": mode, "len": length, "beam": 16.5 * (length / 100.0), "yaw": 0.0,
+		"phase": rng.randf() * TAU, "speed": SHIP_SPEED})
 	_place_ship(_ships[-1], 0.0, true)
 
 
-## The port: one ship working the berth on the docks quay (in, alongside,
-## turned, out to sea, and back in again later).
+## The port: a 104 m coastal container feeder working the docks quay berth.
+## Approaches straight down the deep-water strait centre (x = -210, dead centre
+## between the suspension bridge towers, air-draft < 20.5 m clearing the 22 m
+## railway bridge), eases parallel alongside the quay, and backs astern out into
+## the strait before heading north to sea (never swinging its hull into land).
 func _port_ships() -> void:
-	var berth := Vector3(CityLayout.RIVER_EDGE - 19.0, 0, 440.0)
-	# (In from the open sea to the east, round the north of the city and down
-	# the strait – under the suspension bridge's main span and the railway's
-	# 22 m deck; Skyport Island closes the strait's southern mouth.)
-	var path := PackedVector3Array([Vector3(2600, 0, -1050), Vector3(400, 0, -1000), Vector3(-200, 0, -820),
-		Vector3(-215, 0, -300), Vector3(-205, 0, 250), Vector3(-90, 0, 400), Vector3(berth.x - 8.0, 0, 430.0), berth])
-	if _route_ok(path.slice(0, path.size() - 1), 18.0):
-		_add_ship(path, 150.0, "port", 1550.0)  # (already coming in when you arrive)
+	var ship_len := 104.0
+	var ship_beam := 16.5 * (ship_len / 100.0)
+	var berth_x := CityLayout.RIVER_EDGE - (ship_beam * 0.5 + 8.0)   # parallel alongside quay with clean fender gap
+	var raw := PackedVector3Array([
+		Vector3(2600, 0, -1450),
+		Vector3(600, 0, -1400),
+		Vector3(-210, 0, -1100),
+		Vector3(-210, 0, -450),
+		Vector3(-210, 0, 120),
+		Vector3(-120, 0, 310),
+		Vector3(berth_x, 0, 405),
+		Vector3(berth_x, 0, 455),
+	])
+	var path := _smooth_path(raw, 22.0)
+	# Validate every point up to the quay approach with full hull footprint.
+	if _route_ok_hull(path.slice(0, maxi(2, path.size() - 3)), ship_len, ship_beam, 6.0):
+		_add_ship(path, ship_len, "port", 1650.0)
 	else:
-		push_warning("SeaAndSky: port route crosses land; no port ship")
+		push_warning("SeaAndSky: port route failed full-hull clearance; skipping port ship")
 
 
-## Ships passing the island on the lanes east and north (loop end to end,
-## far out in the haze).
+## Open-ocean shipping lanes well clear of Commercial Island, Westbank, and Skyport Island.
 func _lane_ships() -> void:
 	var lanes := [
-		[PackedVector3Array([Vector3(1450, 0, -3200), Vector3(1450, 0, 3200)]), 0.0],
-		[PackedVector3Array([Vector3(1720, 0, 3200), Vector3(1720, 0, -3200)]), 2600.0],
-		[PackedVector3Array([Vector3(3000, 0, -1250), Vector3(-200, 0, -1250)]), 1200.0],
-		[PackedVector3Array([Vector3(900, 0, 1500), Vector3(3000, 0, 1500)]), 600.0],
+		[PackedVector3Array([Vector3(2400, 0, -3200), Vector3(2400, 0, 3200)]), 0.0],
+		[PackedVector3Array([Vector3(2750, 0, 3200), Vector3(2750, 0, -3200)]), 2400.0],
+		[PackedVector3Array([Vector3(3200, 0, -1550), Vector3(-220, 0, -1550)]), 1200.0],
+		[PackedVector3Array([Vector3(1400, 0, 2650), Vector3(3200, 0, 2650)]), 600.0],
 	]
 	for ln in lanes:
 		var pth: PackedVector3Array = ln[0]
-		if _route_ok(pth, 30.0):
-			_add_ship(pth, rng.randf_range(170.0, 230.0), "lane", ln[1])
+		var slen := rng.randf_range(165.0, 210.0)
+		var sbeam := 16.5 * (slen / 100.0)
+		if _route_ok_hull(pth, slen, sbeam, 35.0):
+			_add_ship(pth, slen, "lane", ln[1])
 
 
 func _place_ship(sh: Dictionary, dt: float, snap := false) -> void:
@@ -291,21 +368,31 @@ func _place_ship(sh: Dictionary, dt: float, snap := false) -> void:
 			tangent = (path[i + 1] - path[i]).normalized()
 			break
 		acc += seg
-	var want_yaw := atan2(-tangent.x, -tangent.z) if float(sh["dir"]) > 0.0 else atan2(tangent.x, tangent.z)
-	if sh["state"] == "turn":
-		want_yaw = float(sh["turn_to"])
+	# Port ship backs astern off the quay while close to the berth (keeping its
+	# hull parallel to the shore) and only rotates once clear in the wide strait.
+	var reverse_astern := String(sh["mode"]) == "port" and float(sh["dir"]) < 0.0 and (float(sh["total"]) - s) < 340.0
+	var want_yaw := atan2(-tangent.x, -tangent.z) if (float(sh["dir"]) > 0.0 or reverse_astern) else atan2(tangent.x, tangent.z)
 	var y: float = sh["yaw"]
 	if snap:
 		y = want_yaw
 	else:
-		var rate := deg_to_rad(4.5) if sh["state"] != "turn" else PI / TURN_TIME
+		var rate := deg_to_rad(5.5) if String(sh["state"]) != "turn" else deg_to_rad(7.0)
 		y += clampf(wrapf(want_yaw - y, -PI, PI), -rate * dt, rate * dt)
 	sh["yaw"] = y
-	var ph: float = sh["phase"] + _time * 0.35
+	# Subtle realistic buoyancy: coupled heave, pitch, and gentle roll (calmer when berthed).
+	var ph: float = sh["phase"] + _time * 0.42
+	var calm := 0.35 if String(sh["state"]) == "berth" else 1.0
+	var pitch := sin(ph * 0.95) * 0.010 * calm
+	var roll := sin(ph * 0.68 + 0.9) * 0.018 * calm
+	var heave := sin(ph * 1.15) * 0.20 * calm
 	var n: Node3D = sh["node"]
-	n.transform = Transform3D(Basis.from_euler(Vector3(sin(ph) * 0.012, y, sin(ph * 0.7) * 0.02)),
-		Vector3(p.x, SEA_Y + sin(ph * 1.3) * 0.25, p.z))
-	(n.get_node("Wake") as Node3D).visible = sh["state"] == "sail" and float(sh["speed"]) > 2.0
+	n.transform = Transform3D(Basis.from_euler(Vector3(pitch, y, roll)),
+		Vector3(p.x, SEA_Y + heave, p.z))
+	var wake := n.get_node_or_null("Wake") as Node3D
+	if wake:
+		var sp_k := clampf(float(sh["speed"]) / SHIP_SPEED, 0.0, 1.0)
+		wake.visible = String(sh["state"]) == "sail" and sp_k > 0.12 and not reverse_astern
+		wake.scale = Vector3(lerpf(0.65, 1.0, sp_k), 1.0, lerpf(0.35, 1.0, sp_k))
 
 
 func _update_ship(sh: Dictionary, dt: float) -> void:
@@ -316,13 +403,16 @@ func _update_ship(sh: Dictionary, dt: float) -> void:
 			var to_end := (total - s) if float(sh["dir"]) > 0.0 else s
 			var spd := SHIP_SPEED
 			if sh["mode"] == "port":
-				# Slow ahead into the berth, and gather way leaving it.
-				spd = lerpf(1.2, SHIP_SPEED, clampf((total - s) / 450.0, 0.0, 1.0))
+				# Realistic port speed profile: slow tug-assisted docking & astern undocking.
+				var dist_berth := total - s
+				spd = lerpf(1.4, SHIP_SPEED, clampf(dist_berth / 480.0, 0.0, 1.0))
+				if float(sh["dir"]) < 0.0 and dist_berth < 340.0:
+					spd = minf(spd, 3.8)
 			sh["speed"] = spd
 			sh["s"] = clampf(s + spd * dt * float(sh["dir"]), 0.0, total)
-			if to_end <= 0.01:
+			if to_end <= 0.05:
 				if sh["mode"] == "lane":
-					sh["s"] = 0.0  # back to the far end of the lane, out in the haze
+					sh["s"] = 0.0
 					_place_ship(sh, 0.0, true)
 					return
 				if float(sh["dir"]) > 0.0:
@@ -335,16 +425,11 @@ func _update_ship(sh: Dictionary, dt: float) -> void:
 			sh["speed"] = 0.0
 			sh["t"] = float(sh["t"]) + dt
 			if float(sh["t"]) > BERTH_TIME:
-				sh["state"] = "turn"
-				sh["t"] = 0.0
-				sh["turn_to"] = wrapf(float(sh["yaw"]) + PI, -PI, PI)
-		"turn":
-			sh["t"] = float(sh["t"]) + dt
-			if float(sh["t"]) > TURN_TIME:
+				# Back astern off the quay into the deep-water channel (never spin into land).
 				sh["state"] = "sail"
 				sh["dir"] = -1.0
+				sh["t"] = 0.0
 		"away":
-			# Out past the haze: a while at sea, then the next call comes in.
 			sh["t"] = float(sh["t"]) + dt
 			if float(sh["t"]) > 90.0:
 				sh["state"] = "sail"

@@ -403,6 +403,7 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 			_street_front_proxy(t, apt, col, seed)
 		if detailed and i == 0 and b["kind"] == "normal" and _on_ground(b, t):
 			_frontage_courses(t, int(style), seed, col, trim, apt)
+			_shopfront_frames(t, int(style), seed, col, trim, apt)
 		if b["kind"] == "bridge" or _overhangs(tiers, i) or not _on_ground(b, t) and i == 0:
 			# Underside: sky bridges, cantilevered tiers, towers' first tier
 			# (hidden on their podium, but they never show a hole).
@@ -476,6 +477,46 @@ func _frontage_courses(t: Array, style: int, seed: float, col: Color, trim: Colo
 			var half_width := minf(grid.y * 0.115, 0.22)
 			var pier := _fbox(face, centre - half_width, centre + half_width, -0.006, projection * 0.72, bottom, top_y - 0.085)
 			_fin(pier, face[2], dressed.darkened(0.11))
+
+
+## Physical 3D framing for non-enterable commercial shopfronts (matches
+## building.gdshader's 6 m shopfront bay grid so windows sit recessed behind
+## projecting piers, fascia cornice, stall-riser sill and doorway hood).
+func _shopfront_frames(t: Array, style: int, seed: float, col: Color, trim: Color, unit: Dictionary) -> void:
+	if bool(unit.get("ground", false)) or style == CityLayout.Style.WAREHOUSE:
+		return
+	if fposmod(seed * 5.37 + 0.21, 1.0) >= 0.5:
+		return
+	var base := float(t[4])
+	if float(t[5]) - base < 5.0:
+		return
+	var curtain := style in [CityLayout.Style.GLASS, CityLayout.Style.DARK_GLASS]
+	var frame_col := col.darkened(0.55) if curtain else col.lerp(trim, 0.52).darkened(0.16)
+	var metal_col := Color(0.11, 0.12, 0.13)
+	var long_side := 0 if float(t[2]) - float(t[0]) >= float(t[3]) - float(t[1]) else 1
+	for side in [long_side, long_side + 2]:
+		var face := _face(t, side)
+		var span: float = face[3]
+		if span < 7.0:
+			continue
+		# Projecting fascia cornice cap & soffit above the 3.7..4.55 m shop signboard.
+		_trim_box(_fbox(face, 0.06, span - 0.06, -0.01, 0.26, base + 4.46, base + 4.64), frame_col.lightened(0.06))
+		_trim_box(_fbox(face, 0.06, span - 0.06, -0.01, 0.18, base + 3.60, base + 3.74), frame_col.darkened(0.08))
+		# Stall-riser plinth sill along the base of the display windows.
+		_trim_box(_fbox(face, 0.06, span - 0.06, -0.01, 0.14, base + 0.52, base + 0.64), frame_col)
+		# Projecting bay piers (every 6 m) + central recessed-door canopy hoods.
+		var bays := maxi(1, int(floor(span / 6.0)))
+		for b_i in range(bays + 1):
+			var px := clampf(float(b_i) * 6.0, 0.18, span - 0.18)
+			_trim_box(_fbox(face, px - 0.18, px + 0.18, -0.01, 0.22, base, base + 4.52), frame_col.darkened(0.06))
+		for b_i in range(bays):
+			var cx := float(b_i) * 6.0 + 3.0
+			if cx + 0.85 < span - 0.25:
+				# Projecting doorway canopy / transom hood over the central shop door.
+				_trim_box(_fbox(face, cx - 0.72, cx + 0.72, -0.01, 0.34, base + 2.54, base + 2.68), metal_col)
+				# Vertical display mullions flanking the doorway.
+				for mx in [cx - 0.62, cx + 0.62]:
+					_trim_box(_fbox(face, mx - 0.045, mx + 0.045, -0.005, 0.11, base + 0.62, base + 3.62), metal_col)
 
 
 func _trim_box(b: AABB, c: Color) -> void:

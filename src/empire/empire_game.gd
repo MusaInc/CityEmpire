@@ -2295,6 +2295,12 @@ func _spawn_car(v: Dictionary) -> Car:
 			p = f["pos"]
 			yaw = f["yaw"] if not is_nan(float(f["yaw"])) else yaw
 	c.place(Transform3D(Basis(Vector3.UP, yaw), p + Vector3.UP * 0.3))
+	c.splashed.connect(func(at: Vector3, spd: float):
+		var sc := clampf(c.mass / 1400.0, 0.85, 1.65)
+		if vfx:
+			vfx.splash(at, spd, sc)
+		if audio:
+			audio.play("splash", clampf(lerpf(-5.0, 3.0, spd / 20.0), -5.0, 3.0), clampf(lerpf(1.06, 0.72, spd / 24.0), 0.72, 1.1)))
 	cars[v["id"]] = c
 	vfx.cars = cars.values()
 	return c
@@ -2505,13 +2511,19 @@ func _sample_car_safe(vid: String, c: Car, dt: float) -> void:
 		safe.settled(vid)
 
 
+var _was_wet := false
+var _wade_snd_t := 0.0
+
+
 ## On foot the sea has a floor (the cars' water collision) but every quay is
 ## too tall to step up: someone who walks off the edge would wade forever.
-## Remember the last dry ground and put them back on it.
+## Remember the last dry ground and put them back on it, with realistic splash
+## & wading wake effects on entry and movement.
 func _check_wading(dt: float) -> void:
 	var p := player.global_position
 	var wet := p.y < Car.WATER_Y + 1.2 and layout.is_water(p)
 	if not wet:
+		_was_wet = false
 		_wet_t = 0.0
 		_dry_t -= dt
 		# (Sampled, and only where the ground really is dry and solid: a
@@ -2523,6 +2535,25 @@ func _check_wading(dt: float) -> void:
 				player.last_safe_position = p + Vector3.UP * 0.2
 				safe.settled("hero")
 		return
+	if not _was_wet:
+		_was_wet = true
+		var spd := maxf(player.velocity.length(), maxf(-player.velocity.y, 0.0) * 1.35)
+		var is_jump := spd >= 4.5
+		var obj_sc := clampf(0.45 + spd * 0.035, 0.52, 0.95) if is_jump else 0.34
+		if vfx:
+			vfx.splash(Vector3(p.x, Car.WATER_Y + 0.05, p.z), maxf(spd, 2.8), obj_sc)
+		if audio:
+			var db := clampf(lerpf(-5.0, 1.0, spd / 14.0), -5.0, 1.0) if is_jump else -9.0
+			var pitch := clampf(lerpf(1.12, 0.86, spd / 14.0), 0.86, 1.12) if is_jump else 1.24
+			audio.play("splash", db, pitch)
+	else:
+		if vfx:
+			vfx.water_disturb(p, player.velocity, 0.38, dt)
+		_wade_snd_t -= dt
+		if _wade_snd_t <= 0.0 and Vector2(player.velocity.x, player.velocity.z).length() > 0.8:
+			_wade_snd_t = 0.46
+			if audio:
+				audio.play("splash", -13.0, 1.32)
 	_wet_t += dt
 	if _wet_t < 1.5:
 		return
@@ -2844,11 +2875,50 @@ func sell_vehicle(vid: String) -> String:
 	return ""
 
 
+var last_wholesale_loaded := 0
+var last_wholesale_veh := ""
+
+
+## Finds the player's closest parked road vehicle near the warehouse (or largest
+## road vehicle with free cargo space) for automatic loading on checkout.
+func wholesale_vehicle(u: Dictionary) -> Dictionary:
+	var door := Premises.door_point(u)
+	var best := {}
+	var best_d := INF
+	for v in empire.vehicles:
+		if SkyportPlay.vclass(String(v["model"])) != "car":
+			continue
+		var st: Stock = v["cargo"]
+		if st.case_capacity <= 0:
+			continue
+		var c: Car = cars.get(v["id"])
+		var d := c.global_position.distance_to(door) if (c and is_instance_valid(c)) else 9999.0
+		if best.is_empty() or d < best_d:
+			best = v
+			best_d = d
+	return best
+
+
 func buy_wholesale(u: Dictionary, order: Dictionary, sack_truck := false) -> String:
+	last_wholesale_loaded = 0
+	last_wholesale_veh = ""
 	var err := empire.buy_wholesale(u["id"], order)
-	if err == "" and interiors.has(u["id"]):
-		interiors[u["id"]].refresh_goods(_pallet(u["id"]))
 	if err == "":
+		# Auto-load purchased stock directly into the player's vehicle parked outside,
+		# respecting its cargo capacity (eliminates repetitive manual pallet loading).
+		var veh := wholesale_vehicle(u)
+		if not veh.is_empty():
+			var pal := _pallet(u["id"])
+			var cargo: Stock = veh["cargo"]
+			var before := cargo.cases_used()
+			for pid in pal.units.keys():
+				var qty := pal.qty(pid)
+				if qty > 0:
+					Stock.transfer(pal, cargo, pid, qty)
+			last_wholesale_loaded = cargo.cases_used() - before
+			last_wholesale_veh = String(EmpireData.vehicle_model(veh["model"]).get("name", "vehicle"))
+		if interiors.has(u["id"]):
+			interiors[u["id"]].refresh_goods(_pallet(u["id"]))
 		Sfx.play("cash", -4.0)
 	return err
 

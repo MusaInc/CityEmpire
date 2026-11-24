@@ -2396,6 +2396,41 @@ func _build_warehouse(st: _Batch) -> void:
 			_solid(s0.min(s1), s0.max(s1))
 			a += 2.75
 	_static.add_child(_mesh_of(cases, "vc"))
+	# Industrial floor safety-yellow pedestrian & loading-bay lane stripes.
+	var saf_y := Color(0.92, 0.72, 0.12)
+	st.box(R(1.35, 0.8, 0.008), R(1.48, D - 1.4, 0.016), saf_y)
+	st.box(R(W - 1.48, 0.8, 0.008), R(W - 1.35, D - 1.4, 0.016), saf_y)
+	# Overhead high-bay industrial LED luminaire bars across the warehouse ceiling.
+	for lx_f: float in [0.28, 0.72]:
+		var lx := W * lx_f
+		st.box(R(lx - 0.12, 1.8, H - 0.24), R(lx + 0.12, D - 1.6, H - 0.12), Color(0.24, 0.25, 0.27))
+		_glow_quad(R(lx - 0.09, 2.2, H - 0.248), R(lx + 0.09, D - 2.0, H - 0.248), Color(0.96, 0.98, 1.0) * 1.25, true)
+	# Parked yellow electric warehouse forklift near the back-right racking bay.
+	if W >= 8.5 and D >= 8.0:
+		var fx := W - 2.35
+		var fz := D - 2.35
+		var fy_c := Color(0.92, 0.64, 0.08)
+		var fk_dk := Color(0.12, 0.13, 0.14)
+		# Counterweight body & cab
+		st.box(R(fx - 0.52, fz - 0.72, 0.24), R(fx + 0.52, fz + 0.72, 0.92), fy_c)
+		st.box(R(fx - 0.54, fz + 0.25, 0.24), R(fx + 0.54, fz + 0.78, 1.04), fk_dk)
+		# Overhead safety roll-cage posts & roof guard
+		for sx: float in [-0.46, 0.46]:
+			for sz: float in [-0.36, 0.42]:
+				st.box(R(fx + sx - 0.04, fz + sz - 0.04, 0.92), R(fx + sx + 0.04, fz + sz + 0.04, 2.02), fk_dk)
+		st.box(R(fx - 0.50, fz - 0.42, 2.02), R(fx + 0.50, fz + 0.46, 2.08), fk_dk)
+		# Vertical steel mast & twin steel forks with a loaded pallet
+		for sx: float in [-0.30, 0.30]:
+			st.box(R(fx + sx - 0.05, fz - 0.86, 0.12), R(fx + sx + 0.05, fz - 0.74, 2.45), fk_dk)
+			st.box(R(fx + sx - 0.06, fz - 1.72, 0.08), R(fx + sx + 0.06, fz - 0.80, 0.14), Color(0.32, 0.34, 0.36))
+		# Four rubber tyres
+		for sx: float in [-0.54, 0.54]:
+			for sz: float in [-0.46, 0.48]:
+				st.box(R(fx + sx - 0.10, fz + sz - 0.22, 0.0), R(fx + sx + 0.10, fz + sz + 0.22, 0.42), fk_dk)
+		# Wooden Euro pallet + stacked bulk cases on the forks
+		st.box(R(fx - 0.52, fz - 1.70, 0.14), R(fx + 0.52, fz - 0.88, 0.26), Color(0.56, 0.42, 0.24))
+		st.box(R(fx - 0.46, fz - 1.64, 0.26), R(fx + 0.46, fz - 0.94, 0.92), Color(0.76, 0.62, 0.44))
+		_solid(R(fx - 0.64, fz - 1.75, 0.0), R(fx + 0.64, fz + 0.82, 2.45))
 	# Trade counter facing the entrance.
 	var tx := (ox.x + ox.y) * 0.5
 	st.box(R(tx - 1.8, 4.2, 0.0), R(tx + 1.8, 4.9, 1.05), Color(0.25, 0.27, 0.3))

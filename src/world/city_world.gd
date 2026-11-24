@@ -30,7 +30,7 @@ const PROP_RANGES := {
 }
 ## Street furniture (tools/blender/build_street.py), merged into one mesh per
 ## chunk: [kind, inset from the kerb line (m)].
-const FURNITURE := ["bench", "bin", "hydrant", "bollard", "sign_post", "bus_shelter", "planter"]
+const FURNITURE := ["bench", "bin", "hydrant", "bollard", "sign_post", "bus_shelter", "planter", "grass_tuft", "hedge_cluster"]
 const FURNITURE_RANGE := 190.0
 ## Traffic: [kind, how common, Never Stop civilian body (assets/vehicles)].
 ## The bodies are ~3x the old build_cars.py models' triangles, so there are
@@ -1182,6 +1182,38 @@ func _place_furniture() -> Dictionary:
 			var dp := Premises.door_point(u)
 			doors.append(Vector2(dp.x, dp.z))
 	for blk in layout.blocks:
+		if blk["kind"] == "park":
+			# Scatter real 3D grass blade tufts & sculpted shrubs along park borders and lawns.
+			var ppoly: PackedVector2Array = blk["poly"]
+			var pc := CityRoads._centroid(ppoly)
+			var prng := RandomNumberGenerator.new()
+			prng.seed = hash(Vector2i(int(pc.x), int(pc.y))) ^ 0x6a55
+			var psimple := CityRoads._simplify(CityLayout._closed(ppoly), 1.5)
+			psimple.remove_at(psimple.size() - 1)
+			for ei in psimple.size():
+				var o: Vector2 = psimple[ei]
+				var e: Vector2 = psimple[(ei + 1) % psimple.size()] - o
+				var length := e.length()
+				if length < 8.0:
+					continue
+				var along := e / length
+				var nrm := Vector2(along.y, -along.x)
+				if not Geometry2D.is_point_in_polygon(o + along * length * 0.5 + nrm * 0.5, ppoly):
+					nrm = -nrm
+				var pd := 1.8
+				while pd < length - 1.8:
+					var inset := prng.randf_range(0.55, 2.8)
+					var p2 := o + along * pd + nrm * inset
+					if Geometry2D.is_point_in_polygon(p2, ppoly):
+						var key := Vector2i(floori(p2.x / CHUNK), floori(p2.y / CHUNK))
+						if not out.has(key):
+							out[key] = []
+						var kind := "hedge_cluster" if prng.randf() < 0.24 else "grass_tuft"
+						var sc := prng.randf_range(0.85, 1.35) if kind == "grass_tuft" else prng.randf_range(0.82, 1.25)
+						var b := Basis(Vector3.UP, prng.randf() * TAU).scaled(Vector3(sc, sc, sc))
+						out[key].append([kind, Transform3D(b, Vector3(p2.x, layout.ground_y(p2.x, p2.y), p2.y))])
+					pd += prng.randf_range(2.6, 5.4)
+			continue
 		if blk["kind"] not in ["block", "plaza"]:
 			continue
 		var poly: PackedVector2Array = blk["poly"]
@@ -1286,6 +1318,59 @@ func _place_furniture() -> Dictionary:
 		if not out.has(key):
 			out[key] = []
 		out[key].append(item)
+	# Waterfront headlands & coastal promenade: scatter 3D grass tufts & shrubs on
+	# Landforms slopes, plus benches, planters & bollards along the north/coastal esplanade.
+	if not layout.is_mainland and Landforms.enabled:
+		var crng := RandomNumberGenerator.new()
+		crng.seed = layout.seed ^ 0x5ea1
+		for f: Dictionary in Landforms.forms(layout):
+			var pts: PackedVector2Array = f.get("outline", PackedVector2Array())
+			var ftop: float = float(f.get("top", 3.0))
+			if pts.size() < 4:
+				continue
+			var fc := CityRoads._centroid(pts)
+			for i in pts.size():
+				var a: Vector2 = pts[i]
+				var b: Vector2 = pts[(i + 1) % pts.size()]
+				var seg := a.distance_to(b)
+				if seg < 4.0:
+					continue
+				var steps := maxi(1, int(seg / 5.5))
+				for si in steps:
+					var p2 := a.lerp(b, (float(si) + crng.randf_range(0.15, 0.85)) / float(steps))
+					var inward := (fc - p2).normalized()
+					for ring_d: float in [crng.randf_range(2.2, 6.0), crng.randf_range(7.0, 16.0)]:
+						var gp: Vector2 = p2 + inward * ring_d
+						if not Geometry2D.is_point_in_polygon(gp, pts):
+							continue
+						var key := Vector2i(floori(gp.x / CHUNK), floori(gp.y / CHUNK))
+						if not out.has(key):
+							out[key] = []
+						var kind := "hedge_cluster" if crng.randf() < 0.28 else "grass_tuft"
+						var sc := crng.randf_range(0.95, 1.55) if kind == "grass_tuft" else crng.randf_range(0.9, 1.45)
+						var bas := Basis(Vector3.UP, crng.randf() * TAU).scaled(Vector3(sc, sc, sc))
+						out[key].append([kind, Transform3D(bas, Vector3(gp.x, ftop, gp.y))])
+		# Coastal promenade furniture (benches, planters, bollards) facing the sea.
+		var csmps: Array = BuildingMesher.shore_samples(layout.coast)
+		var last_cs := -INF
+		for sm in csmps:
+			var sp: Vector2 = sm[0]
+			var sn: Vector2 = sm[1]
+			var ss: float = sm[2]
+			if ss - last_cs < 18.0:
+				continue
+			last_cs = ss
+			var inset := sp - sn * 2.2
+			if layout.is_water(Vector3(inset.x, 0.0, inset.y)):
+				continue
+			var key := Vector2i(floori(inset.x / CHUNK), floori(inset.y / CHUNK))
+			if not out.has(key):
+				out[key] = []
+			var gy := layout.terrain.road_y(inset.x, inset.y) + CityTerrain.KERB
+			var sea_basis := Basis.looking_at(Vector3(sn.x, 0.0, sn.y), Vector3.UP)
+			var pick := int(ss / 18.0) % 3
+			var fkind := "bench" if pick == 0 else ("planter" if pick == 1 else "bollard")
+			out[key].append([fkind, Transform3D(sea_basis, Vector3(inset.x, gy, inset.y))])
 	return out
 
 

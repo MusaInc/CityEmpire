@@ -13,6 +13,7 @@ extends Node3D
 ## Works the same on the Mobile and Compatibility (web) renderers.
 
 const SHADER := preload("res://src/fx/particle.gdshader")
+const RIPPLE_SHADER := preload("res://src/fx/water_ripple.gdshader")
 
 class Pool:
 	var mm: MultiMesh
@@ -115,6 +116,17 @@ var cars: Array = []           # Car list provided by the game each frame
 var smoke: Pool
 var sparks: Pool
 var fire: Pool
+var _rip_mm: MultiMesh
+var _rip_buf: PackedFloat32Array
+var _rip_pos: PackedVector3Array
+var _rip_life: PackedFloat32Array
+var _rip_max: PackedFloat32Array
+var _rip_r0: PackedFloat32Array
+var _rip_r1: PackedFloat32Array
+var _rip_alpha: PackedFloat32Array
+var _rip_next := 0
+const RIP_N := 28
+var _wade_t := 0.0
 var skid_mesh: ArrayMesh
 var _skid_i := 0
 var _skid_n := 1400
@@ -146,6 +158,31 @@ func _ready() -> void:
 	fire = Pool.new(60, _mat(true, 1.0), self)
 	fire.drag = 2.0
 	fire.gravity = -3.0
+	# Pooled horizontal expanding water-surface ripple & foam rings (1 draw call).
+	_rip_mm = MultiMesh.new()
+	_rip_mm.transform_format = MultiMesh.TRANSFORM_3D
+	_rip_mm.use_colors = true
+	var rq := PlaneMesh.new()
+	rq.size = Vector2(2.0, 2.0)
+	_rip_mm.mesh = rq
+	_rip_mm.instance_count = RIP_N
+	var rmat := ShaderMaterial.new()
+	rmat.shader = RIPPLE_SHADER
+	var rnode := MultiMeshInstance3D.new()
+	rnode.multimesh = _rip_mm
+	rnode.material_override = rmat
+	rnode.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	rnode.extra_cull_margin = 2000.0
+	add_child(rnode)
+	_rip_pos.resize(RIP_N)
+	_rip_life.resize(RIP_N)
+	_rip_max.resize(RIP_N)
+	_rip_r0.resize(RIP_N)
+	_rip_r1.resize(RIP_N)
+	_rip_alpha.resize(RIP_N)
+	_rip_buf.resize(RIP_N * 16)
+	_rip_life.fill(0.0)
+	_rip_max.fill(1.0)
 	# Skid marks: continuous ribbons (one ArrayMesh, a ring buffer of quads;
 	# each quad starts on the previous one's end edge, so a trail has no gaps
 	# at bends and no darker overlaps), feathered at the sides.
@@ -212,6 +249,7 @@ func _process(dt: float) -> void:
 	smoke.step(dt)
 	sparks.step(dt)
 	fire.step(dt)
+	_step_ripples(dt)
 	# Debris lifetime.
 	var keep: Array = []
 	for d in _debris:
@@ -407,17 +445,98 @@ func _chunk(at: Vector3, normal: Vector3, strength: float, col: Color) -> void:
 	_debris.append([b, 0.0])
 
 
-## A car going into the water: a spray of white water.
-func splash(at: Vector3, speed: float) -> void:
-	var k := clampf(speed / 20.0, 0.3, 1.4)
-	for i in int(22 * k) + 6:
-		var v := Vector3(_rng.randf_range(-1, 1), 0.0, _rng.randf_range(-1, 1)).normalized() * _rng.randf_range(1.5, 5.0) * k \
-			+ Vector3.UP * _rng.randf_range(3.0, 8.0) * k
-		smoke.emit(at + Vector3(_rng.randf_range(-1.5, 1.5), 0.2, _rng.randf_range(-1.5, 1.5)), v,
-			_rng.randf_range(0.8, 1.6), 1.2, 1.6, Color(0.85, 0.92, 0.95, 0.6))
-	for i in int(16 * k):
-		sparks.emit(at + Vector3.UP * 0.3, Vector3(_rng.randf_range(-3, 3), _rng.randf_range(4, 9), _rng.randf_range(-3, 3)) * k,
-			_rng.randf_range(0.5, 1.0), 0.1, 0.04, Color(0.8, 0.9, 1.0, 0.8))
+func emit_ripple(at: Vector3, r0: float, r1: float, life: float, alpha := 0.72) -> void:
+	if _rip_mm == null:
+		return
+	var i := _rip_next
+	_rip_next = (_rip_next + 1) % RIP_N
+	_rip_pos[i] = Vector3(at.x, Car.WATER_Y + 0.06, at.z)
+	_rip_life[i] = life
+	_rip_max[i] = maxf(life, 0.05)
+	_rip_r0[i] = r0
+	_rip_r1[i] = r1
+	_rip_alpha[i] = alpha
+
+
+func _step_ripples(dt: float) -> void:
+	if _rip_mm == null:
+		return
+	for i in RIP_N:
+		var l := _rip_life[i]
+		var o := i * 16
+		if l <= 0.0:
+			_rip_buf[o] = 0.0; _rip_buf[o + 5] = 0.0; _rip_buf[o + 10] = 0.0
+			_rip_buf[o + 3] = 0.0; _rip_buf[o + 7] = -9999.0; _rip_buf[o + 11] = 0.0
+			_rip_buf[o + 15] = 0.0
+			continue
+		l -= dt
+		_rip_life[i] = l
+		var k := 1.0 - clampf(l / _rip_max[i], 0.0, 1.0)
+		var ease_k := 1.0 - pow(1.0 - k, 2.2)
+		var r := lerpf(_rip_r0[i], _rip_r1[i], ease_k)
+		var p := _rip_pos[i]
+		_rip_buf[o] = r; _rip_buf[o + 1] = 0.0; _rip_buf[o + 2] = 0.0; _rip_buf[o + 3] = p.x
+		_rip_buf[o + 4] = 0.0; _rip_buf[o + 5] = 1.0; _rip_buf[o + 6] = 0.0; _rip_buf[o + 7] = p.y
+		_rip_buf[o + 8] = 0.0; _rip_buf[o + 9] = 0.0; _rip_buf[o + 10] = r; _rip_buf[o + 11] = p.z
+		_rip_buf[o + 12] = 0.92; _rip_buf[o + 13] = 0.96; _rip_buf[o + 14] = 1.0
+		_rip_buf[o + 15] = _rip_alpha[i] * (1.0 - k) * (1.0 - k)
+	_rip_mm.buffer = _rip_buf
+
+
+## Physically scaled water-entry splash for characters (obj_scale ~0.3–0.65)
+## and vehicles (obj_scale ~1.0–1.6): plume spray, droplets, surface foam, and
+## expanding concentric water ripples.
+func splash(at: Vector3, speed: float, obj_scale := 1.0) -> void:
+	var sc := clampf(obj_scale, 0.25, 1.8)
+	var sp := clampf(speed / 15.0, 0.25, 1.7)
+	var k := clampf(sp * sc, 0.22, 2.0)
+	var water_p := Vector3(at.x, Car.WATER_Y + 0.08, at.z)
+	# Expanding surface ripple & foam rings.
+	emit_ripple(water_p, 0.55 * sc, (3.2 + 3.6 * k) * sc, lerpf(1.4, 2.6, clampf(k * 0.6, 0.0, 1.0)), clampf(0.45 + 0.35 * k, 0.45, 0.85))
+	if k > 0.45:
+		emit_ripple(water_p, 0.35 * sc, (2.1 + 2.4 * k) * sc, lerpf(1.1, 2.1, clampf(k * 0.5, 0.0, 1.0)), clampf(0.35 + 0.28 * k, 0.35, 0.72))
+	# Upward & outward water spray plume.
+	var plume_n := clampi(int(20.0 * k) + 6, 6, 46)
+	for i in plume_n:
+		var ang := _rng.randf() * TAU
+		var rad := _rng.randf_range(0.15, 1.35) * sc
+		var out_v := Vector3(cos(ang), 0.0, sin(ang)) * _rng.randf_range(1.0, 4.6) * k
+		var up_v := Vector3.UP * _rng.randf_range(2.2, 7.6) * k
+		smoke.emit(water_p + Vector3(cos(ang) * rad, 0.12, sin(ang) * rad), out_v + up_v,
+			_rng.randf_range(0.55, 1.35), 0.45 * sc, (1.35 + 1.15 * k) * sc, Color(0.86, 0.93, 0.97, clampf(0.42 + 0.25 * k, 0.42, 0.72)))
+	# Low floating foam collar on the surface.
+	var foam_n := clampi(int(10.0 * sc) + 3, 4, 18)
+	for i in foam_n:
+		var ang := _rng.randf() * TAU
+		var rad := _rng.randf_range(0.25, 1.6) * sc
+		smoke.emit(water_p + Vector3(cos(ang) * rad, 0.05, sin(ang) * rad),
+			Vector3(cos(ang), 0.05, sin(ang)) * _rng.randf_range(0.5, 2.2) * k,
+			_rng.randf_range(0.9, 1.8), 0.65 * sc, 1.8 * sc, Color(0.92, 0.97, 1.0, 0.46))
+	# High-velocity arcing water droplets.
+	var drop_n := clampi(int(18.0 * k) + 5, 5, 40)
+	for i in drop_n:
+		var ang := _rng.randf() * TAU
+		var v := Vector3(cos(ang), 0.0, sin(ang)) * _rng.randf_range(1.2, 5.2) * k + Vector3.UP * _rng.randf_range(3.2, 9.2) * k
+		sparks.emit(water_p + Vector3.UP * 0.2, v, _rng.randf_range(0.45, 0.95), 0.09 * maxf(sc, 0.6), 0.03, Color(0.84, 0.93, 1.0, 0.85))
+
+
+## Continuous wake ripples & small splashes while a character or vehicle moves in water.
+func water_disturb(at: Vector3, vel: Vector3, obj_scale := 0.4, dt := 0.016) -> void:
+	var spd := Vector2(vel.x, vel.z).length()
+	if spd < 0.45:
+		return
+	_wade_t -= dt
+	if _wade_t > 0.0:
+		return
+	_wade_t = clampf(0.28 / maxf(spd * 0.25, 0.5), 0.09, 0.26)
+	var water_p := Vector3(at.x, Car.WATER_Y + 0.06, at.z)
+	emit_ripple(water_p, 0.32 * obj_scale, (1.6 + spd * 0.25) * obj_scale, 1.25, 0.48)
+	for i in 3:
+		var ang := _rng.randf() * TAU
+		var v := Vector3(cos(ang), 0.0, sin(ang)) * _rng.randf_range(0.6, 1.8) + Vector3.UP * _rng.randf_range(1.2, 2.8)
+		sparks.emit(water_p + Vector3.UP * 0.1, v, _rng.randf_range(0.28, 0.55), 0.06, 0.025, Color(0.86, 0.94, 1.0, 0.78))
+		smoke.emit(water_p + Vector3(cos(ang) * 0.25, 0.06, sin(ang) * 0.25), v * 0.45,
+			_rng.randf_range(0.35, 0.65), 0.25 * obj_scale, 0.85 * obj_scale, Color(0.90, 0.96, 1.0, 0.36))
 
 
 ## A mine going off: a fireball, a ring of sparks and a column of smoke.

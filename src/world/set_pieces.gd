@@ -304,57 +304,77 @@ func _wheel(r: Rect2, rng: RandomNumberGenerator) -> void:
 			L._kbeam(k, hub + o * 0.5, rim[i] + o, 0.18, 0.18, WHITE.darkened(0.08), false)
 	for i in range(0, n, 2):
 		L._kbeam(k, rim[i] + Vector3(-1.6, 0, 0), rim[i] + Vector3(1.6, 0, 0), 0.3, 0.3, WHITE.darkened(0.1))
-		# Gondola hanging under the rim point.
+		# Sleek modern glazed observation capsule (navy/slate & glass instead of toy blocks).
 		var g: Vector3 = rim[i] + Vector3(0, -2.2, 0)
-		var gc: Color = [Color(0.9, 0.35, 0.18), Color(0.2, 0.5, 0.75), Color(0.95, 0.75, 0.2)][(i / 2) % 3]
-		L._ksolid(k, g.x - 1.6, g.z - 1.4, g.x + 1.6, g.z + 1.4, g.y - 2.4, g.y, gc)
-		L._ksolid(k, g.x - 1.7, g.z - 1.5, g.x + 1.7, g.z + 1.5, g.y, g.y + 0.3, WHITE)
+		L._ksolid(k, g.x - 1.55, g.z - 1.35, g.x + 1.55, g.z + 1.35, g.y - 2.35, g.y - 1.45, Color(0.14, 0.20, 0.28))
+		L._ksolid(k, g.x - 1.48, g.z - 1.28, g.x + 1.48, g.z + 1.28, g.y - 1.45, g.y - 0.18, Color(0.16, 0.24, 0.30))
+		L._ksolid(k, g.x - 1.65, g.z - 1.45, g.x + 1.65, g.z + 1.45, g.y - 0.18, g.y + 0.18, WHITE)
 	L._ksolid(k, hub.x - 2.6, hub.z - 1.8, hub.x + 2.6, hub.z + 1.8, hub.y - 1.8, hub.y + 1.8, STEEL)
 	# A-frame legs either side, splayed along the ring's plane.
 	for side: float in [-1.0, 1.0]:
 		for s: float in [-1.0, 1.0]:
 			L._kbeam(k, Vector3(c.x + side * 7.0, 0.0, c.y + s * 15.0), hub + Vector3(side * 2.6, 0, 0), 1.1, 1.1, STEEL)
 		L._ksolid(k, c.x + side * 7.0 - 2.0, c.y - 18.0, c.x + side * 7.0 + 2.0, c.y + 18.0, 0.0, 1.0,
-			Color(0.6, 0.59, 0.56))
-	# Boarding platform under the bottom of the ring.
-	L._ksolid(k, c.x - 5.0, c.y - 6.0, c.x + 5.0, c.y + 6.0, 0.0, 1.6, Color(0.55, 0.55, 0.57))
+			Color(0.56, 0.55, 0.52))
+	# Integrated waterfront boarding plaza, ticket pavilion, planters & promenade railings.
+	var stone := Color(0.62, 0.60, 0.56)
+	var coping := Color(0.74, 0.72, 0.68)
+	var canopy := Color(0.13, 0.18, 0.25)
+	var shrub := Color(0.22, 0.35, 0.17)
+	L._ksolid(k, c.x - 12.0, c.y - 16.0, c.x + 12.0, c.y + 16.0, 0.0, 0.35, stone)
+	L._ksolid(k, c.x - 5.5, c.y - 6.5, c.x + 5.5, c.y + 6.5, 0.35, 1.55, coping)
+	# Ticket & cafe pavilion beside the wheel plaza
+	L._ksolid(k, c.x + 13.0, c.y - 7.0, c.x + 21.0, c.y + 7.0, 0.0, 3.6, Color(0.22, 0.25, 0.28))
+	L._ksolid(k, c.x + 12.2, c.y - 7.8, c.x + 21.8, c.y + 7.8, 3.6, 4.1, canopy)
+	# Corner landscaped planter beds framing the wheel plaza
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			var px := c.x + sx * 16.5
+			var pz := c.y + sz * 22.0
+			L._ksolid(k, px - 3.6, pz - 2.2, px + 3.6, pz + 2.2, 0.0, 0.65, coping)
+			L._ksolid(k, px - 3.1, pz - 1.7, px + 3.1, pz + 1.7, 0.65, 1.35, shrub)
 	L.reserved.append(r)
 
 
-# ------------------------------------------------------ container yard
-## Stacks of shipping containers (1–4 high) in bays with aisles: a low,
-## blocky playground for running, vaulting and short swings.
-func _container_yard(r: Rect2, rng: RandomNumberGenerator) -> void:
+# ------------------------------------------------------ waterfront plaza (replaces roadside containers)
+## Cohesive landscaped waterfront public plaza & commercial promenade:
+## stone-coped planted terraces, architectural timber/steel pergolas,
+## waterfront cafe pavilion, seating walls and clean walkways (zero toy containers).
+func _container_yard(r: Rect2, _rng: RandomNumberGenerator) -> void:
 	var k := L._kit("yard")
-	var inner := r.grow(-5.0)
-	var cl := 12.2
-	var cw := 2.44
-	var ch := 2.6
-	var x := inner.position.x
-	while x + cl <= inner.end.x:
-		var z := inner.position.y
-		var bay := 0
-		while z + cw <= inner.end.y:
-			var stack := rng.randi_range(0, 4)
-			if bay == 0 or rng.randf() < 0.2:
-				stack = maxi(stack, 1)
-			for s in stack:
-				var col: Color = CONTAINER_COLORS[rng.randi() % CONTAINER_COLORS.size()]
-				_container(k, x, z, x + cl, z + cw, s * ch, col)
-			z += cw + 0.1
-			bay += 1
-			if bay == 5:
-				bay = 0
-				z += 4.0  # aisle
-		x += cl + 3.5
-	# A straddle carrier parked over one row.
-	var sx := inner.position.x + cl * 0.5 + rng.randi_range(0, 2) * (cl + 3.5)
-	var sz := inner.position.y + 1.2
-	for e: float in [-1.0, 1.0]:
-		for f: float in [-1.0, 1.0]:
-			L._kbeam(k, Vector3(sx + e * 5.0, 0.0, sz + f * 2.2), Vector3(sx + e * 5.0, 12.5, sz + f * 2.2), 0.6, 0.6,
-				Color(0.92, 0.68, 0.12))
-	L._ksolid(k, sx - 5.6, sz - 2.8, sx + 5.6, sz + 2.8, 12.5, 14.0, Color(0.92, 0.68, 0.12))
+	var inner := r.grow(-4.0)
+	var c := inner.get_center()
+	var stone := Color(0.64, 0.62, 0.58)
+	var dark_stone := Color(0.42, 0.41, 0.39)
+	var timber := Color(0.44, 0.30, 0.19)
+	var iron := Color(0.14, 0.16, 0.19)
+	var foliage_a := Color(0.20, 0.34, 0.16)
+	var foliage_b := Color(0.27, 0.40, 0.20)
+	var pavilion_wall := Color(0.76, 0.73, 0.68)
+	# Raised central stone terrace & promenade bands
+	L._ksolid(k, inner.position.x, inner.position.y, inner.end.x, inner.end.y, 0.0, 0.22, stone)
+	# Perimeter low stone planter beds with layered greenery
+	var pw := minf(inner.size.x * 0.26, 11.0)
+	var pd := minf(inner.size.y * 0.22, 8.5)
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			var cx := c.x + sx * (inner.size.x * 0.5 - pw * 0.5 - 2.0)
+			var cz := c.y + sz * (inner.size.y * 0.5 - pd * 0.5 - 2.0)
+			L._ksolid(k, cx - pw * 0.5, cz - pd * 0.5, cx + pw * 0.5, cz + pd * 0.5, 0.22, 0.78, dark_stone)
+			L._ksolid(k, cx - pw * 0.44, cz - pd * 0.44, cx + pw * 0.44, cz + pd * 0.44, 0.78, 1.48,
+				foliage_a if sx * sz > 0.0 else foliage_b)
+	# Central waterfront mixed-use pavilion & shaded pergola walkway
+	var pav_w := minf(inner.size.x * 0.34, 16.0)
+	var pav_d := minf(inner.size.y * 0.28, 10.0)
+	L._ksolid(k, c.x - pav_w * 0.5, c.y - pav_d * 0.5, c.x + pav_w * 0.5, c.y + pav_d * 0.5, 0.22, 4.4, pavilion_wall)
+	L._ksolid(k, c.x - pav_w * 0.56, c.y - pav_d * 0.56, c.x + pav_w * 0.56, c.y + pav_d * 0.56, 4.4, 4.95, iron)
+	# Timber pergola beams flanking the pavilion
+	for side: float in [-1.0, 1.0]:
+		var pz := c.y + side * (pav_d * 0.5 + 4.5)
+		for px_f: float in [-0.35, 0.0, 0.35]:
+			var px: float = c.x + px_f * pav_w
+			L._kbeam(k, Vector3(px, 0.22, pz), Vector3(px, 3.6, pz), 0.24, 0.24, iron)
+		L._ksolid(k, c.x - pav_w * 0.42, pz - 1.4, c.x + pav_w * 0.42, pz + 1.4, 3.55, 3.82, timber)
 	L.reserved.append(r)
 
 

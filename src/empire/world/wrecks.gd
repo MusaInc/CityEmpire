@@ -215,6 +215,11 @@ func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, 
 	c.reverse_enabled = false
 	game.add_child(c)
 	c.place(Transform3D(xf.basis.orthonormalized(), xf.origin + Vector3.UP * 0.05), vel)
+	c.splashed.connect(func(at: Vector3, spd: float):
+		if game and game.vfx:
+			game.vfx.splash(at, spd, clampf(c.mass / 1400.0, 0.85, 1.6))
+		if game and game.audio:
+			game.audio.play("splash", clampf(lerpf(-6.0, 2.0, spd / 20.0), -6.0, 2.0), clampf(lerpf(1.05, 0.76, spd / 24.0), 0.76, 1.08)))
 	var vis := CarVisual.new()
 	c.add_child(vis)
 	vis.setup(c)
