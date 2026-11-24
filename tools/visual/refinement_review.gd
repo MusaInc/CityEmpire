@@ -286,6 +286,9 @@ func _clearance(car: Car, label: String) -> void:
 
 
 func _weather(hour: float, weather: String) -> void:
+	game.args["weather"] = weather
+	# Keep the city's HUD label and the visual conditions in sync.
+	game.empire.weather = "sunny" if weather == "clear" else weather
 	game.empire.minute = hour * 60.0
 	game.atmosphere.hour = hour
 	game.atmosphere.set_weather(weather, true)
