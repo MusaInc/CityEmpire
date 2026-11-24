@@ -751,7 +751,10 @@ void fragment() {
 				rm *= curtain ? (tint * 2.2 + 0.15) : vec3(0.85, 0.88, 0.9);
 				interior = mix(interior, rm * 0.64, detail * 0.83);
 			}
-			gcol = mix(interior, refl, curtain ? 0.30 + 0.62 * fres : 0.16 + 0.68 * fres);
+			gcol = mix(interior, refl, curtain ? 0.38 + 0.60 * fres : 0.24 + 0.70 * fres);
+			// Crisp sun glint on architectural glazing.
+			float sun_g = pow(max(dot(r, normalize(sun_dir)), 0.0), 140.0) * (1.0 - night) * (curtain ? 0.65 : 0.42);
+			gcol += vec3(1.0, 0.96, 0.88) * sun_g;
 			vec3 fabric = mix(vec3(0.26, 0.25, 0.23), vec3(0.48, 0.45, 0.39), rnd);
 			fabric = mix(fabric, lamp_col * (0.35 + 0.16 * rnd), lit);
 			float blind_slats = sin(pane_pos.y * 105.0) * (1.0 - smoothstep(0.01, 0.05, window_pixel));
@@ -778,7 +781,7 @@ void fragment() {
 				float rim = 1.0 - smoothstep(0.0, 0.07, min(whalf.x - abs(wpos.x), whalf.y - abs(wpos.y)));
 				reveal = max(reveal * 0.85, rim * 0.6);
 			}
-			gcol *= 1.0 - reveal * 0.55 * detail;
+			gcol *= 1.0 - reveal * 0.68 * detail;
 			if (punched) {
 				float return_weight = (1.0 - clear_pane) * detail;
 				float lower_return = step(margin.y, margin.x) * step(pane_pos.y, 0.0);
@@ -1160,9 +1163,9 @@ void fragment() {
 		// different batches of brick) so long walls aren't one flat colour.
 		albedo *= 1.0 + (vnoise_b(uv * vec2(0.08, 0.03) + seed * 5.0) - 0.5) * 0.1 * detail;
 	}
-	if ((v_kind == KIND_STONE || v_kind == KIND_WALL) && uv.y >= 0.0 && uv.y < 0.56 && abs(v_world_normal.y) < 0.18) {
-		float base_contact = 1.0 - smoothstep(0.02, 0.56, uv.y);
-		albedo *= 1.0 - base_contact * detail * (0.21 + 0.06 * wetness);
+	if ((v_kind == KIND_STONE || v_kind == KIND_WALL) && uv.y >= 0.0 && uv.y < 0.78 && abs(v_world_normal.y) < 0.18) {
+		float base_contact = 1.0 - smoothstep(0.02, 0.78, uv.y);
+		albedo *= 1.0 - base_contact * detail * (0.34 + 0.09 * wetness);
 	}
 	// Preserve window reveal/sill normal relief (bend_n) when blending PBR
 	// masonry detail up close instead of overwriting it.
@@ -1204,6 +1207,14 @@ void fragment() {
 			float coverage = min(1.0, 0.15 / aa) * smoothstep(UV2.y + 12.0, UV2.y + 20.0, uv.x);
 			albedo = mix(albedo, vec3(0.70, 0.55, 0.22), centre * coverage);
 			albedo = mix(albedo, vec3(0.75, 0.75, 0.70), max(edge, dash) * coverage);
+			if (wetness > 0.08) {
+				float bp = smoothstep(0.42, 0.72, vnoise_b(p * vec2(0.18, 0.14) + 17.0)) * smoothstep(0.15, 0.75, wetness);
+				rough = mix(rough, 0.06, bp);
+				vec3 to_e = normalize(CAMERA_POSITION_WORLD - v_wpos);
+				float br_fres = pow(1.0 - clamp(dot(normalize(v_world_normal), to_e), 0.0, 1.0), 3.4);
+				vec3 br_sky = mix(sky_horizon * 0.34, max(sky_horizon * 0.42, vec3(0.06, 0.08, 0.12)), night);
+				emit += br_sky * mix(0.12, 0.75, br_fres) * (0.18 * wetness + 0.55 * bp);
+			}
 		}
 	}
 	}

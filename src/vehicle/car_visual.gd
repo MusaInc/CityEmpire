@@ -191,19 +191,27 @@ static func shared_mat(name: String) -> Material:
 	return m
 
 
-## Contact shadow (2026-11-21): a soft dark ellipse on the ground under the
-## body – the shadow map's edge is soft and coarse at the tyres, so cars read
-## as floating. Fades while the wheels are off the ground.
+## Contact shadow: rounded-rectangle underbody ambient occlusion plus tight
+## tyre-contact pads so every vehicle sits firmly grounded on the road.
 const CONTACT_SHADER := """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
 global uniform float night;
-uniform float strength = 0.3;
+uniform float strength = 0.82;
 void fragment() {
-	float d = length((UV - 0.5) * 2.0);
-	ALBEDO = vec3(0.0);
-	float core = 1.0 - smoothstep(0.12, 0.94, d);
-	ALPHA = core * strength * (1.0 - night * 0.47);
+	vec2 q = (UV - 0.5) * 2.0;
+	// Rounded-box SDF matching the chassis footprint with soft penumbra.
+	vec2 b = vec2(0.62, 0.72);
+	vec2 d = abs(q) - b;
+	float box_d = length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0);
+	float body_ao = 1.0 - smoothstep(-0.08, 0.34, box_d);
+	float deep_core = 1.0 - smoothstep(-0.18, 0.14, box_d);
+	// Four tight tyre-contact darkening pads near the corners.
+	vec2 wq = abs(q) - vec2(0.56, 0.54);
+	float wheel_ao = 1.0 - smoothstep(0.06, 0.24, length(wq * vec2(1.35, 0.95)));
+	float occ = clamp(body_ao * 0.62 + deep_core * 0.42 + wheel_ao * 0.48, 0.0, 1.0);
+	ALBEDO = vec3(0.01, 0.012, 0.016);
+	ALPHA = occ * strength * mix(1.0, 0.68, night);
 }
 """
 static var _contact_shader: Shader
@@ -266,7 +274,7 @@ func _ground_shadow(dt: float) -> void:
 		support = 0.0
 	_contact_weight = lerpf(_contact_weight, support, 1.0 - exp(-dt * 15.0))
 	_contact.visible = _contact_weight >= 0.02
-	var strength := _contact_weight * 0.42
+	var strength := _contact_weight * 0.84
 	if _contact.visible and absf(_shadow_strength - strength) > 0.008:
 		_shadow_strength = strength
 		(_contact.material_override as ShaderMaterial).set_shader_parameter("strength", strength)

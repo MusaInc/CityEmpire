@@ -11,18 +11,19 @@ uniform sampler2D screen_tex : hint_screen_texture, filter_linear, repeat_disabl
 uniform sampler2D screen_mip : hint_screen_texture, filter_linear_mipmap, repeat_disable;
 global uniform float night;
 
-uniform float sharpen = 0.50;
-uniform float clarity = 0.14;
-uniform float film_contrast = 0.14;
-uniform float film_toe = 0.010;
-uniform float saturation = 1.04;
-uniform float split_tone = 0.07;
-uniform vec3 shadow_tint : source_color = vec3(0.86, 0.92, 1.04);
-uniform vec3 light_tint : source_color = vec3(1.04, 1.0, 0.93);
-uniform float vignette = 0.11;
-uniform float lens = 0.38;
-uniform float lens_threshold = 1.15;
-uniform vec3 streak_tint : source_color = vec3(0.55, 0.72, 1.0);
+uniform float sharpen = 0.54;
+uniform float clarity = 0.18;
+uniform float film_contrast = 0.19;
+uniform float film_toe = 0.006;
+uniform float saturation = 1.08;
+uniform float split_tone = 0.09;
+uniform vec3 shadow_tint : source_color = vec3(0.84, 0.91, 1.06);
+uniform vec3 light_tint : source_color = vec3(1.05, 1.01, 0.92);
+uniform float vignette = 0.13;
+uniform float lens = 0.44;
+uniform float lens_threshold = 1.12;
+uniform vec3 streak_tint : source_color = vec3(0.55, 0.74, 1.0);
+uniform float lens_distort = 0.012;
 uniform float dither = 1.0;
 
 void vertex() {
@@ -70,7 +71,10 @@ vec3 cas(vec3 c, vec3 n, vec3 s, vec3 e, vec3 w, float amount) {
 }
 
 void fragment() {
-	vec2 uv = SCREEN_UV;
+	vec2 q_raw = SCREEN_UV - 0.5;
+	float r2 = dot(q_raw, q_raw);
+	// Subtle photographic barrel lens distortion, scaled so edges stay inside [0, 1].
+	vec2 uv = clamp(0.5 + q_raw * (1.0 - lens_distort * 0.5 + lens_distort * r2 * 2.0), vec2(0.001), vec2(0.999));
 	vec2 px = 1.0 / VIEWPORT_SIZE;
 	vec3 g = vec3(1.0 / 2.2);
 	vec3 centre = texture(screen_tex, uv).rgb;

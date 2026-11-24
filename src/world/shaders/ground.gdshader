@@ -22,7 +22,10 @@ uniform vec4 wet_road_lamps[4];
 #include "res://src/world/shaders/pbr_detail.gdshaderinc"
 global uniform float night;
 global uniform float wetness;
+global uniform float rain;
+global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
+global uniform vec3 sun_dir;
 
 #include "res://src/world/shaders/rock.gdshaderinc"
 varying float v_up;
@@ -268,6 +271,9 @@ void fragment() {
 				// beside the kerb and thickens where runoff reaches the drains.
 				float kerb_in = hw - a;
 				float gutter_fade = smoothstep(0.5, 3.5, other);
+				// Crisp kerb-edge contact AO where the vertical granite kerb meets asphalt.
+				float kerb_ao = (1.0 - smoothstep(0.0, 0.34, kerb_in)) * gutter_fade;
+				albedo *= 1.0 - 0.34 * kerb_ao * near;
 				float gutter = (1.0 - smoothstep(0.07, 0.77 + 0.52 * n, kerb_in)) * gutter_fade;
 				float silt = gutter * (0.25 + 0.75 * smoothstep(0.25, 0.79, n));
 				float grit = (0.69 + 0.31 * st1) * (1.0 - smoothstep(0.045, 0.23, fpx));
@@ -562,13 +568,13 @@ void fragment() {
 		float flatness = smoothstep(0.925, 0.985, normalize(v_wn).y);
 		float basin = n * 0.18 + vnoise(p * vec2(0.21, 0.18) + 46.0) * 0.62;
 		basin += 0.32 * shoulder_depression - 0.11 * wheel_tracks;
-		float threshold = mix(0.83, 0.58, surface_wet);
-		puddle = smoothstep(threshold, threshold + max(0.085, aa * 0.14), basin)
-			* flatness * smoothstep(0.24, 0.86, surface_wet);
-		puddle *= 1.0 - smoothstep(115.0, 250.0, camera_distance);
-		albedo *= (1.0 - (asphalt ? 0.24 : 0.12) * surface_wet) * (1.0 - 0.025 * puddle);
-		rough = mix(rough, asphalt ? 0.36 : 0.51, surface_wet);
-		rough = mix(rough, 0.10, puddle);
+		float threshold = mix(0.80, 0.50, surface_wet);
+		puddle = smoothstep(threshold, threshold + max(0.065, aa * 0.12), basin)
+			* flatness * smoothstep(0.18, 0.78, surface_wet);
+		puddle *= 1.0 - smoothstep(135.0, 275.0, camera_distance);
+		albedo *= (1.0 - (asphalt ? 0.34 : 0.16) * surface_wet) * (1.0 - 0.08 * puddle);
+		rough = mix(rough, asphalt ? 0.26 : 0.44, surface_wet);
+		rough = mix(rough, 0.04, puddle);
 	} else if (!shore && flat_top && grass) {
 		albedo *= 1.0 - wetness * 0.11;
 	}
@@ -589,35 +595,43 @@ void fragment() {
 	// Limit it to road tops so vegetation, retaining walls and sand stay dark.
 	if (asphalt && has_streets && flat_top && !shore) {
 		EMISSION = albedo * vec3(0.13, 0.16, 0.20) * night;
-		if (puddle > 0.02) {
-			// Water sheets reflect the sky along the local road grade.
-			// Only the shallow, resolved foreground picks up rain ripples.
+		if (puddle > 0.02 || surface_wet > 0.25) {
+			// Water sheets reflect the sky and bright horizon along the road grade.
+			// Foreground puddles pick up expanding concentric raindrop ripples.
 			vec3 plane_normal = normalize(v_wn);
 			vec3 to_eye = normalize(CAMERA_POSITION_WORLD - v_world);
 			float facing = clamp(dot(plane_normal, to_eye), 0.0, 1.0);
-			float grazing = (1.0 - facing) * (1.0 - facing);
+			float fres = pow(1.0 - facing, 3.6);
 			vec3 reflected = reflect(-to_eye, plane_normal);
 			float ripple = 1.0;
-			if (camera_distance < 19.0 && aa < 0.12) {
-				float rip = sin(dot(p, vec2(11.0, 8.3)) + TIME * 9.0 + n * 9.0);
-				ripple += rip * 0.11 * (1.0 - smoothstep(7.0, 19.0, camera_distance)) * (1.0 - smoothstep(0.025, 0.12, aa));
+			if (puddle > 0.05 && rain > 0.08 && camera_distance < 22.0 && aa < 0.12) {
+				vec2 rc = floor(p * 1.4);
+				vec2 rf_p = fract(p * 1.4) - 0.5;
+				float ph = fract(TIME * 2.4 + hash12(rc) * 6.283);
+				float ring_d = abs(length(rf_p) - ph * 0.42);
+				float ring_w = (1.0 - smoothstep(0.015, 0.055, ring_d)) * (1.0 - ph);
+				float rfade = (1.0 - smoothstep(8.0, 22.0, camera_distance)) * (1.0 - smoothstep(0.025, 0.12, aa));
+				ripple += ring_w * 0.28 * rain * rfade;
 			}
-			vec3 rain_sky = mix(sky_horizon * 0.18, max(sky_horizon * 0.33, vec3(0.040, 0.047, 0.060)), night);
-			float hemisphere = mix(0.42, 1.0, smoothstep(-0.04, 0.22, reflected.y));
-			EMISSION += rain_sky * puddle * grazing * hemisphere * ripple;
+			vec3 sky_grad = mix(sky_horizon, sky_top, clamp(reflected.y * 1.8, 0.0, 1.0));
+			vec3 rain_sky = mix(sky_grad * 0.42, max(sky_horizon * 0.48, vec3(0.055, 0.072, 0.105)), night);
+			float sd_wet = pow(max(dot(reflected, normalize(sun_dir)), 0.0), 48.0) * (1.0 - night) * 0.35;
+			float hemisphere = mix(0.45, 1.0, smoothstep(-0.04, 0.22, reflected.y));
+			float sheet = max(puddle, surface_wet * 0.24 * (0.5 + 0.5 * wheel_tracks));
+			EMISSION += (rain_sky * mix(0.14, 0.88, fres) + vec3(sd_wet)) * sheet * hemisphere * ripple;
 		}
-		if (surface_wet > 0.18 && night > 0.24 && camera_distance < 55.0) {
+		if (surface_wet > 0.16 && night > 0.20 && camera_distance < 68.0) {
 			vec3 glint = vec3(0.0);
 			for (int i = 0; i < 4; i++) {
 				vec4 lamp = wet_road_lamps[i];
-				vec3 light_colour = mix(vec3(1.0, 0.61, 0.29), vec3(0.78, 0.87, 1.0), lamp.w);
+				vec3 light_colour = mix(vec3(1.0, 0.62, 0.28), vec3(0.78, 0.88, 1.0), lamp.w);
 				glint += light_colour * wet_lamp_reflection(lamp, v_world, CAMERA_POSITION_WORLD, puddle, n);
 			}
-			float coat = smoothstep(0.18, 0.9, surface_wet);
-			float texture_breakup = mix(0.23 + 0.75 * n, 1.0, puddle);
-			float fade = 1.0 - smoothstep(32.0, 55.0, camera_distance);
-			EMISSION += min(glint, vec3(1.25)) * coat * fade
-				* texture_breakup * (0.08 + 0.28 * puddle) * smoothstep(0.24, 0.7, night);
+			float coat = smoothstep(0.16, 0.86, surface_wet);
+			float texture_breakup = mix(0.28 + 0.72 * n, 1.0, puddle);
+			float fade = 1.0 - smoothstep(38.0, 68.0, camera_distance);
+			EMISSION += min(glint, vec3(1.85)) * coat * fade
+				* texture_breakup * (0.14 + 0.46 * puddle) * smoothstep(0.20, 0.65, night);
 		}
 	} else if (pave && has_streets && flat_top && !shore) {
 		// Subtle warm pavement light spill near building frontages at night,

@@ -2,9 +2,9 @@ class_name TreeKit
 ## Mobile LODs baked from the WorldState oak, birch and pine Blender study.
 const SPECIES := ["oak", "birch", "pine"]
 const SPECIES_TINT := {
-	"oak": Vector3(0.95, 1.0, 0.92),
-	"birch": Vector3(1.04, 1.04, 0.90),
-	"pine": Vector3(0.84, 0.96, 0.92),
+	"oak": Vector3(0.90, 1.02, 0.84),
+	"birch": Vector3(1.08, 1.06, 0.84),
+	"pine": Vector3(0.74, 0.94, 0.86),
 }
 const CANOPY := preload("res://src/world/shaders/tree_canopy.gdshader")
 const LOD_CELL := 96.0
@@ -80,8 +80,8 @@ static func pick(p: Vector3, park := false) -> String:
 
 
 static func shape(p: Vector3, base_scale: float) -> Basis:
-	var spread := lerpf(0.84, 1.12, _h(p, 9))
-	var height := lerpf(0.86, 1.17, _h(p, 7))
+	var spread := lerpf(0.92, 1.24, _h(p, 9))
+	var height := lerpf(0.90, 1.22, _h(p, 7))
 	return Basis(Vector3.UP, _h(p, 29) * TAU).scaled_local(Vector3(spread, height, spread) * base_scale)
 
 

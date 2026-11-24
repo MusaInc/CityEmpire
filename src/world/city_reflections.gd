@@ -8,8 +8,8 @@ extends Node3D
 ## RECAPTURE m or the light has changed (every LIGHT_EVERY s) – never every
 ## frame. Off on the Low quality preset.
 
-const RECAPTURE := 260.0   # (70 m re-rendered 6 cube faces every ~2 s at driving speed)
-const LIGHT_EVERY := 120.0
+const RECAPTURE := 180.0
+const LIGHT_EVERY := 60.0
 var probe: ReflectionProbe
 var _last := Vector3(INF, 0, INF)
 var _t := 0.0
@@ -24,7 +24,7 @@ func _ready() -> void:
 	probe.box_projection = false
 	probe.interior = false
 	probe.enable_shadows = false
-	probe.intensity = 1.0
+	probe.intensity = 1.18
 	probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED
 	probe.mesh_lod_threshold = 8.0
 	add_child(probe)

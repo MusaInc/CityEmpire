@@ -41,6 +41,7 @@ var _sphere := SphereShape3D.new()
 var _ray := PhysicsRayQueryParameters3D.new()
 var _accel_offset := 0.0
 var _prev_speed := 0.0
+var _bank := 0.0
 
 
 func _ready() -> void:
@@ -210,7 +211,12 @@ func _chase(dt: float) -> void:
 	_snap = false
 	global_position = lens
 	if lens.distance_to(_look) > 0.1:
-		look_at(_look, Vector3.UP)
+		# Subtle cinematic cornering bank at speed (disabled with Reduce Motion).
+		var yaw_rate := clampf(car.angular_velocity.y, -2.5, 2.5)
+		var want_bank := 0.0 if reduce_motion else clampf(-yaw_rate * sp_t * 0.028, -0.032, 0.032)
+		_bank = 0.0 if _snap else lerpf(_bank, want_bank, 1.0 - exp(-5.0 * dt))
+		var up_dir := (Vector3.UP + global_basis.x * _bank).normalized() if absf(_bank) > 0.0005 else Vector3.UP
+		look_at(_look, up_dir)
 	# FOV: speed and nitro.
 	_fov_kick = move_toward(_fov_kick, 0.0, dt * 14.0)
 	var nitro_fov := 6.0 if (car.nitro and car.nitro_amount > 0.0) else 0.0

@@ -25,9 +25,9 @@ void fragment() {
 	vec3 ground = mix(vec3(0.03, 0.034, 0.04), sky_horizon * 0.22, smoothstep(-0.32, 0.0, r.y)) * (1.0 - 0.65 * night);
 	vec3 env = mix(ground, sky, smoothstep(-0.02, 0.045, r.y)) * vec3(0.94, 0.98, 1.0);
 	float facing = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
-	float fres = pow(1.0 - facing, 5.0);
+	float fres = pow(1.0 - facing, 4.2);
 	float sd = max(dot(r, normalize(sun_dir)), 0.0);
-	float glint = pow(sd, 210.0) * 0.48 + pow(sd, 40.0) * 0.04;
-	EMISSION = (env * mix(0.06, 0.54, fres) + vec3(glint)) * (1.0 - night * 0.57);
-	ALPHA = mix(0.28, 0.86, fres);
+	float glint = pow(sd, 240.0) * 0.62 + pow(sd, 40.0) * 0.05;
+	EMISSION = (env * mix(0.09, 0.64, fres) + vec3(glint)) * (1.0 - night * 0.50);
+	ALPHA = mix(0.26, 0.88, fres);
 }

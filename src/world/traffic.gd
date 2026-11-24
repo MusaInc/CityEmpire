@@ -33,7 +33,7 @@ const PATH_SHADER := preload("res://src/world/shaders/traffic_path.gdshader")
 const PATH_BEAM_SHADER := preload("res://src/world/shaders/traffic_path_beam.gdshader")
 const PATH_AO_SHADER := preload("res://src/world/shaders/traffic_path_ao.gdshader")
 const LANE_V := {"ring": 13.0, "major": 12.0, "minor": 9.0, "roundabout": 8.0}
-const SPACING := 140.0     # m of lane per car at density 1 (was 72: quieter roads for the detailed civilian cars)
+const SPACING := 112.0     # m of lane per car at density 1 (livelier streets without overcrowding)
 
 const SIGNAL_CYCLE := 26.0
 const SIGNAL_GREEN := 0.38

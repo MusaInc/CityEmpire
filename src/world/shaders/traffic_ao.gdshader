@@ -6,12 +6,15 @@ shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
 
 global uniform float night;
-uniform float strength = 0.3;   // (0.62 read as a dark pool under every car on device)
+uniform float strength = 0.72;
 
 void fragment() {
 	vec2 q = (UV - 0.5) * 2.0;
-	float d = length(q * vec2(1.0, 1.0));
-	float a = (1.0 - smoothstep(0.15, 1.0, d)) * strength * (1.0 - night);
-	ALBEDO = vec3(0.0);
+	vec2 d = abs(q) - vec2(0.58, 0.68);
+	float box_d = length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0);
+	float body_ao = 1.0 - smoothstep(-0.08, 0.36, box_d);
+	float core_ao = 1.0 - smoothstep(-0.18, 0.14, box_d);
+	float a = clamp(body_ao * 0.62 + core_ao * 0.42, 0.0, 1.0) * strength * mix(1.0, 0.54, night);
+	ALBEDO = vec3(0.01, 0.012, 0.016);
 	ALPHA = a;
 }

@@ -259,18 +259,18 @@ func wet_tyre_spray(c: Car, wetness: float, dt: float, paved_at: Callable) -> vo
 
 
 func _emit_tyre_spray(contact: Vector3, velocity: Vector3, outward: Vector3, strength: float) -> void:
-	var at := contact + outward * 0.10 + Vector3.UP * 0.10
-	var drift := velocity * 0.63 + outward * _spray_rng.randf_range(0.36, 0.96)
-	drift.y = _spray_rng.randf_range(0.49, 1.01) * (0.73 + 0.27 * strength)
-	var mist := Color(0.64, 0.71, 0.75, lerpf(0.16, 0.44, strength))
-	smoke.emit(at, drift, _spray_rng.randf_range(0.34, 0.56), 0.23,
-		_spray_rng.randf_range(0.64, 0.92) * (0.75 + 0.25 * strength), mist)
-	if strength > 0.4:
-		# A shorter, tighter stream at the edge of the main plume.
-		var drops := drift * 0.74 + outward * 0.38
-		drops.y *= 0.59
-		smoke.emit(at + outward * 0.09, drops, 0.25, 0.10, 0.22,
-			Color(0.74, 0.80, 0.82, 0.4 * strength))
+	var at := contact + outward * 0.08 + Vector3.UP * 0.08
+	var drift := velocity * 0.52 + outward * _spray_rng.randf_range(0.28, 0.72)
+	drift.y = _spray_rng.randf_range(0.32, 0.72) * (0.68 + 0.32 * strength)
+	var mist := Color(0.56, 0.64, 0.70, lerpf(0.09, 0.24, strength))
+	smoke.emit(at, drift, _spray_rng.randf_range(0.26, 0.44), 0.16,
+		_spray_rng.randf_range(0.48, 0.78) * (0.72 + 0.28 * strength), mist)
+	if strength > 0.35:
+		# Tight fine-droplet rooster tail close to the road surface.
+		var drops := drift * 0.68 + outward * 0.26
+		drops.y *= 0.48
+		smoke.emit(at + outward * 0.06, drops, 0.19, 0.07, 0.18,
+			Color(0.68, 0.76, 0.82, 0.26 * strength))
 
 
 func _car_fx(c: Car, dt: float) -> void:

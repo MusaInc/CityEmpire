@@ -10,12 +10,12 @@ var _mat: ShaderMaterial
 
 
 func _ready() -> void:
-	var count := 1400
+	var count := 1600
 	var settings := get_node_or_null("/root/Settings")
 	if settings:
-		count = [600, 1100, 1800][clampi(settings.quality, 0, 2)]
+		count = [800, 1500, 2400][clampi(settings.quality, 0, 2)]
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.018, 0.85)
+	quad.size = Vector2(0.024, 1.12)
 	_mat = ShaderMaterial.new()
 	_mat.shader = load("res://src/world/shaders/rain.gdshader")
 	_mat.set_shader_parameter("box", BOX)
