@@ -2,7 +2,7 @@ class_name TreeKit
 ## Mobile LODs baked from the WorldState oak, birch and pine Blender study.
 const SPECIES := ["oak", "birch", "pine"]
 const CANOPY := preload("res://src/world/shaders/tree_canopy.gdshader")
-const LOD_CELL := 56.0
+const LOD_CELL := 96.0
 static var _meshes := {}
 
 
@@ -89,8 +89,8 @@ static func _add_lods(parent: Node3D, placements: Array, far_mesh: Mesh, near_me
 	far.visibility_range_end = ends_at
 	far.visibility_range_end_margin = 16.0
 	if near_mesh_resource != null:
-		far.visibility_range_begin = 105.0
-		far.visibility_range_begin_margin = 8.0
+		far.visibility_range_begin = 82.0
+		far.visibility_range_begin_margin = 10.0
 		var near := _instance_lod(parent, placements, near_mesh_resource)
 		near.visibility_parent = near.get_path_to(far)
 

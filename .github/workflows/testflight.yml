@@ -20,7 +20,7 @@ on:
     inputs:
       version:
         description: "Marketing version (CFBundleShortVersionString)"
-        default: "0.1.0"
+        default: "0.11.0"
       fix_build:
         description: "Only make an existing build testable (build number, e.g. 33) – skips building"
         default: ""
@@ -160,7 +160,20 @@ jobs:
           sed -i '' "s/^application\/short_version=.*/application\/short_version=\"$VERSION\"/" export_presets.cfg
           sed -i '' "s/^application\/version=.*/application\/version=\"$BUILD\"/" export_presets.cfg
           mkdir -p build/ios
-          "$GODOT" --headless --import >/dev/null 2>&1 || true
+          set +e
+          "$GODOT" --headless --import >build/ios/godot-import.log 2>&1
+          import_rc=$?
+          set -e
+          if [ "$import_rc" -ne 0 ]; then
+            echo "::error::Godot headless import failed with exit code $import_rc"
+            tail -n 100 build/ios/godot-import.log
+            exit "$import_rc"
+          fi
+          if grep -iE "SCRIPT ERROR:|Parse Error:|Failed loading resource:|Error importing" build/ios/godot-import.log; then
+            echo "::error::Godot headless import reported fatal resource or script errors"
+            tail -n 100 build/ios/godot-import.log
+            exit 1
+          fi
           "$GODOT" --headless --export-release "iOS" build/ios/CityEmpire.ipa
           test -d build/ios/CityEmpire.xcodeproj
 

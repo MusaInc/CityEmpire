@@ -297,21 +297,21 @@ def _figure_delta(p, identity, j):
     torso = 1 - smooth(.20, .27, ax)          # keeps the A-pose arms out of it
     waist = j['hips'] + .55 * (j['chest'] - j['hips'])
     if identity == 'ade':
-        taper = .115 * _bell((z - waist) / .085, 1) + .10 * _bell((z - (j['hips'] + .02)) / .06, 1)
-        widen = .055 * _bell((z - (j['chest'] + .11)) / .07, 1)
+        taper = .045 * _bell((z - waist) / .085, 1) + .035 * _bell((z - (j['hips'] + .02)) / .06, 1)
+        widen = .048 * _bell((z - (j['chest'] + .11)) / .07, 1)
         d.x += -x * taper * torso + x * widen * torso * (1 - smooth(.17, .22, ax))
-        d.y += -y * .55 * taper * torso * (1 if y > 0 else .35)
+        d.y += -y * .45 * taper * torso * (1 if y > 0 else .30)
         d.y += .010 * _bell((z - (j['chest'] + .09)) / .05, 1) * _bell(x / .085, 1) * smooth(-.01, .05, y)
         cap, gain = .080, .013
     else:
-        taper = .115 * _bell((z - waist) / .072, 1)
-        hips = .060 * _bell((z - (j['hips'] - .09)) / .085, 1) * smooth(.04, .13, ax)
+        taper = .042 * _bell((z - waist) / .085, 1)
+        hips = .028 * _bell((z - (j['hips'] - .08)) / .095, 1) * smooth(.04, .13, ax)
         d.x += (-x * taper - x * hips) * torso
-        d.y += -y * taper * torso * (.9 if y > 0 else .3)
-        belly = .16 * _bell((z - (j['hips'] + .05)) / .055, 1) * smooth(.0, .06, y)
+        d.y += -y * taper * torso * (.65 if y > 0 else .25)
+        belly = .055 * _bell((z - (j['hips'] + .05)) / .068, 1) * smooth(.0, .06, y)
         d.y += -y * belly * torso
-        d.x += -x * .5 * belly * torso
-        cap, gain = .068, .006
+        d.x += -x * .35 * belly * torso
+        cap, gain = .068, .005
     for sign in (-1, 1):
         shoulder = Vector((sign * j['shoulder_x'], 0, j['shoulder_z']))
         off = p - shoulder

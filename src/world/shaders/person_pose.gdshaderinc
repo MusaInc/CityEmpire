@@ -117,6 +117,64 @@ void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, flo
 	v.x += cycle * 0.010 * walk * smoothstep(0.15, 1.0, height);
 }
 
+// Subtle standing life for stopped/browsing/waiting people: chest breathing,
+// gentle asynchronous weight shift across the feet, and soft head/arm motion.
+void person_pose_idle(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float walk, float carry, float t, float seed) {
+	float idle = clamp(1.0 - walk, 0.0, 1.0);
+	if (idle <= 0.001) {
+		return;
+	}
+	float height = v.y;
+	float b_ph = t * (1.45 + fract(seed * 5.71) * 0.45) + seed * 6.28318;
+	float breath = sin(b_ph) * idle;
+	float s_ph = t * (0.34 + fract(seed * 3.17) * 0.16) + seed * 19.3;
+	float s_raw = clamp(sin(s_ph) * 1.45, -1.0, 1.0);
+	float shift = s_raw * s_raw * (3.0 - 2.0 * abs(s_raw)) * sign(s_raw) * idle;
+
+	// Soften the unloaded knee slightly so weight rests naturally on one leg.
+	if (limb == 1 || limb == 2) {
+		float side = limb == 1 ? -1.0 : 1.0;
+		float unload = max(0.0, -side * shift);
+		float k = unload * 0.065;
+		if (k > 0.001) {
+			vec3 vk = pitch_about(v, vec3(0.0, 0.49, 0.02), -k);
+			v = mix(v, vk, lw);
+			n = normalize(mix(n, pitch_dir(n, -k), lw));
+			vec3 vh = pitch_about(v, vec3(0.0, 0.94, 0.0), k * 0.45);
+			v = mix(v, vh, cw);
+			n = normalize(mix(n, pitch_dir(n, k * 0.45), cw));
+		}
+	} else if ((limb == 3 || limb == 4) && carry < 0.5) {
+		float side = limb == 3 ? -1.0 : 1.0;
+		float arm_sway = (sin(b_ph - 0.55) * 0.018 + shift * side * 0.028) * idle * (1.0 - carry);
+		vec3 vs = pitch_about(v, vec3(0.0, 1.48, 0.0), arm_sway);
+		v = mix(v, vs, cw);
+		n = normalize(mix(n, pitch_dir(n, arm_sway), cw));
+		float el_relax = sin(b_ph - 0.8) * 0.022 * idle * (1.0 - carry);
+		vec3 ve = pitch_about(v, vec3(0.0, 1.21, 0.0), el_relax);
+		v = mix(v, ve, lw);
+		n = normalize(mix(n, pitch_dir(n, el_relax), lw));
+	} else if (limb == 5) {
+		float nod = breath * 0.014;
+		vec3 vh = pitch_about(v, vec3(0.0, 1.56, 0.0), nod);
+		v = mix(v, vh, cw);
+		n = normalize(mix(n, pitch_dir(n, nod), cw));
+	}
+
+	// Subtle ribcage breath expansion and lateral weight shift with upper-spine counter-balance.
+	float torso = smoothstep(0.90, 1.55, height);
+	float chest = smoothstep(0.98, 1.46, height) * (1.0 - smoothstep(1.52, 1.72, height));
+	v.y += breath * 0.006 * torso;
+	v.z -= breath * 0.0045 * chest * (1.0 - smoothstep(-0.02, 0.14, v.z));
+	v.x += shift * 0.022 * smoothstep(0.18, 0.96, height) - shift * 0.008 * smoothstep(1.06, 1.66, height);
+
+	float i_yaw = shift * 0.042 * torso * (1.0 - 0.7 * carry);
+	float ic = cos(i_yaw);
+	float is_ = sin(i_yaw);
+	v.xz = mat2(vec2(ic, is_), vec2(-is_, ic)) * v.xz;
+	n.xz = mat2(vec2(ic, is_), vec2(-is_, ic)) * n.xz;
+}
+
 float person_surface_roughness(int part) {
 	if (part == 1 || part == 9) return .62;
 	if (part == 3) return .70;

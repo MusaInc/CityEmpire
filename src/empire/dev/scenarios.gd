@@ -736,21 +736,22 @@ func scenario_xc() -> void:
 	e.personal_cash = 5000.0
 	game.ui.open_store("clothes_premium")
 	await frames(3)
-	game.ui._style_set({"top": "top_blazer", "shoes": "shoes_royal"})
+	game.ui._style_set({"top": "top_shirt", "shoes": "shoes_royal"})
 	await frames(2)
 	var un := Wardrobe.unpaid(e.flags, HeroLook.current(e.flags))
 	check(un.size() == 2, "trying on two items you don't own (%s)" % str(un))
 	# (Empire.pay takes company cash first: count both.)
 	var cash := e.personal_cash + e.company_cash
 	var err := Wardrobe.buy(e, un, "clothes_premium")
-	check(err == "" and absf(cash - e.personal_cash - e.company_cash - 740.0) < 0.01, "paid £740 once (%s)" % err)
+	var expected := Wardrobe.price("top_shirt") + Wardrobe.price("shoes_royal")
+	check(err == "" and absf(cash - e.personal_cash - e.company_cash - expected) < 0.01, "paid for both items once (%s)" % err)
 	Wardrobe.save_outfit(e.flags, HeroLook.current(e.flags))
 	game.ui._close_style()
 	game.save_game()
 	game.load_game()
 	await frames(5)
 	var l := HeroLook.current(game.empire.flags)
-	check(l["top"] == "top_blazer" and Wardrobe.owns(game.empire.flags, "shoes_royal"), "wearing and owning them after a reload")
+	check(l["top"] == "top_shirt" and Wardrobe.owns(game.empire.flags, "shoes_royal"), "wearing and owning them after a reload")
 	check((game.empire.flags.get("outfits", []) as Array).size() >= 1, "the saved outfit is there")
 	# Leaving a store without paying puts your own clothes back.
 	game.ui.open_store("clothes_premium")
@@ -825,7 +826,11 @@ func scenario_xw() -> void:
 			var q: Vector3 = sp[1]
 			await stand(Vector3(q.x, xf.origin.y, q.z) + (xf.basis * Vector3(0, 0, 0.6)))
 			game._update_spot()
-			if String(game.spot.get("venue_spot", "")) != String(sp[0]):
+			var marker := String(sp[0])
+			var offered := String(game.spot.get("venue_spot", ""))
+			if game.spot.get("kind") == "sky_display":
+				offered = "inspect_" + String(game.spot.get("model", ""))
+			if offered != marker or game.spot.get("site") != d["site"]:
 				bad.append("%s→%s (hero %s, spot %s)" % [sp[0], game.spot.get("venue_spot", game.spot.get("kind", "none")), p.global_position.snapped(Vector3.ONE * 0.01), q.snapped(Vector3.ONE * 0.01)])
 		check(bad.is_empty(), "%s: every walk-up point offers its prompt (%d points; %s)" % [id, (R["spots"] as Array).size(), str(bad)])
 		var cars_in := 0
@@ -976,12 +981,16 @@ func scenario_xf() -> void:
 	# A car on its roof is put back on its wheels (it stayed upside down).
 	var vid2 := String(game.empire.vehicles[0]["id"])
 	var car: Car = game.cars[vid2]
+	var apron := SkyportIsland.w(Vector3(1660, SkyportIsland.LAND_Y + 1.5, 470))
+	car.place(Transform3D(Basis.IDENTITY, apron))
 	game.enter_vehicle(vid2)
 	await frames(5)
-	car.place(Transform3D(Basis(Vector3.FORWARD, PI), car.global_position + Vector3.UP * 1.5))
+	car.place(Transform3D(Basis(Vector3.FORWARD, PI), apron))
 	check(await until(func(): return car.global_basis.y.dot(Vector3.UP) > 0.9 and car.upside_time == 0.0, 12.0),
 		"a flipped car is back on its wheels (up·y %.2f)" % car.global_basis.y.dot(Vector3.UP))
+	await until(func(): return car.wheels_on_ground > 0 and car.linear_velocity.length() < 1.0, 10.0)
 	game.exit_vehicle()
+	check(game.driving == "", "got out of the recovered car")
 
 
 ## U: "Stuck? Back to the street" (quality audit 2026-11-18). Puts you, then
@@ -1184,6 +1193,7 @@ func scenario_xs() -> void:
 	var P: Dictionary = game.skyport.plan_data
 	# Streaming: away from the island its detail isn't loaded; on it, it is.
 	game.ui.close_panel(true)   # (earlier days left a day report open: panels pause the world)
+	check(game.driving == "" and game.skyport_play.piloting == "", "on foot before checking distance-based streaming")
 	game._teleport(Vector3(500, game.layout.ground_y(500, -400) + 1.0, -400), 0.0)   # (the city's north side: well away)
 	await until(func(): return game.skyport.near_root == null, 40.0)
 	if game.skyport.near_root != null:

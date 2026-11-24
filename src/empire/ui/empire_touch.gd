@@ -47,6 +47,15 @@ var _pad_p := Vector2.ZERO
 var _pad_zone := ""
 ## What the pad is doing now (drawn, and read by tests).
 var pad := {"gas": 0.0, "brake": 0.0, "kick": false, "zone": ""}
+## Cached visual state so _process only queues redraws on actual changes.
+var _d_blocked := true
+var _d_driving := false
+var _d_safe := Rect2()
+var _d_size := -1.0
+var _d_inset := -1.0
+var _d_opacity := -1.0
+var _d_action := ""
+var _d_mode := -1
 
 
 func _ready() -> void:
@@ -56,11 +65,19 @@ func _ready() -> void:
 
 
 ## The screen minus the notch / Dynamic Island / home indicator (the HUD's
-## rect: EmpireUI insets it by the display's safe area).
+## rect plus the full bottom safe-area inset for the iPhone home indicator).
 func _safe() -> Rect2:
-	if ui != null and ui.hud != null:
-		return ui.hud.get_global_rect()
-	return get_viewport_rect()
+	var vp := get_viewport_rect()
+	var r := ui.hud.get_global_rect() if (ui != null and ui.hud != null) else vp
+	var sa := DisplayServer.get_display_safe_area()
+	var win := DisplayServer.window_get_size()
+	if sa.size.x > 0 and win.x > 0 and DisplayServer.screen_get_size() == win:
+		var ky := vp.size.y / float(win.y)
+		var bottom_inset := float(win.y - sa.end.y) * ky
+		var max_end_y := vp.end.y - bottom_inset
+		if r.end.y > max_end_y:
+			r.size.y = maxf(0.0, max_end_y - r.position.y)
+	return r
 
 
 ## Control scale: tablets draw canvas units physically bigger, so bring the
@@ -114,8 +131,9 @@ func _buttons() -> Dictionary:
 		if action_text != "":
 			out["action"] = Rect2(h + Vector2(-PAD_R - 40.0, -PAD_R - 70.0) * k, Vector2(92, 92) * k)
 	else:
-		out["action"] = Rect2(s.x - 200 * k, s.y - 220 * k, 160 * k, 160 * k)
-		out["jump"] = Rect2(s.x - 330 * k, s.y - 140 * k, 100 * k, 100 * k)
+		var inset := Settings.touch_inset
+		out["action"] = Rect2(s.x - 200 * k - inset, s.y - 220 * k, 160 * k, 160 * k)
+		out["jump"] = Rect2(s.x - 330 * k - inset, s.y - 140 * k, 100 * k, 100 * k)
 	return out
 
 
@@ -125,6 +143,7 @@ func _input(event: InputEvent) -> void:
 	var w := get_viewport_rect().size.x
 	if event is InputEventScreenTouch:
 		var t := event as InputEventScreenTouch
+		var driving := _driving()
 		if t.pressed:
 			var bs := _buttons()
 			for k in bs:
@@ -134,33 +153,50 @@ func _input(event: InputEvent) -> void:
 					get_viewport().set_input_as_handled()
 					queue_redraw()
 					return
-			if t.position.x < w * 0.45 and _stick_id < 0:
-				_stick_id = t.index
-				_stick_o = t.position
-				_stick_v = Vector2.ZERO
-			elif _driving() and t.position.x >= w * 0.5 and _pad_id < 0:
-				_pad_id = t.index
-				_pad_o = t.position
-				_pad_p = t.position
-				_pad_zone = ""
-				_apply_pad()
-			elif _look_id < 0:
-				_look_id = t.index
-				_look_last = t.position
+			if driving:
+				# Clean 50/50 split while driving/piloting: no dead zone and
+				# never rotate the inactive on-foot SwingCamera.
+				if t.position.x < w * 0.5:
+					if _stick_id < 0:
+						_stick_id = t.index
+						_stick_o = t.position
+						_stick_v = Vector2.ZERO
+						queue_redraw()
+				elif _pad_id < 0:
+					_pad_id = t.index
+					_pad_o = t.position
+					_pad_p = t.position
+					_pad_zone = ""
+					_apply_pad()
+					queue_redraw()
+			else:
+				if t.position.x < w * 0.45 and _stick_id < 0:
+					_stick_id = t.index
+					_stick_o = t.position
+					_stick_v = Vector2.ZERO
+					queue_redraw()
+				elif _look_id < 0:
+					_look_id = t.index
+					_look_last = t.position
 		else:
+			var changed := false
 			if _held.has(t.index):
 				_press(_held[t.index], false)
 				_held.erase(t.index)
+				changed = true
 			if t.index == _stick_id:
 				_stick_id = -1
 				_stick_v = Vector2.ZERO
 				_apply_stick()
+				changed = true
 			if t.index == _pad_id:
 				_pad_id = -1
 				_apply_pad()
+				changed = true
 			if t.index == _look_id:
 				_look_id = -1
-		queue_redraw()
+			if changed:
+				queue_redraw()
 	elif event is InputEventScreenDrag:
 		var d := event as InputEventScreenDrag
 		if d.index == _stick_id:
@@ -170,16 +206,14 @@ func _input(event: InputEvent) -> void:
 		elif d.index == _pad_id:
 			_pad_p = d.position
 			# The landing point follows a thumb that wanders well past full
-			# travel, so pulling back always responds at once.
+			# travel, so pulling back always responds at once, while keeping
+			# horizontal steering and vertical throttle axes independent for
+			# both Car and Craft.
 			var so := _pad_p - _pad_o
 			var lim := PAD_R * ui_k() * 1.35
-			if _car() is Car:
-				# A long sideways pull must keep the throttle/brake axis
-				# where the thumb left it, and vice versa.
-				_pad_o = _pad_p - so.clamp(Vector2(-lim, -lim), Vector2(lim, lim))
-			elif so.length() > lim:
-				_pad_o = _pad_p - so.normalized() * lim
+			_pad_o = _pad_p - so.clamp(Vector2(-lim, -lim), Vector2(lim, lim))
 			_apply_pad()
+			queue_redraw()
 		elif d.index == _look_id:
 			ui.game.camera.add_touch_look(d.position - _look_last, w)
 			_look_last = d.position
@@ -251,7 +285,7 @@ func _apply_pad() -> void:
 	di.touch_gas = pad["gas"]
 	di.touch_brake = pad["brake"]
 	di.touch_kickdown = pad["kick"]
-	di.touch_pad_steer = read_pad_steer(_pad_p.x - _pad_o.x, ui_k()) if _pad_id >= 0 and car is Car else 0.0
+	di.touch_pad_steer = read_pad_steer(_pad_p.x - _pad_o.x, ui_k()) if _pad_id >= 0 and car != null else 0.0
 
 
 func _physics_process(_dt: float) -> void:
@@ -272,6 +306,22 @@ func release_all() -> void:
 	_stick_v = Vector2.ZERO
 	_apply_stick()
 	_apply_pad()
+	queue_redraw()
+
+
+func _draw_mode(driving: bool) -> int:
+	if not driving:
+		return 0
+	var v := _car()
+	if v is Craft:
+		var k := String(v.get("kind"))
+		if k == "heli":
+			return 3
+		if k == "plane":
+			return 5 if String(v.get("state")) in ["air", "stall"] else 4
+		return 6
+	var rev := v is Car and float(pad["brake"]) > 0.5 and float(v.get("forward_speed")) < 1.5
+	return 2 if rev else 1
 
 
 func _process(_dt: float) -> void:
@@ -281,11 +331,32 @@ func _process(_dt: float) -> void:
 	var blocked := not visible or ui.panel_open() or ui.game == null or ui.game.state != "play"
 	if blocked and (_stick_id >= 0 or _look_id >= 0 or _pad_id >= 0 or not _held.is_empty()):
 		release_all()
+	var driving := _driving()
 	# Getting out with a thumb still on the pad: drop it.
-	if not _driving() and (_pad_id >= 0 or _held.values().has("drift")):
+	if not driving and (_pad_id >= 0 or _held.values().has("drift")):
 		release_all()
-	if visible:
-		self_modulate.a = Settings.touch_opacity
+	if not visible:
+		_d_blocked = true
+		return
+	var op := Settings.touch_opacity
+	if not is_equal_approx(self_modulate.a, op):
+		self_modulate.a = op
+	var sr := _safe()
+	var sz := Settings.touch_size
+	var ins := Settings.touch_inset
+	var mode := _draw_mode(driving)
+	var dirty := blocked != _d_blocked or driving != _d_driving or sr != _d_safe \
+		or not is_equal_approx(sz, _d_size) or not is_equal_approx(ins, _d_inset) \
+		or not is_equal_approx(op, _d_opacity) or action_text != _d_action or mode != _d_mode
+	if dirty:
+		_d_blocked = blocked
+		_d_driving = driving
+		_d_safe = sr
+		_d_size = sz
+		_d_inset = ins
+		_d_opacity = op
+		_d_action = action_text
+		_d_mode = mode
 		queue_redraw()
 
 
@@ -376,7 +447,7 @@ func _draw_pad(f: Font, k: float) -> void:
 	var knob := c
 	if live:
 		var offset := _pad_p - _pad_o
-		knob += offset.limit_length(r) if car is Car else Vector2(0, clampf(offset.y, -r, r))
+		knob += offset.limit_length(r)
 	var kr := 44.0 * k
 	var z := String(pad["zone"])
 	var kc := Color(1, 1, 1, 0.14)

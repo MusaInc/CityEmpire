@@ -17,10 +17,13 @@ var _ph := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
 var _lp := 0.0
 var _lp2 := 0.0
 var _rng := RandomNumberGenerator.new()
+var _gain := 0.0
+var _last_level := 0.0
 
 
 func setup(c: Craft) -> void:
 	craft = c
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	var gen := AudioStreamGenerator.new()
 	gen.mix_rate = RATE
 	gen.buffer_length = 0.15
@@ -32,15 +35,21 @@ func setup(c: Craft) -> void:
 	_rng.seed = 7
 
 
-func _process(_dt: float) -> void:
+func _process(dt: float) -> void:
 	if craft == null or not is_instance_valid(craft):
 		return
 	var cam := get_viewport().get_camera_3d()
 	var near := cam != null and cam.global_position.distance_to(global_position) < 120.0
 	var level := _level()
-	if not near or level < 0.02:
+	var want := not get_tree().paused and near and level >= 0.02
+	if want:
+		_last_level = level
+	var prev_gain := _gain
+	_gain = move_toward(_gain, 1.0 if want else 0.0, maxf(dt, 0.001) * 10.0)
+	if not want and _gain <= 0.0005:
 		if playing:
 			stop()
+			_pb = null
 		return
 	if not playing:
 		play()
@@ -52,14 +61,26 @@ func _process(_dt: float) -> void:
 		return
 	var buf := PackedVector2Array()
 	buf.resize(n)
+	var eff_level := level if want else _last_level
 	match craft.kind:
 		"heli":
-			_heli(buf, level)
+			_heli(buf, eff_level)
 		"plane":
-			_plane(buf, level)
+			_plane(buf, eff_level)
 		_:
-			_boat(buf, level)
+			_boat(buf, eff_level)
+	if prev_gain < 0.9995 or _gain < 0.9995:
+		var inv := 1.0 / float(maxi(n - 1, 1))
+		for i in n:
+			buf[i] *= lerpf(prev_gain, _gain, float(i) * inv)
 	_pb.push_buffer(buf)
+
+
+func _player_aboard() -> bool:
+	var owner_node := craft.get_parent()
+	if owner_node != null and owner_node.has_method("vehicle_node"):
+		return owner_node.call("vehicle_node") == craft
+	return false
 
 
 ## How loud: the rotor / throttle / speed, by kind.
@@ -69,8 +90,9 @@ func _level() -> float:
 			return craft.rotor
 		"plane":
 			return maxf(craft.rotor * 0.5, craft.throttle) if craft.state != "air" else 0.8
-	return clampf(0.25 + absf(craft.forward_speed) / maxf(float(craft.spec.get("vmax", 15.0)), 1.0), 0.0, 1.0) \
-		if bool(craft.input.get("active", false)) or absf(craft.forward_speed) > 0.3 else 0.12
+	if bool(craft.input.get("active", false)) or absf(craft.forward_speed) > 0.3:
+		return clampf(0.25 + absf(craft.forward_speed) / maxf(float(craft.spec.get("vmax", 15.0)), 1.0), 0.0, 1.0)
+	return 0.12 if _player_aboard() else 0.0
 
 
 func _heli(buf: PackedVector2Array, level: float) -> void:

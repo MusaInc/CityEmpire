@@ -293,6 +293,10 @@ static func _wheel_finish(name: String, offroad: bool) -> Material:
 	return _wheel_mats[key]
 
 
+var has_clear_cabin := false
+var driver_seat := Vector3.ZERO
+
+
 func setup(p_car: Car) -> void:
 	car = p_car
 	var spec := car.spec
@@ -329,6 +333,7 @@ func setup(p_car: Car) -> void:
 		for i in mesh.get_surface_count():
 			var src := mesh.surface_get_material(i)
 			var n := src.resource_name if src else ""
+			has_clear_cabin = has_clear_cabin or n == "glass_clear"
 			var m: Material
 			match n:
 				"paint": m = paint_mat
@@ -347,6 +352,8 @@ func setup(p_car: Car) -> void:
 					m = beacon_mat
 				_: m = shared_mat(n)
 			body.set_surface_override_material(i, m)
+	if has_clear_cabin:
+		driver_seat = VehicleAccess.geometry(car)["seat"]
 	# Wheels.
 	var wheel_style := String(spec.get("wheel", "five"))
 	var wmesh := load_mesh("wheel_" + wheel_style)
@@ -581,6 +588,20 @@ func _process(dt: float) -> void:
 		if i < 2:
 			p.rotation.y = -car.wheel_steering(i)
 		_spins[i].rotation.x = -car.wheel_spin[i]
+	# Subtle chassis weight-transfer pitch & roll (dive on braking, squat on
+	# acceleration, lean in high-speed corners) while keeping wheels planted.
+	var flex_on := not _showroom and _access_nodes == null and not (car.park_lock and not car.occupied)
+	var bp := car.body_pitch if flex_on else 0.0
+	var br := car.body_roll if flex_on else 0.0
+	if body:
+		body.rotation = Vector3(bp, 0.0, br)
+	if flares:
+		flares.rotation = Vector3(bp, 0.0, br)
+	if _mods:
+		_mods.rotation = Vector3(bp, 0.0, br)
+	for f: Node3D in _frames:
+		if is_instance_valid(f):
+			f.rotation = Vector3(bp, 0.0, br)
 	# Running lights, service brake and reverse are separate circuits.
 	var rise := 1.0 - exp(-dt * 30.0)
 	_brake_level = lerpf(_brake_level, 1.0 if car.brake_lamps else 0.0, rise)

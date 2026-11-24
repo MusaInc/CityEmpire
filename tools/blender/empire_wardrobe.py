@@ -683,7 +683,10 @@ def shirt_height(P, N):
     H += (.0006 * elbow * np.sin(t * L / .009 * math.pi + np.sin(aa * 3))).astype(np.float32)
     stack = np.clip((t - .72) / .1, 0, 1) * on_arm
     H += (.0005 * stack * np.sin(t * L / .011 * math.pi + aa * 2)).astype(np.float32)
-    H += (.0004 * (z < 1.2) * torso * np.sin(ang * 31 + z * 23) * np.sin(z * 7 + ang)).astype(np.float32)
+    # Subtle, smooth lower-torso natural fabric drape (no hard horizontal step at z=1.2 or fluted pleats!).
+    drape_fade = np.clip((1.26 - z) / .18, 0.0, 1.0)
+    drape_fade = drape_fade * drape_fade * (3.0 - 2.0 * drape_fade)
+    H += (.00010 * drape_fade * torso * np.sin(ang * 9 + z * 11) * np.sin(z * 5 + ang)).astype(np.float32)
     for sx in (-1, 1):   # armpit drag lines
         d = P - np.array([sx * .165, NECK_CY, 1.37])
         r = np.linalg.norm(d, axis=1)
@@ -1038,7 +1041,9 @@ def join_as(name, objs):
     return objs[0]
 
 
-stand, leaf, _szi, _sri, collar_btn = shirt_collar('Top_Shirt', mat=trim_mat, gap=OPEN_HALF / STAND_R(0) + .02, spread=.28,
+stand, leaf, _szi, _sri, collar_btn = shirt_collar('Top_Shirt', mat=trim_mat, gap=OPEN_HALF / STAND_R(0) + .04,
+                                                  leaf_w=(.044, .068), spread=.44,
+                                                  H=_periodic([.021 - .005 * max(0.0, math.cos(a)) for a in _NK_A]),
                                                   closed=False, button=False)
 plk = shirt_placket('plk', ZV + .004, WAIST_TOP - .02, mat=trim_mat)
 btns = shirt_buttons(plk, [ZV - .012 - .09 * k for k in range(6) if ZV - .012 - .09 * k > WAIST_TOP + .025], button_mat, hole_mat)
@@ -1066,8 +1071,8 @@ weights_from(stand, shirt, lambda co: 1.0 - .8 * _stand_t(co))
 for o_ in [leaf, plk] + btns + cuffs:
     weights_from(o_, shirt)
 breast_pocket = stitch_panel('Shirt breast pocket',shirt,
-    [(.061,.113,0,1.385),(.054,.119,.0012,1.398),(.051,.123,.0023,1.425),(.050,.123,.0011,1.452)],
-    trim_mat, clearance=.0028)
+    [(.060,.114,0,1.384),(.054,.118,.0005,1.398),(.052,.121,.0008,1.425),(.051,.121,.0004,1.450)],
+    trim_mat, clearance=.0015)
 shirt_trims = [stand,leaf,plk]+btns+cuffs
 if breast_pocket is not None:
     shirt_trims.append(breast_pocket)
@@ -1132,7 +1137,9 @@ def seams_fn(hem_fn, sleeve_hem_t=None, cuffed=False):
             L = afs['r'].L
             m = on_arm & (np.abs(t - sleeve_hem_t + .02) < .03)
             out[m] += seam_height(((t - sleeve_hem_t + .02) * L)[m], aa[m] * .05, groove=.0, stitch_off=0)
-        out += (.0004 * (z < 1.2) * torso * np.sin(ang * 31 + z * 23) * np.sin(z * 7 + ang)).astype(np.float32)
+        drape_fade = np.clip((1.26 - z) / .18, 0.0, 1.0)
+        drape_fade = drape_fade * drape_fade * (3.0 - 2.0 * drape_fade)
+        out += (.00009 * drape_fade * torso * np.sin(ang * 9 + z * 11) * np.sin(z * 5 + ang)).astype(np.float32)
         return out
     return H
 
@@ -1185,7 +1192,7 @@ def everyday_top(name, matname, layer, lim, sleeve_end, neck, ease, hem=TEE_HEM,
         def ridges(co):
             k = co.z-1.32 - .49*(abs(co.x)-.14) - .14*co.y
             return math.exp(-(k/.022)**2)-.55*math.exp(-((k+.023)/.019)**2)
-        fold_relief(ob,[(tension,ridges,.0046)])
+        fold_relief(ob,[(tension,ridges,.0016)])
     clear_layer(ob, pants, .007, zmax=PANTS_TOP + .03)
     # (the hem moves with the trousers under it: at .6 the hips pushed the
     # waistband and belt loops through the tee's hem in motion)
@@ -1256,10 +1263,10 @@ for side, af in frames()[1].items():
     weights_from(hem_piece,tee)
     tee_trim.append(hem_piece)
 add(join_as('Topx_Tee_Bindings',tee_trim),False)
-# Polo: rib-less neckline with a knitted collar (stand + leaf, open) and a two-button placket.
+# Polo: rib-less neckline with a soft folded knitted collar (low stand + wide rolled leaf) and two-button placket.
 polo, _pR, _pZ = everyday_top('Top_Polo', 'hero_polo', 'shirt', .78, SHORT_T, (1.592, 1.565), .0055, sleeve_ease=(.018, .017))
-_pH = _periodic([.02 - .003 * max(0.0, math.cos(a)) for a in _NK_A])
-pstand, pleaf, _, _, _ = shirt_collar('Top_Polo', gap=.16, leaf_w=(.036, .052), spread=.22, mat=rib_trim, garment=polo,
+_pH = _periodic([.014 - .004 * max(0.0, math.cos(a)) for a in _NK_A])
+pstand, pleaf, _, _, _ = shirt_collar('Top_Polo', gap=.11, leaf_w=(.042, .058), spread=.42, mat=rib_trim, garment=polo,
                                      R=_pR, Z0=_pZ, H=_pH, closed=False, button=False)
 pplk = shirt_placket('pplk', _pZ(0) - .0005, _pZ(0) - .12, w=.03, mat=rib_trim, garment=polo)
 pbtns = shirt_buttons(pplk, [_pZ(0) - .03, _pZ(0) - .085], button_mat, hole_mat)

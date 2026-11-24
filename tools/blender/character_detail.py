@@ -11,41 +11,51 @@ def stable_seed(*parts):
 
 
 def eye_material():
-    """A shared ocular atlas, with iris tint applied in the game shader."""
-    n = 256
+    """A shared high-detail ocular atlas, with iris tint applied in the game shader."""
+    n = 512
     y, x = (np.mgrid[0:n, 0:n] + .5) / n * 2 - 1
     r = np.hypot(x, y)
     angle = np.arctan2(y, x)
-    iris_radius = .49
+    iris_radius = .485
     iris = r / iris_radius
-    fibres = (.045 * np.sin(49 * angle + 7 * r + np.sin(angle * 9))
-              + .030 * np.sin(83 * angle + 16 * r)
-              + .028 * np.sin(24 * angle - 11 * r))
-    collar = .17 * np.exp(-((iris - .52) / .14) ** 2)
-    rim = np.clip((iris - .80) / .20, 0, 1)
-    spokes = .031*np.sin(105*angle+np.sin(r*144)*.8)*np.exp(-((iris-.69)/.23)**2)
-    pigment = np.clip(.70 + fibres + spokes + collar - .55 * rim, .15, .95)
-    whites = np.clip((r - .47) * 1.6, 0, .75)
-    vessels = np.maximum(0, np.sin(angle * 13 + np.sin(r * 19) + angle * r * 10)) ** 38 * whites
-    albedo = np.stack([.57 + .055 * whites, .545 - .095 * whites - .033 * vessels,
-                       .51 - .10 * whites - .041 * vessels], -1)
-    iris_mask = np.clip((iris_radius - r) / .022, 0, 1)
-    albedo = albedo * (1 - iris_mask[..., None]) + pigment[..., None] * iris_mask[..., None]
-    pupil = np.clip((.186 - r) / .024, 0, 1)
-    albedo = albedo * (1 - pupil[..., None]) + np.array([.025, .021, .018]) * pupil[..., None]
-    return material('hero_eye', (1, 1, 1), .24, _save('ocular_albedo', albedo))
+    # Organic fibrous iris stroma: multi-frequency radial trabeculae, subtle collarette, deep crypts, soft dark limbal ring.
+    swirl = 0.08 * np.sin(angle * 7 + r * 6) + 0.04 * np.cos(angle * 13 - r * 9)
+    a_w = angle + swirl * np.clip(iris, 0, 1)
+    fibres = (.095 * np.sin(54 * a_w + 5 * r + 1.2 * np.sin(a_w * 11) * iris)
+              + .062 * np.sin(113 * a_w - 11 * r + .5 * np.sin(a_w * 19))
+              + .038 * np.sin(187 * a_w + 9 * r))
+    # Warm golden-amber collarette ring (subtle, NOT a bright white starburst!).
+    collar = .14 * np.exp(-((iris - .44) / .14) ** 2)
+    crypt = np.maximum(0, np.sin(23 * a_w + 5 * r)) * np.exp(-((iris - .60) / .16) ** 2)
+    furrow = .045 * np.sin(iris * 26.0) * np.clip((iris - .50) / .45, 0, 1)
+    rim = np.clip((iris - .70) / .30, 0, 1) ** 1.45
+    pigment = np.clip(.68 + fibres - .16 * crypt + collar - furrow - .54 * rim, .14, .95)
+    # Natural moist ivory sclera: gently shaded and subtly pinker toward peripheral corners.
+    whites = np.clip((r - .46) * 1.55, 0, .85)
+    corner_pink = np.clip((r - .56) * 1.8, 0, 1.0)
+    vessels = np.maximum(0, np.sin(angle * 15 + np.sin(r * 21) + angle * r * 9)) ** 42 * whites
+    albedo = np.stack([.86 - .10 * whites + .035 * corner_pink,
+                       .83 - .14 * whites - .025 * corner_pink - .028 * vessels,
+                       .79 - .16 * whites - .038 * corner_pink - .036 * vessels], -1)
+    iris_col = pigment[..., None] * np.array([1.0, .93, .85]) + collar[..., None] * np.array([.11, .065, .02])
+    iris_mask = np.clip((iris_radius - r) / .028, 0, 1)
+    albedo = albedo * (1 - iris_mask[..., None]) + np.clip(iris_col, 0, 1) * iris_mask[..., None]
+    pupil = np.clip((.182 - r) / .016, 0, 1)
+    albedo = albedo * (1 - pupil[..., None]) + np.array([.008, .007, .008]) * pupil[..., None]
+    return material('hero_eye', (1, 1, 1), .10, _save('ocular_albedo', albedo))
 
 
 def map_eye(ob):
-    """Project continuous iris/sclera UVs onto an anatomical eyeball."""
+    """Project continuous iris/sclera UVs onto an anatomical eyeball with parallel natural gaze."""
     centre = sum((v.co for v in ob.data.vertices), Vector()) / len(ob.data.vertices)
-    forward = Vector((-.025 if centre.x > 0 else .025, 1, .028)).normalized()
+    # True straight-ahead optical axis (eliminates cross-eyed / upward stare).
+    forward = Vector((0.0, 1.0, -0.008)).normalized()
     right = forward.cross(Vector((0, 0, 1))).normalized()
     up = right.cross(forward).normalized()
     layer = ob.data.uv_layers[0]
     for loop in ob.data.loops:
         d = (ob.data.vertices[loop.vertex_index].co - centre).normalized()
-        layer.data[loop.index].uv = (.5 + .50 * d.dot(right), .5 + .50 * d.dot(up))
+        layer.data[loop.index].uv = (.5 + .49 * d.dot(right), .5 + .49 * d.dot(up))
 
 
 def blink_shape(face, lashes, eyes, skin):
@@ -256,7 +266,7 @@ def sculpt_head(points, fid):
             dx,dz = x-centre.x,z-centre.z
             if abs(dx) < .022 and y > centre.y+.005 and abs(dz)<.023:
                 orbit = math.exp(-(dx/.0145)**4-(dz/.016)**4)
-                opening = (.07 if dz > 0 else .06) if BODY == 'b' else (.26 if dz > 0 else .22)
+                opening = (.06 if dz > 0 else .04) if BODY == 'b' else (.07 if dz > 0 else .04)
                 p.z += orbit * dz * opening
                 p.y += .0014*orbit*math.exp(-((dz+.006)/.005)**2)
         if ax > .067 and eye.y-.112 < y < eye.y-.03:

@@ -208,7 +208,7 @@ void fragment() {
 			// linear: it read chalky in full sun) with a faint warm/cool drift,
 			// and aggregate: stones at two scales, faded with their pixel size so
 			// they never shimmer.
-			albedo = vec3(0.092, 0.089, 0.084) * (0.82 + 0.36 * drift) * (1.0 + 0.12 * grain);
+			albedo = vec3(0.080, 0.078, 0.075) * (0.82 + 0.36 * drift) * (1.0 + 0.12 * grain);
 			float fpx = fwidth(p.x) + fwidth(p.y);
 			float st1 = hash12(floor(p * 9.0));
 			float st2 = hash12(floor(p * 23.0) + 5.0);
@@ -225,7 +225,10 @@ void fragment() {
 			float crack = (1.0 - smoothstep(0.0, 0.01 + cfw, abs(cn - 0.5))) * (0.01 / (0.01 + cfw))
 				* smoothstep(0.55, 0.75, vnoise(p * 0.035 + 7.0));
 			albedo *= 1.0 - 0.3 * crack * sa * near;
-			if (on && other > 0.0) {
+			if (on) {
+				// Smooth blend into junction boxes so tyre wear/gutter never
+				// cut a hard polygonal seam across intersections (Westbank fix).
+				float j_smooth = smoothstep(-0.6, 2.6, other);
 				float across = rf.x;
 				float avenue = rf.y < 0.0 ? 1.0 : 0.0;
 				// rf.z = metres along the road (mod 64) + a roundabout flag: +64 or
@@ -239,7 +242,7 @@ void fragment() {
 				float from_j = other;               // metres past the junction mouth
 				// Tyre tracks: two polished bands per 3.5 m lane.
 				float lane_d = abs(fract(a / 3.5) - 0.5) * 3.5;
-				float tracks = band(lane_d - 0.85, 0.32, 0.3) * step(0.9, hw - a) * mix(0.6, 1.0, near);
+				float tracks = band(lane_d - 0.85, 0.32, 0.3) * step(0.9, hw - a) * mix(0.6, 1.0, near) * j_smooth;
 				// Tyre-polished: darker, smoother, a little oil (a sun sheen runs
 				// along the lanes like on a real road).
 				albedo *= 1.0 - 0.16 * tracks;
@@ -248,13 +251,14 @@ void fragment() {
 				// The wheel paths stay relatively clean. Sediment collects
 				// beside the kerb and thickens where runoff reaches the drains.
 				float kerb_in = hw - a;
-				float gutter = 1.0 - smoothstep(0.07, 0.77 + 0.52 * n, kerb_in);
+				float gutter = (1.0 - smoothstep(0.07, 0.77 + 0.52 * n, kerb_in)) * j_smooth;
 				float silt = gutter * (0.25 + 0.75 * smoothstep(0.25, 0.79, n));
 				float grit = (0.69 + 0.31 * st1) * (1.0 - smoothstep(0.045, 0.23, fpx));
 				albedo = mix(albedo, albedo * vec3(0.49, 0.45, 0.39), silt * (0.40 + 0.55 * sa));
 				albedo = mix(albedo, vec3(0.13, 0.105, 0.076), gutter * grit * (0.09 + 0.24 * sa));
 				shoulder_depression = band(a - (hw - 0.75), 0.67, max(0.18, aa))
 					* smoothstep(0.0, 4.0, from_j);
+			if (other > 0.0) {
 				float drain_along = fract(along / 16.0 + 0.5) * 16.0 - 8.0;
 				float grate = band(drain_along, 0.45, aa) * band(kerb_in - 0.45, 0.25, aa);
 				float drain_runoff = (1.0 - smoothstep(0.06, 1.0, abs(drain_along) * 0.46 + abs(kerb_in - 0.24) * 0.56));
@@ -378,8 +382,7 @@ void fragment() {
 				paint_coverage = max(max(max(centre, divider), max(edge, arrow)),
 					max(max(max(zebra, stop), max(giveway, ghost)), max(max(ring_edge, apron_line), max(bay_edge, bay_tick))));
 				rough = mix(rough, 0.7, max(max(centre, edge), max(max(zebra, stop), max(giveway, ring_edge))));
-			} else if (on) {
-				albedo *= 1.03;  // junctions: a touch lighter, worn smooth
+			}
 			}
 		} else if (pave) {
 			c *= vec3(0.76, 0.77, 0.77);

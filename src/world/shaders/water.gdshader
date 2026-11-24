@@ -127,41 +127,48 @@ void fragment() {
 	float wind = 0.62 + 0.25 * sin(TIME * 0.011) + 0.35 * (gnoise(p0 * 0.0007) );
 	vec3 w = vec3(0.0);
 	float amp_sum = 0.0;
-	float L = 41.0;
-	for (int i = 0; i < 10; i++) {
+	float L = 42.0;
+	// Mobile-optimised 7 golden-angle wave trains (down from 10): identical
+	// non-periodic coastal swell character with ~30% less fragment ALU.
+	for (int i = 0; i < 7; i++) {
 		float fi = float(i);
-		float ang = wind + (fract(fi * 0.618034) - 0.5) * mix(1.6, 2.4, fi / 9.0);
+		float ang = wind + (fract(fi * 0.618034) - 0.5) * mix(1.6, 2.4, fi / 6.0);
 		vec2 dir = vec2(cos(ang), sin(ang));
 		float c = sqrt(9.81 * L / 6.28318);
 		c = min(c, sqrt(9.81 * max(depth, 0.4)));            // (shallow water slows it)
-		// (Groups are 150 m+ across: the cheap value noise is smooth enough.)
-		float group = 0.45 + 0.9 * vnoise(p0 * (0.004 + 0.0013 * fi) + dir * TIME * 0.02 + fi * 7.3);
-		float a = L * 0.021 * sw * group * (i < 3 ? 1.0 : 0.85);
+		float group = 0.45 + 0.9 * vnoise(p0 * (0.004 + 0.0018 * fi) + dir * TIME * 0.02 + fi * 7.3);
+		float a = L * 0.022 * sw * group * (i < 3 ? 1.0 : 0.85);
 		float fade = 1.0 - smoothstep(L * 0.05, L * 0.2, fp);
-		if (i >= 7) {
+		if (i >= 5) {
 			fade *= near;
 		}
 		w += wave(p, dir, L, a, c) * fade;
 		amp_sum += a * fade;
-		L *= 0.74;
+		L *= 0.68;
 	}
 	// Normalise the crest height for colour and foam (≈ the old 0–1.1 range).
 	w.x *= 1.1 / max(amp_sum, 0.01) * min(amp_sum, 1.2);
-	// Chop up close (smooth gradient noise, two octaves drifting with the
-	// wind) and rain pock-marks.
+	// Chop up close (skip finite differences entirely beyond near fade) and rain pock-marks.
 	vec2 wd = vec2(cos(wind), sin(wind));
-	float e = 0.3;
-	vec2 q = p * 0.5 + wd * TIME * 0.35;
-	vec2 q3 = p * 1.3 + vec2(-wd.y, wd.x) * TIME * 0.22 + 31.0;
-	float c0 = gnoise(q) + 0.5 * gnoise(q3);
-	vec2 chop = vec2(gnoise(q + vec2(e, 0.0)) + 0.5 * gnoise(q3 + vec2(e, 0.0)) - c0,
-		gnoise(q + vec2(0.0, e)) + 0.5 * gnoise(q3 + vec2(0.0, e)) - c0) / e * 0.09 * (1.0 + 0.8 * blow);
-	vec2 q2 = p * 2.3 - vec2(TIME * 1.4, -TIME * 1.1);
-	float r0 = vnoise(q2);
-	vec2 pock = vec2(vnoise(q2 + vec2(0.3, 0.0)) - r0, vnoise(q2 + vec2(0.0, 0.3)) - r0) * 0.5 * blow;
+	vec2 chop = vec2(0.0);
+	vec2 pock = vec2(0.0);
+	float chop_w = near * (1.0 - smoothstep(0.15, 0.6, fp));
+	if (chop_w > 0.01) {
+		float e = 0.3;
+		vec2 q = p * 0.5 + wd * TIME * 0.35;
+		vec2 q3 = p * 1.3 + vec2(-wd.y, wd.x) * TIME * 0.22 + 31.0;
+		float c0 = gnoise(q) + 0.5 * gnoise(q3);
+		chop = vec2(gnoise(q + vec2(e, 0.0)) + 0.5 * gnoise(q3 + vec2(e, 0.0)) - c0,
+			gnoise(q + vec2(0.0, e)) + 0.5 * gnoise(q3 + vec2(0.0, e)) - c0) / e * 0.09 * (1.0 + 0.8 * blow);
+		if (blow > 0.02) {
+			vec2 q2 = p * 2.3 - vec2(TIME * 1.4, -TIME * 1.1);
+			float r0 = vnoise(q2);
+			pock = vec2(vnoise(q2 + vec2(0.3, 0.0)) - r0, vnoise(q2 + vec2(0.0, 0.3)) - r0) * 0.5 * blow;
+		}
+	}
 	// (Far off the swell's slopes fade more: seen from height the trains
 	// interfere into a regular ripple grid.)
-	vec2 slope = w.yz * mix(0.12, 1.0, mid * mid) * mix(1.0, 0.3, alt) + (chop + pock) * near * (1.0 - smoothstep(0.15, 0.6, fp));
+	vec2 slope = w.yz * mix(0.12, 1.0, mid * mid) * mix(1.0, 0.3, alt) + (chop + pock) * chop_w;
 	// (Over the shallows the surface is glassier still: no swell grid over
 	// a bright sandy floor.)
 	slope *= mix(0.35, 1.0, smoothstep(1.0, 10.0, depth));
@@ -174,23 +181,23 @@ void fragment() {
 	// paws and slicks – shape the reflection instead.)
 	float farw = max(smoothstep(180.0, 800.0, dist), alt);
 	slope *= mix(1.0, 0.5, farw);
-	// Multi-scale noise slopes (90 m, 31 m, 11 m), each octave rotated and
-	// drifting downwind, the finest dropped once a pixel spans it: no period,
-	// no direction, cheap (gradient noise, finite differences).
+	// Multi-scale noise slopes (2 octaves, skipped when close at street level).
 	vec2 nsl = vec2(0.0);
-	float oct_s = 0.011;
-	float oct_a = 0.075;
-	mat2 rot = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8));
-	vec2 pn = p0;
-	for (int o = 0; o < 3; o++) {
-		vec2 qn = pn * oct_s + wd * TIME * (0.05 + 0.04 * float(o));
-		float e0 = 0.35;
-		float n0 = gnoise(qn);
-		vec2 gn = vec2(gnoise(qn + vec2(e0, 0.0)) - n0, gnoise(qn + vec2(0.0, e0)) - n0) / e0;
-		nsl += rot * gn * oct_a * (1.0 - smoothstep(0.12, 0.45, fp * oct_s * 2.0));
-		pn = rot * pn + 13.7;
-		oct_s *= 2.85;
-		oct_a *= 0.62;
+	if (farw > 0.01) {
+		float oct_s = 0.012;
+		float oct_a = 0.082;
+		mat2 rot = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8));
+		vec2 pn = p0;
+		for (int o = 0; o < 2; o++) {
+			vec2 qn = pn * oct_s + wd * TIME * (0.05 + 0.05 * float(o));
+			float e0 = 0.35;
+			float n0 = gnoise(qn);
+			vec2 gn = vec2(gnoise(qn + vec2(e0, 0.0)) - n0, gnoise(qn + vec2(0.0, e0)) - n0) / e0;
+			nsl += rot * gn * oct_a * (1.0 - smoothstep(0.12, 0.45, fp * oct_s * 2.0));
+			pn = rot * pn + 13.7;
+			oct_s *= 2.9;
+			oct_a *= 0.62;
+		}
 	}
 	slope += nsl * farw * (1.0 + blow) * calm;
 	vec3 nw = normalize(vec3(-slope.x, 1.0, -slope.y));
@@ -261,23 +268,28 @@ void fragment() {
 	vec3 kd = vec3(0.34, 0.16, 0.14) * (1.0 + 1.6 * blow);
 	float path = depth * (1.0 + 1.0 / max(ndv, 0.25));
 	vec3 tr = exp(-kd * path);
-	// (Parallax: the bottom sits below the surface, offset along the view.)
-	vec2 bp = p0 - view_w.xz / max(view_w.y, 0.25) * depth * 0.55;
-	float ripple = sin(dot(bp, vec2(0.83, 0.55)) * 2.6 + vnoise(bp * 0.35) * 4.0) * 0.5 + 0.5;
-	vec3 sand_c = mix(vec3(0.74, 0.7, 0.57), vec3(0.5, 0.52, 0.44), smoothstep(0.5, 5.0, depth))
-		* (0.86 + 0.14 * ripple) * (0.9 + 0.2 * vnoise(bp * 0.05));
-	float stones = vnoise(bp * 0.45) * 0.6 + vnoise(bp * 1.7) * 0.4;
-	vec3 rock_c = mix(vec3(0.16, 0.17, 0.14), vec3(0.34, 0.33, 0.27), stones) * (0.8 + 0.4 * vnoise(bp * 0.06 + 3.0));
-	vec3 floor_c = mix(sand_c, rock_c, smoothstep(0.25, 0.75, rocky));
-	// Caustics flicker on a shallow sunlit floor.
-	float caus = pow(vnoise(bp * 0.9 + vec2(TIME * 0.4, TIME * 0.25)) * vnoise(bp * 1.3 - vec2(TIME * 0.3, 0.0)), 2.0) * 2.4;
-	floor_c *= 1.0 + caus * day * exp(-depth * 0.35) * (1.0 - blow);
-	floor_c *= mix(1.0, 0.12, night) * mix(1.0, 0.7, blow);
-	// Far off the bottom's detail aliases: fade it to its mean.
-	float fdet = 1.0 - smoothstep(0.12, 0.9, fp);
-	floor_c = mix(mix(vec3(0.72, 0.69, 0.56), vec3(0.3, 0.3, 0.26), smoothstep(0.25, 0.75, rocky)) * mix(1.0, 0.12, night), floor_c, fdet);
 	vec3 water_c = body;
-	body = floor_c * tr + body * (vec3(1.0) - tr);
+	float caus = 0.0;
+	if (depth < 16.0 && dist < 1400.0) {
+		// (Parallax: the bottom sits below the surface, offset along the view.)
+		vec2 bp = p0 - view_w.xz / max(view_w.y, 0.25) * depth * 0.55;
+		float fdet = 1.0 - smoothstep(0.12, 0.9, fp);
+		vec3 floor_c = mix(vec3(0.72, 0.69, 0.56), vec3(0.3, 0.3, 0.26), smoothstep(0.25, 0.75, rocky)) * mix(1.0, 0.12, night);
+		if (fdet > 0.02) {
+			float ripple = sin(dot(bp, vec2(0.83, 0.55)) * 2.6 + vnoise(bp * 0.35) * 4.0) * 0.5 + 0.5;
+			vec3 sand_c = mix(vec3(0.74, 0.7, 0.57), vec3(0.5, 0.52, 0.44), smoothstep(0.5, 5.0, depth))
+				* (0.86 + 0.14 * ripple) * (0.9 + 0.2 * vnoise(bp * 0.05));
+			float stones = vnoise(bp * 0.45) * 0.6 + vnoise(bp * 1.7) * 0.4;
+			vec3 rock_c = mix(vec3(0.16, 0.17, 0.14), vec3(0.34, 0.33, 0.27), stones) * (0.8 + 0.4 * vnoise(bp * 0.06 + 3.0));
+			vec3 det_c = mix(sand_c, rock_c, smoothstep(0.25, 0.75, rocky));
+			// Caustics flicker on a shallow sunlit floor.
+			caus = pow(vnoise(bp * 0.9 + vec2(TIME * 0.4, TIME * 0.25)) * vnoise(bp * 1.3 - vec2(TIME * 0.3, 0.0)), 2.0) * 2.4;
+			det_c *= 1.0 + caus * day * exp(-depth * 0.35) * (1.0 - blow);
+			det_c *= mix(1.0, 0.12, night) * mix(1.0, 0.7, blow);
+			floor_c = mix(floor_c, det_c, fdet);
+		}
+		body = floor_c * tr + body * (vec3(1.0) - tr);
+	}
 
 	// See-through shallows: where the baked seabed says it's shallow there
 	// is real floor geometry under the surface (SeabedMesh, the beaches and

@@ -146,30 +146,28 @@ class Collection:
         self.add(obj)
 
     def button_placket(self, shell):
+        """Build a clean, narrow vertical button placket matching the cardigan fabric."""
         tree = surface_tree(shell.data)
         points, faces = [], []
         for index in range(15):
-            z = 1.132 + .093 * index / 14
-            edges = []
-            for side in (-1, 1):
-                hits = (tree.ray_cast(Vector((side * i * .002, .4, z)), Vector((0, -1, 0)))[0]
-                        for i in range(1, 42))
-                edge = next((hit for hit in hits if hit is not None and hit.y > .063), None)
-                if edge is not None:
-                    edges.append(edge)
-            if len(edges) != 2:
-                continue
+            z = 1.124 + .126 * index / 14
             row = len(points)
-            for index in range(5):
-                p = edges[0].lerp(edges[1], index / 4)
-                p.x *= 1.13
-                p.y += .002 + .005 * math.sin(math.pi * index / 4)
+            for idx in range(5):
+                t = idx / 4
+                x = (t - 0.5) * 0.022
+                hit = tree.ray_cast(Vector((x, 0.40, z)), Vector((0, -1, 0)))[0]
+                if hit is None or hit.y < 0.04:
+                    break
+                p = hit.copy()
+                p.y += .0016 + .0010 * math.sin(math.pi * t)
                 points.append(p)
-            if row:
+            if len(points) - row != 5:
+                del points[row:]
+                continue
+            if row and len(points) >= 10:
                 faces.extend((row-5+i, row+i, row+i+1, row-4+i) for i in range(4))
         if faces:
-            fabric = self.material('hero_fashion_top_rib_placket', (.19,.19,.19), .79)
-            self.attach_panel('Topx_Fashion_Ribcrop_Placket', shell, points, faces, fabric)
+            self.attach_panel('Topx_Fashion_Ribcrop_Placket', shell, points, faces, shell.data.materials[0])
 
     def gown_sash(self, bodice, skirt):
         trees = [surface_tree(ob.data) for ob in (bodice, skirt)]
@@ -179,33 +177,62 @@ class Collection:
             t = ring / 5
             for vertex in range(columns):
                 angle = math.tau * vertex / (columns - 1)
-                z = 1.012 + .053*t - .012 * math.sin(angle)
-                centre = Vector((0,.019,z))
-                direction = Vector((math.sin(angle),math.cos(angle),0))
-                hits = [tree.ray_cast(centre+direction*.27,-direction)[0] for tree in trees]
-                hit = max((p for p in hits if p is not None), key=lambda p: (p-centre).dot(direction), default=None)
+                z = 1.018 + .034 * t - .006 * math.sin(angle)
+                centre = Vector((0, .019, z))
+                direction = Vector((math.sin(angle), math.cos(angle), 0))
+                hits = [tree.ray_cast(centre + direction * .27, -direction)[0] for tree in trees]
+                hit = max((p for p in hits if p is not None), key=lambda p: (p - centre).dot(direction), default=None)
                 if hit is None:
                     hit = centre + direction * .115
-                points.append(hit + direction * (.0028 + .0022 * math.sin(t*math.pi*3)**2))
+                points.append(hit + direction * (.0014 + .0008 * math.sin(t * math.pi)))
                 if ring and vertex:
                     j = ring * columns + vertex
-                    faces.append((j-columns-1,j-1,j,j-columns))
-        fabric = self.material('hero_fashion_top_satin_sash', (.18,.18,.18), .45)
+                    faces.append((j - columns - 1, j - 1, j, j - columns))
+        fabric = self.material('hero_fashion_top_satin_sash', (.18, .18, .18), .70)
         self.attach_panel('Topx_Fashion_Cowldress_Sash', skirt, points, faces, fabric)
 
     def casual(self):
-        top = self.clone('Top_Fashion_Cardigan', 'Top_Fashion_Ribcrop', 'hero_fashion_top_rib_ivory', .78)
+        # Build cropped V-neck ribbed cardigan from closed Blouse base so lower front is cleanly closed (no gaping belly gap!).
+        top = self.clone('Top_Fashion_Blouse', 'Top_Fashion_Ribcrop', 'hero_fashion_top_rib_ivory', .80)
         def neckline(p):
-            # Deep V with a closed point and a cropped seam. The sleeves pass
-            # through untouched and retain their posed shoulder correctives.
-            v = max(abs(p.x) - (.015 + .38 * max(p.z - 1.224, 0)), 1.223 - p.z, .006 - p.y)
-            return min(v, max(p.z - 1.115 - .019 * smooth(.14, 0, abs(p.x)), abs(p.x) - .218))
-        self.cut(top, neckline)
+            # Smooth modern curved V-neck cardigan ending at z = 1.258, cropped neatly at z = 1.122,
+            # with the blouse's standing neck collar cleanly trimmed away (ZERO upturned shoulder flaps!).
+            dz = max(p.z - 1.258, 0.0)
+            v = max(abs(p.x) - (.008 + .46 * (dz ** .86)), 1.258 - p.z, .010 - p.y)
+            no_collar = (1.428 + .014 * smooth(.01, -.05, p.y)) - p.z
+            return min(v, no_collar, max(p.z - 1.122 - .012 * smooth(.14, 0, abs(p.x)), abs(p.x) - .218))
+        self.cut(top, neckline, rim=.0028)
         self.button_placket(top)
-        self.clone('Topx_Fashion_Cardigan_Buttons', 'Topx_Fashion_Ribcrop_Buttons')
-        self.cut(self.models['Topx_Fashion_Ribcrop_Buttons'], neckline, 0)
+        # 3 clean small tonal buttons evenly spaced down the closed center placket.
+        btn_mat = self.material('hero_fashion_top_rib_ivory_btn', (.72, .66, .58), .45)
+        plk = self.models.get('Topx_Fashion_Ribcrop_Placket') or top
+        ptree = surface_tree(plk.data)
+        b_pts, b_faces = [], []
+        for bz in (1.148, 1.192, 1.236):
+            hit = ptree.ray_cast(Vector((0.0, 0.40, bz)), Vector((0.0, -1.0, 0.0)))[0]
+            if hit is None:
+                continue
+            c = hit + Vector((0.0, 0.0018, 0.0))
+            base = len(b_pts)
+            segs = 10
+            r = 0.0046
+            for k in range(segs):
+                a = math.tau * k / segs
+                b_pts.append(c + Vector((math.cos(a) * r, 0.0, math.sin(a) * r)))
+            b_pts.append(c + Vector((0.0, 0.0016, 0.0)))
+            for k in range(segs):
+                b_faces.append((base + k, base + (k + 1) % segs, base + segs))
+        if b_faces:
+            self.attach_panel('Topx_Fashion_Ribcrop_Buttons', top, b_pts, b_faces, btn_mat)
         jeans = self.clone('Lower_widejeans', 'Lower_relaxeddenim', 'hero_fashion_bottom_denim_relaxed', .82)
-        adjust_basis(jeans, lambda p: Vector((math.copysign(.010 * smooth(.47, .07, p.z), p.x), 0, 0)))
+        adjust_basis(jeans, lambda p: Vector((math.copysign(.004 * smooth(.47, .07, p.z), p.x), 0, .014 * smooth(.15, .03, p.z))))
+        # Tuck Fashion_Crop_Skin cleanly inside waistbands so skin NEVER clips jaggedly out of jeans/skirts!
+        crop_skin = self.models.get('Fashion_Crop_Skin')
+        if crop_skin is not None:
+            def crop_waist_tuck(p):
+                overlap = smooth(1.036, 0.998, p.z) * (1.0 - smooth(.155, .205, abs(p.x)))
+                return Vector((-p.x * .30 * overlap, -(p.y - .018) * .42 * overlap, 0))
+            adjust_basis(crop_skin, crop_waist_tuck)
 
     def sport_bra(self):
         bra = self.clone('Top_Fashion_Camisole', 'Top_Fashion_Crossbra', 'hero_fashion_top_jersey_bra', .74)
@@ -215,8 +242,8 @@ class Collection:
         self.crossed_back('Crossbra', .133, .0055, 'jersey')
         skin = self.clone('Fashion_Crop_Skin', 'JulesSkin_Crossbra')
         def waistband_clearance(p):
-            overlap = smooth(1.042, 1.005, p.z) * (1 - smooth(.146, .190, abs(p.x)))
-            return Vector((-p.x * .34 * overlap, -(p.y - .018) * .49 * overlap, 0))
+            overlap = smooth(1.012, 0.985, p.z) * (1 - smooth(.146, .190, abs(p.x)))
+            return Vector((-p.x * .30 * overlap, -(p.y - .018) * .42 * overlap, 0))
         adjust_basis(skin, waistband_clearance)
         short = self.clone('Lower_bikershorts', 'Lower_sprintshorts', 'hero_fashion_bottom_jersey_sprint', .76)
         self.cut(short, lambda p: p.z - (.680 + .023 * smooth(.10, .20, abs(p.x))))
@@ -235,16 +262,15 @@ class Collection:
         top = self.clone('Top_Fashion_Racer', 'Top_Fashion_Zipcrop', 'hero_fashion_top_cotton_zipcrop', .73)
         self.cut(top, lambda p: max(p.z - 1.145, abs(p.x) - .211))
         self.clone('Topx_Fashion_Pullover_Hood', 'Topx_Fashion_Zipcrop_Hood', 'hero_fashion_top_cotton_zipcrop', .73)
-        teeth = self.material('hero_jules_zip_metal', (.19,.18,.18), .52, .62)
+        teeth = self.material('hero_jules_zip_metal', (.28, .29, .32), .36, .72)
         for side, label in ((-1, 'Left'), (1, 'Right')):
+            # Trace the actual front zip edge of Top_Fashion_Zipcrop cleanly so rails never float off the chest!
             self.surface_strip('Topx_Fashion_Zipcrop_Zip' + label, top,
-                [(side * (.072 + .045 * f), 1.150 + .252 * f) for f in (i/30 for i in range(31))],
-                .0017, teeth, .0025)
+                [(side * (.074 + .038 * f), 1.152 + .242 * f) for f in (i/30 for i in range(31))],
+                .0018, teeth, .0016)
         bra = self.clone('Top_Fashion_Crossbra', 'Topx_Fashion_Zipcrop_Bra', 'hero_jules_black_jersey', .78)
-        straps = self.clone('Topx_Fashion_Crossbra_Straps', 'Topx_Fashion_Zipcrop_Straps', 'hero_jules_black_jersey', .78)
         black = self.material('hero_jules_black_jersey_flat', (.020, .021, .026), .79)
         bra.data.materials[0] = black
-        straps.data.materials[0] = black
         skirt = self.clone('Lower_miniskirt', 'Lower_utilitymini', 'hero_fashion_bottom_cotton_utility', .83)
         adjust_basis(skirt, lambda p: Vector((0, 0, .051 * smooth(.98, .65, p.z))))
         for side in (-1, 1):
@@ -253,10 +279,14 @@ class Collection:
                 .023, skirt.data.materials[0], .005)
 
     def smart(self):
-        top = self.clone('Top_Fashion_Blouse', 'Top_Fashion_Tailoredknit', 'hero_fashion_top_rib_tailored', .69)
+        top = self.clone('Top_Fashion_Blouse', 'Top_Fashion_Tailoredknit', 'hero_fashion_top_rib_tailored', .76)
         def opening(p):
-            return max(abs(p.x) - (.011 + .43 * max(p.z - 1.236, 0)), 1.236 - p.z, .006 - p.y)
-        self.cut(top, opening)
+            # Tasteful, flattering soft curved V-neck with the blouse's standing collar trimmed cleanly away!
+            dz = max(p.z - 1.304, 0.0)
+            v = max(abs(p.x) - (.016 + .50 * (dz ** .82)), 1.304 - p.z, .010 - p.y)
+            no_collar = (1.428 + .014 * smooth(.01, -.05, p.y)) - p.z
+            return min(v, no_collar)
+        self.cut(top, opening, rim=.0032)
         skirt = self.clone('Lower_miniskirt', 'Lower_beltedmini', 'hero_fashion_bottom_crepe_belted', .68)
         adjust_basis(skirt, lambda p: Vector((-p.x*.085 * smooth(.95, .66, p.z), -(p.y-.028)*.025*smooth(.94,.66,p.z), .039 * smooth(.99, .65, p.z))))
         belt = self.material('hero_jules_tan_leather', (.21,.115,.058), .63)
@@ -267,20 +297,20 @@ class Collection:
                            .013, brass, .006)
 
     def formal(self):
-        top = self.clone('Top_Fashion_Camisole', 'Top_Fashion_Cowldress', 'hero_fashion_top_satin_cowl', .40)
-        def cowl(p):
-            front = smooth(.067, .137, p.y)
-            centre = 1 - smooth(.018, .113, abs(p.x))
-            neck = smooth(1.245, 1.365, p.z)
-            gathering = math.sin((p.z - 1.16) * 132 + p.x * 19)
-            return Vector((0, front * (.005 * centre * neck + .0019 * gathering),
-                           -.022 * front * centre * neck))
-        adjust_basis(top, cowl)
-        straps = self.clone('Topx_Fashion_Camisole_Straps', 'Topx_Fashion_Cowldress_Straps', 'hero_fashion_top_satin_cowl', .40)
+        top = self.clone('Top_Fashion_Camisole', 'Top_Fashion_Cowldress', 'hero_fashion_top_satin_cowl', .70)
+        straps = self.clone('Topx_Fashion_Camisole_Straps', 'Topx_Fashion_Cowldress_Straps', 'hero_fashion_top_satin_cowl', .70)
         self.cut(straps, lambda p: p.y + .038)
         self.crossed_back('Cowldress', .182, .0026, 'satin')
-        self.cut(top, lambda p: max(1.258 + abs(p.x) * .38 - p.z, p.y + .027))
-        skirt = self.clone('Lower_midiskirt', 'Topx_Fashion_Cowldress_Skirt', 'hero_fashion_top_satin_cowl_skirt', .42)
+        def sweetheart_neckline(p):
+            # Refined, smooth, classy gentle sweetheart neckline (no exaggerated rollercoaster peaks!).
+            ax = abs(p.x)
+            front_w = smooth(.008, .085, p.y)
+            sweetheart = 1.300 + .022 * math.exp(-((ax - .064) / .045) ** 2) - .022 * smooth(.094, .148, ax)
+            back_line = 1.278
+            top_z = back_line + (sweetheart - back_line) * front_w
+            return top_z - p.z
+        self.cut(top, sweetheart_neckline, rim=.0030)
+        skirt = self.clone('Lower_midiskirt', 'Topx_Fashion_Cowldress_Skirt', 'hero_fashion_top_satin_cowl_skirt', .70)
         hem, waist = min(v.co.z for v in skirt.data.vertices), max(v.co.z for v in skirt.data.vertices)
         def fall(p):
             length = smooth(waist - .20, hem, p.z)
@@ -312,11 +342,14 @@ class Collection:
             hip = self.rig.data.bones['b_thigh_l'].head_local.copy()
             knee = self.rig.data.bones['b_shin_l'].head_local.copy()
             def slit_clearance(p):
-                if p.x >= 0 or p.z < .41:
+                if p.x >= 0 or p.z < .36:
                     return Vector()
-                t = (p.z - knee.z) / (hip.z - knee.z)
+                t = max(0.0, min(1.0, (p.z - knee.z) / max(hip.z - knee.z, 1e-4)))
                 centre = knee.lerp(hip, t)
-                tuck = .25 * smooth(.43, .58, p.z) * smooth(.038, -.01, p.y)
+                # Tuck concealed back AND outer-lateral hip/thigh cleanly inside the closed side of the slit skirt!
+                back_tuck = .26 * smooth(.40, .56, p.z) * smooth(.045, -.01, p.y)
+                outer_tuck = .24 * smooth(.42, .62, p.z) * smooth(.095, .145, abs(p.x))
+                tuck = max(back_tuck, outer_tuck)
                 return Vector(((centre.x-p.x)*tuck, (centre.y-p.y)*tuck, 0))
             adjust_basis(legs, slit_clearance)
 

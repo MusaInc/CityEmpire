@@ -167,7 +167,7 @@ func enter(vid: String, animate := false) -> void:
 	if c == null or game.vehicle_access.active():
 		return
 	if animate:
-		var dock := _step_off(c) if c.kind == "boat" else Vector3.INF
+		var dock := _step_off(c, c.global_transform) if c.kind == "boat" else Vector3.INF
 		var found := game.vehicle_access.landing(c, true, dock)
 		if not c.can_exit() or found.is_empty():
 			game.ui.toast("Move beside a clear boarding point", "warn")
@@ -205,7 +205,7 @@ func exit(animate := false) -> String:
 		return ""
 	if not c.can_exit():
 		return {"heli": "Land first", "plane": "Stop on the ground first"}.get(c.kind, "Slow down first") as String
-	var dock := _step_off(c) if c.kind == "boat" else Vector3.INF
+	var dock := _step_off(c, c.global_transform) if c.kind == "boat" else Vector3.INF
 	var found := game.vehicle_access.landing(c, false, dock)
 	if found.is_empty():
 		return "Moor beside a clear dock" if c.kind == "boat" else "Park beside a clear exit"
@@ -225,6 +225,20 @@ func _finish_exit(stand: Vector3, from: Transform3D, fov: float, vid: String) ->
 	game._finish_on_foot(stand, c.global_basis.get_euler().y, from, fov)
 	if v.get("test", false):
 		end_test(vid)
+
+
+## Cleanly resets piloting state when starting a new game or loading a save.
+func force_exit_for_reset() -> void:
+	if piloting != "":
+		var c: Craft = crafts.get(piloting)
+		if c and is_instance_valid(c):
+			c.input = {"active": false, "gas": 0.0, "brake": 0.0, "kick": false, "steer": 0.0}
+		piloting = ""
+	script_input.clear()
+	_test_return = Vector3.INF
+	_km_acc = 0.0
+	if cam and is_instance_valid(cam):
+		cam.target = null
 
 
 ## After a crash: the airport's recovery crew brings the craft back to where
@@ -252,26 +266,26 @@ func _recover(c: Craft) -> void:
 
 ## Where the pilot steps out: beside the cabin, or (boats) the nearest pier
 ## or quay.
-func _step_off(c: Craft) -> Vector3:
-	var side := c.global_transform * Vector3(-(c.spec["size"] as Vector3).x * 0.5 - 1.6, 0.0, 0.0)
+func _step_off(c: Craft, xf: Transform3D) -> Vector3:
+	var side := xf * Vector3(-(c.spec["size"] as Vector3).x * 0.5 - 1.6, 0.0, 0.0)
 	if c.kind != "boat":
 		var g := c.ground_below(side + Vector3.UP * 3.0, 20.0)
-		return Vector3(side.x, (g if not is_nan(g) else c.global_position.y), side.z)
+		return Vector3(side.x, (g if not is_nan(g) else xf.origin.y), side.z)
 	var best := Vector3.INF
 	var bd := INF
 	for pr: Array in game.skyport.wplan["piers"]:
 		var a: Vector3 = pr[0]
 		var b: Vector3 = pr[1]
-		var q := Vector3(clampf(c.global_position.x, a.x + 0.34, b.x - 0.34),
-			b.y + 0.10, clampf(c.global_position.z, a.z + 0.34, b.z - 0.34))
-		var d := q.distance_to(c.global_position)
+		var q := Vector3(clampf(xf.origin.x, a.x + 0.34, b.x - 0.34),
+			b.y + 0.10, clampf(xf.origin.z, a.z + 0.34, b.z - 0.34))
+		var d := q.distance_to(xf.origin)
 		if d < bd:
 			bd = d
 			best = q
 	if bd < 25.0:
 		return best
 	# Anywhere else: the nearest safe dry ground (or road).
-	var f := game.safe.find(c.global_position, EmpireGame.HERO_BOX, {"kind": "foot", "max_r": 400.0, "exclude": [c.get_rid()]})
+	var f := game.safe.find(xf.origin, EmpireGame.HERO_BOX, {"kind": "foot", "max_r": 400.0, "exclude": [c.get_rid()]})
 	if f["ok"]:
 		return f["pos"]
 	return best if best != Vector3.INF else game._start_point()
@@ -309,13 +323,7 @@ func sync_positions() -> void:
 ## Where the pilot would be after a save in flight: beside the craft at its
 ## last resting place.
 func saved_pilot_point(c: Craft) -> Vector3:
-	if c.can_exit():
-		return _step_off(c)
-	var now := c.global_transform
-	c.global_transform = c.rest_xf
-	var p := _step_off(c)
-	c.global_transform = now
-	return p
+	return _step_off(c, c.global_transform if c.can_exit() else c.rest_xf)
 
 
 ## Controls each physics frame: the touch drive pad and the keys, as for cars.
@@ -338,7 +346,9 @@ func _physics_process(_dt: float) -> void:
 	var key_brake := Input.get_action_strength("brake")
 	var key_steer := Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left")
 	var touch_steer := game.drive_input.touch_steer
-	var steer := key_steer if absf(key_steer) > absf(touch_steer) else touch_steer
+	var primary_steer := key_steer if absf(key_steer) > absf(touch_steer) else touch_steer
+	var pad_steer := game.drive_input.touch_pad_steer * DriveInput.pad_authority(primary_steer)
+	var steer := clampf(primary_steer + pad_steer, -1.0, 1.0)
 	var pad_on := String(pad.get("zone", "")) != ""
 	c.input = {
 		"active": pad_on or key_gas > 0.0 or key_brake > 0.0 or Input.is_action_pressed("nitro"),
@@ -541,6 +551,8 @@ func spot_near(p: Vector3) -> Dictionary:
 			best = {"kind": "sky_craft", "vehicle": vid, "world": c.global_position, "d": maxf(d - r, 0.0)}
 	for key in displays:
 		var dc: Car = displays[key]
+		if not is_instance_valid(dc) or absf(dc.global_position.y - p.y + 0.9) > 2.0:
+			continue
 		var d2 := Vector2(dc.global_position.x - p.x, dc.global_position.z - p.z).length() - 2.8
 		if d2 < REACH and d2 < bd:
 			bd = d2

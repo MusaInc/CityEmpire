@@ -16,6 +16,7 @@ const EVERY := 0.3
 const WET_ROAD_LIGHTS := 4
 
 var worlds: Array = []      # CityWorld (the island and the mainland)
+var skyport: SkyportIsland  # optional Skyport Island (auto-discovered if present)
 var camera_fn: Callable
 var _lights: Array = []
 var _t := 0.0
@@ -23,7 +24,17 @@ var _wet_road_lights := PackedVector4Array()
 
 
 func setup(p_worlds: Array, p_camera_fn: Callable) -> void:
-	worlds = p_worlds.filter(func(w): return w != null)
+	worlds = []
+	skyport = null
+	for w in p_worlds:
+		if w == null:
+			continue
+		if w is SkyportIsland:
+			skyport = w as SkyportIsland
+		elif w is CityWorld:
+			worlds.append(w)
+			if skyport == null and w.get("skyport") is SkyportIsland:
+				skyport = w.get("skyport") as SkyportIsland
 	camera_fn = p_camera_fn
 	_wet_road_lights.resize(WET_ROAD_LIGHTS)
 	for i in COUNT:
@@ -65,6 +76,7 @@ func _process(dt: float) -> void:
 		return
 	var cam: Vector3 = camera_fn.call()
 	var cand: Array = []
+	var range_sq := RANGE * RANGE
 	for w: CityWorld in worlds:
 		var k0 := Vector2i(floori(cam.x / CityWorld.CHUNK), floori(cam.z / CityWorld.CHUNK))
 		for dz in range(-1, 2):
@@ -74,8 +86,17 @@ func _process(dt: float) -> void:
 						continue
 					var head: Vector3 = (p[1] as Transform3D) * CityWorld.LAMP_HEAD
 					var d := head.distance_squared_to(cam)
-					if d < RANGE * RANGE:
+					if d < range_sq:
 						cand.append([d, head])
+	if skyport == null and not worlds.is_empty():
+		var sp: Variant = worlds[0].get("skyport")
+		if sp is SkyportIsland:
+			skyport = sp as SkyportIsland
+	if skyport != null and is_instance_valid(skyport) and SkyportIsland.distance_to(cam) < RANGE + 420.0:
+		for head: Vector3 in skyport.lamp_heads():
+			var d := head.distance_squared_to(cam)
+			if d < range_sq:
+				cand.append([d, head])
 	cand.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
 	for i in WET_ROAD_LIGHTS:
 		_wet_road_lights[i] = Vector4.ZERO
@@ -85,6 +106,8 @@ func _process(dt: float) -> void:
 	for world: CityWorld in worlds:
 		if world.ground_mat:
 			world.ground_mat.set_shader_parameter("wet_road_lamps", _wet_road_lights)
+	if skyport != null and is_instance_valid(skyport) and skyport.ground_mat:
+		skyport.ground_mat.set_shader_parameter("wet_road_lamps", _wet_road_lights)
 	for i in COUNT:
 		var l: SpotLight3D = _lights[i]
 		if i < cand.size():

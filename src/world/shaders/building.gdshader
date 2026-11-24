@@ -722,7 +722,7 @@ void fragment() {
 			rm *= curtain ? (tint * 2.2 + 0.15) : vec3(0.85, 0.88, 0.9);
 			interior = mix(interior, rm * 0.64, detail * 0.83);
 		}
-		vec3 gcol = mix(interior, refl, curtain ? 0.26 + 0.60 * fres : 0.10 + 0.59 * fres);
+		vec3 gcol = mix(interior, refl, curtain ? 0.30 + 0.62 * fres : 0.16 + 0.68 * fres);
 		// Diffuse fabric, partially drawn, leaves the room visible below it.
 		vec3 fabric = mix(vec3(0.26, 0.25, 0.23), vec3(0.48, 0.45, 0.39), rnd);
 		fabric = mix(fabric, lamp_col * (0.35 + 0.16 * rnd), lit);
@@ -807,8 +807,8 @@ void fragment() {
 		float grime = age * (0.3 + 0.7 * vnoise_b(uv * vec2(1.3, 0.8) + seed * 3.0)) * (0.6 + 0.4 * (1.0 - smoothstep(-whalf.y, 0.0, wpos.y)));
 		albedo = mix(albedo, albedo * 0.72 + vec3(0.07, 0.065, 0.055), glass * grime * 0.55 * detail);
 		float pane_coverage = glass * (punched ? mix(1.0, clear_pane, detail) : 1.0);
-		rough = mix(0.86, 0.19 + 0.07 * rnd, pane_coverage);
-		metal = mix(0.0, 0.04, pane_coverage);
+		rough = mix(0.86, 0.12 + 0.06 * rnd, pane_coverage);
+		metal = mix(0.0, 0.06, pane_coverage);
 		// Real relief for the light: the inner 15 cm round a punched window is
 		// its reveal (wall facing into the opening), the sill below tilts up
 		// to catch the sun, the lintel tilts down – so as the sun moves round
@@ -1202,7 +1202,7 @@ void fragment() {
 	ALBEDO = albedo * (1.0 - 0.16 * wetness);
 	ROUGHNESS = mix(rough, min(rough, 0.32), wetness * 0.75);
 	METALLIC = metal;
-	SPECULAR = mix(0.28, 0.48, 1.0 - smoothstep(0.2, 0.55, rough));
+	SPECULAR = mix(0.28, 0.62, 1.0 - smoothstep(0.14, 0.52, rough));
 	EMISSION = emit;
 	}
 }

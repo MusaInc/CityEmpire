@@ -1009,7 +1009,7 @@ func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front
 		bst.commit(out)
 		var bm := ShaderMaterial.new()
 		bm.shader = BEAM_SHADER
-		out.surface_set_material(0, bm)
+		out.surface_set_material(out.get_surface_count() - 1, bm)
 	for g in tools:
 		var look: Array = looks[g]
 		(tools[g] as SurfaceTool).commit(out)

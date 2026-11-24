@@ -87,6 +87,10 @@ static func import_quote(e: Empire, lines: Dictionary, sup_id: String) -> Dictio
 
 
 static func import_order(e: Empire, biz_id: String, lines: Dictionary, sup_id: String) -> String:
+	for pid in lines:
+		var count: Variant = lines[pid]
+		if EmpireData.product(pid).is_empty() or count is not int or count <= 0:
+			return "Enter a positive number of cases for each product"
 	var q := import_quote(e, lines, sup_id)
 	if int(q["cases"]) < MIN_CASES:
 		return "Minimum order %d cases" % MIN_CASES
@@ -96,10 +100,22 @@ static func import_order(e: Empire, biz_id: String, lines: Dictionary, sup_id: S
 		return "Not enough money (%s)" % EmpireData.money(float(q["total"]))
 	var orders: Array = e.flags.get("imports", [])
 	orders.append({"id": e.new_id("imp"), "biz": biz_id, "lines": lines.duplicate(), "t": q["arrive_t"], "sup": sup_id,
+		"goods": q["goods"],
 		"unit_k": float(q["total"]) / maxf(float(q["goods"]) / float(supplier(sup_id)["price_k"]), 0.01)})
 	e.flags["imports"] = orders
 	e.stats["imports"] = int(e.stats.get("imports", 0)) + 1
 	return ""
+
+
+static func import_goods_value(order: Dictionary) -> float:
+	if order.has("goods"):
+		return float(order["goods"])
+	# Saves made before the purchase price was recorded use their supplier rate.
+	var price_k := float(supplier(String(order.get("sup", "sea")))["price_k"])
+	var goods := 0.0
+	for pid in order.get("lines", {}):
+		goods += float(EmpireData.product(pid).get("case_cost", 0.0)) * int(order["lines"][pid]) * price_k
+	return goods
 
 
 ## Arrivals: goods into the shop's stockroom, at their landed cost.
@@ -115,6 +131,15 @@ static func deliver_imports(e: Empire) -> void:
 			continue
 		var b: Business = e.business(String(o["biz"]))
 		if b == null:
+			var refund := import_goods_value(o)
+			var cases_lost := 0
+			for count in o.get("lines", {}).values():
+				cases_lost += int(count)
+			if refund > 0.0:
+				e.company_cash += refund
+				e._book("company", refund, "imports", "Import refund: %d cases (shop closed)" % cases_lost)
+				e._note("Import refunded: %s for %d cases (destination shop closed)" % [EmpireData.money(refund), cases_lost], "info")
+				e.news.append({"day": e.day, "text": "Import cancelled: %d cases refunded (%s) — destination shop closed" % [cases_lost, EmpireData.money(refund)], "kind": "info"})
 			continue
 		var cases := 0
 		for pid in o["lines"]:
@@ -355,6 +380,7 @@ static func dealer_day(e: Empire) -> float:
 		buyers += 1
 	var revenue := 0.0
 	var cogs := 0.0
+	var sold := 0
 	for i in buyers:
 		var models: Array = []
 		for m in dl["stock"]:
@@ -369,10 +395,11 @@ static func dealer_day(e: Empire) -> float:
 		revenue += price
 		cogs += trade_price(pick)
 		dl["sold"] = int(dl["sold"]) + 1
+		sold += 1
 	var costs := 120.0 + 80.0   # (a salesperson and the lot)
-	if revenue > 0.0:
+	if sold > 0 and revenue > 0.0:
 		e.company_cash += revenue
-		e._book("company", revenue, "sales", "Kestrel Motors: %d car%s sold" % [buyers, "" if buyers == 1 else "s"])
+		e._book("company", revenue, "sales", "Kestrel Motors: %d car%s sold" % [sold, "" if sold == 1 else "s"])
 	e.company_cash -= costs
 	e._book("company", -costs, "wages", "Kestrel Motors: staff and lot")
 	dl["revenue"] = float(dl["revenue"]) + revenue

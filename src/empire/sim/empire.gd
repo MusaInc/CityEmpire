@@ -796,8 +796,7 @@ func close_value(b: Business) -> Dictionary:
 		orders += float(o.get("cost", 0.0))
 	for o: Dictionary in flags.get("imports", []):
 		if String(o.get("biz", "")) == b.id:
-			for pid in o["lines"]:
-				orders += float(EmpireData.product(pid).get("case_cost", 0.0)) * float(o["lines"][pid])
+			orders += Ventures.import_goods_value(o)
 	var free := float(b.premises.get("price", 0.0)) * FREEHOLD_SALE_K if b.owned else 0.0
 	var notice := 0.0
 	for s in b.staff:
@@ -1385,7 +1384,7 @@ func to_dict() -> Dictionary:
 		"loans": loans.duplicate(true), "carried": carried.to_dict(), "pallets": pal, "avg_cost": avg_cost.duplicate(),
 		"stats": stats.duplicate(), "goals_done": goals_done.duplicate(), "candidates": candidates.duplicate(true),
 		"ledger": ledger.duplicate(true), "log": log.duplicate(true), "day_reports": day_reports.duplicate(true),
-		"flags": flags.duplicate(), "id_n": _id_n, "rng_state": str(rng.state),
+		"flags": flags.duplicate(true), "id_n": _id_n, "rng_state": str(rng.state),
 		"hour_served": _hour_served.duplicate(), "carry": _carry_minutes, "weather": weather, "forecast": forecast,
 		"events": events.duplicate(true), "rivals": rivals.duplicate(true), "news": news.duplicate(true),
 		"firms": firms.duplicate(true), "brand": brand.duplicate(), "hq": hq.duplicate(),

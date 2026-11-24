@@ -12,16 +12,21 @@ global uniform float night;
 
 void fragment() {
 	ALBEDO = tint;
-	METALLIC = 0.02;
-	ROUGHNESS = 0.18;
-	SPECULAR = 0.5;
+	METALLIC = 0.04;
+	ROUGHNESS = 0.06;
+	SPECULAR = 0.65;
 	vec3 n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 v = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 	vec3 r = reflect(-v, n);
-	// Window cells on a van's curved screen look like stripes in the glass.
-	// Use the broad reflected horizon already shared with its paint.
-	vec3 env = paint_reflection(r, (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz, sky_top, sky_horizon, sun_dir, night);
-	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	float glint = pow(max(dot(r, normalize(sun_dir)), 0.0), 145.0) * 0.42;
-	EMISSION = (env * mix(0.11, 0.48, fres) + vec3(glint)) * (1.0 - night * 0.5);
+	vec3 world_at = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	// Crisp automotive glazing reflection: sharp horizon transition without
+	// building window stripes across curved windscreens.
+	vec3 sky = reflected_sky(r, world_at, r.y, sky_top, sky_horizon, sun_dir, night);
+	vec3 ground = mix(vec3(0.032, 0.036, 0.042), sky_horizon * 0.24, smoothstep(-0.35, 0.0, r.y)) * (1.0 - 0.65 * night);
+	vec3 env = mix(ground, sky, smoothstep(-0.025, 0.055, r.y)) * vec3(0.93, 0.98, 1.0);
+	float facing = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
+	float fres = pow(1.0 - facing, 4.0);
+	float sd = max(dot(r, normalize(sun_dir)), 0.0);
+	float glint = pow(sd, 220.0) * 0.65 + pow(sd, 36.0) * 0.06;
+	EMISSION = (env * mix(0.08, 0.58, fres) + vec3(glint)) * (1.0 - night * 0.52);
 }

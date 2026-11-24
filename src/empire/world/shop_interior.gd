@@ -315,6 +315,11 @@ func _build_shop(st: _Batch) -> void:
 	var feature_wall := wall.lerp(brand, 0.42) if type_id == "clothing" else wall.darkened(0.08)
 	_wall_finish(R(dw0 * 0.5, part_d - 0.007, H * 0.5), 0.0, Vector2(dw0 - 0.034, H - 0.015),
 		feature_wall, 7 if type_id == "clothing" else 5)
+	# A shallow perimeter trim closes the visual joint with the ceiling.
+	var cornice := wall.lerp(Color(0.87, 0.83, 0.76), 0.25)
+	st.box(R(0.03, 0.24, H - 0.13), R(0.095, part_d, H), cornice)
+	st.box(R(W - 0.095, 0.24, H - 0.13), R(W - 0.03, part_d, H), cornice)
+	st.box(R(0.095, part_d - 0.065, H - 0.13), R(W - 0.095, part_d, H), cornice)
 	# Shopfront: glass either side of the door, frame, fascia.
 	_shopfront(st, trim)
 	# Counter + tills on the right.
@@ -384,6 +389,7 @@ func _build_shop(st: _Batch) -> void:
 	# Ceiling lights (their kind follows the shop's).
 	var bright := 1.25 if biz and biz.has_upgrade("lighting") else 0.85
 	var tint: Color = look.get("tint", Color(1.0, 0.97, 0.92))
+	tint = tint.lerp(Color(1.0, 0.93, 0.83), 0.18)
 	if biz and biz.has_upgrade("lighting"):
 		tint = tint.lerp(Color(1.0, 0.9, 0.78), 0.4)
 	if unit.get("flagship", false):
@@ -1536,9 +1542,15 @@ func update_signs(trading: bool, night := false) -> void:
 func _fixture_sites(part_d: float) -> Array:
 	var sites: Array = []
 	var x := 0.35
+	var bay_gap := 0.05
+	# When fitting rooms occupy the back corner, start the wall run beside
+	# them. Leaving an empty 1.9 m module here wastes the usable wall.
+	if _fitting_clear.has_area() and _fitting_clear.position.y <= -part_d + 0.02:
+		x = maxf(x, _fitting_clear.end.x + 0.025)
+		bay_gap = 0.025
 	while x + BAY <= W - 2.6:
 		sites.append({"back": R(x, part_d - 0.02, 0.0), "along": Vector3.RIGHT, "out": Vector3(0, 0, 1), "wall": "back"})
-		x += BAY + 0.05
+		x += BAY + bay_gap
 	if unit.get("flagship", false):
 		var aisle_ends: Array = []
 		var gx := 3.8

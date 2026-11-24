@@ -8,10 +8,11 @@ extends Node3D
 ## so it never drifts. The City Loop runs one way round with trains spaced
 ## evenly through the timetable.
 ##
-## Collision is on TRAIN_LAYER, which only human players collide with (bots
-## and recorded courses are unaffected by where the trains happen to be).
+## Collision is on TRAIN_LAYER (CityWorld.HUMAN_LAYER for human riders on roofs
+## plus 1 << 6 for vehicles matching Car.BODY_MASK; bots ignore both).
 
-const TRAIN_LAYER := CityWorld.HUMAN_LAYER
+const TRAIN_LAYER := CityWorld.HUMAN_LAYER | (1 << 6)
+const AUDIO_RANGE := 340.0       # m from camera to stream train audio voices
 const CAR_LEN := 17.6
 const CAR_PITCH := 18.0          # car + gap
 const BOGIE := 6.2               # bogie centres from the car's centre
@@ -140,7 +141,6 @@ func _add_train(line: Dictionary, dir: int, offset: float, phase: float, stream:
 		au.max_distance = 320.0
 		au.volume_db = -80.0
 		tr["cars"][n_cars / 2].add_child(au)
-		au.play()
 		tr["audio"] = au
 	_trains.append(tr)
 
@@ -229,6 +229,10 @@ func _physics_process(dt: float) -> void:
 
 
 func _place_all() -> void:
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	var hear_pos := cam.global_position if cam else Vector3.INF
+	var on_r2 := AUDIO_RANGE * AUDIO_RANGE
+	var off_r2 := (AUDIO_RANGE + 30.0) * (AUDIO_RANGE + 30.0)
 	for tr in _trains:
 		var t := fposmod(_clock + float(tr["phase"]), float(tr["cycle"]))
 		var s := 0.0
@@ -250,9 +254,18 @@ func _place_all() -> void:
 		_place(tr, s)
 		var au: AudioStreamPlayer3D = tr.get("audio")
 		if au:
-			var k := clampf(v / V_MAX, 0.0, 1.0)
-			au.volume_db = linear_to_db(maxf(0.12 + 0.88 * k, 0.001)) - 2.0
-			au.pitch_scale = 0.7 + 0.4 * k
+			if hear_pos.x < INF:
+				var d2 := au.global_position.distance_squared_to(hear_pos)
+				if not au.playing and d2 < on_r2:
+					au.play()
+				elif au.playing and d2 > off_r2:
+					au.stop()
+			elif au.playing:
+				au.stop()
+			if au.playing:
+				var k := clampf(v / V_MAX, 0.0, 1.0)
+				au.volume_db = linear_to_db(maxf(0.12 + 0.88 * k, 0.001)) - 2.0
+				au.pitch_scale = 0.7 + 0.4 * k
 
 
 ## Cars laid out round the train's middle at s (cabs at both ends, so a

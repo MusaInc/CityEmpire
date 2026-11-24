@@ -110,7 +110,10 @@ var _hit: Array[bool] = [false, false, false, false]
 var wheel_spin: PackedFloat32Array = [0.0, 0.0, 0.0, 0.0]
 var _wheel_omega: PackedFloat32Array = [0.0, 0.0, 0.0, 0.0]
 var wheel_comp_visual: PackedFloat32Array = [0.0, 0.0, 0.0, 0.0]
+var body_pitch := 0.0            # rad, visual weight-transfer pitch (dive < 0, squat > 0)
+var body_roll := 0.0             # rad, visual weight-transfer roll (lean outward in corners)
 var _prev_vel := Vector3.ZERO
+var _prev_fwd_speed := 0.0
 var _was_air := false
 var _air_peak_fall := 0.0
 var _gear_timer := 0.0
@@ -463,12 +466,18 @@ func _physics_process(dt: float) -> void:
 		var dist := (origin - p).dot(up)
 		var comp := clampf(rest + wr - dist, 0.0, rest + 0.15)
 		# Rolling onto a kerb compresses the spring 15 cm in one tick; an
-		# unclamped damper turns that into a launch. Cap the damper speed.
+		# unclamped damper turns that into a launch. Cap the damper speed and
+		# use automotive asymmetric damping (softer bump, firmer rebound).
 		var comp_v := clampf((comp - _comp[i]) / dt, -3.0, 3.0)
 		_comp[i] = comp
-		wheel_comp_visual[i] = minf(comp, rest)
-		var fz := maxf(0.0, k * comp + c * comp_v)
-		# Bump stop: bottoming out hits hard instead of tunnelling.
+		wheel_comp_visual[i] = lerpf(wheel_comp_visual[i], minf(comp, rest), 1.0 - exp(-26.0 * dt))
+		var damp_k := 0.92 if comp_v >= 0.0 else 1.18
+		var fz := maxf(0.0, k * comp + c * damp_k * comp_v)
+		# Progressive bump stop: smooth cushion near full travel, firm past rest.
+		var cushion := rest * 0.85
+		if comp > cushion:
+			var t_stop := clampf((comp - cushion) / maxf(rest - cushion, 0.01), 0.0, 1.0)
+			fz += t_stop * t_stop * k * rest * 0.28
 		if comp > rest:
 			fz += (comp - rest) * k * 6.0
 		fz = minf(fz, mass * GRAVITY * 3.5)
@@ -508,7 +517,7 @@ func _physics_process(dt: float) -> void:
 		var f_long := drive_force
 		var b_in := maxf(brk, auto_brk)
 		if b_in > 0.0 and not reversing:
-			var bf: float = spec["brake"] * mass * b_in * (0.62 if front else 0.38)
+			var bf: float = spec["brake"] * mass * b_in * (0.64 if front else 0.36)
 			f_long -= signf(v_long) * minf(bf, absf(v_long) * mass * 0.25 / dt)
 		if hb:
 			f_long -= signf(v_long) * minf(mass * 3.5 * 0.5, absf(v_long) * mass * 0.25 / dt)
@@ -687,8 +696,23 @@ func _physics_process(dt: float) -> void:
 		var wk := exp(-2.2 * dt)
 		linear_velocity = Vector3(wv.x * wk, minf(wv.y, 1.0), wv.z * wk)
 		angular_velocity *= exp(-1.5 * dt)
+	# Subtle weight-transfer pitch (brake dive / launch squat) and cornering
+	# roll, scaled by body height and critically damped for CarVisual.
+	var height_k := clampf(float((spec["size"] as Vector3).y) / 1.5, 0.72, 1.25)
+	var target_pitch := 0.0
+	var target_roll := 0.0
+	if ground >= 2 and not in_water:
+		var long_g := clampf((forward_speed - _prev_fwd_speed) / maxf(dt, 0.001) / GRAVITY, -1.4, 1.4)
+		var dive_scale := 0.030 if long_g < 0.0 else 0.020
+		target_pitch = clampf(long_g * dive_scale * height_k, -0.042, 0.032)
+		var lat_g := clampf(-forward_speed * yaw_rate / GRAVITY, -1.6, 1.6)
+		target_roll = clampf(lat_g * 0.028 * height_k, -0.050, 0.050)
+	var flex_k := 1.0 - exp(-9.0 * dt)
+	body_pitch = lerpf(body_pitch, target_pitch, flex_k)
+	body_roll = lerpf(body_roll, target_roll, flex_k)
 	scraping = move_toward(scraping, 0.0, dt * 4.0)
 	_prev_vel = vel
+	_prev_fwd_speed = forward_speed
 	Prof.end("car")
 
 
@@ -922,6 +946,9 @@ func place(xf: Transform3D, vel := Vector3.ZERO) -> void:
 		_comp[i] = 0.0
 		_hit[i] = false
 		_wheel_omega[i] = rolling_speed
+	body_pitch = 0.0
+	body_roll = 0.0
+	_prev_fwd_speed = vel.dot(-xf.basis.z)
 	airtime = 0.0
 	_was_air = false
 	stuck_time = 0.0

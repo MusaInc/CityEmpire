@@ -103,7 +103,7 @@ func _physics_process(dt: float) -> void:
 	var it := _island()
 	if it:
 		var vn := game.vehicle_node()
-		it.blocker = vn.global_position if vn else Vector3(INF, 0, INF)
+		it.blocker = here if (vn != null or not game.player.indoors) else Vector3(INF, 0, INF)
 	_list_t -= dt
 	if _list_t <= 0.0:
 		_list_t = LIST_EVERY

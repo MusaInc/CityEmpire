@@ -32,15 +32,11 @@ func _build_view() -> void:
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	surface.add_child(bg)
-	# City Empire wordmark (type only: no CitySwing art).
-	var mark := Label.new()
-	mark.text = "WORLDSTATE"
-	mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	mark.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var mark := TextureRect.new()
+	mark.texture = preload("res://assets/splash/launch.png")
+	mark.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	mark.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	mark.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	mark.add_theme_font_override("font", preload("res://assets/fonts/outfit_black.ttf"))
-	mark.add_theme_font_size_override("font_size", 72)
-	mark.add_theme_color_override("font_color", Color("f3efe6"))
 	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	surface.add_child(mark)
 	var box := VBoxContainer.new()
@@ -54,7 +50,7 @@ func _build_view() -> void:
 	status = Label.new()
 	status.text = "LOADING CITY"
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status.add_theme_font_override("font", preload("res://assets/fonts/outfit_semibold.ttf"))
+	status.add_theme_font_override("font", Glass.font("semibold"))
 	status.add_theme_font_size_override("font_size", 12)
 	status.add_theme_color_override("font_color", Color("a6a2b1"))
 	box.add_child(status)
@@ -65,15 +61,15 @@ func _build_view() -> void:
 	var track := StyleBoxFlat.new()
 	track.bg_color = Color(1, 1, 1, 0.10)
 	var fill := StyleBoxFlat.new()
-	fill.bg_color = Color("FFC93C")
+	fill.bg_color = Color("e8b961")
 	progress.add_theme_stylebox_override("background", track)
 	progress.add_theme_stylebox_override("fill", fill)
 	box.add_child(progress)
 	retry = Button.new()
 	retry.text = "Try again"
 	retry.visible = false
-	retry.add_theme_font_override("font", preload("res://assets/fonts/outfit_bold.ttf"))
-	retry.add_theme_color_override("font_color", Color("FFC93C"))
+	retry.add_theme_font_override("font", Glass.font("bold"))
+	retry.add_theme_color_override("font_color", Color("e8b961"))
 	retry.pressed.connect(_begin)
 	box.add_child(retry)
 

@@ -892,9 +892,9 @@ for fid,eth,tg,style in FACES:
     mc=sum(tongue,Vector())/len(tongue)
     if canon is None:canon=(fb,pos,mc)
     if BODY == 'b' and fid == 'jules':
-        # Keep the authored quad loops through lips, nostrils and lids.
-        # Shape the finer cage before baking so geometry and texels agree.
-        subdiv(face, 2)
+        # Keep the clean symmetric quad loops through cheeks, lips, nostrils and lids
+        # (subdiv 1 without decimation avoids diagonal cheek facets and saves mobile verts).
+        subdiv(face, 1)
         eyes = [sum((pos[i] for i in ids), Vector()) / len(ids) for ids in socket_ids]
         female.sculpt_portrait(face.data, eyes, mc)
         head_ids = {j for i in face_faces for j in bf[i]}
@@ -1338,7 +1338,6 @@ for ob in BAKE:
 for ob in all_meshes:ob.hide_render=False
 if BODY == 'b':
     female.fit_silhouette(all_meshes, rig, anatomy_study)
-    female.optimize_portrait(bpy.data.objects['Face_jules'])
     all_meshes.append(finish_casual_fit(bpy, all_meshes, rig))
 identity = 'jules' if BODY == 'b' else 'ade'
 finish_skin_material(bpy.data.objects['Face_' + identity], identity, TEX)

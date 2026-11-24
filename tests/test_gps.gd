@@ -3,9 +3,14 @@ extends RefCounted
 ## water), work on foot and by car across both landmasses, and say so when
 ## a place can't be reached.
 
-static var _layout: CityLayout
-static var _gps: Gps
-static var _grid := {}
+var _layout: CityLayout
+var _gps: Gps
+var _grid := {}
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and is_instance_valid(_gps):
+		_gps.free()
 
 
 func _setup() -> Gps:
@@ -174,4 +179,5 @@ func test_drive_to_skyport_over_each_bridge(t) -> void:
 					wet += 1
 		t.check(over, "%s island → Skyport goes over %s" % [c[0], c[2]])
 		t.check(wet == 0, "%s island → Skyport: never across open water (%d samples)" % [c[0], wet])
+	g.free()
 	SkyportIsland.enabled = was
