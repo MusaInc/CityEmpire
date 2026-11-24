@@ -314,13 +314,17 @@ void fragment() {
 				oil *= (1.0 - smoothstep(0.22, 0.69, lane_d)) * mix(0.49, 1.0, queued);
 				albedo *= 1.0 - oil * (0.21 + 0.26 * sa) * near;
 				rough -= oil * 0.14 * near;
-				// Manholes in the lanes now and then.
+				// Cast-iron manholes in the lanes: beveled collar, textured lid & subtle sheen.
 				float cell = floor(along / 32.0);
 				float mh_on = step(0.55, hash12(vec2(cell, hw + sign(across))));
 				vec2 mh = vec2(fract(along / 32.0) * 32.0 - 16.0, a - min(1.9, hw * 0.5));
 				float mh_r = length(mh);
-				albedo *= 1.0 - 0.25 * band(mh_r, 0.38, aa) * mh_on * near;
-				albedo *= 1.0 - 0.35 * band(mh_r - 0.38, 0.04, aa) * mh_on * near;
+				float mh_lid = band(mh_r, 0.36, aa) * mh_on * near;
+				float mh_rim = band(mh_r - 0.38, 0.045, aa) * mh_on * near;
+				float mh_grid = (step(0.5, fract(mh.x * 16.0)) * step(0.5, fract(mh.y * 16.0))) * (1.0 - smoothstep(0.015, 0.05, aa));
+				albedo = mix(albedo, vec3(0.068, 0.066, 0.064) * (0.88 + 0.24 * mh_grid), mh_lid * 0.85);
+				albedo *= 1.0 - 0.42 * mh_rim;
+				rough = mix(rough, 0.54, mh_lid * 0.7);
 				// Paint: centre line (double yellow on boulevards, dashed white on
 				// streets), zebra crossings and stop lines at every junction mouth.
 				vec3 white = vec3(0.69, 0.67, 0.61);
@@ -525,10 +529,21 @@ void fragment() {
 			albedo = mix(albedo, albedo * vec3(0.69, 0.63, 0.57), edge_dust * (0.34 + 0.66 * foot_age) * near);
 			albedo *= 1.0 - drip_stains * (0.09 + 0.22 * foot_age) * near;
 		} else if (grass) {
-			float verge = 1.0 - smoothstep(0.1, 2.8, kerb + 0.9 * n);
-			albedo = grass_shade(c, v_world.xz, near, (fwidth(v_world.x) + fwidth(v_world.z)) * 0.5, verge * 0.58);
-			float path = band(kerb - 4.8 + 0.36 * (n - 0.5), 0.8, aa + 0.09);
-			albedo = mix(albedo, vec3(0.29, 0.24, 0.17) * (0.87 + 0.23 * n), path * 0.86);
+			float verge = 1.0 - smoothstep(0.1, 3.0, kerb + 0.95 * n);
+			albedo = grass_shade(c, v_world.xz, near, (fwidth(v_world.x) + fwidth(v_world.z)) * 0.5, verge * 0.65);
+			// Natural soil/earth transition along kerb & pavement edges (uneven
+			// turf border rather than a hard green polygon meeting stone).
+			float soil_edge = (1.0 - smoothstep(0.05, 0.62 + 0.45 * n, kerb)) * (0.55 + 0.45 * vnoise(p * 3.4));
+			vec3 earth = vec3(0.21, 0.17, 0.12) * (0.85 + 0.30 * vnoise(p * 5.2));
+			albedo = mix(albedo, earth, soil_edge * 0.72 * near);
+			// Subtle footpath with compacted gravel/soil edges.
+			float path_d = abs(kerb - 4.8 + 0.36 * (n - 0.5));
+			float path = 1.0 - smoothstep(0.68, 0.88 + aa, path_d);
+			float path_edge = smoothstep(0.45, 0.88, path_d) * (1.0 - smoothstep(0.88, 1.35, path_d));
+			vec3 gravel = vec3(0.30, 0.25, 0.18) * (0.86 + 0.24 * n + 0.08 * (hash12(floor(p * 11.0)) - 0.5) * near);
+			albedo = mix(albedo, earth * 1.15, path_edge * 0.45 * near);
+			albedo = mix(albedo, gravel, path * 0.88);
+			rough = mix(0.97, 0.91, max(path, soil_edge));
 		}
 	} else if (asphalt && flat_top) {
 		float drift = vnoise(p * 0.022 + 31.0) * 0.6 + vnoise(p * 0.09) * 0.4;

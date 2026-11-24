@@ -45,9 +45,9 @@ void fragment() {
 	// outer crown tips warmer & brighter) for volumetric leaf-cluster depth.
 	float sky = clamp(crown_height * 0.54 + smoothstep(-0.35, 0.75, normal.y) * 0.32 + radial_out * 0.14, 0.0, 1.0);
 	float grey = dot(leaf.rgb, vec3(0.2126, 0.7152, 0.0722));
-	vec3 foliage_colour = mix(leaf.rgb, vec3(grey), 0.08);
+	vec3 foliage_colour = mix(leaf.rgb, vec3(grey), 0.14);
 	// Per-tree organic hue variation: cool deep emerald to warm sunlit olive-gold.
-	vec3 tint = mix(vec3(0.78, 0.94, 0.84), vec3(1.10, 0.98, 0.74), tree_tone) * species_tint;
+	vec3 tint = mix(vec3(0.76, 0.91, 0.81), vec3(1.06, 0.95, 0.72), tree_tone) * species_tint;
 	vec3 depth_tint = mix(vec3(0.76, 0.84, 0.92), vec3(1.06, 1.03, 0.94), sky);
 	vec3 col = foliage_colour * tint * depth_tint * mix(0.48, 1.06, sky);
 	float wet = clamp(wetness, 0.0, 1.0);

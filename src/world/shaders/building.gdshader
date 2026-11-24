@@ -359,10 +359,81 @@ vec3 shop_room(vec2 o, vec3 d, vec3 rsize, float sid, vec3 lamp, float daylight)
 			}
 		}
 	}
+	// Foreground window-display plane (z = 0.55 m behind the glass) so every
+	// non-enterable shopfront has multi-layered parallax depth: display stands,
+	// backlit listing racks, pastry vitrines, boutique pedestals & hanging lamps.
+	if (kind != 6 && d.z > 1e-4) {
+		float tz = (kind == 4 ? 0.42 : 0.58) / d.z;
+		if (tz > 0.0 && tz < t) {
+			vec3 q = p0 + d * tz;
+			float qy = q.y - lo.y;
+			if (abs(q.x) < rsize.x * 0.46 && qy > 0.0 && qy < rsize.y) {
+				if (kind == 0) {
+					// Café: pastry display vitrine + warm hanging window pendants.
+					float vit = step(0.45, qy) * step(qy, 1.18) * step(0.65, abs(q.x)) * step(abs(q.x), 2.15);
+					float tray = step(fract((qy - 0.45) / 0.24), 0.12);
+					float pastry = step(0.32, hash12(floor(vec2(q.x * 5.0, qy * 4.2)) + sid * 17.0));
+					if (vit > 0.5) {
+						c = mix(vec3(0.72, 0.54, 0.34), vec3(0.36, 0.24, 0.16), pastry * 0.65);
+						c = mix(c, vec3(0.88, 0.85, 0.78), tray);
+						t = tz;
+					} else if (qy > 2.15 && qy < 2.65 && abs(fract(q.x / 1.35 + 0.5) - 0.5) < 0.09) {
+						c = lamp * 1.8;
+						t = tz;
+					}
+				} else if (kind == 1) {
+					// Convenience: front promo stand / low window shelf with colourful packs.
+					if (qy > 0.50 && qy < 1.38 && abs(q.x) > 0.72 && abs(q.x) < 2.15) {
+						float row = floor((qy - 0.50) / 0.28);
+						float shelf = step(fract((qy - 0.50) / 0.28), 0.10);
+						float hr = hash12(vec2(floor(q.x / 0.22), row) + sid * 43.0);
+						if (shelf > 0.5 || hr > 0.22) {
+							vec3 pkc = mix(vec3(0.76, 0.24, 0.18), vec3(0.22, 0.52, 0.74), fract(hr * 5.3));
+							pkc = mix(pkc, vec3(0.86, 0.74, 0.28), step(0.66, fract(hr * 9.1)));
+							c = mix(pkc * 0.78, vec3(0.88), shelf);
+							t = tz;
+						}
+					}
+				} else if (kind == 2) {
+					// Boutique: window display plinths & mannequin silhouettes under track spots.
+					float mx = abs(abs(q.x) - 1.45);
+					if (mx < 0.42 && qy > 0.35 && qy < 0.85) {
+						c = vec3(0.82, 0.80, 0.76);
+						t = tz;
+					} else if (mx < 0.19 && qy >= 0.85 && qy < 1.88) {
+						vec3 outfit = mix(vec3(0.14, 0.16, 0.22), vec3(0.62, 0.24, 0.22), fract(sid * 7.3));
+						c = outfit * (0.85 + 0.3 * smoothstep(0.85, 1.88, qy));
+						t = tz;
+					}
+				} else if (kind == 4) {
+					// Estate agent / office: illuminated backlit window listing cards.
+					if (qy > 0.75 && qy < 2.15 && abs(q.x) > 0.72 && abs(q.x) < 2.18) {
+						vec2 cg = vec2(fract(q.x / 0.42), fract((qy - 0.75) / 0.34));
+						if (cg.x > 0.12 && cg.x < 0.88 && cg.y > 0.12 && cg.y < 0.88) {
+							float pic = step(0.42, cg.y);
+							vec3 card = mix(vec3(0.95, 0.94, 0.90), vec3(0.35, 0.52, 0.68) * (0.75 + 0.4 * hash12(floor(vec2(q.x * 2.4, qy * 3.0)))), pic);
+							c = card * 1.45;
+							t = tz;
+						}
+					}
+				} else if (kind == 5) {
+					// Salon: glass product display shelf in front window.
+					if (qy > 0.70 && qy < 1.65 && abs(q.x) > 0.85 && abs(q.x) < 2.05) {
+						float shelf = step(fract((qy - 0.70) / 0.32), 0.08);
+						float bottle = step(0.45, fract(q.x / 0.16)) * step(0.28, hash12(floor(vec2(q.x * 6.0, qy * 3.1)) + sid * 19.0));
+						if (shelf > 0.5 || bottle > 0.5) {
+							c = mix(vec3(0.75, 0.64, 0.48), vec3(0.92), shelf);
+							t = tz;
+						}
+					}
+				}
+			}
+		}
+	}
 	vec3 hpos = p0 + d * t;
-	float depth_k = mix(1.0, 0.7, hpos.z / rsize.z);
-	float lit = kind == 6 ? 0.25 : (kind == 3 ? 0.75 : 1.0);
-	return c * (vec3(daylight) * depth_k * 0.5 + lamp * 0.5 * lit);
+	float depth_k = mix(1.0, 0.68, hpos.z / rsize.z);
+	float lit = kind == 6 ? 0.25 : (kind == 3 ? 0.82 : 1.0);
+	return c * (vec3(daylight) * depth_k * 0.48 + lamp * 0.58 * lit);
 }
 
 // Street-level reveals are evaluated only inside the near facade range.
@@ -956,22 +1027,30 @@ void fragment() {
 				shop_glass = mix(shop_glass, vec3(0.86, 0.85, 0.8), (0.55 + 0.35 * ww) * detail);
 			}
 			albedo = mix(albedo, shop_glass, glass * (1.0 - riser));
-			albedo = mix(albedo, base * 0.5, max(riser, max(mull, transom) * glass) * detail);
-			// Glazed door with a dark frame and push bar.
-			float door_frame = door * (1.0 - step(abs(bay_x - 3.0), 0.47) * step(uv.y, 2.42));
-			albedo = mix(albedo, vec3(0.07, 0.07, 0.07), door_frame * detail);
-			albedo = mix(albedo, albedo * 0.7, door * (1.0 - door_frame) * detail);
-			emit += shop_in * glass * (1.0 - riser) * mix(0.18, 0.8, night) * mix(detail, 1.0, night);
+			// Tiled / masonry stall riser beneath the display window + crisp anodized mullions.
+			float riser_tile = step(fract(bay_x / 0.30), 0.06) + step(fract(uv.y / 0.20), 0.08);
+			vec3 riser_col = mix(base * 0.42, sign_col * 0.55, 0.35) * (1.0 - 0.18 * clamp(riser_tile, 0.0, 1.0));
+			albedo = mix(albedo, riser_col, riser * detail);
+			albedo = mix(albedo, vec3(0.09, 0.10, 0.11), max(mull, transom) * glass * detail);
+			// Recessed glazed doorway with dark bronze frame, vestibule shadow & chrome push bar.
+			float door_frame = door * (1.0 - step(abs(bay_x - 3.0), 0.46) * step(uv.y, 2.40));
+			float push_bar = door * step(abs(uv.y - 1.05), 0.035) * step(abs(bay_x - 3.0), 0.38);
+			albedo = mix(albedo, vec3(0.06, 0.065, 0.07), door_frame * detail);
+			albedo = mix(albedo, albedo * 0.58, door * (1.0 - door_frame) * detail);
+			albedo = mix(albedo, vec3(0.76, 0.77, 0.79), push_bar * detail);
+			emit += shop_in * glass * (1.0 - riser) * mix(0.20, 0.88, night) * mix(detail, 1.0, night);
 			emit += interior_warm * glass * (1.0 - riser) * 0.25 * night * (1.0 - detail);
 			float pier = smoothstep(2.56, 2.64, abs(bay_x - 3.0)) * step(uv.y, 4.59);
 			float fascia = step(3.7, uv.y) * step(uv.y, 4.5) * (1.0 - pier);
 			albedo = mix(albedo, sign_col, fascia);
 			// Old painted fascias fade and chalk in the sun.
 			albedo = mix(albedo, albedo * 0.7 + vec3(0.17, 0.16, 0.15), fascia * smoothstep(0.4, 1.0, age) * 0.7);
-			// Lettering blocks on the fascia.
+			// Lettering blocks on the fascia (softly illuminated at night on active units).
 			float letters = step(0.35, hash12(vec2(floor(uv.x / 0.45), sid * 77.0))) * step(abs(bay_x - 3.0), 1.9)
 				* step(abs(uv.y - 4.1), 0.16);
+			float active_shop = float(shop_kind(sid) != 6);
 			albedo = mix(albedo, vec3(0.95, 0.92, 0.84), letters * fascia * detail * step(0.25, sid));
+			emit += (sign_col * 0.10 + vec3(1.0, 0.94, 0.80) * letters * step(0.25, sid) * 0.72) * fascia * detail * active_shop * night;
 			// Mostly closed units have painted roller shutters behind the
 			// joinery. Projecting canopies are handled by the building mesh.
 			float sk = fract(sid * 13.7);

@@ -32,11 +32,11 @@ void fragment() {
 	float slope = 1.0 - clamp(v_wn.y, 0.0, 1.0);          // 0 flat … 1 vertical
 	float n = fbm(p * 0.006);
 	float n2 = fbm(p * 0.03);
-	vec3 sand = vec3(0.72, 0.66, 0.52);
-	vec3 meadow = mix(vec3(0.33, 0.42, 0.2), vec3(0.42, 0.46, 0.24), n2);
-	vec3 forest = mix(vec3(0.12, 0.2, 0.11), vec3(0.17, 0.25, 0.13), n2);
-	vec3 rock = mix(vec3(0.38, 0.37, 0.36), vec3(0.5, 0.47, 0.43), n2);
-	vec3 snow = vec3(0.92, 0.94, 0.97);
+	vec3 sand = vec3(0.68, 0.61, 0.47);
+	vec3 meadow = mix(vec3(0.28, 0.36, 0.18), vec3(0.39, 0.41, 0.23), n2);
+	vec3 forest = mix(vec3(0.11, 0.17, 0.10), vec3(0.16, 0.22, 0.12), n2);
+	vec3 rock = mix(vec3(0.35, 0.34, 0.33), vec3(0.47, 0.44, 0.40), n2);
+	vec3 snow = vec3(0.90, 0.92, 0.96);
 	// Forest on the middle slopes, patchy; meadow lower and on flats.
 	float forest_k = smoothstep(0.35, 0.6, n + 0.25 * smoothstep(20.0, 200.0, y)) * (1.0 - smoothstep(380.0, 560.0, y + n * 120.0));
 	vec3 c = mix(meadow, forest, forest_k);

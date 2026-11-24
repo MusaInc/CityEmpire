@@ -234,38 +234,61 @@ void fragment() {
 		albedo *= 1.0 - 0.15 * smoothstep(0.75, 0.88, vnoise(p * 0.55 + 3.0)) * near;
 		albedo *= 1.0 - 0.18 * smoothstep(hw - 1.0, hw - 0.2, abs(uv.x));
 	} else if (v_kind == 3.0) {
-		albedo = c * tone * (1.0 - 0.05 * step(0.5, fract(uv.y / 40.0)));
+		// Airport runway: grooved dark tarmac, concrete joint bands, weathered
+		// piano-key thresholds, touchdown rubber streaks and centreline wear.
+		float groove = 1.0 - 0.04 * sin(uv.y * 14.0) * (1.0 - smoothstep(0.03, 0.12, aa));
+		albedo = c * tone * groove * (1.0 - 0.05 * step(0.5, fract(uv.y / 40.0)));
 		float len = UV2.y;
 		float ends = min(uv.y, len - uv.y);
+		float wear = 0.86 + 0.14 * vnoise(p * 0.9);
 		float keys = step(6.0, ends) * step(ends, 36.0) * step(abs(uv.x), hw - 3.0)
 			* band(fract(abs(uv.x) / 1.8) - 0.5, 0.28, aa / 1.8);
 		float centre = band(uv.x, 0.45, aa) * step(fract(uv.y / 50.0), 0.6) * step(60.0, ends);
 		float edge = band(abs(uv.x) - (hw - 1.2), 0.45, aa);
 		float tdz = step(150.0, ends) * step(ends, 200.0) * step(abs(abs(uv.x) - 8.0), 4.0) * band(fract(ends / 25.0) - 0.5, 0.4, 0.02);
 		float aim = step(290.0, ends) * step(ends, 340.0) * step(abs(abs(uv.x) - 9.0), 2.5);
-		albedo = mix(albedo, white, max(max(keys, centre), max(edge, max(tdz, aim))) * 0.95);
-		// Rubber deposits at the touchdown zones.
-		albedo *= 1.0 - 0.25 * (1.0 - smoothstep(0.0, 120.0, abs(ends - 260.0))) * step(abs(uv.x), 12.0) * vnoise(p * 0.5);
-		rough = 0.85;
+		albedo = mix(albedo, white * wear, max(max(keys, centre), max(edge, max(tdz, aim))) * 0.95);
+		// Multi-track tyre rubber deposits concentrated at both touchdown zones.
+		float td_env = (1.0 - smoothstep(0.0, 130.0, abs(ends - 255.0))) * (1.0 - smoothstep(4.0, 14.0, abs(uv.x)));
+		float streaks = 0.55 + 0.45 * vnoise(vec2(uv.x * 1.4, uv.y * 0.045));
+		albedo *= 1.0 - 0.36 * td_env * streaks;
+		rough = mix(0.85, 0.64, td_env * streaks);
 	} else if (v_kind == 4.0) {
-		albedo = c * tone;
-		float centre = band(uv.x, 0.15, aa);
-		float edge = band(abs(uv.x) - (hw - 0.8), 0.12, aa);
-		albedo = mix(albedo, yellow, max(centre, edge) * 0.95);
+		// Airport taxiway: weathered asphalt with tar-sealed joints and double-yellow edges.
+		float joint_y = band(fract(uv.y / 18.0) - 0.5, 0.008, aa / 18.0);
+		albedo = c * tone * (1.0 - 0.12 * joint_y * near);
+		float wear = 0.85 + 0.15 * vnoise(p * 1.1);
+		float centre = band(uv.x, 0.16, aa);
+		float edge = max(band(abs(uv.x) - (hw - 0.8), 0.10, aa), band(abs(uv.x) - (hw - 1.12), 0.10, aa));
+		albedo = mix(albedo, yellow * wear, max(centre, edge) * 0.95);
+		float tyre_c = (1.0 - smoothstep(0.4, 2.2, abs(uv.x))) * (0.4 + 0.6 * vnoise(p * 0.35));
+		albedo *= 1.0 - 0.12 * tyre_c * near;
+		rough = mix(0.86, 0.72, tyre_c * 0.6);
 	} else if (v_kind == 5.0) {
+		// Apron & industrial yard: cast concrete bays, tar expansion joints,
+		// fuel/oil stains around stands, and weathered aggregate.
 		vec2 f = fract(p / 7.5);
-		float joint = max(band(f.x, 0.008, aa / 7.5), band(f.y, 0.008, aa / 7.5));
-		albedo = c * tone * (0.95 + 0.06 * hash12(floor(p / 7.5))) * (1.0 - 0.18 * joint * near);
-		albedo *= 1.0 - 0.15 * smoothstep(0.75, 0.9, vnoise(p * 0.25)) * near;   // oil and tyre marks
+		float joint = max(band(f.x, 0.011, aa / 7.5), band(f.y, 0.011, aa / 7.5));
+		float slab_id = hash12(floor(p / 7.5));
+		albedo = c * tone * (0.93 + 0.10 * slab_id) * (1.0 - 0.26 * joint * near);
+		float oil = smoothstep(0.70, 0.90, vnoise(p * 0.24 + 5.3)) * near;
+		albedo *= 1.0 - 0.22 * oil;
+		rough = mix(0.84 + 0.08 * slab_id, 0.62, oil);
 	} else if (v_kind == 6.0) {
-		albedo = c * tone;
+		// Helipad: cast concrete pad with rotor-wash dust ring and crisp hazard markings.
+		vec2 f = fract(p / 4.0);
+		float joint = max(band(f.x, 0.01, aa / 4.0), band(f.y, 0.01, aa / 4.0));
+		albedo = c * tone * (1.0 - 0.15 * joint * near);
 		vec2 q = uv;   // metres from the pad's centre
 		float r = length(q);
+		float wear = 0.88 + 0.12 * vnoise(p * 1.4);
 		float ring = band(r - 7.0, 0.45, aa);
 		float hbar = step(abs(q.y), 0.45) * step(abs(q.x), 2.6);
 		float hleg = step(abs(abs(q.x) - 2.6), 0.5) * step(abs(q.y), 3.2);
-		albedo = mix(albedo, white, max(ring, max(hbar, hleg)) * 0.95);
-		albedo = mix(albedo, yellow, band(r - 8.6, 0.25, aa));
+		albedo = mix(albedo, white * wear, max(ring, max(hbar, hleg)) * 0.95);
+		albedo = mix(albedo, yellow * wear, band(r - 8.6, 0.25, aa));
+		albedo *= 1.0 - 0.14 * (1.0 - smoothstep(2.0, 6.5, r)) * vnoise(p * 0.7) * near;
+		rough = 0.86;
 	}
 	if ((v_kind == 0.0 || v_kind == 5.0) && hw > 2.5 && hw < 3.5) {
 		// A car park (SkyportIsland areas flagged "bays", UV = island-local
