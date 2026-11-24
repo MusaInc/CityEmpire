@@ -116,7 +116,10 @@ func apply() -> void:
 		var temporal := mode in [Viewport.SCALING_3D_MODE_FSR2, Viewport.SCALING_3D_MODE_METALFX_TEMPORAL]
 		var renderer := RenderingServer.get_current_rendering_method()
 		var needs_depth := look not in ["clean", "cinematic"] and renderer != "gl_compatibility"
-		vp.msaa_3d = Viewport.MSAA_DISABLED if temporal or needs_depth else p["msaa"]
+		# The screen-space passes resolve opaque buffers. Keep MSAA for
+		# Reference and Hybrid, with FXAA on the advanced spatial path.
+		var advanced := RenderLab.lab_effects(lab_profile)
+		vp.msaa_3d = Viewport.MSAA_DISABLED if temporal or needs_depth or advanced else p["msaa"]
 		if renderer != "gl_compatibility":
 			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if vp.msaa_3d == Viewport.MSAA_DISABLED and not temporal else Viewport.SCREEN_SPACE_AA_DISABLED
 

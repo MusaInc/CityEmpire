@@ -12,9 +12,9 @@ The production workflow pins the official Godot **4.5.1 stable** editor and expo
 | Contact shadows | Procedural and asset AO, plus dynamic sun and lamp shadows. | SSAO in Balanced, Quality and GI study. |
 | Reflections | Authored and procedural skyline, wet-road and car reflections. Hybrid tests one box-projected room probe. | SSR on wet streets or indoors in Quality and GI study. Transparent water and glass still need their existing reflection fallback. |
 | Atmosphere | Height and depth fog, rain streaks and local lamps. | Short-range volumetrics in rainy or foggy conditions with smaller froxel buffers. |
-| Skin | Wrapped diffuse lighting and shader backlight. | A low-strength SSS contribution on existing hero skin in Quality and GI study. |
+| Skin | Wrapped diffuse lighting and shader backlight. | A low-strength SSS contribution on existing hero skin in native Metal Quality and GI study. The software review uses the wrapped diffuse skin path. |
 | Shadows | Two directional cascades and selected local lights. | Four cascades in Quality and GI study, retaining the near cascade. |
-| Antialiasing | MSAA or FXAA. MetalFX spatial when available. | MetalFX temporal where the device supports it, with spatial fallback. FSR2 for non-Metal Forward+ tests. The preview avoids stacking MSAA or FXAA onto the temporal path. |
+| Antialiasing | MSAA or FXAA. MetalFX spatial when available. | MetalFX temporal where the device supports it, with spatial fallback. FSR2 for non-Metal Forward+ tests. The advanced spatial path uses FXAA to avoid MSAA resolve artifacts. The temporal path uses its own antialiasing. |
 
 [Godot renderer comparison](https://docs.godotengine.org/en/4.5/tutorials/rendering/renderers.html) · [Godot viewport scaling modes](https://docs.godotengine.org/en/4.5/classes/class_viewport.html#enum-viewport-scaling3dmode)
 

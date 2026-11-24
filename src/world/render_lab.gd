@@ -80,7 +80,10 @@ static func configure_environment(env: Environment, sun: DirectionalLight3D, pro
 	sun.directional_shadow_split_2 = 0.25
 	sun.directional_shadow_split_3 = 0.52
 	sun.light_angular_distance = 1.1 if quality else 1.0
-	RenderingServer.global_shader_parameter_set("lab_skin_sss", 0.18 if quality else 0.0)
+	if forward_plus():
+		var scatter := quality and RenderingServer.get_current_rendering_driver_name() == "metal"
+		RenderingServer.sub_surface_scattering_set_quality(RenderingServer.SUB_SURFACE_SCATTERING_QUALITY_LOW if scatter else RenderingServer.SUB_SURFACE_SCATTERING_QUALITY_DISABLED)
+		RenderingServer.global_shader_parameter_set("lab_skin_sss", 0.18 if scatter else 0.0)
 
 
 static func weather_effects(env: Environment, profile: String, wet: float, rain: float, fog: float, indoors: bool) -> void:
