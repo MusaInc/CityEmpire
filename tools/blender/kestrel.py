@@ -952,11 +952,22 @@ def interior(m, out):
     out.append(box("dash_top", (1.56, 0.34, 0.05), (0, 0.72, 0.97), I, bevel=0.025))
     out.append(box("binnacle", (0.36, 0.16, 0.09), (0.38, 0.58, 1.0), P, bevel=0.035))
     out.append(box("cluster", (0.3, 0.01, 0.07), (0.38, 0.5, 0.99), m["trim"]))
+    # Dual circular chrome instrument dials inside the binnacle + screen bezel.
+    for gx in (0.31, 0.45):
+        out.append(disc_on("gauge_ring", V((gx, 0.494, 0.99)), V((0, -1, 0)), 0.032, 0.008, C, 16))
     out.append(box("screen", (0.26, 0.012, 0.15), (0.0, 0.47, 0.98), m["trim"], bevel=0.008))
+    out.append(box("screen_bezel", (0.275, 0.008, 0.162), (0.0, 0.476, 0.98), C, bevel=0.005))
     for x in (-0.6, -0.1, 0.1, 0.6):
         out.append(disc_on("vent", V((x, 0.44, 0.88)), V((0, -1, 0)), 0.035, 0.012, C, 16))
     out.append(box("console", (0.24, 0.9, 0.2), (0, 0.05, 0.45), P, bevel=0.04))
+    out.append(box("console_trim", (0.20, 0.58, 0.012), (0, 0.10, 0.552), C, bevel=0.004))
     out.append(tube_path("gear", [V((0, 0.2, 0.55)), V((0, 0.18, 0.66))], 0.012, C, 8))
+    out.append(box("gear_knob", (0.038, 0.044, 0.048), (0, 0.175, 0.675), I, bevel=0.016))
+    # Metallic driver footwell pedals (accelerator & brake).
+    for px, pw, ph in ((0.47, 0.045, 0.095), (0.36, 0.062, 0.075)):
+        ped = box("pedal", (pw, 0.012, ph), (px, 0.72, 0.43), C, bevel=0.004)
+        ped.rotation_euler = (math.radians(-28), 0, 0)
+        out.append(ped)
     for sx in (1, -1):
         x = sx * 0.39
         out.append(box("seat", (0.5, 0.5, 0.12), (x, -0.06, zf), I, bevel=0.05))
@@ -1000,8 +1011,10 @@ def interior(m, out):
     for a in (0.0, math.pi, -math.pi / 2):
         e = c + V((0.17 * math.cos(a), -0.17 * math.sin(a) * math.sin(tilt), 0.17 * math.sin(a) * math.cos(tilt)))
         out.append(tube_path("spoke", [c, e], 0.014, P, 6))
-    out.append(disc_on("hub", c, V((0, -math.sin(tilt) * -1, 0)).normalized() if False else V((0, -0.37, 0.93)).normalized(),
+    out.append(disc_on("hub", c, V((0, -0.37, 0.93)).normalized(),
                        0.065, 0.04, P, 16))
+    out.append(disc_on("hub_badge", c + V((0, -0.022, 0.008)), V((0, -0.37, 0.93)).normalized(),
+                       0.024, 0.006, C, 14))
     out.append(tube_path("column", [c + V((0, 0.03, -0.02)), V((0.38, 0.62, 0.84))], 0.035, P, 10))
 
 

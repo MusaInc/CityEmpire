@@ -88,44 +88,53 @@ static func shared_mat(name: String) -> Material:
 			m.roughness = 0.55 if name == "trim" else 0.85
 			m.metallic = 0.2 if name == "grille" else 0.0
 		"chrome":
-			m.albedo_color = Color(0.72, 0.73, 0.76)
+			m.albedo_color = Color(0.86, 0.88, 0.91)
 			m.metallic = 1.0
-			m.roughness = 0.22
+			m.roughness = 0.12
 		"rim":
-			# Bright machined alloy: less mirror than chrome, so spokes read
-			# against the dark wheel well instead of turning sky-grey.
-			m.albedo_color = Color(0.8, 0.81, 0.83)
-			m.metallic = 0.65
-			m.roughness = 0.3
+			# Machined diamond-cut alloy: crisp specular edge contrast against the dark wheel well.
+			m.albedo_color = Color(0.84, 0.85, 0.88)
+			m.metallic = 0.84
+			m.roughness = 0.21
+			m.clearcoat_enabled = true
+			m.clearcoat = 0.45
+			m.clearcoat_roughness = 0.14
 		"tyre_wall":
 			m.albedo_color = Color(0.115, 0.112, 0.107)
 			m.roughness = 0.86
 			m.metallic_specular = 0.26
 		"disc":
-			m.albedo_color = Color(0.35, 0.35, 0.36)
-			m.metallic = 0.8
-			m.roughness = 0.45
+			m.albedo_color = Color(0.38, 0.38, 0.40)
+			m.metallic = 0.86
+			m.roughness = 0.36
 		"caliper":
-			m.albedo_color = Color(0.75, 0.08, 0.05)
-			m.roughness = 0.35
-			m.metallic = 0.2
+			# Gloss painted performance caliper (Brembo-style finish).
+			m.albedo_color = Color(0.82, 0.08, 0.05)
+			m.roughness = 0.24
+			m.metallic = 0.35
+			m.clearcoat_enabled = true
+			m.clearcoat = 0.82
+			m.clearcoat_roughness = 0.12
 		"rim_dark":
-			m.albedo_color = Color(0.09, 0.09, 0.1)
-			m.metallic = 0.8
-			m.roughness = 0.35
+			m.albedo_color = Color(0.09, 0.09, 0.10)
+			m.metallic = 0.85
+			m.roughness = 0.28
+			m.clearcoat_enabled = true
+			m.clearcoat = 0.40
 		"tyre":
 			m.albedo_color = Color(0.082, 0.079, 0.075)
 			m.roughness = 0.93
 			m.metallic_specular = 0.23
 		"seam":
-			m.albedo_color = Color(0.01, 0.01, 0.012)
-			m.roughness = 0.9
+			m.albedo_color = Color(0.008, 0.008, 0.010)
+			m.roughness = 0.92
 		"carbon":
-			m.albedo_color = Color(0.05, 0.05, 0.056)
-			m.roughness = 0.28
-			m.metallic = 0.35
+			m.albedo_color = Color(0.048, 0.050, 0.056)
+			m.roughness = 0.20
+			m.metallic = 0.38
 			m.clearcoat_enabled = true
-			m.clearcoat = 0.5
+			m.clearcoat = 0.88
+			m.clearcoat_roughness = 0.08
 		"cladding":
 			m.albedo_color = Color(0.075, 0.075, 0.08)
 			m.roughness = 0.85
@@ -153,11 +162,13 @@ static func shared_mat(name: String) -> Material:
 			m.albedo_color = Color(0.02, 0.02, 0.022)
 			m.roughness = 0.8
 		"plastic":
-			m.albedo_color = Color(0.035, 0.035, 0.038)
-			m.roughness = 0.62
+			m.albedo_color = Color(0.045, 0.047, 0.052)
+			m.roughness = 0.48
+			m.metallic_specular = 0.42
 		"interior":
-			m.albedo_color = Color(0.05, 0.05, 0.055)
-			m.roughness = 0.9
+			m.albedo_color = Color(0.062, 0.060, 0.064)
+			m.roughness = 0.72
+			m.metallic_specular = 0.36
 		"reflector":
 			m.albedo_color = Color(0.85, 0.86, 0.88)
 			m.metallic = 1.0

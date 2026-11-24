@@ -585,7 +585,8 @@ def cabin_interior(m, out, kind, doors):
     or narrower with the body, rear bench only where there are rear seats."""
     tmp = []
     K.interior(m, tmp)
-    dash_names = ("dash", "dash_top", "binnacle", "cluster", "screen", "vent", "wheel_rim", "spoke", "hub", "column")
+    dash_names = ("dash", "dash_top", "binnacle", "cluster", "gauge_ring", "screen", "screen_bezel",
+                  "vent", "wheel_rim", "spoke", "hub", "hub_badge", "column", "pedal")
     rear_names = ("rear_bench", "rear_back", "rear_headrest")
     rear = (doors == 4 or kind == "hatch") and kind not in ("pickup", "van", "box")
     dash, seats, back = [], [], []
@@ -1431,15 +1432,23 @@ def build_wheel(name):
     c.rotation_euler = (0, math.pi / 2, 0)
     c.location = (-0.08, 0, 0)
     parts.append(c)
-    if style in ("center", "y", "twin"):
-        # Drilled disc: a ring of dark holes on the face.
+    # Ventilated brake rotor slots / drilled cooling holes & machined centre-cap bezel.
+    if style in ("center", "y", "twin", "dish"):
         for i in range(24):
             a = i * 2 * math.pi / 24
-            for rr in (dr * 0.72, dr * 0.86):
-                h = cyl("hole", 0.012, 0.004, (0, 0, 0), m["liner"], 6)
+            for rr in (dr * 0.70, dr * 0.85):
+                h = cyl("hole", 0.013, 0.006, (0, 0, 0), m["liner"], 6)
                 h.rotation_euler = (0, math.pi / 2, 0)
-                h.location = (-0.018, rr * math.cos(a + rr * 3), rr * math.sin(a + rr * 3))
+                h.location = (-0.017, rr * math.cos(a + rr * 3), rr * math.sin(a + rr * 3))
                 parts.append(h)
+    # Rim lip valve stem + metallic centre-cap accent ring.
+    vs = cyl("valve", 0.011, 0.045, (0, 0, 0), m["chrome"], 8)
+    vs.location = (lipd - 0.025, 0, R * 0.90)
+    parts.append(vs)
+    cap_ring = cyl("cap_ring", R * 0.17, 0.018, (0, 0, 0), m["chrome"], 20)
+    cap_ring.rotation_euler = (0, math.pi / 2, 0)
+    cap_ring.location = (0.14 if style != "dish" else 0.07, 0, 0)
+    parts.append(cap_ring)
     c = cyl("hat", R * 0.36, 0.05, (0, 0, 0), rim_dark, 24)
     c.rotation_euler = (0, math.pi / 2, 0)
     c.location = (-0.03, 0, 0)

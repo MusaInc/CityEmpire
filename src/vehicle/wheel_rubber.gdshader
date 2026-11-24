@@ -39,8 +39,8 @@ void fragment() {
 			(1.0 - smoothstep(0.026, 0.10, px)) * smoothstep(0.91, 0.97, radius);
 		raised = 0.12 * smoothstep(0.13, 0.22, width);
 	}
-	float wear = 0.05 * sin(angle * 427.2566) * (1.0 - smoothstep(0.018, 0.060, px));
-	ALBEDO = vec3(rubber * (1.0 + detail * (raised + wear - cuts * 0.48)));
-	SPECULAR = mix(0.26, 0.37, wetness);
-	ROUGHNESS = clamp(0.86 - wetness * 0.19 - raised * 0.19 * detail + cuts * 0.09, 0.55, 0.95);
+	float wear = 0.065 * sin(angle * 427.2566) * (1.0 - smoothstep(0.018, 0.060, px));
+	ALBEDO = vec3(rubber * (1.0 + detail * (raised * 1.25 + wear - cuts * 0.62)));
+	SPECULAR = mix(0.28, 0.46, wetness);
+	ROUGHNESS = clamp(0.84 - wetness * 0.26 - raised * 0.22 * detail + cuts * 0.11, 0.46, 0.95);
 }
