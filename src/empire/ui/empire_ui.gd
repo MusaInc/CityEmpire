@@ -799,8 +799,9 @@ func show_title(has_save: bool) -> void:
 			open_style(), false, 118))
 	options.add_child(S.button("Settings", _settings_panel, false, 118 if has_save else 246))
 	actions.add_child(options)
-	var studio := S.label("Musa Studios", 15, Color("c0c5c5"))
-	_anchor(studio, 0.0, 1.0, Vector2(80.0 + float(ins[0]), -52.0 - float(ins[3])), Vector2(200, 26))
+	var edition := "Forward+ Preview" if RenderLab.forward_plus() else "Rendering Preview"
+	var studio := S.label("Musa Studios · " + edition, 15, Color("c0c5c5"))
+	_anchor(studio, 0.0, 1.0, Vector2(80.0 + float(ins[0]), -52.0 - float(ins[3])), Vector2(330, 26))
 	_title_studio = studio
 	_title_root.add_child(studio)
 
@@ -2832,6 +2833,47 @@ func _touch_settings_panel() -> void:
 	v.add_child(S.button("Back to Settings", _settings_panel, false, 190))
 
 
+func _render_lab_panel() -> void:
+	var v := _open("Rendering Lab", 740, 400)
+	var hardware := "%s · %s" % [RenderingServer.get_current_rendering_method(), RenderingServer.get_current_rendering_driver_name()]
+	v.add_child(Glass.line(hardware, "subhead", Glass.LABEL2))
+	var profiles: Array = []
+	for pair in RenderLab.PROFILES:
+		if RenderLab.forward_plus() or pair[0] in ["reference", "hybrid"]:
+			profiles.append(pair)
+	v.add_child(Glass.segmented(profiles, Settings.lab_profile, func(key):
+		Settings.lab_profile = key
+		Settings.apply()
+		Settings.save()
+		_render_lab_panel()))
+	v.add_child(Glass.para({
+		"reference": "Production lighting and effects on this renderer.",
+		"hybrid": "A local reflection probe and the original room lighting.",
+		"balanced": "Screen-space contact shadows with a temporal upscaler.",
+		"quality": "Indirect light, wet reflections, weather fog, skin scattering and four shadow cascades.",
+		"gi": "Experimental dynamic bounce lighting. Use the metrics overlay during this test.",
+	}.get(Settings.lab_profile, ""), "subhead"))
+	v.add_child(Glass.segmented(RenderLab.UPSCALERS, Settings.lab_upscaler, func(key):
+		Settings.lab_upscaler = key
+		Settings.apply()
+		Settings.save()
+		_render_lab_panel()))
+	v.add_child(Glass.line("Upscaler in use  " + RenderLab.scale_name(get_viewport().scaling_3d_mode), "subhead"))
+	var controls := S.hbox(10)
+	controls.add_child(S.button("Hide performance overlay" if Settings.lab_metrics else "Show performance overlay", func():
+		Settings.lab_metrics = not Settings.lab_metrics
+		Settings.apply()
+		Settings.save()
+		_render_lab_panel()))
+	var copy := S.button("Copy last sample", func():
+		DisplayServer.clipboard_set(JSON.stringify(RenderLab.last_sample, "  "))
+		toast("Rendering metrics copied", "good"))
+	copy.disabled = RenderLab.last_sample.is_empty()
+	controls.add_child(copy)
+	v.add_child(controls)
+	v.add_child(S.button("Back to Settings", _settings_panel))
+
+
 func _settings_panel() -> void:
 	var v := _open("Settings", 680, 620)
 	var q := S.hbox(10)
@@ -2842,6 +2884,7 @@ func _settings_panel() -> void:
 			Settings.apply()
 			Settings.save()
 			_settings_panel(), Settings.quality == i))
+	q.add_child(S.button("Rendering Lab", _render_lab_panel))
 	v.add_child(q)
 	var lk_row := S.hbox(10)
 	lk_row.add_child(S.label("Visual look", 18, S.MUTED))

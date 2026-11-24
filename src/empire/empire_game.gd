@@ -92,6 +92,10 @@ func _ready() -> void:
 	Prof.enabled = args.has("profile-world")
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
+	if args.has("lab-profile"):
+		Settings.lab_profile = String(args["lab-profile"])
+	if args.has("lab-upscaler"):
+		Settings.lab_upscaler = String(args["lab-upscaler"])
 	if args.has("look"):
 		Settings.look = args["look"]   # captures: --look=crisp|clean|... (not saved)
 	if args.has("geo"):
@@ -258,7 +262,10 @@ func _ready() -> void:
 	var gov := FrameGovernor.new()
 	gov.name = "FrameGovernor"
 	gov.enabled = OS.has_feature("mobile") and not args.has("fixedscale")
+	if args.has("lab-scale"):
+		get_viewport().scaling_3d_scale = clampf(float(args["lab-scale"]), RenderLab.min_scale(get_viewport().scaling_3d_mode), 1.0)
 	add_child(gov)
+	add_child(RenderLab.new())
 	# Hitting things like NEVER STOP: street furniture flies, cars are cars.
 	wrecks = Wrecks.new()
 	wrecks.name = "Wrecks"
@@ -1483,18 +1490,32 @@ func _door_assist(move: Vector3) -> Vector3:
 ## Inside a shop, office lobby or warehouse: indoor walking (a brisk walk,
 ## quick turns) and the camera brought in under the ceiling. Every frame, so
 ## the change happens as you cross the threshold, not up to 0.4 s later.
+var _probe_room: ShopInterior
+
+
 func _update_indoors() -> void:
 	var ceiling := INF
+	var room: ShopInterior
 	if driving == "":
 		var p := player.global_position
 		for id in interiors:
 			var si: ShopInterior = interiors[id]
 			if si.global_transform.origin.distance_squared_to(p) < 6400.0 and si.contains(p):
 				ceiling = si.global_transform.origin.y + si.H
+				room = si
 				break
 		if ceiling == INF and venues:
 			ceiling = venues.ceiling_at(p)
 	player.indoors = ceiling < INF
+	atmosphere.lab_indoors = player.indoors and not in_vehicle()
+	var probe_active := Settings.lab_profile == "hybrid" and not in_vehicle() and DisplayServer.get_name() != "headless"
+	var next_probe := room if probe_active else null
+	if next_probe != _probe_room:
+		if is_instance_valid(_probe_room):
+			_probe_room.preview_reflection(false)
+		_probe_room = next_probe
+	if is_instance_valid(_probe_room):
+		_probe_room.preview_reflection(true)
 	if audio:
 		audio.shelter = 1.0 if player.indoors else (0.6 if driving != "" else 0.0)
 	camera.indoor_ceiling = ceiling

@@ -156,6 +156,8 @@ func _ready() -> void:
 ## Main calls this once settings and command-line overrides are known.
 ## Set by --time: captures keep that hour (the title camera's shots don't
 ## replace it).
+var lab_indoors := false
+var _lab_profile := "reference"
 var fixed_hour := false
 
 
@@ -209,6 +211,10 @@ func _apply_quality_preset() -> void:
 		else:
 			sun.directional_shadow_max_distance = 240.0
 			sun.directional_shadow_split_1 = 0.085
+
+	if env and sun:
+		_lab_profile = String(st.get("lab_profile"))
+		RenderLab.configure_environment(env, sun, _lab_profile)
 
 
 ## The Settings autoload (looked up, not named: tool scripts run without it).
@@ -297,6 +303,7 @@ func _apply(dt: float, instant: bool) -> void:
 	var overcast := smoothstep(0.55, 1.0, float(w["cloud"]))
 	var cloud_softness := smoothstep(0.48, 0.90, float(w["cloud"]))
 	var fog := float(w["fog"])
+	RenderLab.weather_effects(env, _lab_profile, wetness, float(w["rain"]), fog, lab_indoors)
 	night = 1.0 - smoothstep(-8.0, 3.0, el)
 	var lamps := maxf(night, overcast * 0.35 * float(w["dark"]))
 

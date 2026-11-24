@@ -73,6 +73,7 @@ var office_pos := Vector3.ZERO
 var walk := {}            # Vector2i cell -> true when free
 
 var _static: Node3D
+var _lab_probe: ReflectionProbe
 var _goods: Node3D
 var _labels: Node3D
 var _headers: Array = []     # shelf header Label3Ds (meta "fixture" = [kind, unit])
@@ -3804,6 +3805,28 @@ func world_spots() -> Array:
 		d["interior"] = self
 		out.append(d)
 	return out
+
+
+func preview_reflection(active: bool) -> void:
+	if is_instance_valid(_lab_probe) and _lab_probe.get_parent() == _static:
+		_lab_probe.visible = active
+		return
+	if not active:
+		return
+	var shell := _static.get_node("Shell") as MeshInstance3D
+	shell.layers |= RenderLab.PROBE_LAYER
+	var probe := ReflectionProbe.new()
+	probe.name = "InteriorReflection"
+	probe.position = R(W * 0.5, D * 0.5, H * 0.55)
+	probe.size = Vector3(maxf(W - 0.2, 1.0), H, maxf(D - 0.2, 1.0))
+	probe.cull_mask = RenderLab.PROBE_LAYER
+	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	probe.interior = true
+	probe.box_projection = true
+	probe.intensity = 0.7
+	probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED
+	_static.add_child(probe)
+	_lab_probe = probe
 
 
 ## Is a world point inside this room?

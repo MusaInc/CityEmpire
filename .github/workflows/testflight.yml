@@ -217,6 +217,7 @@ jobs:
             <key>teamID</key><string>$TEAM</string>
             <key>signingStyle</key><string>automatic</string>
             <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>testFlightInternalTestingOnly</key><true/>
           </dict></plist>
           PLIST
           xcodebuild -exportArchive -archivePath build/CityEmpire.xcarchive \
@@ -334,6 +335,21 @@ jobs:
               ok = call(f"/v1/builds/{bid}", "PATCH",
                         {"data": {"type": "builds", "id": bid, "attributes": {"usesNonExemptEncryption": False}}})
               print("export compliance answered:", "yes" if ok is not None else "FAILED")
+          # Distinguish the preview in the tester's build history.
+          locale = "en-US"
+          notes = ("Forward+ Rendering Preview. Use Settings > Rendering Lab for graphics profiles, "
+                   "MetalFX and performance metrics. Find the Mobile build under Previous Builds.")
+          localizations = call(f"/v1/builds/{bid}/betaBuildLocalizations") or {}
+          existing = next((row for row in localizations.get("data", [])
+                           if row["attributes"]["locale"] == locale), None)
+          if existing:
+              lid = existing["id"]
+              call(f"/v1/betaBuildLocalizations/{lid}", "PATCH", {"data": {
+                  "type": "betaBuildLocalizations", "id": lid, "attributes": {"whatsNew": notes}}})
+          else:
+              call("/v1/betaBuildLocalizations", "POST", {"data": {
+                  "type": "betaBuildLocalizations", "attributes": {"locale": locale, "whatsNew": notes},
+                  "relationships": {"build": {"data": {"type": "builds", "id": bid}}}}})
           groups = call(f"/v1/apps/{app}/betaGroups?limit=50")["data"]
           if not any(g["attributes"]["isInternalGroup"] for g in groups):
               # New app: an internal group with the same testers as the studio's other app.

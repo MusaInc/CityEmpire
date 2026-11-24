@@ -12,7 +12,6 @@ const CHECK_EVERY := 0.5      # s between samples
 const MIN_GAP := 2.0          # s between scale changes
 const STEP := 0.92
 const FLOOR_FRACTION := 0.62  # never below 62% of the cap…
-const ABS_FLOOR := 0.42       # …or 42% of native
 
 var enabled := true
 var scale := 1.0
@@ -68,7 +67,7 @@ func _process(_dt: float) -> void:
 	var budget := 1000.0 / maxf(Engine.max_fps if Engine.max_fps > 0 else 60, 1)
 	var gpu_ms := RenderingServer.viewport_get_measured_render_time_gpu(_vp_rid)
 	var gpu_known := gpu_ms > 0.05
-	var floor_scale := maxf(_cap * FLOOR_FRACTION, ABS_FLOOR)
+	var floor_scale := maxf(_cap * FLOOR_FRACTION, RenderLab.min_scale(get_viewport().scaling_3d_mode))
 	var behind := frame_ms > budget * 1.18
 	var gpu_bound := (not gpu_known) or gpu_ms > budget * 0.8
 	if behind and gpu_bound:

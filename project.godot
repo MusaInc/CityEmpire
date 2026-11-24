@@ -49,8 +49,14 @@ common/max_physics_steps_per_frame=4
 
 [rendering]
 
-renderer/rendering_method="mobile"
-renderer/rendering_method.mobile="mobile"
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.mobile="forward_plus"
+renderer/rendering_method.ios="forward_plus"
+renderer/rendering_method.android="mobile"
+rendering_device/driver.ios="metal"
+environment/volumetric_fog/volume_size=48
+environment/volumetric_fog/volume_depth=48
+global_illumination/gi/use_half_resolution=true
 renderer/rendering_method.web="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 anti_aliasing/quality/msaa_3d=1
@@ -120,4 +126,9 @@ grass_coast={
 grass_verge={
 "type": "sampler2D",
 "value": "res://assets/textures/pbr/grass_verge.jpg"
+}
+
+lab_skin_sss={
+"type": "float",
+"value": 0.0
 }

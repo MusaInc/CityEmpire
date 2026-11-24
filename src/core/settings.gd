@@ -27,6 +27,9 @@ var fps_60 := true  # swinging needs it; Settings can drop to 30 for battery
 const VERSION := 6  # bump to migrate saved settings to new defaults
 var haptics := true
 var show_perf := false
+var lab_profile := "balanced"
+var lab_upscaler := "auto"
+var lab_metrics := false
 var look_sensitivity := 1.0
 var driving_lens := 0.55
 var touch_size := 1.0
@@ -58,6 +61,9 @@ func _ready() -> void:
 		quality = cfg.get_value("gfx", "quality", quality)
 		fps_60 = cfg.get_value("gfx", "fps_60", fps_60)
 		show_perf = cfg.get_value("gfx", "show_perf", show_perf)
+		lab_profile = String(cfg.get_value("render_lab", "profile", lab_profile))
+		lab_upscaler = String(cfg.get_value("render_lab", "upscaler", lab_upscaler))
+		lab_metrics = bool(cfg.get_value("render_lab", "metrics", lab_metrics))
 		driving_lens = clampf(float(cfg.get_value("gfx", "driving_lens", driving_lens)), 0.0, 1.0)
 		look = String(cfg.get_value("gfx", "look", look))
 		appearance = cfg.get_value("gfx", "appearance", appearance)
@@ -93,7 +99,10 @@ func render_scale_cap() -> float:
 	var p := preset()
 	var size := Vector2(DisplayServer.window_get_size())
 	var px := maxf(size.x * size.y, 1.0)
-	return clampf(minf(p["render_scale"], sqrt(p["pixels"] / px)), 0.5, 1.0)
+	var scale := clampf(minf(p["render_scale"], sqrt(p["pixels"] / px)), 0.5, 1.0)
+	if RenderLab.lab_effects(lab_profile):
+		scale = minf(scale, 0.80 if lab_profile == "gi" else 0.88)
+	return maxf(scale, RenderLab.min_scale(RenderLab.scaling_mode(lab_upscaler, lab_profile)))
 
 
 func apply() -> void:
@@ -102,20 +111,15 @@ func apply() -> void:
 	var vp := get_viewport()
 	if vp:
 		vp.scaling_3d_scale = render_scale_cap()
-		# On iPhone/iPad (Metal) MetalFX upscales the 3D image sharply; FSR 1
-		# is Forward+-only, so elsewhere it stays bilinear. The HUD always
-		# draws at native resolution.
-		if RenderingServer.get_current_rendering_driver_name() == "metal":
-			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_METALFX_SPATIAL
-		else:
-			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-		# Stylised looks read the depth buffer, which MSAA leaves unresolved on
-		# the Mobile/Compatibility renderers: swap MSAA for FXAA. "clean" and
-		# "cinematic" (look_cinematic.gdshader) do not read depth, so MSAA stays on.
-		var needs_depth := look not in ["clean", "cinematic"] and RenderingServer.get_current_rendering_method() != "gl_compatibility"
-		vp.msaa_3d = Viewport.MSAA_DISABLED if needs_depth else p["msaa"]
-		if RenderingServer.get_current_rendering_method() != "gl_compatibility":  # no FXAA there
-			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if vp.msaa_3d == Viewport.MSAA_DISABLED else Viewport.SCREEN_SPACE_AA_DISABLED
+		var mode := RenderLab.scaling_mode(lab_upscaler, lab_profile)
+		vp.scaling_3d_mode = mode
+		var temporal := mode in [Viewport.SCALING_3D_MODE_FSR2, Viewport.SCALING_3D_MODE_METALFX_TEMPORAL]
+		var renderer := RenderingServer.get_current_rendering_method()
+		var needs_depth := look not in ["clean", "cinematic"] and renderer != "gl_compatibility"
+		vp.msaa_3d = Viewport.MSAA_DISABLED if temporal or needs_depth else p["msaa"]
+		if renderer != "gl_compatibility":
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if vp.msaa_3d == Viewport.MSAA_DISABLED and not temporal else Viewport.SCREEN_SPACE_AA_DISABLED
+
 	changed.emit()
 
 
@@ -124,6 +128,9 @@ func save() -> void:
 	cfg.set_value("gfx", "quality", quality)
 	cfg.set_value("gfx", "fps_60", fps_60)
 	cfg.set_value("gfx", "show_perf", show_perf)
+	cfg.set_value("render_lab", "profile", lab_profile)
+	cfg.set_value("render_lab", "upscaler", lab_upscaler)
+	cfg.set_value("render_lab", "metrics", lab_metrics)
 	cfg.set_value("gfx", "driving_lens", driving_lens)
 	cfg.set_value("gfx", "look", look)
 	cfg.set_value("gfx", "appearance", appearance)

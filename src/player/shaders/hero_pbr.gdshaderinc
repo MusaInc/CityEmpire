@@ -48,6 +48,10 @@ void vertex() {
         VERTEX += transpose(world) * offset;
     }
 }
+#ifdef SKIN
+global uniform float lab_skin_sss;
+#endif
+
 void fragment() {
     // glTF converts the Blender V coordinate to a top-left origin.
     float mask = clamp(1.0 - UV2.y, 0.0, 1.0);
@@ -113,6 +117,9 @@ void fragment() {
     SPECULAR = mix(0.24, 0.28, surface_definition);
     ALBEDO = ALBEDO * vec3(1.01, 0.995, 0.98) + ALBEDO * vec3(0.052, 0.038, 0.030) * skin_fres;
     BACKLIGHT = ALBEDO * vec3(0.40, 0.135, 0.060);
+#if CURRENT_RENDERER == RENDERER_FORWARD_PLUS
+    SSS_STRENGTH = lab_skin_sss;
+#endif
     EMISSION += ALBEDO * mix(mix(0.020, 0.012, surface_definition), 0.010, night);
 #elif defined(EYE)
     // Wet dome cornea with crisp twin catchlights + subtle lower-meniscus moisture sheen.
