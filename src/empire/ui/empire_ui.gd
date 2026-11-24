@@ -216,9 +216,9 @@ func _build_hud() -> void:
 	_turn_sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	tv.add_child(_turn_dist)
 	tv.add_child(_turn_sub)
-	# Phone button (left of the minimap).
-	_phone_btn = S.button("☰", func(): open_phone(), false, 52)
-	_phone_btn.add_theme_font_size_override("font_size", 26)
+	# In-game smartphone button (left of the minimap).
+	_phone_btn = S.button("PHONE", func(): open_phone("overview"), false, 88)
+	_phone_btn.add_theme_font_size_override("font_size", 15)
 	hud.add_child(_phone_btn)
 	# Toasts (top centre).
 	_toasts = S.vbox(8)
@@ -622,25 +622,65 @@ func _open(title: String, width := 860.0, height := 560.0) -> VBoxContainer:
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.35)
+	dim.color = Color(0.03, 0.04, 0.06, 0.18)
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.gui_input.connect(func(ev: InputEvent):
+		var tap: bool = (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT) or (ev is InputEventScreenTouch and ev.pressed)
+		if tap:
+			close_panel(true))
 	_panel_root.add_child(dim)
 	var vs := get_viewport().get_visible_rect().size
 	var ins := _safe_insets(vs)
-	width = minf(width * 1.08, vs.x - float(ins[0]) - float(ins[2]) - 48.0)
-	height = minf(height * 1.08, vs.y - float(ins[1]) - float(ins[3]) - 32.0)
+	width = minf(width, vs.x - float(ins[0]) - float(ins[2]) - 64.0)
+	height = minf(height, vs.y - float(ins[1]) - float(ins[3]) - 56.0)
 	_panel = PanelContainer.new()
-	_panel.add_theme_stylebox_override("panel", Glass.box(Glass.CARD, 34, 26))
+	var psb := Glass.box(Color(Glass.CARD, 0.88), 26, 22)
+	psb.border_color = Glass.RIM
+	psb.set_border_width_all(1)
+	psb.shadow_color = Color(0, 0, 0, 0.34)
+	psb.shadow_size = 24
+	_panel.add_theme_stylebox_override("panel", psb)
 	_panel.custom_minimum_size = Vector2(width, height)
 	var shift := Vector2((float(ins[0]) - float(ins[2])) * 0.5, (float(ins[1]) - float(ins[3])) * 0.5)
-	_anchor(_panel, 0.5, 0.5, -Vector2(width, height) * 0.5 + shift, Vector2(width, height))
+	var rest := Vector2((vs.x - width) * 0.5, (vs.y - height) * 0.5) + shift
+	_panel.position = rest + Vector2(0, 22.0)
+	_panel.size = Vector2(width, height)
+	_panel.modulate.a = 0.0
 	_panel_root.add_child(_panel)
-	var v := S.vbox(14)
+	var tw := _panel.create_tween().set_parallel()
+	tw.tween_property(_panel, "position", rest, 0.18).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_panel, "modulate:a", 1.0, 0.15)
+	var v := S.vbox(12)
 	_panel.add_child(v)
+	# Swipe-down grabber handle for quick gesture dismissal.
+	var grab_hit := MarginContainer.new()
+	grab_hit.mouse_filter = Control.MOUSE_FILTER_STOP
+	grab_hit.add_theme_constant_override("margin_top", 0)
+	grab_hit.add_theme_constant_override("margin_bottom", 4)
+	var grab := Panel.new()
+	grab.custom_minimum_size = Vector2(44, 4)
+	grab.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	grab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grab.add_theme_stylebox_override("panel", Glass.box(Color(Glass.LABEL3, 0.7), 2, 0))
+	grab_hit.add_child(grab)
+	var pdrag := {"on": false}
+	var pnl := _panel
+	grab_hit.gui_input.connect(func(ev: InputEvent):
+		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed:
+			pdrag["on"] = true
+		elif (ev is InputEventScreenTouch or ev is InputEventMouseButton) and not ev.pressed and pdrag["on"]:
+			pdrag["on"] = false
+			if pnl.position.y - rest.y > 80.0:
+				close_panel(true)
+			else:
+				pnl.create_tween().tween_property(pnl, "position", rest, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		elif (ev is InputEventScreenDrag or ev is InputEventMouseMotion) and pdrag["on"]:
+			pnl.position.y = maxf(rest.y, pnl.position.y + ev.relative.y))
+	v.add_child(grab_hit)
 	var head := S.hbox(10)
 	head.add_child(Glass.line(title, "title2"))
-	head.add_child(Glass.icon_button("close", close_panel.bind(true), false, 48))
+	head.add_child(Glass.icon_button("close", close_panel.bind(true), false, 40))
 	v.add_child(head)
 	return v
 
@@ -1868,29 +1908,31 @@ class _Roundel extends Control:
 		draw_string(f, c + Vector2(-w * 0.5, fs * 0.36), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, acc)
 
 
-func open_phone(tab := "home", focus := {}) -> void:
+func open_phone(tab := "overview", focus := {}) -> void:
 	var e := game.empire
 	# (Onboarding: these count as having looked.)
 	if tab == "map":
 		e.flags["opened_map"] = true
-	elif tab == "bank":
+	elif tab in ["bank", "finances"]:
 		e.flags["viewed_finances"] = true
-	elif tab == "property" and not e.businesses.is_empty():
+	elif tab in ["property", "assets"] and not e.businesses.is_empty():
 		e.flags["viewed_expansion"] = true
 	if tab == "style":
 		open_style()
 		return
-	# (Older names for sections.)
-	tab = {"finances": "bank", "garage": "vehicles", "character": "you", "marketplace": "market", "empire": "home"}.get(tab, tab)
+	var resolved := Phone.resolve_section(tab)
+	var sec := String(resolved[0])
+	var sub := String(resolved[1])
 	if phone and is_instance_valid(phone):
 		phone.go(tab, focus)
 		return
 	close_panel(false)
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	Phone.section = tab
+	Phone.section = sec
+	Phone.st(sec)["sub"] = sub
 	if not focus.is_empty():
-		Phone.st(tab)["focus"] = focus
+		Phone.st(sec)["focus"] = focus
 	phone = Phone.new()
 	phone.ui = self
 	phone.game = game

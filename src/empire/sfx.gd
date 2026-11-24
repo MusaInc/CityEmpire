@@ -27,6 +27,9 @@ func _ready() -> void:
 	_streams["bell"] = _tone([[2093.0, 0.35]], 0.25, true)
 	_streams["error"] = _tone([[220.0, 0.12], [0.0, 0.04], [196.0, 0.16]], 0.3)
 	_streams["click"] = _tone([[2400.0, 0.012]], 0.25)
+	_streams["elev_tick"] = _tone([[1320.0, 0.025]], 0.18, true)
+	_streams["elev_door"] = _elev_door()
+	_streams["elev_hum"] = _elev_hum()
 
 
 static func play(name: String, db := 0.0, pitch := 1.0) -> void:
@@ -66,6 +69,51 @@ static func _tone(notes: Array, amp: float, ring := false, thud := false) -> Aud
 			var s := int(clampf(v * amp, -1.0, 1.0) * 32767.0)
 			data.append(s & 0xff)
 			data.append((s >> 8) & 0xff)
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = rate
+	w.stereo = false
+	w.data = data
+	return w
+
+
+static func _elev_door() -> AudioStreamWAV:
+	var rate := 22050
+	var dur := 0.42
+	var n := int(dur * rate)
+	var data := PackedByteArray()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 41
+	var lp := 0.0
+	for i in n:
+		var t := float(i) / rate
+		var env := sin(PI * clampf(t / dur, 0.0, 1.0))
+		lp = lerpf(lp, rng.randf_range(-1.0, 1.0), 0.12)
+		var glide := sin(TAU * (155.0 + 30.0 * (t / dur)) * t) * 0.22
+		var v := (lp * 0.42 + glide) * env * 0.32
+		var s := int(clampf(v, -1.0, 1.0) * 32767.0)
+		data.append(s & 0xff)
+		data.append((s >> 8) & 0xff)
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = rate
+	w.stereo = false
+	w.data = data
+	return w
+
+
+static func _elev_hum() -> AudioStreamWAV:
+	var rate := 22050
+	var dur := 0.95
+	var n := int(dur * rate)
+	var data := PackedByteArray()
+	for i in n:
+		var t := float(i) / rate
+		var env := minf(t / 0.18, 1.0) * minf((dur - t) / 0.22, 1.0)
+		var v := (sin(TAU * 98.0 * t) * 0.55 + sin(TAU * 196.0 * t) * 0.22 + sin(TAU * 294.0 * t) * 0.08) * env * 0.18
+		var s := int(clampf(v, -1.0, 1.0) * 32767.0)
+		data.append(s & 0xff)
+		data.append((s >> 8) & 0xff)
 	var w := AudioStreamWAV.new()
 	w.format = AudioStreamWAV.FORMAT_16_BITS
 	w.mix_rate = rate

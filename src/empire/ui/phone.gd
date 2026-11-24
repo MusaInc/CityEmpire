@@ -18,16 +18,49 @@ extends Control
 ## untouched); closing one returns to exactly where you were.
 
 const SECTIONS := [
-	["home", "Empire", "chart", "ACCENT"], ["map", "Map", "map", "BLUE"], ["market", "Marketplace", "bag", "PINK"],
-	["city500", "City500", "star", "ORANGE"], ["vehicles", "Garage", "car", "TEAL"], ["property", "Property", "property", "GREEN"],
-	["you", "Character", "person", "PURPLE"], ["businesses", "Businesses", "businesses", "ORANGE"], ["bank", "Finances", "bank", "GREEN"],
-	["explore", "Explore", "compass", "BLUE"], ["company", "Corporate", "company", "PURPLE"], ["city", "City", "city", "TEAL"],
-	["goals", "Goals", "goals", "ORANGE"], ["game", "Game", "game", "LABEL2"],
+	["overview", "Overview", "chart", "ACCENT"],
+	["businesses", "Businesses", "businesses", "ACCENT"],
+	["assets", "Assets", "property", "ACCENT"],
+	["map", "Map", "map", "ACCENT"],
+	["profile", "Profile", "person", "ACCENT"],
 ]
-const TABS := ["home", "map", "market", "city500", "more"]
+const TABS := ["overview", "businesses", "assets", "map", "profile"]
+
+## Maps any legacy section/tab key onto one of the 5 unified sections + sub-tab.
+static func resolve_section(raw: String) -> Array:
+	match raw:
+		"overview", "home", "empire", "":
+			return ["overview", "summary"]
+		"bank", "finances":
+			return ["overview", "finances"]
+		"city":
+			return ["overview", "city"]
+		"goals":
+			return ["overview", "goals"]
+		"businesses":
+			return ["businesses", "shops"]
+		"company", "corporate":
+			return ["businesses", "corporate"]
+		"city500":
+			return ["businesses", "city500"]
+		"assets", "property":
+			return ["assets", "property"]
+		"vehicles", "garage":
+			return ["assets", "garage"]
+		"market", "marketplace":
+			return ["assets", "market"]
+		"map":
+			return ["map", "city_map"]
+		"explore":
+			return ["map", "explore"]
+		"profile", "you", "character":
+			return ["profile", "character"]
+		"game", "settings", "more":
+			return ["profile", "game"]
+	return ["overview", "summary"]
 
 ## Session state (survives closing the phone).
-static var section := "home"
+static var section := "overview"
 static var stacks := {}        # section -> [{page, args, title}]
 static var scroll_mem := {}    # "section|page|args" -> [[v, h], …] per scroll container (tree order)
 static var state := {}         # section -> Dictionary (filters, selection, search)
@@ -56,7 +89,7 @@ var _tab_btns := {}            # tab key -> {btn, icon, label}
 
 
 static func clear_caches() -> void:
-	section = "home"
+	section = "overview"
 	stacks.clear()
 	scroll_mem.clear()
 	state.clear()
@@ -135,9 +168,12 @@ func _want_compact(vs: Vector2) -> bool:
 
 
 # ---------------------------------------------------------------- shell
+var _frame: Control = null
+var _status_clock: Label = null
+var _status_cash: Label = null
+
+
 func _build() -> void:
-	if _side_scroll != null and is_instance_valid(_side_scroll):
-		_saved_side_scroll = _side_scroll.scroll_vertical
 	for c in get_children():
 		c.queue_free()
 	_sheet = null
@@ -147,47 +183,194 @@ func _build() -> void:
 	_side_cash_l = null
 	_side_recents_host = null
 	_tab_btns.clear()
+	_frame = null
 	var vs := get_viewport_rect().size
 	_built_size = vs
-	compact = _want_compact(vs)
+	compact = vs.x < 980.0
 	Glass.set_dark(Glass.want_dark(game.empire.minute if game and game.empire else -1.0))
 	theme = EmpireStyle.theme()
 	var safe := _safe_insets(vs)
-	# The city behind, blurred and tinted: the app's one true backdrop blur pass.
-	var back := Glass.surface(0.0, 0.0, Glass.BG, false, false)
+	# Subtle translucent scrim — keeps the live 3D open world clearly visible!
+	# Tapping anywhere outside the smartphone frame seamlessly pockets the phone.
+	var back := ColorRect.new()
+	back.color = Glass.BG
 	back.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	back.mouse_filter = Control.MOUSE_FILTER_STOP
+	back.gui_input.connect(func(ev: InputEvent):
+		var tap: bool = (ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT) or (ev is InputEventScreenTouch and ev.pressed)
+		if tap and not has_sheet():
+			ui.close_panel(true))
 	add_child(back)
-	var top := 18.0 + safe.y
-	if compact:
-		_page_host = Control.new()
-		_page_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		_page_host.offset_left = 22 + safe.x
-		_page_host.offset_right = -22 - safe.z
-		_page_host.offset_top = top
-		_page_host.offset_bottom = 0
-		add_child(_page_host)
-		_tab_bar(vs, safe)
-	else:
-		var sw := 256.0 if vs.x < 1100.0 else 296.0
-		var side := Glass.surface(30.0, 0.0, Color(0, 0, 0, 0), true, true)
-		side.position = Vector2(16 + safe.x, 16 + safe.y)
-		side.size = Vector2(sw, vs.y - 32 - safe.y - safe.w)
-		side.custom_minimum_size = side.size
-		add_child(side)
-		side.add_child(_sidebar())
-		_page_host = Control.new()
-		_page_host.position = Vector2(16 + safe.x + sw + 24, top)
-		_page_host.size = Vector2(vs.x - _page_host.position.x - 24 - safe.z, vs.y - top - 12 - safe.w)
-		add_child(_page_host)
+	# Floating In-Game Smartphone Bezel (compact translucent smoked glass,
+	# docked cleanly on the right on wide screens so the world stays visible on the left).
+	var pad_x := 18.0 + maxf(safe.x, safe.z)
+	var pad_y := 16.0 + maxf(safe.y, safe.w)
+	var pw := minf(vs.x - pad_x * 2.0, 920.0 if section == "map" else 760.0)
+	if vs.x >= 1180.0 and section != "map":
+		pw = minf(vs.x * 0.64, 780.0)
+	var ph := minf(vs.y - pad_y * 2.0, 680.0)
+	var fx := (vs.x - pw - pad_x) if (vs.x >= 1120.0 and section != "map") else (vs.x - pw) * 0.5
+	var fy := (vs.y - ph) * 0.5
+	var frame := PanelContainer.new()
+	var fsb := StyleBoxFlat.new()
+	fsb.bg_color = Glass.TINT
+	fsb.set_corner_radius_all(30)
+	fsb.border_color = Glass.RIM
+	fsb.set_border_width_all(1)
+	fsb.shadow_color = Color(0, 0, 0, 0.36)
+	fsb.shadow_size = 28
+	fsb.shadow_offset = Vector2(0, 10)
+	fsb.content_margin_left = 0
+	fsb.content_margin_right = 0
+	fsb.content_margin_top = 0
+	fsb.content_margin_bottom = 0
+	frame.add_theme_stylebox_override("panel", fsb)
+	frame.position = Vector2(fx, fy)
+	frame.size = Vector2(pw, ph)
+	frame.custom_minimum_size = Vector2(pw, ph)
+	frame.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(frame)
+	_frame = frame
+	var shell := Glass.vbox(0)
+	shell.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	frame.add_child(shell)
+	# Smartphone swipe-down handle + status bar: live clock, spendable cash & close.
+	var top_bar := _status_bar()
+	shell.add_child(top_bar)
+	_wire_swipe_exit(frame, top_bar, Vector2(fx, fy))
+	var rule_top := ColorRect.new()
+	rule_top.color = Glass.SEP
+	rule_top.custom_minimum_size.y = 1
+	shell.add_child(rule_top)
+	# Main scrollable content area.
+	var host_wrap := MarginContainer.new()
+	host_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	host_wrap.add_theme_constant_override("margin_left", 20)
+	host_wrap.add_theme_constant_override("margin_right", 20)
+	host_wrap.add_theme_constant_override("margin_top", 12)
+	host_wrap.add_theme_constant_override("margin_bottom", 8)
+	shell.add_child(host_wrap)
+	_page_host = Control.new()
+	_page_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_page_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	host_wrap.add_child(_page_host)
+	var rule_bot := ColorRect.new()
+	rule_bot.color = Glass.SEP
+	rule_bot.custom_minimum_size.y = 1
+	shell.add_child(rule_bot)
+	# Compact 5-icon floating smartphone dock at bottom of the bezel.
+	shell.add_child(_dock_bar())
 	_sheet_layer = Control.new()
 	_sheet_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_sheet_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_sheet_layer)
+	if not _shell_built:
+		frame.position.y = fy + 26.0
+		frame.modulate.a = 0.0
+		var tw := frame.create_tween().set_parallel()
+		tw.tween_property(frame, "position:y", fy, 0.20).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw.tween_property(frame, "modulate:a", 1.0, 0.16).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	_shell_built = true
-	if _side_scroll != null and _saved_side_scroll > 0:
-		_side_scroll.set_deferred("scroll_vertical", _saved_side_scroll)
 	_show_page(false)
+
+
+func _status_bar() -> Control:
+	var e := game.empire
+	var wrap := Glass.vbox(4)
+	wrap.mouse_filter = Control.MOUSE_FILTER_STOP
+	var grab := Panel.new()
+	grab.custom_minimum_size = Vector2(44, 4)
+	grab.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	grab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grab.add_theme_stylebox_override("panel", Glass.box(Color(Glass.LABEL3, 0.7), 2, 0))
+	wrap.add_child(Glass.margin(grab, 0, 7, 0, 0))
+	var row := Glass.hbox(12)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var brand_dot := ColorRect.new()
+	brand_dot.color = Glass.ACCENT
+	brand_dot.custom_minimum_size = Vector2(8, 8)
+	brand_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	brand_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(brand_dot)
+	_status_clock = Glass.text("Day %d · %s %s" % [e.day, e.weekday(), e.clock_text()], "caption", Glass.LABEL2, "semibold")
+	row.add_child(_status_clock)
+	row.add_child(Glass.spacer())
+	_status_cash = Glass.text(EmpireData.money(e.personal_cash + maxf(e.company_cash, 0.0)), "subhead", Glass.ACCENT_TEXT, "semibold")
+	row.add_child(_status_cash)
+	var cls := Glass.icon_button("close", func(): _animate_exit(), false, 34)
+	row.add_child(cls)
+	wrap.add_child(Glass.margin(row, 20, 2, 14, 8))
+	return wrap
+
+
+func _wire_swipe_exit(frame: Control, handle: Control, rest: Vector2) -> void:
+	var drag := {"on": false, "y0": 0.0, "x0": 0.0}
+	handle.gui_input.connect(func(ev: InputEvent):
+		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed:
+			drag["on"] = true
+			drag["y0"] = ev.position.y
+			drag["x0"] = ev.position.x
+		elif (ev is InputEventScreenTouch or ev is InputEventMouseButton) and not ev.pressed and drag["on"]:
+			drag["on"] = false
+			var dy := frame.position.y - rest.y
+			var dx := frame.position.x - rest.x
+			if dy > 90.0 or dx > 120.0:
+				_animate_exit()
+			else:
+				var tw := frame.create_tween().set_parallel()
+				tw.tween_property(frame, "position", rest, 0.24).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+				tw.tween_property(frame, "modulate:a", 1.0, 0.18)
+		elif (ev is InputEventScreenDrag or ev is InputEventMouseMotion) and drag["on"]:
+			frame.position.y = maxf(rest.y, frame.position.y + ev.relative.y)
+			if rest.x > 60.0:
+				frame.position.x = maxf(rest.x, frame.position.x + maxf(ev.relative.x, 0.0) * 0.65)
+			var pull := maxf((frame.position.y - rest.y) / 260.0, (frame.position.x - rest.x) / 300.0)
+			frame.modulate.a = clampf(1.0 - pull * 0.55, 0.35, 1.0))
+
+
+func _animate_exit() -> void:
+	if _frame == null or not is_instance_valid(_frame):
+		ui.close_panel(true)
+		return
+	var tw := _frame.create_tween().set_parallel()
+	tw.tween_property(_frame, "position:y", _frame.position.y + 80.0, 0.16).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	tw.tween_property(self, "modulate:a", 0.0, 0.15)
+	tw.chain().tween_callback(func(): ui.close_panel(true))
+
+
+func _dock_bar() -> Control:
+	var row := Glass.hbox(6)
+	row.custom_minimum_size.y = 66
+	var m := Glass.margin(row, 14, 6, 14, 8)
+	for key: String in TABS:
+		var on := key == section
+		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size.y = 54
+		var n := Glass.box(Color(Glass.ACCENT, 0.16) if on else Color(0, 0, 0, 0), 16, 0)
+		if on:
+			n.border_color = Color(Glass.ACCENT, 0.45)
+			n.set_border_width_all(1)
+		for s in ["normal", "focus", "hover", "pressed"]:
+			b.add_theme_stylebox_override(s, n)
+		var col := Glass.ACCENT_TEXT if on else Glass.LABEL2
+		var cv := Glass.vbox(2)
+		cv.alignment = BoxContainer.ALIGNMENT_CENTER
+		cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cv.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		var ic := Glass.Symbol.new(icon_of(key), col, 22)
+		ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		cv.add_child(ic)
+		var lb := Glass.text(title_of(key), "caption2", col, "semibold" if on else "medium")
+		lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cv.add_child(lb)
+		b.add_child(cv)
+		Glass.feedback(b, func(): go(key))
+		row.add_child(b)
+		_tab_btns[key] = {"btn": b, "icon": ic, "label": lb}
+	return m
 
 
 ## Safe-area insets in canvas px (left, top, right, bottom): notch,
@@ -368,14 +551,12 @@ func _tab_bar(vs: Vector2, safe: Vector4) -> void:
 ## Updates sidebar / tab bar highlights, spendable cash and recents in-place
 ## without tearing down the shell or losing sidebar scroll position.
 func _sync_nav() -> void:
-	if _side_cash_l != null and is_instance_valid(_side_cash_l) and game and game.empire:
+	if game and game.empire:
 		var e := game.empire
-		_side_cash_l.text = EmpireData.money(e.personal_cash + maxf(e.company_cash, 0.0))
-	for key in _side_btns:
-		var b: Button = _side_btns[key]
-		if is_instance_valid(b):
-			_style_side_item(b, String(key) == section)
-	var cur := section if section in TABS else "more"
+		if _status_cash != null and is_instance_valid(_status_cash):
+			_status_cash.text = EmpireData.money(e.personal_cash + maxf(e.company_cash, 0.0))
+		if _status_clock != null and is_instance_valid(_status_clock):
+			_status_clock.text = "Day %d · %s %s" % [e.day, e.weekday(), e.clock_text()]
 	for key in _tab_btns:
 		var entry: Dictionary = _tab_btns[key]
 		var b: Button = entry["btn"]
@@ -383,11 +564,14 @@ func _sync_nav() -> void:
 		var lb: Label = entry["label"]
 		if not is_instance_valid(b):
 			continue
-		var on := String(key) == cur
-		var n := Glass.box(Glass.FILL2 if on else Color(0, 0, 0, 0), 36, 0)
+		var on := String(key) == section
+		var n := Glass.box(Color(Glass.ACCENT, 0.16) if on else Color(0, 0, 0, 0), 16, 0)
+		if on:
+			n.border_color = Color(Glass.ACCENT, 0.45)
+			n.set_border_width_all(1)
 		for s in ["normal", "focus", "hover", "pressed"]:
 			b.add_theme_stylebox_override(s, n)
-		var col := Glass.ACCENT_TEXT if on else Glass.LABEL
+		var col := Glass.ACCENT_TEXT if on else Glass.LABEL2
 		ic.color = col
 		if ic._old != null and is_instance_valid(ic._old):
 			ic._old.set("color", col)
@@ -423,22 +607,28 @@ func _needs_shell_rebuild() -> bool:
 ## section again = refresh in place (scroll kept).
 func go(sec: String, focus := {}) -> void:
 	dismiss_sheet(false)
-	if sec == section and focus.is_empty():
-		# Tapping the current tab again pops to its root (iOS), else refresh.
-		if (_stack(sec) as Array).size() > 1:
+	var resolved := resolve_section(sec)
+	var target_sec := String(resolved[0])
+	var target_sub := String(resolved[1])
+	var was_sub := String(st(target_sec).get("sub", ""))
+	if sec != target_sec:
+		st(target_sec)["sub"] = target_sub
+	if target_sec == section and focus.is_empty() and (sec == target_sec or was_sub == target_sub):
+		if (_stack(target_sec) as Array).size() > 1:
 			save_scroll()
-			stacks[sec] = [_stack(sec)[0]]
+			stacks[target_sec] = [_stack(target_sec)[0]]
 			_sync_nav()
 			_show_page(true)
 		else:
 			refresh()
 		return
 	save_scroll()
-	section = sec
+	var prev_map := section == "map"
+	section = target_sec
 	if not focus.is_empty():
-		st(sec)["focus"] = focus
-	if _needs_shell_rebuild():
-		_build()   # (_build already calls _show_page(false))
+		st(target_sec)["focus"] = focus
+	if _needs_shell_rebuild() or prev_map != (section == "map"):
+		_build()
 		return
 	_sync_nav()
 	_show_page(true)
@@ -501,27 +691,23 @@ func _show_page(animate: bool) -> void:
 	_page = page
 	_page_host.add_child(page)
 	# Header: back · large title · close.
-	var head := Glass.hbox(12)
+	var head := Glass.hbox(10)
 	var depth := (_stack(section) as Array).size()
 	if depth > 1:
-		head.add_child(Glass.icon_button("back", back, true, 52))
+		head.add_child(Glass.icon_button("back", back, true, 42))
 	var tv := Glass.vbox(-2)
 	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_title_l = Glass.line(String(top["title"]) if depth > 1 else title_of(section), "title1" if depth > 1 else "large")
+	_title_l = Glass.line(String(top["title"]) if depth > 1 else title_of(section), "title2")
 	tv.add_child(_title_l)
 	var sub := _subtitle()
 	if sub != "" and depth == 1:
-		tv.add_child(Glass.line(sub, "subhead", Glass.LABEL2))
+		tv.add_child(Glass.line(sub, "caption", Glass.LABEL2))
 	head.add_child(tv)
-	if compact:
-		head.add_child(Glass.icon_button("close", func(): ui.close_panel(true), true, 52))
 	page.add_child(head)
 	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 14)
+	body.add_theme_constant_override("separation", 12)
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page.add_child(body)
-	if compact:
-		page.add_child(Glass.gap(96 + _safe_insets(get_viewport_rect().size).w))   # (clear of the tab bar)
 	PhonePages.build(self, section, String(top["page"]), top["args"], body)
 	# Single crisp transition (0.16s cubic ease-out, subtle 12px slide) with zero blank frames.
 	if animate:
@@ -568,20 +754,18 @@ func save_scroll() -> void:
 func _subtitle() -> String:
 	var e := game.empire
 	match section:
-		"home":
-			return "Day %d · %s %s" % [e.day, e.weekday(), e.clock_text()]
-		"market":
-			return "Businesses, homes, cars and clothes – buy in a tap"
-		"city500":
-			var yr := City500.your_rank(e)
-			return ("You're #%d of 500" % int(yr["rank"])) if int(yr["rank"]) > 0 else "%s to enter the list" % City500.money(float(yr["gap_500"]))
-		"vehicles":
-			return "%d vehicle%s" % [e.vehicles.size(), "" if e.vehicles.size() == 1 else "s"]
-		"property":
-			return "Shops to let, businesses for sale, homes and investments"
+		"overview":
+			var nm := String(e.brand.get("name", ""))
+			return (nm + " · " if nm != "" else "") + "Net worth %s" % EmpireData.money(e.net_worth())
+		"businesses":
+			return "%d active business%s · corporate & rankings" % [e.businesses.size(), "" if e.businesses.size() == 1 else "es"]
+		"assets":
+			return "%d propert%s · %d vehicle%s" % [e.properties.size(), "y" if e.properties.size() == 1 else "ies", e.vehicles.size(), "" if e.vehicles.size() == 1 else "s"]
 		"map":
 			return ""
-	return String(EmpireUI.PHONE_SUB.get(section, ""))
+		"profile":
+			return "Character, style and game settings"
+	return ""
 
 
 # ---------------------------------------------------------------- sheets

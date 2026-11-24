@@ -58,6 +58,8 @@ var car_audio: CarAudio
 var units: Array = []
 var unit_by_id := {}
 var interiors := {}
+var elevators := {}        # home id -> ApartmentElevator
+var _elev_riding := false
 var _front_cells := {}
 var _front_rooms := {}      # unit id -> ShopInterior
 var floor: ShopFloor
@@ -137,6 +139,7 @@ func _ready() -> void:
 			return _title_focus.global_position
 		return vehicle_node().global_position if vehicle_node() else player.global_position
 	print("Skyport Island: %d ms" % (Time.get_ticks_msec() - t1))
+	_build_elevators()
 	EmpireMinimap.bake.call_deferred(self, layout)  # (the minimap's and phone map's city image)
 	atmosphere.configure(args, world)
 	Car.water_check = layout.is_water
@@ -1135,6 +1138,7 @@ func _process(dt: float) -> void:
 	if vehicle_access.active():
 		vehicle_access.tick(dt)
 		return
+	_tick_elevators(dt)
 	_update_spot()
 	_update_indoors()
 	if floor and floor.room:
@@ -1510,6 +1514,15 @@ func _update_indoors() -> void:
 				break
 		if ceiling == INF and venues:
 			ceiling = venues.ceiling_at(p)
+		if ceiling == INF:
+			for el: ApartmentElevator in elevators.values():
+				if el.is_inside_cabin(p):
+					ceiling = el.global_position.y + el.cabin_y + ApartmentElevator.CAB_H - 0.05
+					break
+				elif el.is_inside_lobby(p):
+					var at_upper := absf(p.y - (el.global_position.y + el.top_y + 0.95)) < 2.2
+					ceiling = el.global_position.y + (el.top_y + 2.8 if at_upper else ApartmentElevator.LOBBY_H)
+					break
 	player.indoors = ceiling < INF
 	if audio:
 		audio.shelter = 1.0 if player.indoors else (0.6 if driving != "" else 0.0)
@@ -1669,7 +1682,8 @@ func _update_spot() -> void:
 	var changed: bool = best.get("kind", "") != spot.get("kind", "") or best.get("slot", -9) != spot.get("slot", -9) \
 		or best.get("vehicle", "") != spot.get("vehicle", "") or best.get("interior") != spot.get("interior") \
 		or best.get("site") != spot.get("site") or best.get("model") != spot.get("model") \
-		or best.get("venue_spot") != spot.get("venue_spot")
+		or best.get("venue_spot") != spot.get("venue_spot") or best.get("home", "") != spot.get("home", "") \
+		or best.get("to_top", false) != spot.get("to_top", false)
 	spot = best
 	if changed:
 		spot_changed.emit(spot)
@@ -1840,18 +1854,30 @@ func spot_prompt() -> Array:
 				var q = empire.properties.filter(func(x): return x["id"] == spot["home"])[0]
 				if q.get("let", false):
 					return ["%s · LET TO TENANTS" % String(home["name"]).to_upper(), false]
-				return ["LIFT UP TO %s" % String(home["name"]).to_upper(), true]
+				return ["CALL LIFT · %s" % String(home["name"]).to_upper(), true]
 			if String(home.get("estate", "")) != "":
 				return ["%s · COMES WITH %s" % [String(home["name"]).to_upper(), String(Ventures.estate_def(home["estate"])["name"]).to_upper()], true]
 			return ["FOR SALE · %s · %s" % [home["name"], EmpireData.money(float(home["price"]))], true]
+		"elev_call_g":
+			return ["CALL ELEVATOR TO LOBBY", true]
+		"elev_call_top":
+			var el_t: ApartmentElevator = elevators.get(spot["home"])
+			return ["CALL ELEVATOR TO %s" % (el_t.top_floor_label if el_t else "APARTMENT"), true]
+		"elev_select":
+			var el_s: ApartmentElevator = elevators.get(spot["home"])
+			if bool(spot.get("to_top", true)):
+				return ["PRESS [%s] · %s" % [el_s.top_floor_label if el_s else "UP", String(home_by_id(spot["home"]).get("name", "APARTMENT")).to_upper()], true]
+			return ["PRESS [G] · GROUND LOBBY", true]
 		"home_down":
-			return ["LIFT DOWN TO THE STREET", true]
+			return ["CALL ELEVATOR TO STREET", true]
 		"home_bed":
 			return ["SLEEP TILL 07:00", true]
 		"home_wardrobe":
 			return ["WARDROBE · CHANGE OUTFIT", true]
 		"home_trophies":
 			return ["EMPIRE GALLERY · CITY500", true]
+		"home_jobs":
+			return ["PROPERTY DESK · MANAGE PORTFOLIO", true]
 		"car_door":
 			var v := empire.vehicle(spot["vehicle"])
 			return ["DRIVE %s" % String(EmpireData.vehicle_model(v["model"])["name"]).to_upper(), true]
@@ -2008,18 +2034,43 @@ func act() -> void:
 				ui.open_property(unit_by_id[spot["unit"]])
 		"home_lift":
 			if empire.owns_property(spot["home"]):
-				var h: Dictionary = home_by_id(spot["home"])["h"]
-				_teleport(Apartments.spawn_point(h), atan2(Apartments.outward(h).x, Apartments.outward(h).z) + PI)
-				Sfx.play("bell", -8.0)
+				var el_h: ApartmentElevator = elevators.get(spot["home"])
+				if el_h and not args.has("autoplay"):
+					el_h.call_to(false)
+					ui.toast("Step inside the elevator and press [%s]" % el_h.top_floor_label, "info")
+				else:
+					var h: Dictionary = home_by_id(spot["home"])["h"]
+					if el_h:
+						el_h.snap_to_top(player)
+					_teleport(Apartments.spawn_point(h), atan2(Apartments.outward(h).x, Apartments.outward(h).z) + PI)
+					Sfx.play("chime", -8.0)
 			elif String(home_by_id(spot["home"]).get("estate", "")) != "":
 				ui.open_phone("property")   # (the suite / flat come with their building)
 			else:
 				ui.open_home(home_by_id(spot["home"]))
+		"elev_call_g":
+			var el_g: ApartmentElevator = elevators.get(spot["home"])
+			if el_g:
+				Sfx.play("click", -5.0)
+				el_g.call_to(false)
+		"elev_call_top":
+			var el_u: ApartmentElevator = elevators.get(spot["home"])
+			if el_u:
+				Sfx.play("click", -5.0)
+				el_u.call_to(true)
+		"elev_select":
+			var el_c: ApartmentElevator = elevators.get(spot["home"])
+			if el_c:
+				el_c.ride_to(bool(spot.get("to_top", true)))
 		"home_down":
-			var home2 := home_by_id(spot["home"])
-			var l := home_lift(home2)
-			_teleport(l + Apartments.outward(home2["h"]) * 1.5 + Vector3.UP * 1.0, atan2(-Apartments.outward(home2["h"]).x, -Apartments.outward(home2["h"]).z) + PI)
-			Sfx.play("bell", -8.0)
+			var el_d: ApartmentElevator = elevators.get(spot["home"])
+			if el_d:
+				el_d.call_to(true)
+			else:
+				var home2 := home_by_id(spot["home"])
+				var l := home_lift(home2)
+				_teleport(l + Apartments.outward(home2["h"]) * 1.5 + Vector3.UP * 1.0, atan2(-Apartments.outward(home2["h"]).x, -Apartments.outward(home2["h"]).z) + PI)
+				Sfx.play("bell", -8.0)
 		"home_bed":
 			sleep_until(7.0)
 			save_game()
@@ -2027,6 +2078,8 @@ func act() -> void:
 			ui.open_style(false)
 		"home_trophies":
 			ui.open_phone("city500")
+		"home_jobs":
+			ui.open_phone("property")
 		"car_door":
 			enter_vehicle(spot["vehicle"], true)
 		"car_boot":
@@ -3056,8 +3109,53 @@ func _migrate_penthouse_estate() -> void:
 				"price": SKYPORT_PENTHOUSE, "let": false, "income": 0.0})
 
 
+## Build furnished ground lobbies, shafts and working 3D elevators for every apartment.
+func _build_elevators() -> void:
+	var root := Node3D.new()
+	root.name = "ApartmentElevators"
+	add_child(root)
+	for home in homes():
+		var h: Dictionary = home["h"]
+		var gy: float
+		if h.has("lift"):
+			gy = float((h["lift"] as Vector3).y)
+		elif String(home.get("district", "")) == "east:skyport":
+			gy = SkyportIsland.LAND_Y
+		else:
+			var wc := Apartments.window_center(h) + Apartments.outward(h) * 1.6
+			gy = layout.ground_y(wc.x, wc.z)
+		var el := ApartmentElevator.build(home, gy)
+		root.add_child(el)
+		elevators[String(home["id"])] = el
+
+
+func _tick_elevators(dt: float) -> void:
+	if elevators.is_empty():
+		return
+	var riding := false
+	for hid: String in elevators:
+		var el: ApartmentElevator = elevators[hid]
+		var owns := empire.owns_property(hid)
+		if owns:
+			var q := empire.properties.filter(func(x): return x["id"] == hid)
+			if not q.is_empty() and q[0].get("let", false):
+				owns = false
+		el.tick(dt, player, owns)
+		if el.is_riding():
+			riding = true
+	if riding and not _elev_riding:
+		_elev_riding = true
+		player.scripted = true
+	elif not riding and _elev_riding:
+		_elev_riding = false
+		player.scripted = false
+
+
 ## Street door of a home's tower (below its window, on the pavement).
 func home_lift(home: Dictionary) -> Vector3:
+	var el: ApartmentElevator = elevators.get(String(home.get("id", "")))
+	if el:
+		return el.street_door_world()
 	var h: Dictionary = home["h"]
 	if h.has("lift"):
 		return h["lift"]
@@ -3067,24 +3165,57 @@ func home_lift(home: Dictionary) -> Vector3:
 
 func _home_spots(p: Vector3, best: Dictionary, best_d: float) -> Array:
 	for home in homes():
-		var lift := home_lift(home)
-		var d := Vector2(p.x, p.z).distance_to(Vector2(lift.x, lift.z))
-		if d < 2.2 and absf(p.y - 0.9 - lift.y) < 2.0 and d < best_d:
-			best = {"kind": "home_lift", "home": home["id"], "world": lift}
-			best_d = d
-		if empire.owns_property(home["id"]):
+		var hid := String(home["id"])
+		var owns := empire.owns_property(hid)
+		var is_let := false
+		if owns:
+			var q := empire.properties.filter(func(x): return x["id"] == hid)
+			if not q.is_empty() and q[0].get("let", false):
+				is_let = true
+		var el: ApartmentElevator = elevators.get(hid)
+		if el:
+			# Inside the 3D elevator cabin: functional floor selector button!
+			if owns and not is_let and el.is_inside_cabin(p):
+				if el.state in ["idle_g", "idle_top"]:
+					return [{"kind": "elev_select", "home": hid, "to_top": not el.at_top, "world": el.cabin_panel_world()}, 0.1]
+				return [{}, 0.1]
+			# Ground lobby entrance & call button
+			var ent := el.street_door_world()
+			var d_ent := Vector2(p.x, p.z).distance_to(Vector2(ent.x, ent.z))
+			if d_ent < 2.4 and absf(p.y - 0.9 - ent.y) < 2.2 and d_ent < best_d:
+				if not owns or is_let or args.has("autoplay"):
+					best = {"kind": "home_lift", "home": hid, "world": ent}
+					best_d = d_ent
+			var gcall := el.ground_call_world()
+			var d_gc := p.distance_to(gcall + Vector3.UP * 1.0)
+			if d_gc < 2.0 and d_gc < best_d:
+				if not owns or is_let:
+					best = {"kind": "home_lift", "home": hid, "world": gcall}
+					best_d = d_gc
+				elif el.at_top and el.state == "idle_top":
+					best = {"kind": "elev_call_g", "home": hid, "world": gcall}
+					best_d = d_gc
+			# Upper private landing call button (when cabin is at ground floor)
+			if owns and not is_let:
+				var ucall := el.upper_call_world()
+				var d_uc := p.distance_to(ucall + Vector3.UP * 1.0)
+				if d_uc < 2.0 and not el.at_top and el.state == "idle_g" and d_uc < best_d:
+					best = {"kind": "elev_call_top", "home": hid, "world": ucall}
+					best_d = d_uc
+		else:
+			var lift := home_lift(home)
+			var d := Vector2(p.x, p.z).distance_to(Vector2(lift.x, lift.z))
+			if d < 2.2 and absf(p.y - 0.9 - lift.y) < 2.0 and d < best_d:
+				best = {"kind": "home_lift", "home": hid, "world": lift}
+				best_d = d
+		if owns:
 			var h: Dictionary = home["h"]
-			var up := Apartments.spawn_point(h) - Vector3.UP * 0.95
-			var d2 := p.distance_to(up + Vector3.UP * 0.95)
-			if d2 < 1.6 and d2 < best_d:
-				best = {"kind": "home_down", "home": home["id"], "world": up}
-				best_d = d2
 			for sp in HomeInteriors.spots.get(String(h["id"]), []):
 				var sk := String(sp["kind"])
-				if sk in ["bed", "wardrobe", "trophies"]:
+				if sk in ["bed", "wardrobe", "trophies", "jobs"]:
 					var d3 := p.distance_to(sp["pos"] + Vector3.UP * 0.95)
 					if d3 < 1.8 and d3 < best_d:
-						best = {"kind": "home_" + sk, "home": home["id"], "world": sp["pos"]}
+						best = {"kind": "home_" + sk, "home": hid, "world": sp["pos"]}
 						best_d = d3
 	return [best, best_d]
 
