@@ -67,7 +67,7 @@ void person_pose(inout vec3 v, inout vec3 n, int limb, float ph, float walk, flo
 // its limb; lw: how much it follows the lower segment (shin / forearm).
 // Pivots are the hero rig's (metres up): hip 0.94, knee 0.49, shoulder 1.5,
 // elbow 1.21.
-void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float ph, float walk, float carry, float look) {
+void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float ph, float walk, float carry, float look, float alarm) {
 	float cycle = sin(ph);
 	float sw = cycle * walk;
 	float height = v.y;
@@ -75,9 +75,9 @@ void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, flo
 		float side = limb == 1 ? -1.0 : 1.0;
 		float swing = -cycle * side;
 		float through = cos(ph) * -side;
-		float a = sw * -side * 0.33;
+		float a = sw * -side * (0.33 + 0.23 * alarm);
 		// The knee flexes during swing, then extends before heel contact.
-		float k = (max(through, 0.0) * (0.17 + 0.61 * max(-swing, 0.0)) + 0.045) * walk;
+		float k = (max(through, 0.0) * (0.17 + (0.61 + 0.37 * alarm) * max(-swing, 0.0)) + 0.045) * walk;
 		vec3 vk = pitch_about(v, vec3(0.0, 0.49, 0.02), -k);
 		v = mix(v, vk, lw);
 		n = normalize(mix(n, pitch_dir(n, -k), lw));
@@ -93,8 +93,8 @@ void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, flo
 		n = normalize(mix(n, pitch_dir(n, rollover), foot));
 	} else if (limb == 3 || limb == 4) {
 		float side = limb == 3 ? -1.0 : 1.0;
-		float a = mix((sw * side - cos(ph) * side * walk * 0.16) * 0.32, 0.30, carry);
-		float e = 0.13 + 0.12 * walk + 1.18 * carry + max(0.0, sw * side) * 0.24;
+		float a = mix((sw * side - cos(ph) * side * walk * 0.16) * (0.32 + 0.21 * alarm), 0.30, carry);
+		float e = 0.13 + 0.12 * walk + 1.18 * carry + 0.55 * alarm + max(0.0, sw * side) * 0.24;
 		vec3 ve = pitch_about(v, vec3(0.0, 1.21, 0.0), e);
 		v = mix(v, ve, lw);
 		n = normalize(mix(n, pitch_dir(n, e), lw));
@@ -107,6 +107,9 @@ void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, flo
 		v.xz = vec2(v.x * c - v.z * s, v.x * s + v.z * c);
 		n.xz = vec2(n.x * c - n.z * s, n.x * s + n.z * c);
 	}
+	float lean = -alarm * (0.10 + 0.14 * walk) * smoothstep(0.91, 1.34, height);
+	v = pitch_about(v, vec3(0.0, 0.94, 0.0), lean);
+	n = pitch_dir(n, lean);
 	float torso = smoothstep(0.89, 1.55, height);
 	float yaw = sw * (0.07 * torso - 0.025) * (1.0 - 0.75 * carry);
 	float c = cos(yaw);

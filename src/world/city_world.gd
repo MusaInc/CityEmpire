@@ -164,6 +164,13 @@ var far_city: FarCity
 var _pending := {}     # key -> WorkerThreadPool task id
 var _results := {}     # key -> Dictionary of mesh arrays
 var _mutex := Mutex.new()
+var _stream_pos := Vector2.INF
+var _stream_axis := Vector2.ZERO
+var _stream_vista := -1.0
+var _stream_lead := 0.0
+var _stream_order: Array = []
+var _stream_cursor := 0
+var _stream_cam_axis := Vector2.ZERO
 var _want := {}        # key -> distance, from the latest streaming update
 var chunks_built := 0
 var gen_ms_total := 0.0
@@ -754,10 +761,10 @@ func _materials() -> void:
 	ground_mat = ShaderMaterial.new()
 	ground_mat.shader = load("res://src/world/shaders/ground.gdshader")
 	# Packed surface detail (assets/textures/pbr/SOURCES.md).
-	ground_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/worldstate_street_asphalt.png"))
-	ground_mat.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/worldstate_pavement_concrete.png"))
+	ground_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/street_asphalt_scan.png"))
+	ground_mat.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/pavement_concrete_scan.png"))
 	ground_mat.set_shader_parameter("pbr_on", true)
-	building_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/worldstate_street_asphalt.png"))
+	building_mat.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/street_asphalt_scan.png"))
 	building_mat.set_shader_parameter("pbr_on", true)
 	building_mat.set_shader_parameter("wall_tex", load("res://assets/textures/pbr/concrete_wall_008.png"))
 	building_mat.set_shader_parameter("brick_tex", load("res://assets/textures/pbr/codex_brick.png"))
@@ -1904,44 +1911,62 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 	# Elevated homes need distant skyline chunks after the initial spawn load.
 	var elevation := maxf(0.0, pos.y - layout.ground_y(pos.x, pos.z))
 	var vista_range := view_distance + minf(elevation * 1.5, 550.0)
-	# Smart loading: where you'll be in ~4 s (driving, flying) is wanted too,
-	# and what's in front of the camera / ahead of travel loads before what's
-	# behind you.
 	var v2 := Vector2(_vel.x, _vel.z)
-	var ahead := here + v2.limit_length(60.0) * 4.0
-	var fwd := v2.normalized() if v2.length() > 4.0 else Vector2.ZERO
+	var speed := v2.length()
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
-	if fwd == Vector2.ZERO and cam:
+	var camera_axis := Vector2.ZERO
+	if cam != null:
 		var cf := -cam.global_basis.z
-		fwd = Vector2(cf.x, cf.z).normalized()
-	for key in _all_keys:
-		var c := (Vector2(key) + Vector2(0.5, 0.5)) * CHUNK
-		var d := c.distance_to(here)
-		if d < vista_range + CHUNK * 0.75 or c.distance_to(ahead) < vista_range * 0.9:
-			# Priority: distance, less for chunks ahead, more for those behind
-			# (the chunks round you always come first).
-			var facing := fwd.dot((c - here).normalized()) if d > CHUNK else 0.0
-			want[key] = d * (1.0 - 0.4 * maxf(facing, 0.0) + 0.5 * maxf(-facing, 0.0))
-		elif _loaded.has(key) and d > vista_range + CHUNK * 1.25:
-			var old := _loaded[key] as Node3D
-			remove_child(old)
-			_loaded.erase(key)
-			if far_city:
-				far_city.set_streamed(key, false)
-			old.queue_free()
-	_want = want
-	# Most wanted first.
-	var order := want.keys()
-	order.sort_custom(func(a, b): return want[a] < want[b])
+		camera_axis = Vector2(cf.x, cf.z).normalized()
+	var fwd := v2.normalized() if speed > 3.5 else camera_axis
+	# Keep both the direction of travel and the view represented when the
+	# driver pans sideways. Extend a narrow corridor instead of a second circle.
+	var lead := clampf(speed * 4.2, 0.0, 320.0)
+	if here.distance_squared_to(_stream_pos) > 7.0 * 7.0 or fwd.distance_squared_to(_stream_axis) > 0.03 \
+			or camera_axis.distance_squared_to(_stream_cam_axis) > 0.12 \
+			or absf(vista_range - _stream_vista) > 12.0 or absf(lead - _stream_lead) > 15.0:
+		_stream_pos = here
+		_stream_axis = fwd
+		_stream_vista = vista_range
+		_stream_lead = lead
+		_stream_cam_axis = camera_axis
+		var route_axis := fwd
+		if speed > 7.5 and elevation < 4.0:
+			var road_axis := layout.roads.travel_axis(here, fwd)
+			var upcoming := layout.roads.travel_axis(here + road_axis * minf(lead, 36.0), road_axis)
+			route_axis = fwd.lerp(upcoming, 0.6).normalized()
+		for key in _all_keys:
+			var c := (Vector2(key) + Vector2(0.5, 0.5)) * CHUNK
+			var offset := c - here
+			var radius := vista_range + CHUNK * 0.75
+			var d2 := offset.length_squared()
+			var along := offset.dot(route_axis)
+			var cross_track := absf(offset.cross(route_axis))
+			var corridor := speed > 7.5 and along > 0.0 and along < radius + lead and cross_track < CHUNK * 1.25
+			if d2 < radius * radius or corridor:
+				var facing := along / sqrt(d2) if d2 > CHUNK * CHUNK else 0.0
+				var camera_facing := camera_axis.dot(offset) / maxf(sqrt(d2), 1.0)
+				want[key] = sqrt(d2) * (1.0 - 0.32 * maxf(facing, 0.0) - 0.13 * maxf(camera_facing, 0.0) + 0.38 * maxf(-facing, 0.0))
+			elif _loaded.has(key) and d2 > pow(radius + CHUNK * 0.66, 2.0):
+				var old := _loaded[key] as Node3D
+				remove_child(old)
+				_loaded.erase(key)
+				if far_city:
+					far_city.set_streamed(key, false)
+				old.queue_free()
+		_want = want
+		_stream_order = want.keys()
+		_stream_order.sort_custom(func(a, b): return _want[a] < _want[b])
+		_stream_cursor = 0
 	var in_flight := _pending.size()
-	for key in order:
+	while _stream_cursor < _stream_order.size() and in_flight < 3:
+		var key: Vector2i = _stream_order[_stream_cursor]
+		_stream_cursor += 1
 		_mutex.lock()
 		var ready: bool = _results.has(key)
 		_mutex.unlock()
 		if _loaded.has(key) or _pending.has(key) or ready:
 			continue
-		if in_flight >= 3:
-			break
 		_request(key)
 		in_flight += 1
 	Prof.end("stream_select")

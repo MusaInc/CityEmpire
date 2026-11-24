@@ -29,3 +29,9 @@ material-specific roughness in one mipmapped texture. The outdoor maps are
 | `worldstate_retail_ceramic.png` | Shop tile floors |
 | `worldstate_retail_oak.png` | Wood floors in cafés and fashion shops |
 | `worldstate_retail_terrazzo.png` | Electronics retail floors |
+
+The Mobile refinement blends the original asphalt and paving studies with the
+listed Poly Haven asphalt and concrete scans. The generated
+`street_asphalt_scan.png` and `pavement_concrete_scan.png` retain packed detail
+channels, mipmaps and GPU compression. Regenerate them with
+`godot --headless -s res://tools/textures/blend_street_scans.gd`.

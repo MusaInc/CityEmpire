@@ -90,6 +90,7 @@ var stuck_time := 0.0
 var upside_time := 0.0
 var steer_angle := 0.0
 var last_impact_time := -10.0
+var last_impact_strength := 0.0
 var grip_loss := 0.0           # seconds of reduced grip after a heavy hit
 var puncture := 0.0            # 1 = tyres shredded by a spike strip
 var climbed_kerb := 0.0        # > 0 just after hopping a kerb/ledge (camera, audio)
@@ -848,6 +849,7 @@ func _handle_impacts() -> void:
 	if _time - last_impact_time < 0.12 and dv < 8.0:
 		return
 	last_impact_time = _time
+	last_impact_strength = dv
 	var local := global_transform.affine_inverse() * at
 	var side := "front"
 	var size: Vector3 = spec["size"]

@@ -190,6 +190,12 @@ CARS = {
                  bon_exp=1.0, HAUNCH=(0.0, 0.0), TUMBLE=0.03, REAR_EXP=14.0, END_RF=0.22, END_RR=0.16, RAKE_ZF=2.5,
                  RAKE_KF=0.0, RAKE_ZR=2.5, RAKE_KR=0.0, RAKE_CHIN=0.5, CREASE_RINGS={5: 1.0, 7: 0.9}),
         wheel="steel", paint="b0201a", feats=["bus_kit"], grille="bus", lamps="square", doors=0, dec=0.3),
+    "courier_van": dict(label="COURIER", reg="VN62 DLV",
+        d=design(5.0, 2.0, 1.98, 2.93, 0.95, 0.34, 0.18, 1.12, 0.98, "van", 0.225,
+                 lambda AX, YF, YR: (AX[0] - 0.35, AX[0] - 1.02, YR + 0.18, YR + 0.1),
+                 rear_z=1.22, tail_z=1.22, TUMBLE=0.075, END_RF=0.17, END_RR=0.03),
+        dec=0.27, wheel="steel", paint="e9e6df", feats=["sliding_door", "skirt_clad"],
+        grille="slats", lamps="square", doors=2),
     "civ_box": dict(label="HAULER", reg="BX70 WSE",
         d=design(6.4, 2.24, 2.3, 3.6, 1.0, 0.44, 0.3, 1.32, 1.2, "box", 0.28,
                  lambda AX, YF, YR: (AX[0] + 0.25, AX[0] - 0.38, AX[0] - 0.95, AX[0] - 1.0), rear_z=1.0, tail_z=0.98,
@@ -751,13 +757,14 @@ def build_car(name):
         else:
             yb = K.Y_TG + 0.02
             lines.append([(yb, K.SILL_Z), (yb, top(yb))])
-    gs = K.Surface([clean])
+    # Use the actual rendered shell, including the wheel-arch cuts.
+    gs = K.Surface([body])
     for ln in lines:
         F.gap_decal(gs, m, out, ln, "side", side=0)
     for sx in (1, -1):
         bon = [(sx * (hw(y) - (0.16 if kind != "mid" else 0.3)), y) for y in (K.Y_COWL + 0.04, (K.Y_COWL + YF) / 2, YF - 0.2)]
-        if YF - 0.2 > K.Y_COWL + 0.1:
-            F.gap_decal(gs, m, out, bon, "top")
+        if kind != "mid" and YF - 0.2 > K.Y_COWL + 0.1:
+            F.gap_decal(gs, m, out, bon, "top", w=0.0035, lift=0.0018)
     if kind in ("saloon", "muscle", "coupe"):
         for sx in (1, -1):
             xi = W2 * (0.5 if kind != "muscle" else 0.56) - 0.018     # (lines up with the rear shut line)
@@ -1042,12 +1049,30 @@ def build_car(name):
         z = rear + 0.27
         wing(m, out, YR + 0.3, z, 2 * W2 * 0.84, 0.3, 0.12, angle=10, base_z=rear_at(YR + 0.3))
     if "louvres" in feats:
+        # Folded extractors pick up highlights and have a real trailing edge.
+        # Keep the shell solid underneath, without a wide dark strip on paint.
+        deck = K.Surface([body])
         for i in range(6):
             y = K.Y_RE - 0.55 - i * 0.12
             if y < YR + 0.45:
                 break
-            rx = K.ring(y)[2].x * 0.6
-            F.gap_decal(gs, m, out, [(-rx, y), (rx, y)], "top", w=0.035)
+            rx = K.ring(y)[2].x * (0.56 - i * 0.025)
+            shape = K.poly_fn([(-rx, y - 0.024), (rx, y - 0.024),
+                               (rx * 0.94, y + 0.020), (-rx * 0.94, y + 0.020)])
+            hits = K.patch(deck, "top", shape, 16, 2, 1)
+            rows = []
+            for row in hits:
+                projected = []
+                for hit in row:
+                    if hit is None:
+                        projected.append(None)
+                        continue
+                    point, normal = hit
+                    t = min(1.0, max(0.0, (point.y - y + 0.024) / 0.044))
+                    lift = (1.0 - (abs(point.x) / max(0.01, rx)) ** 4) * (0.003 + 0.019 * t)
+                    projected.append((point + normal * lift, normal))
+                rows.append(projected)
+            out.append(K.sheet("folded extractor", rows, 0.001, m["paint"], thick=0.007))
     if "roof_scoop_mid" in feats or "roof_scoop" in feats:
         y = K.Y_WS - 0.35 if "roof_scoop" in feats else K.Y_RE - 0.15
         z = roof_at(y)

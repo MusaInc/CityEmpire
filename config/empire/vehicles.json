@@ -24,6 +24,7 @@
   "van": {
    "name": "Courier Van",
    "body": "civ_van",
+   "art": "courier_van",
    "base": "civ",
    "cargo": 30,
    "price": 6500,

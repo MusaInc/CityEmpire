@@ -758,6 +758,30 @@ func field_texture() -> ImageTexture:
 
 
 # ------------------------------------------------------------ queries
+## Local heading of travel on the nearest aligned carriageway.
+func travel_axis(p: Vector2, heading: Vector2) -> Vector2:
+	var cell := Vector2i(floori(p.x / SEG_CELL), floori(p.y / SEG_CELL))
+	var axis := heading
+	var best := INF
+	for index in _seg_grid.get(cell, []):
+		var seg: Array = _segs[index]
+		var a: Vector2 = seg[0]
+		var b: Vector2 = seg[1]
+		var dir := (b - a).normalized()
+		var alignment := dir.dot(heading)
+		if absf(alignment) < 0.68:
+			continue
+		var distance := Geometry2D.get_closest_point_to_segment(p, a, b).distance_squared_to(p)
+		var allowed := float(seg[2]) + 4.0
+		if distance > allowed * allowed:
+			continue
+		var score := distance + (1.0 - absf(alignment)) * 28.0
+		if score < best:
+			best = score
+			axis = dir if alignment > 0.0 else -dir
+	return axis
+
+
 ## Points every `step` m along a named road (from `from_t` to `to_t` metres).
 func along(name: String, step: float, from_t := 0.0, to_t := INF) -> Array:
 	var r: Dictionary = by_name.get(name, {})

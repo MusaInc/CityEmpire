@@ -1732,8 +1732,8 @@ func _ground_mat() -> ShaderMaterial:
 		return ground_mat
 	var m := ShaderMaterial.new()
 	m.shader = load("res://src/world/shaders/island_ground.gdshader")
-	m.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/worldstate_street_asphalt.png"))
-	m.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/worldstate_pavement_concrete.png"))
+	m.set_shader_parameter("asph_tex", load("res://assets/textures/pbr/street_asphalt_scan.png"))
+	m.set_shader_parameter("pave_tex", load("res://assets/textures/pbr/pavement_concrete_scan.png"))
 	m.set_shader_parameter("pbr_on", true)
 	m.set_shader_parameter("skyport_grass", true)
 	var edge := w(Vector3(0.0, 0.0, 180.0))

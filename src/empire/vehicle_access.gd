@@ -62,10 +62,16 @@ static func geometry(body: PhysicsBody3D) -> Dictionary:
 		var wh: Array = authored.get("wheel", [0.0, 0.02, -0.44])
 		# The profile names the seated pelvis. The rig's pelvis is 8 cm
 		# above the player's root, so use that same offset in both transitions.
-		var seat_y := float(hip[1]) - CharacterRig.PELVIS_ABOVE_PLAYER_ROOT
+		var roof: Array = authored.get("roof_samples", [dims.y])
+		var roof_y := minf(float(roof[0]), float(roof[mini(2, roof.size() - 1)]))
+		var low := 1.0 - smoothstep(0.53, 0.83, roof_y - float(hip[1]))
+		var seat_y := float(hip[1]) - CharacterRig.PELVIS_ABOVE_PLAYER_ROOT - 0.09 * low
+		var wheel := Vector3(float(wh[0]), float(wh[1]) + 0.09 * low, float(wh[2]))
+		var ankle_y := maxf(sill_y - 0.10, 0.20) + CharacterRig.ANKLE_H - seat_y
 		return {"edge": dims.x * 0.5 - 0.06, "hinge": hinge, "handle": pull, "interior_pull": int_pull,
 			"seat": Vector3(seat_x * driver_side, seat_y, float(hip[0])),
-			"wheel": Vector3(float(wh[0]), float(wh[1]), float(wh[2])),
+			"wheel": wheel, "roof_room": roof_y - seat_y - 0.065,
+			"ankle": Vector3(0.0, ankle_y, wheel.z - 0.17 - 0.12 * low),
 			"seat_x": seat_x, "driver_side": driver_side, "sill_y": sill_y,
 			"step": clampf(float(hip[1]), 0.37, 0.95), "swing": absf(float(hinge[0]) - float(pull[0])) + 0.15}
 	var craft := body as Craft
@@ -190,7 +196,11 @@ func start(body: PhysicsBody3D, board: bool, found: Dictionary, done: Callable, 
 	prior_fov = current.fov
 	pinned = body is Car and (body as Car).freeze
 	if body is Car:
-		(body as Car).freeze = true
+		var car := body as Car
+		car.freeze = true
+		car.throttle = 0.0
+		car.brake = 1.0
+		game.drive_input.enabled = false
 	var base_seat: Vector3 = profile["seat"]
 	var seat_x: float = absf(float(profile.get("seat_x", base_seat.x)))
 	if body is Car:
@@ -222,6 +232,8 @@ func start(body: PhysicsBody3D, board: bool, found: Dictionary, done: Callable, 
 	game.rig.process_mode = Node.PROCESS_MODE_INHERIT
 	game.rig.vehicle_pose = 0.0
 	game.rig.vehicle_entry_side = side
+	game.rig.vehicle_roof_room = float(profile.get("roof_room", INF))
+	game.rig.vehicle_ankle_offset = profile.get("ankle", Vector3.ZERO)
 	game.rig.vehicle_grip = null
 	game.rig.vehicle_grip_weight = 0.0
 	game.rig.show()
@@ -382,7 +394,7 @@ func tick(dt: float) -> void:
 	var inv_b := 1.0 - board
 	var pos := stand * (inv_b * inv_b) + thresh_world * (2.0 * inv_b * board) + entry_world * (board * board)
 	if _cross_cabin and slide > 0.001:
-		pos = pos.lerp(driver_world, slide) + Vector3.UP * (sin(slide * PI) * 0.045)
+		pos = pos.lerp(driver_world, slide) - Vector3.UP * (sin(slide * PI) * 0.035)
 	player.global_position = pos
 
 	var inward := root.basis.x * -side

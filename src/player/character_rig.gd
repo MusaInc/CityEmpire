@@ -203,6 +203,8 @@ var vehicle_facing := Vector3.FORWARD
 var vehicle_grip: Node3D
 var vehicle_grip_weight := 0.0
 var vehicle_seated := false
+var vehicle_roof_room := INF
+var vehicle_ankle_offset := Vector3.ZERO
 const PELVIS_ABOVE_PLAYER_ROOT := 0.08
 var vehicle_steer := 0.0
 var vehicle_basis := Basis.IDENTITY
@@ -3286,10 +3288,11 @@ func _pose_vehicle_access(dt: float) -> void:
 		q[bone] = Quaternion.IDENTITY
 	var sit := vehicle_pose
 	var lift := sin(sit * PI)
-	var settle := smoothstep(0.62, 1.0, sit)
-	q["spine"] = _rx(-0.19 * lift - 0.065 * settle)
+	var settle := smoothstep(0.41, 0.87, sit)
+	var recline := _cabin_recline() * settle
+	q["spine"] = _rx(-0.24 * lift + recline)
 	q["chest"] = _ry(-0.17 * vehicle_entry_side * lift) * _rx(-0.12 * lift + 0.03 * settle)
-	q["neck"] = _ry(0.12 * vehicle_entry_side * lift) * _rx(0.23 * lift)
+	q["neck"] = _ry(0.12 * vehicle_entry_side * lift) * _rx(0.18 * lift - recline * 0.28)
 	q["head"] = _rx(0.08 * lift - 0.03 * settle)
 	for sd in ["l", "r"]:
 		var sign_x := 1.0 if sd == "r" else -1.0
@@ -3350,6 +3353,7 @@ func _pose_vehicle_access(dt: float) -> void:
 			for i in 2:
 				var bone: String = ("thigh_" if i == 0 else "shin_") + sd
 				_set_bone(bone, (_rot[bone] as Quaternion).slerp(solved[i], foot_weight))
+	_fit_cabin_feet(smoothstep(0.41, 0.96, sit))
 	_gait.reset()
 
 
@@ -3374,9 +3378,10 @@ func _pose_vehicle_seated(dt: float) -> void:
 	var q := {}
 	for bone in BONES:
 		q[bone] = Quaternion.IDENTITY
-	q["spine"] = _rx(-0.075 + breath * 0.5) * _rz(-st * 0.04)
+	var recline := _cabin_recline()
+	q["spine"] = _rx(recline + breath * 0.5) * _rz(-st * 0.04)
 	q["chest"] = _rx(0.03 + breath) * _ry(-st * 0.05) * _rz(-st * 0.03)
-	q["neck"] = _ry(-st * 0.08) * _rx(0.02)
+	q["neck"] = _ry(-st * 0.08) * _rx(0.02 - recline * 0.30)
 	q["head"] = _ry(-st * 0.22) * _rx(-0.03 - breath * 0.4) * _rz(st * 0.03)
 	# Relaxed seated legs: left foot on footrest, right foot angled toward pedals.
 	q["thigh_l"] = _rx(1.42) * _rz(-0.075)
@@ -3390,25 +3395,52 @@ func _pose_vehicle_seated(dt: float) -> void:
 	var wheel_r := 0.175
 	var tilt := 0.40  # ~23° wheel column tilt
 	var wheel_ang := st * 1.15
-	var chest_b := _body_basis * Basis(q["spine"]) * Basis(q["chest"])
+	(bones["hips"] as Node3D).position.y = PELVIS_ABOVE_PLAYER_ROOT
+	(bones["hips"] as Node3D).position.x = 0.0
+	_drive_springs(q, dt, false, false)
+	var chest_b := (bones["chest"] as Node3D).global_basis.orthonormalized()
 	for sd in ["l", "r"]:
 		var sign_x := 1.0 if sd == "r" else -1.0
-		var sh_local: Vector3 = (bones["upper_arm_" + sd] as Node3D).position
+		var shoulder := bones["upper_arm_" + sd] as Node3D
 		# Turning right (st > 0): left hand climbs up & right, right hand drops down & left.
 		var rim_x := sign_x * wheel_r * cos(wheel_ang)
 		var rim_y := -sign_x * wheel_r * sin(wheel_ang)
 		var target_local := wheel_center + Vector3(rim_x, rim_y * cos(tilt), -rim_y * sin(tilt))
-		var rel_local := target_local - sh_local
-		var rel_world := chest_b * rel_local
-		var solved := _two_bone(chest_b, rel_world.normalized(), minf(rel_local.length(), 0.56),
+		var rel_world := to_global(target_local) - shoulder.global_position
+		var solved := _two_bone(chest_b, rel_world.normalized(), minf(rel_world.length(), 0.55),
 			Vector3(0.55 * sign_x, -0.45, 0.55))
-		q["upper_arm_" + sd] = solved[0]
-		q["forearm_" + sd] = solved[1]
-		q["hand_" + sd] = _rx(0.24) * _ry(sign_x * 0.34) * _rz(-sign_x * 0.10 - st * 0.12)
-	(bones["hips"] as Node3D).position.y = PELVIS_ABOVE_PLAYER_ROOT
-	(bones["hips"] as Node3D).position.x = lerpf((bones["hips"] as Node3D).position.x, 0.0, 1.0 - exp(-12.0 * dt))
-	_drive_springs(q, dt, false, false)
+		_set_bone("upper_arm_" + sd, solved[0])
+		_set_bone("forearm_" + sd, solved[1])
+		_set_bone("hand_" + sd, _rx(0.24) * _ry(sign_x * 0.34) * _rz(-sign_x * 0.10 - st * 0.12))
+	_fit_cabin_feet(1.0)
 	_gait.reset()
+
+
+func _cabin_recline() -> float:
+	if is_inf(vehicle_roof_room):
+		return 0.06
+	var upright := 0.0
+	for segment in ["chest", "neck", "head"]:
+		upright += (bones[segment] as Node3D).position.y
+	var allowed := vehicle_roof_room - PELVIS_ABOVE_PLAYER_ROOT - (bones["spine"] as Node3D).position.y - 0.17
+	return clampf(acos(clampf(allowed / maxf(upright, 0.3), 0.55, 1.0)), 0.08, 0.98)
+
+
+func _fit_cabin_feet(weight: float) -> void:
+	if weight < 0.001 or vehicle_ankle_offset == Vector3.ZERO:
+		return
+	var hips := (bones["hips"] as Node3D).global_basis.orthonormalized()
+	for sd in ["l", "r"]:
+		var sign_x := -1.0 if sd == "l" else 1.0
+		var ankle := to_global(vehicle_ankle_offset + Vector3(sign_x * 0.115, 0.0, 0.06 if sd == "l" else 0.0))
+		var direction := ankle - (bones["thigh_" + sd] as Node3D).global_position
+		var solved := _two_bone(hips, direction.normalized(), direction.length(), Vector3(sign_x * 0.22, 1.0, -0.40), 0.45, 0.44, -1.0)
+		for i in 2:
+			var bone: String = ("thigh_" if i == 0 else "shin_") + sd
+			_set_bone(bone, (_rot[bone] as Quaternion).slerp(solved[i], weight))
+		var foot := bones["foot_" + sd] as Node3D
+		var flat := Quaternion((foot.get_parent() as Node3D).global_basis.orthonormalized().inverse() * _body_basis)
+		_set_bone("foot_" + sd, (_rot["foot_" + sd] as Quaternion).slerp(flat, weight))
 
 
 func trigger_interact() -> void:

@@ -50,12 +50,12 @@ func setup(p_worlds: Array, p_camera_fn: Callable) -> void:
 		var l := SpotLight3D.new()
 		l.name = "Lamp%d" % i
 		l.light_color = Color(1.0, 0.8, 0.58)
-		l.light_energy = 6.2
+		l.light_energy = 5.3
 		l.light_indirect_energy = 0.0
 		l.light_specular = 0.35
-		l.spot_range = 21.5
-		l.spot_angle = 59.0
-		l.spot_angle_attenuation = 0.66
+		l.spot_range = 17.0
+		l.spot_angle = 52.0
+		l.spot_angle_attenuation = 1.05
 		l.spot_attenuation = 1.12
 		l.shadow_enabled = false
 		l.shadow_bias = 0.045

@@ -70,7 +70,7 @@ void vertex() {
 	// Match stride length to this instance's scaled leg excursion (zero foot slip across height scales).
 	float z_scale = max(length(MODEL_MATRIX[2].xyz), 0.5);
 	float ph = stride / (0.82 * z_scale) * 3.14159;
-	person_pose_w(v, n, limb, UV2.x, 1.0 - UV2.y, ph, walk, carry, look);
+	person_pose_w(v, n, limb, UV2.x, 1.0 - UV2.y, ph, walk, carry, look, 0.0);
 	person_pose_idle(v, n, limb, UV2.x, 1.0 - UV2.y, walk, carry, TIME, seed);
 	VERTEX = v;
 	NORMAL = n;

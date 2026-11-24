@@ -5,6 +5,8 @@ shader_type spatial;
 // distance so it never shimmers far off) and lets light through (backlight).
 render_mode cull_back;
 
+global uniform float night;
+global uniform float wetness;
 varying vec3 v_wpos;
 varying vec3 v_tint;
 varying float v_leaf;
@@ -34,19 +36,21 @@ void fragment() {
 	vec3 c = COLOR.rgb;
 	if (v_leaf > 0.5) {
 		c *= v_tint;
+		c = mix(c, vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))), 0.13 + 0.12 * night);
 		// Leaf clusters: two scales of cells, stronger up close.
 		float near = 1.0 - smoothstep(25.0, 90.0, v_dist);
 		float n1 = hash13(floor(v_wpos * 2.6));
 		float n2 = hash13(floor(v_wpos * 6.5) + 17.0);
 		c *= mix(1.0, 0.72 + 0.45 * n1, 0.8 * near) * mix(1.0, 0.85 + 0.3 * n2, 0.6 * near);
-		ROUGHNESS = 0.82;
-		BACKLIGHT = c * 0.45;
-		SPECULAR = 0.25;
+		ROUGHNESS = mix(0.84, 0.53, wetness);
+		BACKLIGHT = c * 0.20 * (1.0 - 0.90 * night);
+		SPECULAR = 0.21 + 0.10 * wetness;
 	} else {
 		// Bark: vertical fissures.
 		float f = hash13(floor(vec3(v_wpos.x * 9.0, v_wpos.y * 1.4, v_wpos.z * 9.0)));
 		c *= 0.85 + 0.25 * f;
-		ROUGHNESS = 0.95;
+		ROUGHNESS = mix(0.94, 0.76, wetness);
+		c *= 1.0 - 0.14 * wetness;
 		SPECULAR = 0.2;
 	}
 	ALBEDO = c;

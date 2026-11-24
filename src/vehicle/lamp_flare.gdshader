@@ -29,8 +29,8 @@ void fragment() {
 	vec2 d = UV - vec2(0.5);
 	float r = length(d) * 2.0;
 	float core = pow(clamp(1.0 - r, 0.0, 1.0), 6.0) * 1.6;
-	float halo = pow(clamp(1.0 - r, 0.0, 1.0), 2.4) * 0.3;
+	float halo = pow(clamp(1.0 - r, 0.0, 1.0), 2.7) * 0.19;
 	// A faint horizontal streak (anamorphic) on the bright lamps.
-	float streak = exp(-abs(d.y) * 70.0) * clamp(1.0 - abs(d.x) * 2.0, 0.0, 1.0) * 0.45 * step(0.75, v_col.a);
+	float streak = exp(-abs(d.y) * 70.0) * clamp(1.0 - abs(d.x) * 2.0, 0.0, 1.0) * 0.12 * step(0.75, v_col.a);
 	ALBEDO = v_col.rgb * (core + halo + streak) * v_col.a * night * v_face;
 }

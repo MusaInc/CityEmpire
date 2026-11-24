@@ -560,13 +560,13 @@ void fragment() {
 		// Allow wet pooling across Westbank's gentle hills & sloped junctions
 		// while still draining steep embankments (> ~22 deg).
 		float flatness = smoothstep(0.925, 0.985, normalize(v_wn).y);
-		float basin = n * 0.27 + vnoise(p * vec2(0.31, 0.22) + 46.0) * 0.73;
-		basin += 0.24 * shoulder_depression - 0.13 * wheel_tracks;
-		float threshold = mix(0.86, 0.52, surface_wet);
+		float basin = n * 0.18 + vnoise(p * vec2(0.21, 0.18) + 46.0) * 0.62;
+		basin += 0.32 * shoulder_depression - 0.11 * wheel_tracks;
+		float threshold = mix(0.83, 0.58, surface_wet);
 		puddle = smoothstep(threshold, threshold + max(0.085, aa * 0.14), basin)
 			* flatness * smoothstep(0.24, 0.86, surface_wet);
 		puddle *= 1.0 - smoothstep(115.0, 250.0, camera_distance);
-		albedo *= (1.0 - 0.39 * surface_wet) * (1.0 - 0.18 * puddle);
+		albedo *= (1.0 - (asphalt ? 0.24 : 0.12) * surface_wet) * (1.0 - 0.025 * puddle);
 		rough = mix(rough, asphalt ? 0.36 : 0.51, surface_wet);
 		rough = mix(rough, 0.10, puddle);
 	} else if (!shore && flat_top && grass) {

@@ -13,6 +13,7 @@ var chase_camera: ChaseCamera
 var _rect: ColorRect
 var _mat: ShaderMaterial
 var _speed := 0.0
+var _strength := -1.0
 
 
 func _ready() -> void:
@@ -27,6 +28,7 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_on_size)
 	_on_size()
 	if chase_camera != null:
+		_mat.set_shader_parameter("driving", true)
 		process_mode = Node.PROCESS_MODE_ALWAYS
 		visible = false
 	set_process(chase_camera != null)
@@ -59,5 +61,7 @@ func set_speed(amount: float, dt: float) -> void:
 func _apply() -> void:
 	var strength := BASE + FAST * _speed
 	if chase_camera != null:
-		strength = Settings.driving_lens * (0.012 + 0.018 * _speed)
-	_mat.set_shader_parameter("strength", strength)
+		strength = Settings.driving_lens * (0.026 + 0.035 * _speed)
+	if absf(strength - _strength) > 0.0002:
+		_strength = strength
+		_mat.set_shader_parameter("strength", strength)

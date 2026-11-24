@@ -11,6 +11,7 @@ an empty hollow shell.
 """
 import json
 import math
+import sys
 from pathlib import Path
 
 import bmesh
@@ -34,11 +35,14 @@ ARCHETYPES = {
     "goliath": "suv",
     "warden": "suv",
     "civ_van": "van",
+    "courier_van": "van",
     "civ_box": "truck",
     "mammoth": "truck",
 }
 
-CLEAR_GLASS_BODIES = {"kestrel"}
+ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+ONLY = next((set(arg.split("=", 1)[1].split(",")) for arg in ARGS if arg.startswith("--only=")), set())
+CLEAR_GLASS_BODIES = {"kestrel", "stiletto", "halcyon", "courier_van"}
 
 
 def _door_outline(body, dims):
@@ -47,7 +51,7 @@ def _door_outline(body, dims):
     if body == "kestrel":
         return [(-0.177, 0.35), (0.71, 0.35), (0.86, 0.80),
                 (0.59, 1.15), (0.16, roof - 0.043), (-0.177, roof - 0.043)]
-    if body in {"civ_van", "civ_box", "mammoth"}:
+    if body in {"civ_van", "courier_van", "civ_box", "mammoth"}:
         rear = wb * 0.5 - dims["wheel_r"] - 0.79
         front = min(length * 0.34, wb * 0.5 + 0.02)
         top = min(roof - 0.085, 1.94)
@@ -291,6 +295,12 @@ def build(body, dims):
 dims = json.loads((SOURCE / "bodies.json").read_text())
 models = json.loads(MODELS.read_text())["models"]
 bodies = sorted({m.get("art", m.get("body")) for m in models.values() if m.get("class", "car") == "car"} | {"mammoth"})
-profiles = {body: build(body, dims[body]) for body in bodies if body in dims}
-(ROOT / "config/empire/vehicle_entries.json").write_text(json.dumps(profiles, indent=2) + "\n")
-print(f"VEHICLE ENTRIES BUILT: {len(profiles)} bodies -> config/empire/vehicle_entries.json", flush=True)
+profiles = {body: build(body, dims[body]) for body in bodies if body in dims and (not ONLY or body in ONLY)}
+if "--write-profiles" in ARGS:
+    profile_path = ROOT / "config/empire/vehicle_entries.json"
+    current = json.loads(profile_path.read_text())
+    for body, profile in profiles.items():
+        # Preserve the tuned origins used by existing production vehicles.
+        current[body] = profile | current.get(body, {})
+    profile_path.write_text(json.dumps(current, indent=2) + "\n")
+print(f"VEHICLE ENTRIES BUILT: {len(profiles)} bodies", flush=True)

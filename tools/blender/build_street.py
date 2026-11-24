@@ -29,7 +29,8 @@ from build_kit import box, cyl, dome, export, join, mat, new_obj, reset, sphere 
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = ARGS[0] if ARGS else "assets/models"
-PREVIEW = ARGS[1] if len(ARGS) > 1 else ""
+PREVIEW = next((arg for arg in ARGS[1:] if not arg.startswith("--")), "")
+ONLY = next((arg.split("=", 1)[1].split(",") for arg in ARGS[1:] if arg.startswith("--only=")), ())
 kit.OUT = OUT
 os.makedirs(OUT, exist_ok=True)
 
@@ -229,19 +230,26 @@ def bench():
         p.append(box("leg", (0.06, 0.5, 0.42), (x, 0.0, 0.21), m["iron"]))
         p.append(box("arm", (0.06, 0.45, 0.05), (x, 0.0, 0.62), m["iron"]))
         p.append(box("back_leg", (0.05, 0.05, 0.5), (x, -0.24, 0.65), m["iron"]))
+    for i in range(4):
+        y = -0.169 + i * 0.113
+        p.append(box("slat", (1.8, 0.091, 0.037), (0, y, 0.44), m["wood"], bevel=0.006))
+        for x in (-0.75, 0.75):
+            p.append(cyl("fastener", 0.009, 0.002, (x, y, 0.459), m["steel"], 6))
     for i in range(3):
-        p.append(box("slat", (1.8, 0.11, 0.035), (0, -0.16 + i * 0.14, 0.44), m["wood"]))
-    for i in range(2):
-        p.append(box("back", (1.8, 0.03, 0.1), (0, -0.27, 0.62 + i * 0.16), m["wood"]))
+        p.append(box("back", (1.8, 0.035, 0.082), (0, -0.27 - i * 0.013, 0.57 + i * 0.107), m["wood"], bevel=0.005))
     export("bench.glb", [join("bench", p)])
 
 
 def bin_():
     reset()
     m = furniture_mats()
-    p = [cyl("body", 0.24, 0.9, (0, 0, 0), m["green"], 10),
-         cyl("lid", 0.26, 0.08, (0, 0, 0.9), m["iron"], 10),
-         box("slot", (0.3, 0.02, 0.1), (0, 0.24, 0.74), m["iron"])]
+    p = [cyl("plinth", 0.23, 0.08, (0, 0, 0), m["iron"], 14),
+         cyl("body", 0.232, 0.66, (0, 0, 0.08), m["green"], 14, r2=0.245),
+         cyl("lid", 0.254, 0.09, (0, 0, 0.89), m["iron"], 14, r2=0.232),
+         cyl("liner", 0.192, 0.16, (0, 0, 0.725), m["iron"], 12, cap=False)]
+    for x in (-0.203, 0.203):
+        p.append(box("cap support", (0.054, 0.27, 0.17), (x, 0, 0.812), m["green"], bevel=0.009))
+    p.append(box("lock escutcheon", (0.045, 0.006, 0.067), (0, 0.245, 0.637), m["steel"], bevel=0.004))
     export("bin.glb", [join("bin", p)])
 
 
@@ -261,9 +269,10 @@ def hydrant():
 def bollard():
     reset()
     m = furniture_mats()
-    p = [cyl("post", 0.09, 0.85, (0, 0, 0), m["iron"], 8, r2=0.075),
-         sphere("top", 0.085, (0, 0, 0.86), m["iron"], 8, 4, scale=(1, 1, 0.6)),
-         cyl("band", 0.095, 0.05, (0, 0, 0.7), m["white"], 8)]
+    p = [cyl("base plate", 0.109, 0.027, (0, 0, 0), m["iron"], 12),
+         cyl("post", 0.083, 0.842, (0, 0, 0.026), m["iron"], 12, r2=0.073),
+         cyl("cap", 0.075, 0.027, (0, 0, 0.866), m["iron"], 12, r2=0.065),
+         cyl("reflector", 0.078, 0.025, (0, 0, 0.756), m["white"], 12)]
     export("bollard.glb", [join("bollard", p)])
 
 
@@ -290,15 +299,26 @@ def bus_shelter():
     p.append(box("back_glass", (3.5, 0.03, 1.9), (0, -0.62, 1.25), m["glass"]))
     p.append(box("side_glass", (0.03, 1.1, 1.9), (-1.75, -0.05, 1.25), m["glass"]))
     p.append(box("ad", (0.06, 1.0, 1.6), (1.75, -0.05, 1.15), m["ad"]))
-    p.append(box("seat", (1.8, 0.3, 0.05), (-0.5, -0.42, 0.5), m["steel"]))
+    p.append(box("seat", (1.8, 0.3, 0.05), (-0.5, -0.42, 0.5), m["steel"], bevel=0.01))
+    p.append(box("rear gutter", (3.69, 0.095, 0.085), (0, -0.73, 2.39), m["steel"]))
+    for x in (-1.75, 0.0, 1.75):
+        p.append(box("mullion", (0.041, 0.066, 2.05), (x, -0.62, 1.26), m["iron"]))
+        p.append(box("glazing channel", (1.75, 0.057, 0.036), (x * 0.5, -0.62, 0.278), m["steel"]))
+    for x in (-1.3, 0.28):
+        p.append(box("seat bracket", (0.062, 0.34, 0.086), (x, -0.44, 0.451), m["iron"]))
     export("bus_shelter.glb", [join("bus_shelter", p)])
 
 
 def planter():
     reset()
     m = furniture_mats()
-    p = [box("tub", (1.2, 1.2, 0.55), (0, 0, 0.275), m["stone"], bevel=0.04, segs=1)]
-    p.append(lumpy("shrub", 0.55, (0, 0, 0.85), m["leaf"], 1, 0.2, 0.7))
+    p = [box("footing", (1.11, 1.11, 0.12), (0, 0, 0.06), m["stone"], bevel=0.018),
+         box("soil", (1.08, 1.08, 0.16), (0, 0, 0.33), m["wood"])]
+    for side in (-1, 1):
+        p.append(box("long wall", (1.2, 0.087, 0.47), (0, side * 0.554, 0.295), m["stone"], bevel=0.013))
+        p.append(box("short wall", (0.087, 1.04, 0.47), (side * 0.554, 0, 0.295), m["stone"], bevel=0.013))
+    for x, y, z, r in ((0.07, -0.04, 0.70, 0.43), (-0.27, 0.13, 0.59, 0.24), (0.27, 0.25, 0.58, 0.22)):
+        p.append(lumpy("leaf cluster", r, (x, y, z), m["leaf"], 1, 0.26, 0.8))
     export("planter.glb", [join("planter", p)])
 
 
@@ -331,7 +351,8 @@ def preview(path):
 
 if __name__ == "__main__":
     for fn in (pedestrian, tree, tree_tall, bench, bin_, hydrant, bollard, sign_post, bus_shelter, planter):
-        fn()
+        if not ONLY or fn.__name__.rstrip("_") in ONLY:
+            fn()
     if PREVIEW:
         preview(PREVIEW)
     print("STREET DONE")

@@ -2365,6 +2365,7 @@ func _finish_vehicle_exit(stand: Vector3, from: Transform3D, fov: float, vid: St
 	v["pos"] = [xf.origin.x, xf.origin.y, xf.origin.z]
 	v["yaw"] = xf.basis.get_euler().y
 	drive_input.car = null
+	drive_input.enabled = false
 	speed_fx.player = null
 	c.occupied = false
 	driving = ""
@@ -2419,7 +2420,9 @@ func _update_driver_pose(car: Car) -> void:
 	player.global_position = car.visual.body.to_global(car.visual.driver_seat)
 	rig.vehicle_facing = -car.global_basis.z
 	rig.vehicle_basis = car.visual.body.global_basis
-	rig.vehicle_wheel_offset = VehicleAccess.geometry(car).get("wheel", Vector3(0.0, 0.02, -0.44))
+	rig.vehicle_wheel_offset = car.visual.cabin_profile["wheel"]
+	rig.vehicle_roof_room = car.visual.cabin_profile["roof_room"]
+	rig.vehicle_ankle_offset = car.visual.cabin_profile["ankle"]
 	rig.vehicle_steer = car.steer
 
 

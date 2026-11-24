@@ -377,7 +377,7 @@ func _apply(dt: float, instant: bool) -> void:
 		sky_mat.set_shader_parameter("flash", fl)
 
 	# --- ambient, exposure, fog.
-	env.ambient_light_energy = _rampf(el, [[-15.0, 0.46], [-4.0, 0.49], [2.0, 0.57], [20.0, 0.67]]) \
+	env.ambient_light_energy = _rampf(el, [[-15.0, 0.29], [-4.0, 0.43], [2.0, 0.57], [20.0, 0.67]]) \
 		* (1.0 + 0.16 * overcast + 0.08 * hz * day_light) + fl * 2.0
 	var direct_daylight := day_light * (1.0 - overcast)
 	env.ambient_light_energy *= 1.0 - 0.24 * direct_daylight
@@ -386,7 +386,7 @@ func _apply(dt: float, instant: bool) -> void:
 	# dusky at sunset, moonlit blue at night).
 	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
 		[15.0, Color(0.78, 0.77, 0.76)], [40.0, Color(0.79, 0.81, 0.84)]]).lerp(Color(0.74, 0.75, 0.77), overcast * 0.6)
-	env.tonemap_exposure = lerpf(1.0, 1.28, night) * lerpf(1.0, 1.12, overcast) * (1.0 + 0.04 * hz * day_light)
+	env.tonemap_exposure = lerpf(1.0, 1.13, night) * lerpf(1.0, 1.12, overcast) * (1.0 + 0.04 * hz * day_light)
 	# Depth fog only: a clear near field, subtle blue-grey middle distance,
 	# and skyline silhouettes merging with the horizon. Rooftop views get a
 	# modest visibility lift; no volume textures, raymarching or extra lights.

@@ -144,6 +144,20 @@ const DIMS := {
 		"wheel": "traffic",
 		"wheel_r": 0.34
 	},
+	"courier_van": {
+		"L": 5.0,
+		"W": 2.0,
+		"axles": [
+			1.465,
+			-1.465
+		],
+		"ride": 0.18,
+		"roof": 1.98,
+		"tyre_w": 0.225,
+		"wb": 2.93,
+		"wheel": "steel",
+		"wheel_r": 0.34
+	},
 	"goliath": {
 		"L": 5.7,
 		"W": 2.12,

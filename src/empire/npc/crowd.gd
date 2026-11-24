@@ -42,6 +42,7 @@ var _ground: Callable
 var _island_traffic: IslandTraffic
 var _island_check_t := 0.0
 var _vehicles: Array = []          # [[Vector2 pos, Vector2 vel, float radius]]
+var _panic_calls: Array[Vector2] = []
 var _crossing_entries := {}        # sidewalk loop idx -> [{cross_loop, entry_s, pos}]
 var _crossing_counts := {}         # cross loop idx -> active count (rebuilt once per frame)
 var _eff_density := 1.0
@@ -509,6 +510,11 @@ func _process(dt: float) -> void:
 			_island_traffic = get_tree().get_first_node_in_group("island_traffic") as IslandTraffic
 			_island_check_t = 1.0 if _island_traffic == null else 0.0
 	_collect_vehicles(focus)
+	_panic_calls.clear()
+	for pr in _people:
+		if float(pr.get("fear", 0.0)) > 0.64 and float(pr.get("firsthand", 0.0)) > 0.0:
+			var at: Vector3 = pr["pos"]
+			_panic_calls.append(Vector2(at.x, at.z))
 	_queue_up()
 	var keep: Array = []
 	var crossing_people := PackedVector3Array()
@@ -602,7 +608,11 @@ func _collect_vehicles(focus: Vector3) -> void:
 	_vehicles.clear()
 	var max_d2 := (NEAR + 16.0) * (NEAR + 16.0)
 	var f2 := Vector2(focus.x, focus.z)
-	for car_v in game.cars.values():
+	var live_cars := game.cars.values()
+	if game.pursuit != null and game.pursuit.state == "chase":
+		live_cars.append(game.pursuit.suspect)
+		live_cars.append_array(game.pursuit.police)
+	for car_v in live_cars:
 		var car := car_v as Car
 		if car == null or not is_instance_valid(car):
 			continue
@@ -611,7 +621,9 @@ func _collect_vehicles(focus: Vector3) -> void:
 			continue
 		var sz: Vector3 = car.spec["size"]
 		var rad := maxf(sz.x * 0.5, 0.95)
-		_vehicles.append([cp, Vector2(car.linear_velocity.x, car.linear_velocity.z), rad])
+		var impact := smoothstep(4.0, 12.0, car.last_impact_strength) * (1.0 - smoothstep(0.0, 1.3, car._time - car.last_impact_time))
+		var emergency: bool = car.visual != null and car.visual.siren_on
+		_vehicles.append([cp, Vector2(car.linear_velocity.x, car.linear_velocity.z), rad, car.global_position.y, sz.z * 0.5, impact, emergency])
 	if game.traffic_bodies != null:
 		for entry: Array in game.traffic_bodies.city_cars():
 			var id := int(entry[0])
@@ -622,7 +634,7 @@ func _collect_vehicles(focus: Vector3) -> void:
 				continue
 			var spd := tr.car_speed(id)
 			var fwd := -xf.basis.z
-			_vehicles.append([cp, Vector2(fwd.x, fwd.z).normalized() * spd, 1.05])
+			_vehicles.append([cp, Vector2(fwd.x, fwd.z).normalized() * spd, 1.05, xf.origin.y, 2.35, 0.0, false])
 	if _island_traffic != null:
 		for c: Dictionary in _island_traffic.cars:
 			if float(c["wait"]) > 0.0:
@@ -633,52 +645,78 @@ func _collect_vehicles(focus: Vector3) -> void:
 			if cp.distance_squared_to(f2) > max_d2:
 				continue
 			var d3: Vector3 = sp[1]
-			_vehicles.append([cp, Vector2(d3.x, d3.z).normalized() * float(c["v"]), 1.05])
+			_vehicles.append([cp, Vector2(d3.x, d3.z).normalized() * float(c["v"]), 1.05, p3.y, 2.35, 0.0, false])
 
 
-## Checks if a nearby moving or encroaching vehicle threatens a pedestrian at `pos`.
-## Returns [pause: bool, step_back: Vector2, look_at: Vector2] (look_at == Vector2.INF when none).
-func _vehicle_hazard(pos: Vector2) -> Array:
-	var pause := false
+## Predict the swept body footprint and reject traffic on another deck.
+## Result: perceived urgency, lateral dodge and danger position.
+func _vehicle_hazard(at: Vector3, heading: Vector2) -> Array:
+	var pos := Vector2(at.x, at.z)
+	var urgency := 0.0
 	var escape := Vector2.ZERO
 	var look_at := Vector2.INF
-	var closest_threat := INF
 	for v: Array in _vehicles:
-		var vp: Vector2 = v[0]
-		var vv: Vector2 = v[1]
-		var vr: float = float(v[2])
-		var to_ped := pos - vp
-		var dist2 := to_ped.length_squared()
-		if dist2 > 144.0:
+		var from: Vector2 = v[0]
+		var motion: Vector2 = v[1]
+		var radial := pos - from
+		if radial.length_squared() > 42.0 * 42.0 or absf(at.y - float(v[3])) > 2.2:
 			continue
-		var vspeed := vv.length()
-		var dist := sqrt(dist2)
-		if vspeed > 1.1:
-			var vdir := vv / vspeed
-			var ahead := to_ped.dot(vdir)
-			var lat_signed := to_ped.cross(vdir)
-			var lat := absf(lat_signed)
-			var look_d := clampf(3.2 + vspeed * 0.95, 3.2, 12.0)
-			if ahead > -1.8 and ahead < look_d and lat < vr + 2.2:
-				pause = true
-				var away := (to_ped - vdir * ahead)
-				if away.length_squared() < 0.01:
-					away = Vector2(-vdir.y, vdir.x)
+		var speed := motion.length()
+		var dist := radial.length()
+		var risk := float(v[5]) * 0.82 * (1.0 - smoothstep(3.0, 15.0, dist))
+		var dodge := radial.normalized()
+		if speed > 1.2:
+			var forward := motion / speed
+			var lead := radial.dot(forward)
+			var intercept := (lead - float(v[4])) / speed
+			var side := radial - forward * lead
+			var width := float(v[2]) + lerpf(0.32, 1.45, smoothstep(4.0, 22.0, speed))
+			if lead > -float(v[4]) and intercept < 1.65 and side.length() < width:
+				var seen := 1.0 if heading.dot(-dodge) > -0.33 or intercept < 0.38 else 0.72
+				var approach := 1.0 - smoothstep(0.12, 1.65, intercept)
+				risk = maxf(risk, smoothstep(2.2, 11.0, speed) * (0.38 + 0.62 * approach) * seen)
+				if side.length_squared() > 0.04:
+					dodge = side.normalized()
 				else:
-					away = away.normalized()
-				var urgency := clampf(1.0 - maxf(ahead, 0.0) / look_d, 0.25, 1.0) * clampf(1.0 - lat / (vr + 2.2), 0.2, 1.0)
-				escape += away * urgency * 1.45
-				if dist < closest_threat:
-					closest_threat = dist
-					look_at = vp
-		elif dist < vr + 1.15 and dist > 0.01:
-			# Stationary or creeping car encroaching on the pavement: step cleanly around it.
-			var away := to_ped / dist
-			escape += away * clampf((vr + 1.15 - dist) / 1.15, 0.0, 1.0) * 1.1
-			if dist < closest_threat:
-				closest_threat = dist
-				look_at = vp
-	return [pause, escape.limit_length(1.35), look_at]
+					dodge = Vector2(-forward.y, forward.x)
+			if bool(v[6]) and lead > 0.0 and intercept < 1.8 and side.length() < 4.3:
+				risk = maxf(risk, 0.47 * (1.0 - smoothstep(0.5, 1.8, intercept)))
+		if dist < float(v[2]) + 0.9:
+			escape += dodge * 0.7
+		if risk > urgency:
+			urgency = risk
+			look_at = from
+			escape += dodge * (0.45 + risk)
+	return [urgency, escape.limit_length(1.25), look_at]
+
+
+func _update_fear(pr: Dictionary, at: Vector3, dt: float) -> Array:
+	var cadence := float(pr.get("threat_tick", float(pr["seed"]) * 0.11)) - dt
+	var hazard: Array = pr.get("threat", [0.0, Vector2.ZERO, Vector2.INF])
+	var direct := move_toward(float(pr.get("firsthand", 0.0)), 0.0, dt)
+	if cadence <= 0.0:
+		cadence = 0.10 + float(pr["seed"]) * 0.045
+		var yaw := float(pr["yaw"])
+		hazard = _vehicle_hazard(at, Vector2(-sin(yaw), -cos(yaw)))
+		pr["threat"] = hazard
+		if float(hazard[0]) > 0.55:
+			direct = 1.5
+	pr["threat_tick"] = cadence
+	pr["firsthand"] = direct
+	var stimulus := float(hazard[0])
+	if stimulus < 0.32:
+		for caller in _panic_calls:
+			if caller.distance_squared_to(Vector2(at.x, at.z)) < 30.25:
+				stimulus = 0.37 + float(pr["seed"]) * 0.14
+				break
+	var delay := float(pr.get("alarm", 0.0))
+	var threshold := lerpf(0.10, 0.38, float(pr["seed"]))
+	delay = minf(delay + dt, 0.6) if stimulus > 0.33 else maxf(delay - dt * 1.7, 0.0)
+	pr["alarm"] = delay
+	var fear := float(pr.get("fear", 0.0))
+	var target := minf(1.0, stimulus * 1.45) if delay >= threshold else 0.0
+	pr["fear"] = move_toward(fear, target, dt * (4.4 if target > fear else 0.45))
+	return hazard
 
 
 func _transfer_to_sidewalk(pr: Dictionary, conn: Dictionary, cur_pos: Vector2) -> void:
@@ -716,6 +754,18 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 	var vel_cur := float(pr["vel_cur"])
 	var avoid: Vector2 = pr["avoid"]
 	var far := had_pos and d2_focus > 48.0 * 48.0
+	var fear := float(pr.get("fear", 0.0))
+	var hazard: Array = [0.0, Vector2.ZERO, Vector2.INF]
+	if had_pos and not far:
+		hazard = _update_fear(pr, pr["pos"], dt)
+		fear = float(pr["fear"])
+		if fear > 0.42 and state in ["browse", "pause"]:
+			state = "walk"
+			pr["state"] = state
+			pr["pause_cd"] = 12.0
+	elif far and fear > 0.0:
+		fear = move_toward(fear, 0.0, dt)
+		pr["fear"] = fear
 	pr["cross_cd"] = maxf(float(pr["cross_cd"]) - dt, 0.0)
 	pr["pause_cd"] = maxf(float(pr.get("pause_cd", 0.0)) - dt, 0.0)
 	pr["waiting"] = false
@@ -735,19 +785,29 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 				if probe_sp[2] in crossings and not _crossing_clear(l, int(probe_sp[2])):
 					target_v = 0.0
 					pr["waiting"] = true
-			# Check nearby vehicles on or encroaching on the pavement (throttled past 48 m).
-			var veh_pause := false
-			var veh_escape := Vector2.ZERO
-			if not far and not _vehicles.is_empty():
-				var check_pos := prev_xz if had_pos else (cur_sp[0] as Vector2)
-				var haz := _vehicle_hazard(check_pos)
-				veh_pause = haz[0]
-				veh_escape = haz[1]
-				hazard_look = haz[2]
-				if veh_pause and not in_crossing:
+			var veh_escape: Vector2 = hazard[1]
+			hazard_look = hazard[2]
+			var running := fear > 0.42
+			if running:
+				var previous_direction := float(pr["dir"])
+				var other := _sample(l, cur_s - previous_direction * 2.6)
+				var same := _sample(l, cur_s + previous_direction * 2.6)
+				# Choose a safe direction on the authored path once per scare.
+				if not bool(pr.get("fleeing", false)) and not in_crossing and hazard_look != Vector2.INF:
+					var reverse_dist := (other[0] as Vector2).distance_squared_to(hazard_look)
+					var forward_dist := (same[0] as Vector2).distance_squared_to(hazard_look)
+					if other[2] not in crossings and (same[2] in crossings or reverse_dist > forward_dist + 1.0):
+						dir_sgn = -previous_direction
+						pr["dir"] = int(dir_sgn)
+						pr["lane"] = -float(pr["lane"])
+				target_v = lerpf(2.4, 4.7, fear) * lerpf(0.85, 1.08, float(pr["seed"]))
+				if not in_crossing and _sample(l, cur_s + dir_sgn * 1.4)[2] in crossings:
 					target_v = 0.0
-					pr["waiting"] = true
-			var accel_rate := 3.4 if target_v < vel_cur else 2.2
+			elif float(hazard[0]) > 0.39 and not in_crossing:
+				target_v *= 0.25
+				pr["waiting"] = true
+			pr["fleeing"] = running
+			var accel_rate := 5.0 if running else (3.4 if target_v < vel_cur else 2.2)
 			vel_cur = move_toward(vel_cur, target_v, dt * accel_rate)
 			var distance := vel_cur * dt
 			var next := cur_s + dir_sgn * distance
@@ -825,6 +885,12 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 					var steer_away := (away_h * 0.72 + tang * 0.68).normalized()
 					want_avoid += steer_away * clampf((1.05 - hdist) / 1.05, 0.25, 1.0) * 0.85
 			want_avoid = want_avoid.limit_length(1.35)
+			if running and not now_crossing and want_avoid.length_squared() > 0.04:
+				var streets := game.layout.roads
+				if base.x < CityLayout.FAR_SHORE and game.layout.mainland != null:
+					streets = game.layout.mainland.roads
+				if streets.on_road(base + want_avoid) and not streets.on_road(base):
+					want_avoid = Vector2.ZERO
 			var avoid_rate := 1.45 if want_avoid.length_squared() > avoid.length_squared() else 0.95
 			avoid = avoid.move_toward(want_avoid, dt * avoid_rate)
 			pr["avoid"] = avoid
@@ -832,7 +898,7 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 			p = Vector3(q.x, 0.0, q.y)
 			fwd = d
 			# Secondary sidewalk interactions (shop doors + phone/rest pauses) only within 48 m.
-			if not far and not now_crossing and not bool(pr["waiting"]) and profile != "jogger":
+			if not far and fear < 0.28 and not now_crossing and not bool(pr["waiting"]) and profile != "jogger":
 				var entered_shop := false
 				if not pr["browsed"]:
 					for dr in _doors_near(q):
@@ -882,10 +948,8 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 			var bp := prev_xz
 			var want_avoid := Vector2.ZERO
 			if not far:
-				if not _vehicles.is_empty():
-					var haz := _vehicle_hazard(bp)
-					want_avoid = haz[1]
-					hazard_look = haz[2]
+				want_avoid = hazard[1]
+				hazard_look = hazard[2]
 				var rel_b := Vector2(me.x - bp.x, me.z - bp.y)
 				var bdist := rel_b.length()
 				if bdist < 0.95 and bdist > 0.001:
@@ -934,7 +998,7 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 	if actual_dist > 0.0004:
 		# Keep foot speed locked to ground speed even while decelerating (shader scales swing by walk).
 		var eff_walk := maxf(float(pr["walk"]), 0.42)
-		pr["stride"] = float(pr["stride"]) + actual_dist / eff_walk
+		pr["stride"] = float(pr["stride"]) + actual_dist / (eff_walk * (1.0 + 0.58 * fear))
 
 	# Natural head glances: check traffic at crossings, scan shop windows, watch approaching cars or hero.
 	if not far:
@@ -1028,7 +1092,7 @@ func _draw_people() -> void:
 				buf[j + 3] = o[r]
 				j += 4
 			var c: Color = pr["top"]
-			buf[j] = c.r; buf[j + 1] = c.g; buf[j + 2] = c.b; buf[j + 3] = 1.0
+			buf[j] = c.r; buf[j + 1] = c.g; buf[j + 2] = c.b; buf[j + 3] = float(pr.get("fear", 0.0))
 			buf[j + 4] = float(pr["stride"]); buf[j + 5] = float(pr["seed"]); buf[j + 6] = float(pr["walk"]); buf[j + 7] = float(pr["look"])
 			j += 8
 		if not list.is_empty():

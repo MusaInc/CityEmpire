@@ -294,6 +294,7 @@ static func _wheel_finish(name: String, offroad: bool) -> Material:
 
 
 var has_clear_cabin := false
+var cabin_profile: Dictionary
 var driver_seat := Vector3.ZERO
 
 
@@ -352,8 +353,8 @@ func setup(p_car: Car) -> void:
 					m = beacon_mat
 				_: m = shared_mat(n)
 			body.set_surface_override_material(i, m)
-	if has_clear_cabin:
-		driver_seat = VehicleAccess.geometry(car)["seat"]
+	cabin_profile = VehicleAccess.geometry(car)
+	driver_seat = cabin_profile["seat"]
 	# Wheels.
 	var wheel_style := String(spec.get("wheel", "five"))
 	var wmesh := load_mesh("wheel_" + wheel_style)
@@ -496,16 +497,8 @@ func _make_flares() -> void:
 	add_child(flares)
 
 
-## Real headlights (the player's car), night only:
-##  * a main beam: one spotlight just ahead of the bumper, dipped a little,
-##    a broad soft-edged pool reaching ~75 m;
-##  * a soft near spill: a wide, short, dim spot so the kerbs and lane
-##    edges either side of the nose are lit, not just a cone ahead.
-## One spot per job, never one per lamp: lamps inside their housings
-## shadowed their own light (two dark discs on the road). The old visible
-## air "beams" are gone too: seen from the chase camera their dim tips left
-## two dark holes in the lit road.
-
+## One dipped low beam keeps Mobile's light budget constant. Its pitch,
+## falloff and range concentrate spill near the road.
 func enable_headlights(_shadows := false) -> void:
 	if not head_lights.is_empty() or lamp_pos["head"].is_empty():
 		return
@@ -517,13 +510,13 @@ func enable_headlights(_shadows := false) -> void:
 	var main := SpotLight3D.new()
 	main.name = "Headlight"
 	main.light_color = Color(0.95, 0.96, 1.0)
-	main.spot_range = 63.0
-	main.spot_angle = 34.0
-	main.spot_angle_attenuation = 0.8
-	main.spot_attenuation = 0.85
+	main.spot_range = 42.0
+	main.spot_angle = 30.0
+	main.spot_angle_attenuation = 1.15
+	main.spot_attenuation = 1.36
 	main.light_specular = 0.56
 	main.position = Vector3(0.0, mid.y, mid.z - 0.54)
-	main.rotation = Vector3(deg_to_rad(-5.3), 0.0, 0.0)
+	main.rotation = Vector3(deg_to_rad(-12.0), 0.0, 0.0)
 	main.light_energy = 0.0
 	main.shadow_enabled = false
 	main.visible = false
@@ -611,7 +604,7 @@ func _process(dt: float) -> void:
 	if flares:
 		flares.visible = not switched_off
 	tail_mat.emission_energy_multiplier = night_lights * 0.81 + _brake_level * 2.55
-	head_mat.emission_energy_multiplier = 0.16 + night_lights * 4.6
+	head_mat.emission_energy_multiplier = 0.16 + night_lights * 3.25
 	if _reverse_mat:
 		_reverse_mat.set_shader_parameter("reverse_level", _reverse_level * 2.9)
 	if _reverse_light:
@@ -626,7 +619,7 @@ func _process(dt: float) -> void:
 	if not head_lights.is_empty():
 		var on := night_lights > 0.05
 		head_lights[0].visible = on
-		head_lights[0].light_energy = 16.0 * night_lights
+		head_lights[0].light_energy = 8.5 * night_lights
 		if head_lights.size() > 1:
 			head_lights[1].visible = on
 			head_lights[1].light_energy = 3.0 * night_lights

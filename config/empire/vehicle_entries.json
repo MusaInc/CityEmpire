@@ -19,7 +19,14 @@
       -0.46
     ],
     "sill_y": 0.35,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.1498,
+      1.2104,
+      1.2599,
+      1.2969,
+      1.3212
+    ]
   },
   "civ_box": {
     "hinge": [
@@ -41,7 +48,14 @@
       -0.41
     ],
     "sill_y": 0.54,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      2.2577,
+      2.2455,
+      2.2352,
+      1.361,
+      2.62
+    ]
   },
   "civ_van": {
     "hinge": [
@@ -63,7 +77,43 @@
       -0.42
     ],
     "sill_y": 0.42,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.9462,
+      1.9465,
+      1.9467,
+      1.947,
+      1.9472
+    ]
+  },
+  "courier_van": {
+    "hinge": [
+      -1.375,
+      0.83
+    ],
+    "handle": [
+      -0.505,
+      0.91
+    ],
+    "seat": [
+      -0.79,
+      0.6
+    ],
+    "seat_x": 0.46,
+    "wheel": [
+      0.0,
+      0.41,
+      -0.42
+    ],
+    "sill_y": 0.42,
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.4999,
+      1.6671,
+      1.8037,
+      1.9069,
+      1.942
+    ]
   },
   "goliath": {
     "hinge": [
@@ -85,7 +135,14 @@
       -0.44
     ],
     "sill_y": 0.56,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.9472,
+      1.949,
+      1.9496,
+      1.9486,
+      1.9466
+    ]
   },
   "halcyon": {
     "hinge": [
@@ -107,7 +164,14 @@
       -0.47
     ],
     "sill_y": 0.3,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.107,
+      1.1068,
+      1.1016,
+      1.0936,
+      1.0688
+    ]
   },
   "kestrel": {
     "hinge": [
@@ -129,7 +193,14 @@
       -0.44
     ],
     "sill_y": 0.36,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.4318,
+      1.4325,
+      1.4332,
+      1.4336,
+      1.434
+    ]
   },
   "marlin": {
     "hinge": [
@@ -151,7 +222,14 @@
       -0.45
     ],
     "sill_y": 0.34,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.2921,
+      1.3374,
+      1.3712,
+      1.3869,
+      1.3875
+    ]
   },
   "scout": {
     "hinge": [
@@ -173,7 +251,14 @@
       -0.43
     ],
     "sill_y": 0.38,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.2958,
+      1.3503,
+      1.3922,
+      1.4127,
+      1.4137
+    ]
   },
   "stiletto": {
     "hinge": [
@@ -195,7 +280,14 @@
       -0.48
     ],
     "sill_y": 0.29,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.0572,
+      1.0504,
+      1.0399,
+      1.031,
+      1.0154
+    ]
   },
   "vanta": {
     "hinge": [
@@ -217,7 +309,14 @@
       -0.46
     ],
     "sill_y": 0.32,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.0645,
+      1.117,
+      1.1616,
+      1.1964,
+      1.2227
+    ]
   },
   "warden": {
     "hinge": [
@@ -239,6 +338,13 @@
       -0.44
     ],
     "sill_y": 0.54,
-    "driver_side": 1.0
+    "driver_side": 1.0,
+    "roof_samples": [
+      1.9506,
+      1.951,
+      1.9513,
+      1.9516,
+      1.9518
+    ]
   }
 }

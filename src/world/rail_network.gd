@@ -286,6 +286,7 @@ func _viaduct(pts: PackedVector3Array) -> void:
 			L._kbeam(k, deck_a - ext + o + Vector3.UP * 0.5, deck_b + ext + o + Vector3.UP * 0.5, 0.4, 1.0, CONCRETE)
 			var ro := side * sgn * 0.72 + Vector3.DOWN * 0.08
 			L._kbeam(k, a + ro - ext, b + ro + ext, 0.1, 0.16, RAIL_STEEL, false)
+		L.dress_deck_soffit(k, deck_a + Vector3.DOWN * 1.43, deck_b + Vector3.DOWN * 1.43, HALF - 0.3, 0.53)
 		var so := Vector3.DOWN * (RAIL_H - 0.04)
 		L._kbeam(k, a + so - ext, b + so + ext, 2.6, 0.12, Color(0.36, 0.33, 0.3), false)  # ballast bed
 		if not water:
@@ -406,6 +407,8 @@ func _strait_bridge(pts: PackedVector3Array) -> void:
 	for sz: float in [-1.0, 1.0]:
 		L._kbeam(k, Vector3(CityLayout.FAR_SHORE - 6.0, dy - 1.2, zc + sz * (w + 0.3)),
 			Vector3(CityLayout.RIVER_EDGE + 6.0, dy - 1.2, zc + sz * (w + 0.3)), 0.6, 2.6, ARCH_WHITE.darkened(0.15))
+	L.dress_deck_soffit(k, Vector3(CityLayout.FAR_SHORE - 6.0, dy - 1.62, zc),
+		Vector3(CityLayout.RIVER_EDGE + 6.0, dy - 1.62, zc), w - 0.65, 0.86)
 	# Piers: a pair of columns under the two tracks, a cap beam across.
 	var piers: Array = [CityLayout.FAR_SHORE + 25.0, ARCH_X[0], ARCH_X[1], -45.0, 0.0]
 	for x: float in piers:

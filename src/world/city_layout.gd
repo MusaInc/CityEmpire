@@ -1979,6 +1979,34 @@ func _kbeam(k: Dictionary, a: Vector3, b: Vector3, w: float, h: float, col: Colo
 		(kit_obbs_solid if kit_solid_only else kit_obbs).append(ob)
 
 
+## Components of a steel diaphragm and utility run below bridges and viaducts.
+## Geometry joins the existing kit, with no separate collision or draw per beam.
+func dress_deck_soffit(k: Dictionary, a: Vector3, b: Vector3, half_width: float, height: float) -> void:
+	var span := a.distance_to(b)
+	if span < 4.0:
+		return
+	var along := (b - a) / span
+	var side := Vector3(-along.z, 0.0, along.x).normalized()
+	var steel := Color(0.21, 0.24, 0.25)
+	var conduit := Color(0.31, 0.31, 0.28)
+	var chord := side * half_width * 0.76
+	var drop := Vector3.DOWN * height
+	for sign_x: float in [-1.0, 1.0]:
+		var offset := chord * sign_x + drop
+		_kbeam(k, a + offset, b + offset, 0.27, 0.30, steel, false)
+		var pipe := side * sign_x * (half_width - 0.31) + Vector3.DOWN * 0.16
+		_kbeam(k, a + pipe, b + pipe, 0.075, 0.095, conduit, false)
+	var bays := maxi(1, ceili(span / 14.0))
+	for i in bays:
+		var at := a.lerp(b, (float(i) + 0.5) / float(bays))
+		var brace := chord * (1.0 if i % 2 == 0 else -1.0)
+		_kbeam(k, at - chord + drop, at + chord + drop, 0.27, 0.28, steel, false)
+		_kbeam(k, at - brace + Vector3.DOWN * 0.09, at + brace + drop, 0.19, 0.21, steel, false)
+		for sign_x: float in [-1.0, 1.0]:
+			var bracket := side * sign_x * (half_width - 0.31)
+			_kbeam(k, at + bracket, at + bracket + Vector3.DOWN * 0.26, 0.18, 0.15, steel, false)
+
+
 ## Each consecutive section shares the exact end edge with its neighbor.
 ## Store the solid section for collision using the same eight corners.
 func _kdeck(k: Dictionary, a: Vector3, b: Vector3, c: Vector3, d: Vector3, depth: float, col: Color, along: Vector2) -> void:
@@ -2152,6 +2180,8 @@ func _bridge() -> void:
 	var x_east := 56.0
 	var x_west := FAR_SHORE + 14.0
 	_box(x_west, zc - 10.0, x_east, zc + 10.0, deck - 2.0, deck)
+	var soffit := _kit("suspension_soffit")
+	dress_deck_soffit(soffit, Vector3(x_west, deck - 2.03, zc), Vector3(x_east, deck - 2.03, zc), 8.7, 0.92)
 	for sz: float in [-1.0, 1.0]:
 		_box(x_west, zc + sz * 10.0, x_east, zc + sz * 8.8, deck - 2.4, deck + 0.4)  # side girders
 	for tx: float in BRIDGE_TOWERS:

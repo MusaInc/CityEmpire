@@ -314,10 +314,10 @@ void fragment() {
 	float puddle = 0.0;
 	if (surface_wet > 0.001 && v_wn.y > 0.9) {
 		float basin = vnoise(p * 0.21 + 46.0) * 0.8 + vnoise(p * 0.7) * 0.2;
-		float th = mix(0.84, 0.58, surface_wet);
+		float th = mix(0.89, 0.68, surface_wet);
 		puddle = smoothstep(th, th + 0.09, basin) * smoothstep(0.24, 0.86, surface_wet)
 			* (1.0 - smoothstep(120.0, 260.0, v_dist));
-		albedo *= (1.0 - 0.26 * surface_wet) * (1.0 - 0.18 * puddle);
+		albedo *= (1.0 - (is_road ? 0.24 : 0.12) * surface_wet) * (1.0 - 0.025 * puddle);
 		rough = mix(rough, is_road ? 0.36 : 0.48, surface_wet);
 		rough = mix(rough, 0.12, puddle);
 	} else if (!is_shore && v_kind == 1.0) {
