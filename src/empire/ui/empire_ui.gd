@@ -666,12 +666,7 @@ func show_title(has_save: bool) -> void:
 	var stack := S.vbox(16)
 	stack.custom_minimum_size.x = 520.0
 	center.add_child(stack)
-	var title := S.label("WORLDSTATE", 60, Color("f3eee5"), "bold")
-	var title_font := FontVariation.new()
-	title_font.base_font = S.font("bold")
-	title_font.spacing_glyph = 4
-	title.add_theme_font_override("font", title_font)
-	stack.add_child(title)
+	stack.add_child(MenuParts.Logo.new())
 	var rule := ColorRect.new()
 	rule.color = Color("e8b961")
 	rule.custom_minimum_size = Vector2(57, 2)
