@@ -205,6 +205,11 @@ var vehicle_grip_weight := 0.0
 var vehicle_seated := false
 const PELVIS_ABOVE_PLAYER_ROOT := 0.08
 var vehicle_steer := 0.0
+var vehicle_basis := Basis.IDENTITY
+var vehicle_wheel_offset := Vector3(0.0, 0.02, -0.44)
+var using_phone := false
+var _phone_w := 0.0
+var _interact_t := 0.0
 var _vehicle_grip_side := ""
 var _vehicle_steer_smooth := 0.0
 var _press_n := Vector3.ZERO
@@ -283,8 +288,8 @@ func _ready() -> void:
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://src/player/shaders/character.gdshader")
 	_mat = mat
-	for mi in _hero_meshes:
-		_install_hero_materials(mi)
+	# Materials are installed lazily in _show_variants() when each mesh first becomes
+	# visible, avoiding eager shader/texture setup for 40+ unequipped garments.
 	for name in BONES:
 		var def: Array = BONES[name]
 		var pivot := Node3D.new()
@@ -603,6 +608,19 @@ func apply_look(look: Dictionary) -> void:
 	if String(look.get("body", "a")) != body_type and skeleton != null:
 		_swap_body(String(look.get("body", "a")))
 	look_state = look
+	_show_variants()
+	_apply_look_tints(look)
+	if _mat:
+		for k in [["suit", "suit_color"], ["pants", "pants_color"], ["shoe", "shoe_color"], ["sole", "sole_color"],
+				["glove", "glove_color"], ["glow", "glow_color"]]:
+			var c: Color = look[k[0]]
+			_mat.set_shader_parameter(k[1], Vector3(c.r, c.g, c.b))
+	_show_gear()
+
+
+func _apply_look_tints(look: Dictionary) -> void:
+	if look.is_empty():
+		return
 	for region in ["suit", "pants", "shoe", "sole", "glove"]:
 		_tint_hero(region, look[region])
 	_tint_hero("lace", (look["shoe"] as Color).lerp(Color(0.78, 0.76, 0.73), 0.15))
@@ -640,13 +658,6 @@ func apply_look(look: Dictionary) -> void:
 	for entry in _hero_materials:
 		if entry.region == "glove":
 			entry.material.set_shader_parameter("albedo_map", null if bare else entry.get("albedo_map"))
-	_show_variants()
-	if _mat:
-		for k in [["suit", "suit_color"], ["pants", "pants_color"], ["shoe", "shoe_color"], ["sole", "sole_color"],
-				["glove", "glove_color"], ["glow", "glow_color"]]:
-			var c: Color = look[k[0]]
-			_mat.set_shader_parameter(k[1], Vector3(c.r, c.g, c.b))
-	_show_gear()
 
 
 ## A running gadget shows its active pieces (jet flames, open wings).
@@ -781,6 +792,8 @@ func _show_variants() -> void:
 					mi.set_blend_shape_value(index, float(index == fit_index))
 		elif n.begins_with("Mask_"):
 			mi.visible = mask != "" and (n == "Mask_" + mask or n.begins_with("Mask_%s_" % mask))
+		if mi.visible and not mi.has_meta(&"hero_surfaces"):
+			_install_hero_materials(mi)
 		if mi.visible and mi.mesh.get_blend_shape_count() > 0:
 			if lower in ["midiskirt", "utilitymini", "beltedmini", "dress"] and (n in ["Fashion_Legs", "Fashion_Barefoot_Legs"] or n.begins_with("JulesSkin_Cowldress")):
 				_midi_lining_index = mi.find_blend_shape_by_name("MidiSeatClearance")
@@ -888,6 +901,11 @@ func _load_parts() -> Dictionary:
 			mi.owner = null
 			_hero_meshes.append(mi)
 			mi.layers |= HERO_LIGHT_LAYER
+			if mi.mesh and mi.mesh.get_blend_shape_count() > 0 and mi.find_blend_shape_by_name("Grip_r") >= 0:
+				if String(mi.name) == "Skin_Hands":
+					_hand_mesh = mi
+				else:
+					_glove_mesh = mi
 			# Eyewear is too fine to cast a useful shadow and self-shadows into
 			# acne on its thin parts; everything else casts.
 			var mesh_name := String(mi.name)
@@ -941,8 +959,6 @@ func _swap_body(b: String) -> void:
 		return
 	old.get_parent().remove_child(old)
 	old.queue_free()
-	for mi in _hero_meshes:
-		_install_hero_materials(mi)
 	_bind_skeleton()
 	_sync_skeleton()
 
@@ -2087,6 +2103,20 @@ func _update_animated(dt: float) -> void:
 	_handle_time = maxf(0.0, _handle_time - dt)
 	if grounded and _carry < 0.1 and _handle_time > 0.0 and is_instance_valid(_handle):
 		_pose_handle(q)
+	# Contextual everyday poses: checking the phone and brief counter/till reach.
+	_phone_w = move_toward(_phone_w, 1.0 if (using_phone and grounded and not carrying and not ragdolling and hs < 1.2) else 0.0, dt * 5.0)
+	if _phone_w > 0.01:
+		q["upper_arm_r"] = (q["upper_arm_r"] as Quaternion).slerp(_rx(0.62) * _ry(-0.22) * _rz(-0.18), _phone_w)
+		q["forearm_r"] = (q["forearm_r"] as Quaternion).slerp(_rx(1.25) * _ry(0.28), _phone_w)
+		q["hand_r"] = (q["hand_r"] as Quaternion).slerp(_rx(-0.22) * _ry(0.35), _phone_w)
+		q["neck"] = (q["neck"] as Quaternion).slerp(_rx(-0.18) * _ry(-0.06), _phone_w * 0.85)
+		q["head"] = (q["head"] as Quaternion).slerp(_rx(-0.26) * _ry(-0.05), _phone_w * 0.85)
+	_interact_t = maxf(0.0, _interact_t - dt)
+	if _interact_t > 0.001 and grounded and not carrying and not ragdolling:
+		var iw := sin(clampf(_interact_t / 0.42, 0.0, 1.0) * PI)
+		q["upper_arm_r"] = (q["upper_arm_r"] as Quaternion).slerp(_rx(0.72) * _rz(-0.12), iw * 0.85)
+		q["forearm_r"] = (q["forearm_r"] as Quaternion).slerp(_rx(0.68), iw * 0.85)
+		q["chest"] = (q["chest"] as Quaternion).slerp(_ry(0.08) * _rx(-0.06), iw * 0.5)
 	# Hip bob (running) – the pelvis rides up and down over the stance leg.
 	(bones["hips"] as Node3D).position.y = lerpf((bones["hips"] as Node3D).position.y,
 		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop, 1.0 - exp(-20.0 * dt))
@@ -3328,10 +3358,15 @@ func _pose_vehicle_access(dt: float) -> void:
 ## torso counter-lean and gaze into turns.
 func _pose_vehicle_seated(dt: float) -> void:
 	global_position = player.global_position
-	if vehicle_facing.length_squared() > 0.01:
-		_facing = Vector3(vehicle_facing.x, 0.0, vehicle_facing.z).normalized()
-	var facing := Basis.looking_at(_facing, Vector3.UP)
-	_body_basis = _body_basis.slerp(facing, 1.0 - exp(-18.0 * dt)).orthonormalized()
+	if vehicle_basis != Basis.IDENTITY:
+		# Lock directly to the vehicle's live basis (including bridge pitch and body roll)
+		# so the driver never drifts through the door bolster in hard corners or slopes.
+		_body_basis = vehicle_basis.orthonormalized()
+		_facing = Vector3(-_body_basis.z.x, 0.0, -_body_basis.z.z).normalized()
+	else:
+		if vehicle_facing.length_squared() > 0.01:
+			_facing = Vector3(vehicle_facing.x, 0.0, vehicle_facing.z).normalized()
+		_body_basis = Basis.looking_at(_facing, Vector3.UP)
 	global_basis = _body_basis
 	_vehicle_steer_smooth = lerpf(_vehicle_steer_smooth, clampf(vehicle_steer, -1.0, 1.0), 1.0 - exp(-12.0 * dt))
 	var st := _vehicle_steer_smooth
@@ -3351,7 +3386,7 @@ func _pose_vehicle_seated(dt: float) -> void:
 	q["shin_r"] = _rx(-1.26)
 	q["foot_r"] = _rx(-0.08)
 	# Two-bone IK for 9-and-3 steering-wheel hands rotating with `vehicle_steer`.
-	var wheel_center := Vector3(0.0, 0.02, -0.44)
+	var wheel_center := vehicle_wheel_offset
 	var wheel_r := 0.175
 	var tilt := 0.40  # ~23° wheel column tilt
 	var wheel_ang := st * 1.15
@@ -3374,6 +3409,10 @@ func _pose_vehicle_seated(dt: float) -> void:
 	(bones["hips"] as Node3D).position.x = lerpf((bones["hips"] as Node3D).position.x, 0.0, 1.0 - exp(-12.0 * dt))
 	_drive_springs(q, dt, false, false)
 	_gait.reset()
+
+
+func trigger_interact() -> void:
+	_interact_t = 0.42
 
 
 func reach_for_handle(handle: Node3D) -> void:

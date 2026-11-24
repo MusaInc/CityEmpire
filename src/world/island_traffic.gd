@@ -215,7 +215,11 @@ func _draw() -> void:
 		var sp := _sample(lanes[c["lane"]], float(c["s"]))
 		var p: Vector3 = sp[0]
 		var d: Vector3 = sp[1]
-		var hd := Vector3(d.x, 0.0, d.z).normalized()
+		var hd := Vector3(d.x, 0.0, d.z)
+		if hd.length_squared() < 0.0001:
+			hd = Vector3.FORWARD
+		else:
+			hd = hd.normalized()
 		var basis := Basis.looking_at((hd + Vector3.UP * d.y).normalized(), Vector3.UP)
 		p.y -= 0.38   # (lanes ride 0.4 m above the road)
 		# The traffic shader's parked pose: 5 m along the car's back axis.

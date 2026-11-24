@@ -158,33 +158,8 @@ static func photo_card(pic: Control, w: float, ph_h: float, title: String, sub: 
 
 ## Buy buttons ask once more by changing in place (no extra screen): the
 ## first tap turns it into "Confirm · £x" for three seconds.
-static func confirm_button(label: String, confirm: String, cb: Callable, sz := "large") -> Button:
-	var armed := [false]
-	var b := G.button(label, func(): pass, "filled", sz)
-	b.pressed.connect(func():
-		if Time.get_ticks_msec() < EmpireStyle.tap_block_until:
-			return
-		if armed[0]:
-			armed[0] = false
-			cb.call()
-			return
-		armed[0] = true
-		b.text = confirm
-		var gs := G._btn_box(G.GREEN, int(b.size.y * 0.5), 22)
-		for s in ["normal", "focus", "hover"]:
-			b.add_theme_stylebox_override(s, gs)
-		for s in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
-			b.add_theme_color_override(s, Color.WHITE)
-		b.get_tree().create_timer(3.0, true, false, true).timeout.connect(func():
-			if is_instance_valid(b) and armed[0]:
-				armed[0] = false
-				b.text = label
-				var ns := G._btn_box(G.ACCENT, int(b.size.y * 0.5), 22)
-				for s in ["normal", "focus", "hover"]:
-					b.add_theme_stylebox_override(s, ns)
-				for s in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
-					b.add_theme_color_override(s, G.ON_ACCENT)))
-	return b
+static func confirm_button(label: String, confirm: String, cb: Callable, sz := "large", col = null, kind := "filled") -> Button:
+	return G.confirm_button(label, confirm, cb, sz, col, kind)
 
 
 ## A line chart (Stocks): green if it ends higher than it started, red if
@@ -427,11 +402,11 @@ static func map(ph: Phone, body: VBoxContainer) -> void:
 		m.select_ref.call_deferred(focus)
 		Phone.st("map").erase("focus")
 	# Floating search (top left): places by name, tap one to show it.
-	var bar := G.surface(-1.0, 4.0)
+	var bar := G.surface(-1.0, 4.0, Color(0, 0, 0, 0), true, true)
 	bar.position = Vector2(16, 16)
 	bar.custom_minimum_size = Vector2(minf(width(ph) - 120.0, 520.0), 58)
 	holder.add_child(bar)
-	var results := G.surface(26.0, 8.0)
+	var results := G.surface(26.0, 8.0, Color(0, 0, 0, 0), true, true)
 	results.position = Vector2(16, 82)
 	results.custom_minimum_size = Vector2(bar.custom_minimum_size.x, 0)
 	results.visible = false
@@ -485,84 +460,106 @@ static func market(ph: Phone, body: VBoxContainer) -> void:
 	seg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(seg)
 	body.add_child(head)
-	var q := String(s.get("q", ""))
-	var le := G.search("Search", q, func(t):
-		Phone.st("market")["q"] = t)
-	le.text_submitted.connect(func(_t): ph.refresh())
-	le.focus_exited.connect(func(): if String(Phone.st("market").get("q", "")) != q: ph.refresh())
+	var q0 := String(s.get("q", ""))
+	var v_ref: Array = [null]
+	var gen := [0]
+	var fill_market := func(query: String) -> void:
+		var v: VBoxContainer = v_ref[0]
+		if v == null or not is_instance_valid(v):
+			return
+		for c in v.get_children():
+			v.remove_child(c)
+			c.queue_free()
+		var q_low := query.strip_edges().to_lower()
+		var here := g.player.global_position
+		var match_q := func(t: String) -> bool: return q_low == "" or t.to_lower().contains(q_low)
+		var cw := 300.0
+		var n := cols(ph, cw)
+		var gd := grid(n)
+		var card_w := (width(ph) - 16.0 * (n - 1)) / n
+		var ph_h := card_w * 0.56
+		match cat:
+			"business":
+				var items: Array = []
+				for f in CityLife.firms_for_sale(e):
+					var u: Dictionary = g.unit_by_id.get(f["unit"], {})
+					if not u.is_empty():
+						items.append([here.distance_to(Premises.door_point(u)), u])
+				var lets: Array = []
+				for u in g.units:
+					if u["kind"] == "shop" and MapKit.unit_kind(g, u) == "to_let":
+						lets.append([here.distance_to(Premises.door_point(u)), u])
+				lets.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+				items.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+				if not items.is_empty():
+					v.add_child(G.header("Trading businesses for sale"))
+					v.add_child(_listing_grid(ph, items.filter(func(x): return match_q.call(String(ph.ui._listing(x[1], float(x[0]))["title"]))), n, card_w, ph_h, "market"))
+				v.add_child(G.header("Shops to let near you", "On the map", func(): EmpireMap.filter = "property"; ph.go("map")))
+				v.add_child(_listing_grid(ph, lets.slice(0, 12).filter(func(x): return match_q.call(String(ph.ui._listing(x[1], float(x[0]))["title"]))), n, card_w, ph_h, "market"))
+			"homes":
+				var hs: Array = []
+				for hm in g.homes():
+					if match_q.call(String(hm["name"])):
+						hs.append([here.distance_to(g.home_lift(hm)), hm])
+				hs.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+				v.add_child(_listing_grid(ph, hs, n, card_w, ph_h, "market"))
+			"vehicles":
+				var sites := {"dealer_budget": "Kestrel Motors · everyday cars", "dealer_commercial": "Vans and trucks", "dealer_luxury": "Prestige · sports and supercars",
+					"aviation": "Skyport Aviation · helicopters and planes", "marina": "The Marina · boats"}
+				var any_v := false
+				for sid in sites:
+					var models: Array = (SkyportPlay.STOCK.get(sid, []) as Array).filter(func(mm): return match_q.call(String(EmpireData.vehicle_model(mm).get("name", mm))))
+					if models.is_empty():
+						continue
+					any_v = true
+					v.add_child(G.header(String(sites[sid])))
+					var car := carousel(16)
+					v.add_child(car[0])
+					for model in models:
+						var md := EmpireData.vehicle_model(model)
+						var mdl := String(model)
+						var sd := String(sid)
+						var own := SkyportUI._owned(ph.ui, mdl)
+						(car[1] as HBoxContainer).add_child(photo_card(ph.ui.thumbs.vehicle(mdl, Vector2(340, 190)), 340, 190, String(md.get("name", mdl)),
+							SkyportUI._specs(md), EmpireData.money(float(md.get("price", 0))), G.LABEL, "YOU OWN %d" % own if own > 0 else "", G.GREEN,
+							func(): ph.push("vehicle", {"model": mdl, "site": sd}, String(md.get("name", mdl)), "Marketplace", "car")))
+				if not any_v:
+					v.add_child(G.para("No vehicles match right now.", "subhead"))
+			"fashion":
+				var shops: Array = ExploreUI.places(g).filter(func(p): return p["cat"] == "fashion" and match_q.call(String(p["name"])))
+				shops.sort_custom(func(a, b): return here.distance_squared_to(a["pos"]) < here.distance_squared_to(b["pos"]))
+				v.add_child(G.para("Clothes are tried on and bought in the shop. Pick one and the route is set.", "subhead"))
+				for p in shops.slice(0, 18):
+					var pd: Dictionary = p
+					gd.add_child(photo_card(Thumbs.place(pd["pos"], 110.0), card_w, ph_h, String(pd["name"]), String(pd["what"]),
+						ph.ui._dist_text(here.distance_to(pd["pos"])) + " away", G.LABEL2, "", Color.WHITE, func():
+							g.set_gps(pd["pos"], String(pd["name"]), pd["ref"])
+							ph.ui.toast("Route set: %s" % pd["name"], "info")
+							ph.go("map", pd["ref"])))
+				v.add_child(gd)
+				v.add_child(G.button("Your wardrobe", func(): ph.go("you"), "gray", "regular", null, "shirt"))
+			"invest":
+				v.add_child(G.para("Buildings on Skyport Island that pay you rent every day. Run them well and they keep their value.", "subhead"))
+				var inner := G.vbox(10)
+				SkyportUI.estates(ph.ui, inner)
+				var c := G.card(18, 10)
+				(c[1] as VBoxContainer).add_child(inner)
+				v.add_child(c[0])
+		v.add_child(G.gap(8))
+	var le := G.search("Search", q0, func(t):
+		Phone.st("market")["q"] = t
+		gen[0] += 1
+		var ticket := int(gen[0])
+		ph.get_tree().create_timer(0.10, true, false, true).timeout.connect(func():
+			if ticket == gen[0]:
+				fill_market.call(t)))
+	le.text_submitted.connect(func(t):
+		Phone.st("market")["q"] = t
+		gen[0] += 1
+		fill_market.call(t))
 	body.add_child(le)
-	var v := scroller(body, 20)
-	var here := g.player.global_position
-	var match_q := func(t: String) -> bool: return q == "" or t.to_lower().contains(q.to_lower())
-	var cw := 300.0
-	var n := cols(ph, cw)
-	var gd := grid(n)
-	var card_w := (width(ph) - 16.0 * (n - 1)) / n
-	var ph_h := card_w * 0.56
-	match cat:
-		"business":
-			var items: Array = []
-			for f in CityLife.firms_for_sale(e):
-				var u: Dictionary = g.unit_by_id.get(f["unit"], {})
-				if not u.is_empty():
-					items.append([here.distance_to(Premises.door_point(u)), u])
-			var lets: Array = []
-			for u in g.units:
-				if u["kind"] == "shop" and MapKit.unit_kind(g, u) == "to_let":
-					lets.append([here.distance_to(Premises.door_point(u)), u])
-			lets.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
-			items.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
-			if not items.is_empty():
-				v.add_child(G.header("Trading businesses for sale"))
-				v.add_child(_listing_grid(ph, items.filter(func(x): return match_q.call(String(ph.ui._listing(x[1], float(x[0]))["title"]))), n, card_w, ph_h, "market"))
-			v.add_child(G.header("Shops to let near you", "On the map", func(): EmpireMap.filter = "property"; ph.go("map")))
-			v.add_child(_listing_grid(ph, lets.slice(0, 12).filter(func(x): return match_q.call(String(ph.ui._listing(x[1], float(x[0]))["title"]))), n, card_w, ph_h, "market"))
-		"homes":
-			var hs: Array = []
-			for hm in g.homes():
-				if match_q.call(String(hm["name"])):
-					hs.append([here.distance_to(g.home_lift(hm)), hm])
-			hs.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
-			v.add_child(_listing_grid(ph, hs, n, card_w, ph_h, "market"))
-		"vehicles":
-			var sites := {"dealer_budget": "Kestrel Motors · everyday cars", "dealer_commercial": "Vans and trucks", "dealer_luxury": "Prestige · sports and supercars",
-				"aviation": "Skyport Aviation · helicopters and planes", "marina": "The Marina · boats"}
-			for sid in sites:
-				var models: Array = (SkyportPlay.STOCK.get(sid, []) as Array).filter(func(mm): return match_q.call(String(EmpireData.vehicle_model(mm).get("name", mm))))
-				if models.is_empty():
-					continue
-				v.add_child(G.header(String(sites[sid])))
-				var car := carousel(16)
-				v.add_child(car[0])
-				for model in models:
-					var md := EmpireData.vehicle_model(model)
-					var mdl := String(model)
-					var sd := String(sid)
-					var own := SkyportUI._owned(ph.ui, mdl)
-					(car[1] as HBoxContainer).add_child(photo_card(ph.ui.thumbs.vehicle(mdl, Vector2(340, 190)), 340, 190, String(md.get("name", mdl)),
-						SkyportUI._specs(md), EmpireData.money(float(md.get("price", 0))), G.LABEL, "YOU OWN %d" % own if own > 0 else "", G.GREEN,
-						func(): ph.push("vehicle", {"model": mdl, "site": sd}, String(md.get("name", mdl)), "Marketplace", "car")))
-		"fashion":
-			var shops: Array = ExploreUI.places(g).filter(func(p): return p["cat"] == "fashion" and match_q.call(String(p["name"])))
-			shops.sort_custom(func(a, b): return here.distance_squared_to(a["pos"]) < here.distance_squared_to(b["pos"]))
-			v.add_child(G.para("Clothes are tried on and bought in the shop. Pick one and the route is set.", "subhead"))
-			for p in shops.slice(0, 18):
-				var pd: Dictionary = p
-				gd.add_child(photo_card(Thumbs.place(pd["pos"], 110.0), card_w, ph_h, String(pd["name"]), String(pd["what"]),
-					ph.ui._dist_text(here.distance_to(pd["pos"])) + " away", G.LABEL2, "", Color.WHITE, func():
-						g.set_gps(pd["pos"], String(pd["name"]), pd["ref"])
-						ph.ui.toast("Route set: %s" % pd["name"], "info")
-						ph.go("map", pd["ref"])))
-			v.add_child(gd)
-			v.add_child(G.button("Your wardrobe", func(): ph.go("you"), "gray", "regular", null, "shirt"))
-		"invest":
-			v.add_child(G.para("Buildings on Skyport Island that pay you rent every day. Run them well and they keep their value.", "subhead"))
-			var inner := G.vbox(10)
-			SkyportUI.estates(ph.ui, inner)
-			var c := G.card(18, 10)
-			(c[1] as VBoxContainer).add_child(inner)
-			v.add_child(c[0])
-	v.add_child(G.gap(8))
+	v_ref[0] = scroller(body, 20)
+	fill_market.call(q0)
 
 
 ## Photo cards for units/homes ([dist, record] pairs); a tap opens the
@@ -821,16 +818,35 @@ static func garage(ph: Phone, body: VBoxContainer) -> void:
 	var why := e.sell_vehicle_block(veh)
 	if why == "" and inside:
 		why = "Get out first"
-	var sell := G.button("Sell · %s" % EmpireData.money(worth), func():
+	var sell := confirm_button("Sell · %s" % EmpireData.money(worth), "Confirm sell · %s" % EmpireData.money(worth), func():
 		var err := g.sell_vehicle(vid)
 		ui.toast(err if err != "" else "Sold for %s" % EmpireData.money(worth), "bad" if err != "" else "good")
 		if err == "":
 			Phone.st("vehicles").erase("sel")
-		ph.refresh(), "tinted", "regular", G.RED)
+		ph.refresh(), "regular", G.RED, "tinted")
 	sell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sell.disabled = why != ""
 	sell.tooltip_text = why
 	acts2.add_child(sell)
+	# Charter Operations for aircraft and boats (passive daily revenue).
+	if Ventures.is_charterable(veh):
+		var chartered := Ventures.is_chartered(e, vid)
+		var daily_inc := Ventures.vehicle_charter_daily(veh)
+		var chc := G.card(16, 8)
+		var chv: VBoxContainer = chc[1]
+		var ch_top := G.hbox(10)
+		ch_top.add_child(G.line("Charter Operations", "headline"))
+		ch_top.add_child(G.badge("ACTIVE" if chartered else "PRIVATE", G.GREEN if chartered else G.LABEL2))
+		chv.add_child(ch_top)
+		chv.add_child(G.para(("Earning ~%s/day in executive charter revenue (slight daily wear)." % EmpireData.money(daily_inc)) if chartered else
+			"Put this craft on executive charter to earn ~%s/day passively." % EmpireData.money(daily_inc), "footnote"))
+		var ch_btn := G.button("Pause charter" if chartered else "Start charter · +%s/day" % EmpireData.money(daily_inc), func():
+			var now_on := Ventures.toggle_charter(e, vid)
+			g.save_game()
+			ui.toast("Charter active: ~%s/day" % EmpireData.money(daily_inc) if now_on else "Removed from charter", "good" if now_on else "info")
+			ph.refresh(), "gray" if chartered else "filled", "small", null if not chartered else G.LABEL)
+		chv.add_child(ch_btn)
+		info.add_child(chc[0])
 	# Everything you own, one tap to bring it on stage.
 	v.add_child(G.header("Your vehicles", "Showrooms", func(): Phone.st("market")["cat"] = "vehicles"; ph.go("market")))
 	var car := carousel(14)
@@ -892,11 +908,17 @@ static func vehicle_offer(ph: Phone, body: VBoxContainer, model: String, site: S
 
 
 # -------------------------------------------------------------- city500
+static func _c500_idx(c: Dictionary) -> int:
+	if c.has("i"):
+		return int(c["i"])
+	return City500.companies().find(c)
+
+
 static func city500(ph: Phone, body: VBoxContainer) -> void:
 	var e := ph.game.empire
 	var s := Phone.st("city500")
 	var sector := String(s.get("sector", ""))
-	var q := String(s.get("q", ""))
+	var q0 := String(s.get("q", ""))
 	var wide := width(ph) > 1080.0
 	var items: Array = [["", "All"]]
 	for k in City500.SECTORS:
@@ -904,9 +926,109 @@ static func city500(ph: Phone, body: VBoxContainer) -> void:
 	body.add_child(G.pills(items, sector, func(k):
 		Phone.st("city500")["sector"] = k
 		ph.refresh()))
-	var le := G.search("Search companies", q, func(t): Phone.st("city500")["q"] = t)
-	le.text_submitted.connect(func(_t): ph.refresh())
-	body.add_child(le)
+	var search_row := G.hbox(10)
+	body.add_child(search_row)
+	var rank := City500.ranking(e)
+	var yr := City500.your_rank(e)
+	var day := e.day
+	var holdings := City500.all_stakes(e)
+	var list_ref: Array = [null, null]   # [VBoxContainer, TouchScroll]
+	var gen := [0]
+	var fill_c500 := func(query: String, jump_to_you := false) -> void:
+		var v: VBoxContainer = list_ref[0]
+		var sc: ScrollContainer = list_ref[1]
+		if v == null or not is_instance_valid(v):
+			return
+		for ch in v.get_children():
+			v.remove_child(ch)
+			ch.queue_free()
+		var q_low := query.strip_edges().to_lower()
+		var cur_sec := String(Phone.st("city500").get("sector", ""))
+		var limit := int(Phone.st("city500").get("limit", 60))
+		var rows: Array = []
+		var shown := 0
+		var you_row: Control = null
+		for r in rank:
+			if r.get("you", false):
+				if cur_sec == "" and q_low == "":
+					you_row = _c500_you(ph, r)
+					rows.append(you_row)
+				continue
+			var c: Dictionary = r["c"]
+			if cur_sec != "" and String(c["sector"]) != cur_sec:
+				continue
+			if q_low != "" and not String(c["name"]).to_lower().contains(q_low):
+				continue
+			shown += 1
+			if shown > limit:
+				continue
+			rows.append(_c500_row(ph, r, day, wide))
+		var hdr := G.card(20, 6)
+		(hdr[1] as VBoxContainer).add_child(G.figure("Your empire's value", City500.money(float(yr["value"])), null, "title2"))
+		var ahead: Dictionary = yr["ahead"]
+		(hdr[1] as VBoxContainer).add_child(G.para(("#%d of 500" % int(yr["rank"])) + (" · %s to pass %s" % [City500.money(float(ahead["value"]) - float(yr["value"])), ahead["c"]["name"]] if not ahead.is_empty() else "")
+			if int(yr["rank"]) > 0 else "%s more to enter the City500" % City500.money(float(yr["gap_500"])), "subhead"))
+		v.add_child(hdr[0])
+		if cur_sec == "" and q_low == "":
+			if not holdings.is_empty():
+				var holding_rows: Array = []
+				for h: Dictionary in holdings:
+					var idx := int(h["idx"])
+					var title := String(h["name"])
+					holding_rows.append(G.row(title, "%.1f%% owned · %s/day" % [float(h["pct"]), City500.money(float(h["daily_div"]))],
+						City500.money(float(h["value"])), "chart", G.GREEN,
+						func(): ph.push("company", {"idx": idx}, title, "Portfolio", "star")))
+				v.add_child(G.group(holding_rows, "Your holdings"))
+			v.add_child(_c500_next(ph))
+		if rows.is_empty():
+			v.add_child(G.para("No companies match “%s”." % query, "subhead"))
+		else:
+			v.add_child(G.group(rows))
+		if shown > limit:
+			v.add_child(G.button("Show more (%d)" % (shown - limit), func():
+				Phone.st("city500")["limit"] = limit + 100
+				ph.refresh(), "gray", "regular"))
+		if jump_to_you and sc != null and is_instance_valid(sc):
+			ph.get_tree().process_frame.connect(func():
+				if not is_instance_valid(sc):
+					return
+				if you_row != null and is_instance_valid(you_row):
+					var ty := int(you_row.get_global_rect().position.y - sc.get_global_rect().position.y + sc.scroll_vertical - 140)
+					sc.scroll_vertical = maxi(ty, 0)
+				else:
+					sc.scroll_vertical = int(sc.get_v_scroll_bar().max_value), CONNECT_ONE_SHOT)
+	var le := G.search("Search companies", q0, func(t):
+		Phone.st("city500")["q"] = t
+		gen[0] += 1
+		var ticket := int(gen[0])
+		ph.get_tree().create_timer(0.12, true, false, true).timeout.connect(func():
+			if ticket == gen[0]:
+				fill_c500.call(t, false)))
+	le.text_submitted.connect(func(t):
+		Phone.st("city500")["q"] = t
+		gen[0] += 1
+		fill_c500.call(t, false))
+	search_row.add_child(le)
+	var find_me := G.button("Find Me", func():
+		Phone.st("city500")["q"] = ""
+		Phone.st("city500")["sector"] = ""
+		var rk := int(yr["rank"])
+		if rk > 0:
+			Phone.st("city500")["limit"] = maxi(int(Phone.st("city500").get("limit", 60)), rk + 25)
+			if sector != "":
+				Phone.st("city500")["jump_me"] = true
+				ph.refresh()
+			else:
+				le.text = ""
+				fill_c500.call("", true)
+		else:
+			ph.ui.toast("%s more to enter the City500 (#500)" % City500.money(float(yr["gap_500"])), "info")
+			if sector != "":
+				ph.refresh()
+			else:
+				le.text = ""
+				fill_c500.call("", false), "tinted", "regular", G.ACCENT_TEXT, "location")
+	search_row.add_child(find_me)
 	var split := G.hbox(20)
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_child(split)
@@ -915,39 +1037,11 @@ static func city500(ph: Phone, body: VBoxContainer) -> void:
 	lb.size_flags_stretch_ratio = 1.25
 	split.add_child(lb)
 	var v := scroller(lb, 14)
-	var rank := City500.ranking(e)
-	var limit := int(s.get("limit", 60))
-	var rows: Array = []
-	var shown := 0
-	var day := e.day
-	for r in rank:
-		if r.get("you", false):
-			if sector == "" and q == "":
-				rows.append(_c500_you(ph, r))
-			continue
-		var c: Dictionary = r["c"]
-		if sector != "" and String(c["sector"]) != sector:
-			continue
-		if q != "" and not String(c["name"]).to_lower().contains(q.to_lower()):
-			continue
-		shown += 1
-		if shown > limit:
-			continue
-		rows.append(_c500_row(ph, r, day, wide))
-	var yr := City500.your_rank(e)
-	var hdr := G.card(20, 6)
-	(hdr[1] as VBoxContainer).add_child(G.figure("Your empire's value", City500.money(float(yr["value"])), null, "title2"))
-	var ahead: Dictionary = yr["ahead"]
-	(hdr[1] as VBoxContainer).add_child(G.para(("#%d of 500" % int(yr["rank"])) + (" · %s to pass %s" % [City500.money(float(ahead["value"]) - float(yr["value"])), ahead["c"]["name"]] if not ahead.is_empty() else "")
-		if int(yr["rank"]) > 0 else "%s more to enter the City500" % City500.money(float(yr["gap_500"])), "subhead"))
-	v.add_child(hdr[0])
-	if sector == "" and q == "":
-		v.add_child(_c500_next(ph))
-	v.add_child(G.group(rows))
-	if shown > limit:
-		v.add_child(G.button("Show more (%d)" % (shown - limit), func():
-			Phone.st("city500")["limit"] = limit + 100
-			ph.refresh(), "gray", "regular"))
+	list_ref[0] = v
+	list_ref[1] = v.get_parent()
+	var jump_now := bool(s.get("jump_me", false))
+	s.erase("jump_me")
+	fill_c500.call(q0, jump_now)
 	if wide:
 		var insp := G.vbox(12)
 		insp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -956,7 +1050,7 @@ static func city500(ph: Phone, body: VBoxContainer) -> void:
 		if sel < 0 and rank.size() > 0:
 			for r in rank:
 				if not r.get("you", false):
-					sel = int(City500.companies().find(r["c"]))
+					sel = _c500_idx(r["c"])
 					break
 		if sel >= 0:
 			var iv := scroller(insp, 14)
@@ -1002,7 +1096,7 @@ static func _c500_next(ph: Phone) -> Control:
 
 static func _c500_row(ph: Phone, r: Dictionary, day: int, wide: bool) -> Control:
 	var c: Dictionary = r["c"]
-	var idx := City500.companies().find(c)
+	var idx := _c500_idx(c)
 	var hist := City500.history(c, day, 14)
 	var pct := (float(hist[-1]) / maxf(float(hist[0]), 1.0) - 1.0) * 100.0
 	var sel := int(Phone.st("city500").get("sel", -1)) == idx and wide
@@ -1104,6 +1198,74 @@ static func _company_body(ph: Phone, v: VBoxContainer, idx: int) -> void:
 	var why := City500.why_ahead(ph.game.empire, c)
 	if why != "":
 		v.add_child(G.group([G.row(why, "", "", "chart", G.ORANGE)], "Against you"))
+	# Equity investment: buy/sell 5% stakes in City500 companies for daily dividends.
+	var e := ph.game.empire
+	var st: Dictionary = City500.stake_of(e, idx)
+	var pct_held := float(st.get("pct", 0.0))
+	var mkt_val := float(st.get("value", 0.0))
+	var gain := float(st.get("gain", 0.0))
+	var div_day := City500.stake_dividend(c, day, pct_held)
+	var eq := G.card(20, 10)
+	var ev: VBoxContainer = eq[1]
+	var eh := G.hbox(10)
+	eh.add_child(G.line("Equity Investment", "headline"))
+	if bool(st.get("buyout", false)):
+		eh.add_child(G.badge("100% OWNED", G.GREEN))
+	elif bool(st.get("control", false)):
+		eh.add_child(G.badge("CONTROLLING STAKE", G.ACCENT_TEXT))
+	ev.add_child(eh)
+	var figs := G.hbox(16)
+	figs.add_child(G.figure("Your stake", "%.0f%%" % pct_held, G.ACCENT_TEXT if pct_held > 0.0 else G.LABEL2, "title3"))
+	figs.add_child(G.figure("Market value", City500.money(mkt_val) if pct_held > 0.0 else "£0", G.LABEL, "title3"))
+	figs.add_child(G.figure("Daily dividend", City500.money(div_day) if pct_held > 0.0 else "£0", G.GREEN if div_day > 0.0 else G.LABEL2, "title3"))
+	ev.add_child(figs)
+	if pct_held > 0.001:
+		ev.add_child(G.para("Unrealised %s%s" % ["+" if gain >= 0.0 else "−", City500.money(absf(gain))], "footnote", G.GREEN if gain >= 0.0 else G.RED))
+	var step_pct := minf(5.0, 100.0 - pct_held)
+	var step_cost := float(pr["value"]) * (step_pct / 100.0)
+	var eacts := G.hbox(10)
+	if step_pct > 0.001:
+		eacts.add_child(_buy_equity(ph, c, idx, step_pct, step_cost, "Buy %.0f%%" % step_pct))
+
+	if pct_held > 0.001:
+		var sell_pct := minf(5.0, pct_held)
+		var sell_est := float(pr["value"]) * (sell_pct / 100.0) * 0.985
+		var sell_btn := confirm_button("Sell %.0f%% · %s" % [sell_pct, City500.money(sell_est)],
+			"Confirm sell · %s" % City500.money(sell_est), func():
+			var res: Dictionary = City500.sell_stake(e, idx, sell_pct)
+			if not bool(res.get("ok", false)):
+				ph.ui.toast(String(res.get("error", "Sale failed")), "bad")
+			else:
+				ph.game.save_game()
+				Sfx.play("cash", -4.0)
+				ph.ui.toast("Sold %.0f%% of %s for %s" % [float(res.get("sold_pct", sell_pct)), String(c["name"]), City500.money(float(res.get("proceeds", sell_est)))], "good")
+				ph.refresh(), "regular", G.RED, "tinted")
+		sell_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		eacts.add_child(sell_btn)
+	var target_pct := 100.0 if st["control"] else City500.CONTROL_PCT
+	var acquire_pct := target_pct - pct_held
+	if acquire_pct > step_pct + 0.001:
+		var action := "Acquire remaining shares" if st["control"] else "Take control · %.0f%%" % target_pct
+		var acquire_cost := float(pr["value"]) * acquire_pct / 100.0
+		var acquisition := _buy_equity(ph, c, idx, acquire_pct, acquire_cost, action)
+		ev.add_child(acquisition)
+
+	ev.add_child(eacts)
+	v.add_child(eq[0])
+
+
+static func _buy_equity(ph: Phone, company_data: Dictionary, index: int, pct: float, cost: float, title: String) -> Button:
+	var buy := confirm_button("%s · %s" % [title, City500.money(cost)], "Confirm · %s" % City500.money(cost), func():
+		var res := City500.buy_stake(ph.game.empire, index, pct)
+		if not res["ok"]:
+			ph.ui.toast(String(res["error"]), "bad")
+			return
+		ph.game.save_game()
+		Sfx.play("cash", -4.0)
+		ph.ui.toast("Acquired %.1f%% of %s" % [float(res["bought_pct"]), String(company_data["name"])], "good")
+		ph.refresh(), "regular")
+	buy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return buy
 
 
 # -------------------------------------------------------------- character

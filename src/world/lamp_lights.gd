@@ -22,6 +22,14 @@ var camera_fn: Callable
 var _lights: Array = []
 var _t := 0.0
 var _wet_road_lights := PackedVector4Array()
+var _was_on := false
+
+
+## Registers an island (such as SkyportIsland) whose lamp_heads() should be
+## included in the local night SpotLight3D and wet-road reflection pools.
+func add_island_lamps(island: Node) -> void:
+	if island is SkyportIsland:
+		skyport = island as SkyportIsland
 
 
 func setup(p_worlds: Array, p_camera_fn: Callable) -> void:
@@ -76,7 +84,17 @@ func _process(dt: float) -> void:
 	if not on:
 		for l: SpotLight3D in _lights:
 			l.visible = false
+		if _was_on:
+			_was_on = false
+			for i in WET_ROAD_LIGHTS:
+				_wet_road_lights[i] = Vector4.ZERO
+			for world: CityWorld in worlds:
+				if world.ground_mat:
+					world.ground_mat.set_shader_parameter("wet_road_lamps", _wet_road_lights)
+			if skyport != null and is_instance_valid(skyport) and skyport.ground_mat:
+				skyport.ground_mat.set_shader_parameter("wet_road_lamps", _wet_road_lights)
 		return
+	_was_on = true
 	var cam: Vector3 = camera_fn.call()
 	var cand: Array = []
 	var range_sq := RANGE * RANGE
@@ -84,10 +102,18 @@ func _process(dt: float) -> void:
 		var k0 := Vector2i(floori(cam.x / CityWorld.CHUNK), floori(cam.z / CityWorld.CHUNK))
 		for dz in range(-1, 2):
 			for dx in range(-1, 2):
-				for p in w.chunk_props(k0 + Vector2i(dx, dz)):
-					if p[0] != "streetlight":
+				var key := k0 + Vector2i(dx, dz)
+				var items: Array = w.call("chunk_lamps", key) if w.has_method("chunk_lamps") else w.chunk_props(key)
+				for p in items:
+					var lamp: Transform3D
+					if p is Transform3D:
+						lamp = p
+					elif p is Array and p.size() >= 2:
+						if p[0] != "streetlight":
+							continue
+						lamp = p[1]
+					else:
 						continue
-					var lamp: Transform3D = p[1]
 					var head := lamp * CityWorld.LAMP_HEAD
 					var d := head.distance_squared_to(cam)
 					if d < range_sq:

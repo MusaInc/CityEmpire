@@ -95,6 +95,7 @@ static func _roll_weather(e: Empire) -> String:
 static func _roll_event(e: Empire) -> void:
 	var evs: Dictionary = cfg().get("events", {})
 	var opts: Array = []
+	var weights := {}
 	var total := 0.0
 	for k in evs:
 		# Events about your shops need shops (and staff for a sick day).
@@ -102,12 +103,23 @@ static func _roll_event(e: Empire) -> void:
 			continue
 		if k == "sick" and e.businesses.all(func(b): return b.staff.is_empty()):
 			continue
+		var w := float(evs[k].get("weight", 1.0))
 		opts.append(k)
-		total += float(evs[k].get("weight", 1.0))
+		weights[k] = w
+		total += w
+	# Dynamic district market events (competitor promos when rivals/firms exist, and local pop-up booms).
+	if not e.rivals.is_empty() or not e.firms.is_empty():
+		opts.append("rival_promo")
+		weights["rival_promo"] = 0.50
+		total += 0.50
+	if e.day >= 5:
+		opts.append("popup_boom")
+		weights["popup_boom"] = 0.50
+		total += 0.50
 	var r := e.rng.randf() * total
 	var kind := ""
 	for k in opts:
-		r -= float(evs[k].get("weight", 1.0))
+		r -= float(weights[k])
 		if r <= 0.0:
 			kind = k
 			break
@@ -131,6 +143,28 @@ static func trigger(e: Empire, kind: String, target := "") -> Dictionary:
 			ev["district"] = dk
 			ev["k"] = float(d.get("footfall", 1.5))
 			text = text % EmpireData.district(dk).get("name", dk)
+		"rival_promo":
+			var ks2: Array = EmpireData.economy().get("districts", {}).keys()
+			var mine2: Array = []
+			for b: Business in e.businesses:
+				mine2.append(b.district_key())
+			var dk2: String = target if target != "" else (mine2[e.rng.randi() % mine2.size()] if not mine2.is_empty() and e.rng.randf() < 0.65 else ks2[e.rng.randi() % ks2.size()])
+			ev["district"] = dk2
+			ev["until"] = e.day + 1
+			ev["k"] = 0.92
+			ev["wtp_k"] = 0.90
+			text = "Rival Price Cut in %s: local competitors slashed prices — shoppers are price-sensitive for 2 days" % EmpireData.district(dk2).get("name", dk2)
+		"popup_boom":
+			var ks3: Array = EmpireData.economy().get("districts", {}).keys()
+			var mine3: Array = []
+			for b: Business in e.businesses:
+				mine3.append(b.district_key())
+			var dk3: String = target if target != "" else (mine3[e.rng.randi() % mine3.size()] if not mine3.is_empty() and e.rng.randf() < 0.6 else ks3[e.rng.randi() % ks3.size()])
+			ev["district"] = dk3
+			ev["until"] = e.day + 1
+			ev["k"] = 1.22
+			ev["wtp_k"] = 1.08
+			text = "Local Pop-Up Boom in %s: bustling market stalls are drawing extra shoppers for 2 days" % EmpireData.district(dk3).get("name", dk3)
 		"deal", "price_rise":
 			var ids: Array = EmpireData.product_ids()
 			var pid: String = target if target != "" else ids[e.rng.randi() % ids.size()]
@@ -168,7 +202,7 @@ static func trigger(e: Empire, kind: String, target := "") -> Dictionary:
 				pick[1]["off"] = true
 	ev["text"] = text
 	e.events.append(ev)
-	var kind_col := "good" if kind in ["festival", "deal", "viral", "payday"] else ("bad" if kind in ["burglary", "price_rise"] else "warn")
+	var kind_col := "good" if kind in ["festival", "deal", "viral", "payday", "popup_boom"] else ("bad" if kind in ["burglary", "price_rise"] else "warn")
 	_headline(e, text, kind_col)
 	return ev
 
@@ -235,12 +269,12 @@ static func _inspect(e: Empire, ev: Dictionary) -> void:
 
 
 # ------------------------------------------------------------- effects
-## Footfall multiplier for a business today: weather × festival × payday.
+## Footfall multiplier for a business today: weather × festival × district promo × payday.
 static func footfall_k(e: Empire, b: Business) -> float:
 	var k := float(weather_def(e.weather).get("footfall", 1.0))
 	for ev in e.events:
 		match String(ev.get("kind")):
-			"festival":
+			"festival", "rival_promo", "popup_boom":
 				if ev.get("district") == b.district_key():
 					k *= float(ev.get("k", 1.0))
 			"payday", "campaign":
@@ -248,6 +282,15 @@ static func footfall_k(e: Empire, b: Business) -> float:
 	# The football (home-game crowds, a title), your marketing agency.
 	k *= Club.footfall_k(e, b) * Club.trophy_k(e) * (1.0 + Offices.footfall_bonus(e))
 	return k * e.hq_footfall_k()
+
+
+## Local shopper willingness-to-pay multiplier from active district promotions.
+static func price_sensitivity_k(e: Empire, b: Business) -> float:
+	var k := 1.0
+	for ev in e.events:
+		if ev.has("wtp_k") and ev.get("district") == b.district_key():
+			k *= float(ev.get("wtp_k", 1.0))
+	return k
 
 
 ## Category weights for what shoppers want today (weather).

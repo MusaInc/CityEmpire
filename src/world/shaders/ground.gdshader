@@ -149,6 +149,7 @@ void fragment() {
 	float wheel_tracks = 0.0;
 	float shoulder_depression = 0.0;
 	float paint_coverage = 0.0;
+	float kerb_dist = 0.0;
 	bool flat_top = v_up > 0.5;
 	bool asphalt = c.r < 0.3 && c.g < 0.3;
 	bool grass = c.g > c.r + 0.08;
@@ -202,6 +203,7 @@ void fragment() {
 		float other = rf.w;                     // metres from the nearest other road's kerb (< 0: junction)
 		// Metres from the nearest kerb line (negative on the road).
 		float kerb = min(a - hw, other);
+		kerb_dist = kerb;
 		if (asphalt) {
 			// Aged tarmac: neutral grey (not blue), with a broad tone drift
 			// (resurfaced stretches, sun-bleached runs) and fine aggregate
@@ -232,7 +234,10 @@ void fragment() {
 			if (on) {
 				// Smooth blend into junction boxes so tyre wear/gutter never
 				// cut a hard polygonal seam across intersections (Westbank fix).
+				// Inside intersections (other <= 0), keep continuous cross-traffic
+				// wear and pooling so junctions match straight carriageways seamlessly.
 				float j_smooth = smoothstep(-0.6, 2.6, other);
+				float j_in = 1.0 - j_smooth;
 				float across = rf.x;
 				float avenue = rf.y < 0.0 ? 1.0 : 0.0;
 				// rf.z = metres along the road (mod 64) + a roundabout flag: +64 or
@@ -244,24 +249,33 @@ void fragment() {
 				float flag_side = zf < 1.5 ? 1.0 : -1.0;
 				float arm = (1.0 - ring) * step(0.5, zf);
 				float from_j = other;               // metres past the junction mouth
-				// Tyre tracks: two polished bands per 3.5 m lane.
+				// Tyre tracks: two polished bands per 3.5 m lane, transitioning
+				// smoothly into broad cross-traffic polish inside junctions.
 				float lane_d = abs(fract(a / 3.5) - 0.5) * 3.5;
 				float tracks = band(lane_d - 0.85, 0.32, 0.3) * step(0.9, hw - a) * mix(0.6, 1.0, near) * j_smooth;
+				float j_wear = j_in * (0.48 + 0.52 * vnoise(p * 0.16 + 9.0)) * mix(0.65, 1.0, near);
+				float polish = max(tracks, j_wear * 0.85);
 				// Tyre-polished: darker, smoother, a little oil (a sun sheen runs
 				// along the lanes like on a real road).
-				albedo *= 1.0 - 0.16 * tracks;
-				rough -= 0.11 * tracks;
-				wheel_tracks = tracks;
+				albedo *= 1.0 - 0.16 * polish;
+				rough -= 0.11 * polish;
+				wheel_tracks = polish;
+				// Subtle rubber/oil darkening inside intersections matching queued lanes.
+				float j_oil = j_in * smoothstep(0.45, 0.82, vnoise(p * 0.42 + 13.0) * 0.6 + n * 0.4) * near;
+				albedo *= 1.0 - j_oil * (0.14 + 0.18 * sa);
+				rough -= j_oil * 0.10;
 				// The wheel paths stay relatively clean. Sediment collects
 				// beside the kerb and thickens where runoff reaches the drains.
 				float kerb_in = hw - a;
-				float gutter = (1.0 - smoothstep(0.07, 0.77 + 0.52 * n, kerb_in)) * j_smooth;
+				float gutter_fade = smoothstep(0.5, 3.5, other);
+				float gutter = (1.0 - smoothstep(0.07, 0.77 + 0.52 * n, kerb_in)) * gutter_fade;
 				float silt = gutter * (0.25 + 0.75 * smoothstep(0.25, 0.79, n));
 				float grit = (0.69 + 0.31 * st1) * (1.0 - smoothstep(0.045, 0.23, fpx));
-				albedo = mix(albedo, albedo * vec3(0.49, 0.45, 0.39), silt * (0.40 + 0.55 * sa));
-				albedo = mix(albedo, vec3(0.13, 0.105, 0.076), gutter * grit * (0.09 + 0.24 * sa));
+				albedo = mix(albedo, albedo * vec3(0.52, 0.48, 0.43), silt * (0.36 + 0.48 * sa));
+				albedo = mix(albedo, vec3(0.092, 0.080, 0.066), gutter * grit * (0.08 + 0.18 * sa));
 				shoulder_depression = band(a - (hw - 0.75), 0.67, max(0.18, aa))
-					* smoothstep(0.0, 4.0, from_j);
+					* smoothstep(0.0, 4.0, from_j)
+					+ j_in * 0.55 * vnoise(p * 0.14 + 23.0);
 			if (other > 0.0) {
 				float drain_along = fract(along / 16.0 + 0.5) * 16.0 - 8.0;
 				float grate = band(drain_along, 0.45, aa) * band(kerb_in - 0.45, 0.25, aa);
@@ -449,41 +463,48 @@ void fragment() {
 				}
 			} else {
 				// Courtyards, forecourts and gaps behind the pavement: big
-				// concrete slabs or warm brick paving, by area.
+				// concrete slabs or warm brick paving, by area. Skip unused math.
 				float zone = vnoise(p / 45.0);
-				vec3 brick = vec3(0.5, 0.41, 0.37);
-				vec2 b = p * vec2(4.0, 8.0);
-				b.x += step(1.0, mod(floor(b.y), 2.0)) * 0.5;
-				vec2 bf = fract(b);
-				// Mortar anti-aliased and faded out once a brick is only a few
-				// pixels across (a hard step shimmered into blotchy moire
-				// across big dock aprons); each brick's own tone fades the same way.
-				float bfine = 1.0 - smoothstep(0.012, 0.035, aa);
-				float mortar = max(band(min(bf.x, 1.0 - bf.x), 0.04, aa * 4.0), band(min(bf.y, 1.0 - bf.y), 0.06, aa * 8.0)) * bfine;
-				vec3 bricks = brick * (1.0 + (0.12 * hash12(floor(b)) - 0.06) * bfine) * (0.95 - 0.16 * mortar);
-				// Soldier courses: a darker band of bricks on a 9.6 m grid.
-				vec2 sb = abs(fract(p / 9.6 + 0.5) - 0.5) * 9.6;
-				bricks *= 1.0 - 0.16 * (1.0 - smoothstep(0.22, 0.22 + aa * 2.0, min(sb.x, sb.y)));
-				bricks *= 0.94 + 0.1 * vnoise(p / 11.0);
-				// Big squares and promenades (2026-11-20): staggered 1.5 x 0.75 m
-				// flags, each its own tone, framed by darker granite bands on a
-				// 9.6 m grid and worn by foot traffic (a plain 3 m slab grid
-				// read as one flat sheet of beige across a whole square).
-				vec2 fq = p / vec2(1.5, 0.75);
-				fq.x += 0.5 * mod(floor(fq.y), 2.0);
-				vec2 ff = fract(fq);
-				float fj = max(band(min(ff.x, 1.0 - ff.x), 0.012, aa / 1.5), band(min(ff.y, 1.0 - ff.y), 0.02, aa / 0.75));
-				float ftone = hash12(floor(fq) + 41.0);
-				float ffine = 1.0 - smoothstep(0.05, 0.16, aa);  // (no per-flag speckle far off)
-				vec3 slabs = c * 0.84 * mix(0.98, 0.9 + 0.16 * ftone, ffine) * (1.0 - 0.16 * fj * ffine);
-				vec2 gb = abs(fract(p / 9.6 + 0.5) - 0.5) * 9.6;           // m from a band line
-				float gband = 1.0 - smoothstep(0.32, 0.32 + aa * 2.0, min(gb.x, gb.y));
-				vec3 granite = vec3(0.4, 0.4, 0.42) * (0.88 + 0.14 * hash12(floor(p / 0.6) + 3.0));
-				slabs = mix(slabs, granite, gband * 0.85);
-				float wear = vnoise(p / 14.0) * 0.6 + vnoise(p / 3.7) * 0.4;
-				slabs *= 0.93 + 0.12 * wear;
-				slabs *= 1.0 - 0.1 * smoothstep(0.72, 0.9, vnoise(p * 0.35 + 7.0)) * near;  // stains
-				albedo = mix(slabs, bricks, smoothstep(0.6, 0.68, zone));
+				float bmix = smoothstep(0.6, 0.68, zone);
+				vec3 bricks = vec3(0.0);
+				if (bmix > 0.001) {
+					vec3 brick = vec3(0.5, 0.41, 0.37);
+					vec2 b = p * vec2(4.0, 8.0);
+					b.x += step(1.0, mod(floor(b.y), 2.0)) * 0.5;
+					vec2 bf = fract(b);
+					// Mortar anti-aliased and faded out once a brick is only a few
+					// pixels across (a hard step shimmered into blotchy moire
+					// across big dock aprons); each brick's own tone fades the same way.
+					float bfine = 1.0 - smoothstep(0.012, 0.035, aa);
+					float mortar = max(band(min(bf.x, 1.0 - bf.x), 0.04, aa * 4.0), band(min(bf.y, 1.0 - bf.y), 0.06, aa * 8.0)) * bfine;
+					bricks = brick * (1.0 + (0.12 * hash12(floor(b)) - 0.06) * bfine) * (0.95 - 0.16 * mortar);
+					// Soldier courses: a darker band of bricks on a 9.6 m grid.
+					vec2 sb = abs(fract(p / 9.6 + 0.5) - 0.5) * 9.6;
+					bricks *= 1.0 - 0.16 * (1.0 - smoothstep(0.22, 0.22 + aa * 2.0, min(sb.x, sb.y)));
+					bricks *= 0.94 + 0.1 * vnoise(p / 11.0);
+				}
+				vec3 slabs = vec3(0.0);
+				if (bmix < 0.999) {
+					// Big squares and promenades (2026-11-20): staggered 1.5 x 0.75 m
+					// flags, each its own tone, framed by darker granite bands on a
+					// 9.6 m grid and worn by foot traffic (a plain 3 m slab grid
+					// read as one flat sheet of beige across a whole square).
+					vec2 fq = p / vec2(1.5, 0.75);
+					fq.x += 0.5 * mod(floor(fq.y), 2.0);
+					vec2 ff = fract(fq);
+					float fj = max(band(min(ff.x, 1.0 - ff.x), 0.012, aa / 1.5), band(min(ff.y, 1.0 - ff.y), 0.02, aa / 0.75));
+					float ftone = hash12(floor(fq) + 41.0);
+					float ffine = 1.0 - smoothstep(0.05, 0.16, aa);  // (no per-flag speckle far off)
+					slabs = c * 0.84 * mix(0.98, 0.9 + 0.16 * ftone, ffine) * (1.0 - 0.16 * fj * ffine);
+					vec2 gb = abs(fract(p / 9.6 + 0.5) - 0.5) * 9.6;           // m from a band line
+					float gband = 1.0 - smoothstep(0.32, 0.32 + aa * 2.0, min(gb.x, gb.y));
+					vec3 granite = vec3(0.4, 0.4, 0.42) * (0.88 + 0.14 * hash12(floor(p / 0.6) + 3.0));
+					slabs = mix(slabs, granite, gband * 0.85);
+					float wear = vnoise(p / 14.0) * 0.6 + vnoise(p / 3.7) * 0.4;
+					slabs *= 0.93 + 0.12 * wear;
+					slabs *= 1.0 - 0.1 * smoothstep(0.72, 0.9, vnoise(p * 0.35 + 7.0)) * near;  // stains
+				}
+				albedo = mix(slabs, bricks, bmix);
 			}
 			// Foot traffic cleans the middle of the pavement. Rain leaves a
 			// patchy skirt of dust near the kerb, with isolated darker stains.
@@ -503,6 +524,10 @@ void fragment() {
 			float path = band(kerb - 4.8 + 0.36 * (n - 0.5), 0.8, aa + 0.09);
 			albedo = mix(albedo, vec3(0.29, 0.24, 0.17) * (0.87 + 0.23 * n), path * 0.86);
 		}
+	} else if (asphalt && flat_top) {
+		float drift = vnoise(p * 0.022 + 31.0) * 0.6 + vnoise(p * 0.09) * 0.4;
+		albedo = vec3(0.080, 0.078, 0.075) * (0.82 + 0.36 * drift);
+		rough = 0.86;
 	} else if (pave && flat_top) {
 		vec2 f = fract(p / 1.8);
 		albedo *= 1.0 - 0.1 * (step(f.x, 0.03) + step(f.y, 0.03));
@@ -532,7 +557,9 @@ void fragment() {
 		// Porous asphalt darkens before any standing water forms. A road
 		// crown drains toward its edges; wheel tracks break up the water.
 		surface_wet = wetness * (asphalt ? 1.0 : 0.72);
-		float flatness = smoothstep(0.981, 0.997, normalize(v_wn).y);
+		// Allow wet pooling across Westbank's gentle hills & sloped junctions
+		// while still draining steep embankments (> ~22 deg).
+		float flatness = smoothstep(0.925, 0.985, normalize(v_wn).y);
 		float basin = n * 0.27 + vnoise(p * vec2(0.31, 0.22) + 46.0) * 0.73;
 		basin += 0.24 * shoulder_depression - 0.13 * wheel_tracks;
 		float threshold = mix(0.86, 0.52, surface_wet);
@@ -591,6 +618,36 @@ void fragment() {
 			float fade = 1.0 - smoothstep(32.0, 55.0, camera_distance);
 			EMISSION += min(glint, vec3(1.25)) * coat * fade
 				* texture_breakup * (0.08 + 0.28 * puddle) * smoothstep(0.24, 0.7, night);
+		}
+	} else if (pave && has_streets && flat_top && !shore) {
+		// Subtle warm pavement light spill near building frontages at night,
+		// modulated by world noise so it reads like lit shop windows/entrances,
+		// plus crisp wet puddle reflections of shopfront warmth and sky.
+		if (night > 0.08 && kerb_dist > 2.4 && camera_distance < 180.0) {
+			float frontage = smoothstep(2.4, 4.1, kerb_dist) * (1.0 - smoothstep(6.8, 12.5, kerb_dist));
+			float win_pool = smoothstep(0.30, 0.74, vnoise(p * 0.19 + 19.3) * 0.65 + vnoise(p * 0.52 - 7.1) * 0.35);
+			vec3 shop_warm = mix(vec3(1.0, 0.73, 0.42), vec3(0.96, 0.86, 0.68), vnoise(p * 0.07 + 5.0));
+			float dist_fade = 1.0 - smoothstep(90.0, 180.0, camera_distance);
+			float night_k = smoothstep(0.08, 0.65, night);
+			EMISSION += albedo * shop_warm * frontage * win_pool * night_k * dist_fade * 0.30;
+			if (surface_wet > 0.12 || puddle > 0.02) {
+				vec3 plane_normal = normalize(v_wn);
+				vec3 to_eye = normalize(CAMERA_POSITION_WORLD - v_world);
+				float facing = clamp(dot(plane_normal, to_eye), 0.0, 1.0);
+				float grazing = (1.0 - facing) * (1.0 - facing);
+				float wet_boost = (0.05 * surface_wet + 0.26 * puddle) * (0.45 + 0.55 * grazing);
+				EMISSION += shop_warm * frontage * win_pool * wet_boost * night_k * dist_fade;
+			}
+		}
+		if (puddle > 0.02) {
+			vec3 plane_normal = normalize(v_wn);
+			vec3 to_eye = normalize(CAMERA_POSITION_WORLD - v_world);
+			float facing = clamp(dot(plane_normal, to_eye), 0.0, 1.0);
+			float grazing = (1.0 - facing) * (1.0 - facing);
+			vec3 reflected = reflect(-to_eye, plane_normal);
+			vec3 rain_sky = mix(sky_horizon * 0.16, max(sky_horizon * 0.28, vec3(0.036, 0.042, 0.054)), night);
+			float hemisphere = mix(0.42, 1.0, smoothstep(-0.04, 0.22, reflected.y));
+			EMISSION += rain_sky * puddle * grazing * hemisphere * 0.75;
 		}
 	}
 	ALBEDO = albedo;

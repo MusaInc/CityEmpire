@@ -35,8 +35,17 @@ var _zoom0 := 0.0
 var _dragged := 0.0
 var _card: PanelContainer
 var _chips: HBoxContainer
+var _pill_sb: StyleBoxFlat
+var _legend_sb: StyleBoxFlat
 ## The route this view last drew (world points; scenario checks compare views).
 var drawn_route := PackedVector3Array()
+
+
+static func clear_caches() -> void:
+	_areas.clear()
+	_view.clear()
+	filter = "all"
+	legend = false
 
 
 func _ready() -> void:
@@ -77,9 +86,19 @@ func _ready() -> void:
 	resized.connect(fit_chips)
 	fit_chips.call_deferred()
 	_build_chips()
-	_card = Glass.surface(30.0, 0.0)
+	_card = Glass.surface(30.0, 0.0, Color(0, 0, 0, 0), true, true)
 	_card.visible = false
 	add_child(_card)
+	_pill_sb = StyleBoxFlat.new()
+	_pill_sb.set_corner_radius_all(8)
+	_pill_sb.anti_aliasing = true
+	_pill_sb.set_border_width_all(1)
+	_legend_sb = StyleBoxFlat.new()
+	_legend_sb.set_corner_radius_all(20)
+	_legend_sb.anti_aliasing = true
+	_legend_sb.set_border_width_all(1)
+	_legend_sb.shadow_size = 16
+	_legend_sb.shadow_offset = Vector2(0, 6)
 	# Re-select the destination so its card shows Cancel route.
 	if game.gps and game.gps.active():
 		for m in MapKit.markers(game):
@@ -119,8 +138,8 @@ func _process(_dt: float) -> void:
 	if not _had_tex and EmpireMinimap.map_tex != null:
 		_had_tex = true
 		queue_redraw()
-	# Live: you, your car and the route move.
-	if is_visible_in_tree() and Engine.get_process_frames() % 6 == 0:
+	# Live updates only when the simulation is actually running (not paused in Phone).
+	if is_visible_in_tree() and not get_tree().paused and Engine.get_process_frames() % 6 == 0:
 		queue_redraw()
 
 
@@ -233,12 +252,16 @@ func _draw() -> void:
 		MapKit.draw_marker(self, s, m["kind"], k, m["id"] == sel_id)
 		if pri == 0 or _zoom > 1.6 or m["id"] == sel_id:
 			labels.append([s, String(m["label"]), pri == 0 or m["id"] == sel_id])
+	var pill_bg := Color(0.09, 0.10, 0.12, 0.86) if Glass.dark else Color(0.98, 0.98, 0.99, 0.92)
+	var pill_fg := Color(1, 1, 1, 0.95) if Glass.dark else Color(0.08, 0.08, 0.10, 0.95)
+	_pill_sb.bg_color = pill_bg
+	_pill_sb.border_color = Glass.RIM if Glass.dark else Color(0, 0, 0, 0.10)
 	for l in labels:
 		var fs := 15 if l[2] else 13
 		var tw := f.get_string_size(l[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		var pos: Vector2 = l[0] + Vector2(14 * k, 5)
-		draw_rect(Rect2(pos + Vector2(-4, -fs), Vector2(tw + 8, fs + 6)), Color(S.INK, 0.75))
-		draw_string(f, pos, l[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.95))
+		draw_style_box(_pill_sb, Rect2(pos + Vector2(-7, -fs - 2), Vector2(tw + 14, fs + 8)))
+		draw_string(f, pos, l[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, pill_fg)
 	if gps and gps.active():
 		MapKit.draw_destination(self, _to_screen(Vector2(gps.dest.x, gps.dest.z)), k)
 	if String(_selected.get("kind", "")) == "point":
@@ -250,12 +273,13 @@ func _draw() -> void:
 	var me: Vector3 = gps._here() if gps else game.player.global_position
 	var yaw := game.chase.view_yaw() if game.driving != "" else game.camera.view_yaw()
 	MapKit.draw_player(self, _to_screen(Vector2(me.x, me.z)), Vector2(-sin(yaw), -cos(yaw)), 1.1)
-	# Route status (no route / planning) along the bottom.
+	# Route status (no route / planning), placed clear of search and filter pills.
 	if gps and gps.active() and gps.message != "":
 		var msg := gps.message
 		var mw := f.get_string_size(msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
-		draw_rect(Rect2(Vector2(size.x * 0.5 - mw * 0.5 - 12, 60), Vector2(mw + 24, 30)), Color(S.INK, 0.88))
-		draw_string(f, Vector2(size.x * 0.5 - mw * 0.5, 81), msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, S.AMBER)
+		var sy := chips_top + 58.0
+		draw_style_box(_pill_sb, Rect2(Vector2(size.x * 0.5 - mw * 0.5 - 14, sy), Vector2(mw + 28, 32)))
+		draw_string(f, Vector2(size.x * 0.5 - mw * 0.5, sy + 22), msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Glass.ACCENT_TEXT)
 
 
 func _gui_input(e: InputEvent) -> void:
@@ -508,17 +532,23 @@ func _draw_areas(f: Font) -> void:
 		draw_string(f, pos, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.92) if lvl == 0 else Color(0.93, 0.89, 0.8, 0.85))
 
 
-## The key: every icon and what it means, in two columns (top left, under
-## the filters). "Key" in the button column shows/hides it.
+## The key: every icon and what it means, in two columns (top left, clearly
+## below the floating search bar and filter pills).
 func _draw_legend(f: Font) -> void:
 	var ks: Array = MapKit.KINDS.keys().filter(func(x): return x != "place")
 	var rows := ceili(ks.size() / 2.0)
-	var box := Rect2(Vector2(10, 60), Vector2(400, rows * 26 + 18))
-	draw_rect(box, Color(S.INK, 0.92))
-	draw_rect(box, Color(1, 1, 1, 0.1), false, 1.0)
+	var box_w := minf(412.0, maxf(size.x - 110.0, 260.0))
+	var col_w := (box_w - 20.0) * 0.5
+	var top_y := chips_top + 58.0
+	var box := Rect2(Vector2(16, top_y), Vector2(box_w, rows * 28 + 22))
+	_legend_sb.bg_color = Color(Glass.CARD, 0.94)
+	_legend_sb.border_color = Glass.RIM if Glass.dark else Color(0, 0, 0, 0.10)
+	_legend_sb.shadow_color = Color(0, 0, 0, 0.28 if Glass.dark else 0.14)
+	draw_style_box(_legend_sb, box)
+	var fg := Glass.LABEL
 	for i in ks.size():
 		var col := i / rows
 		var row := i % rows
-		var p := box.position + Vector2(22 + col * 196, 22 + row * 26)
+		var p := box.position + Vector2(24 + col * col_w, 25 + row * 28)
 		MapKit.draw_marker(self, p, ks[i], 0.9)
-		draw_string(f, p + Vector2(16, 5), String(MapKit.KINDS[ks[i]]["name"]), HORIZONTAL_ALIGNMENT_LEFT, 168, 13, Color(1, 1, 1, 0.9))
+		draw_string(f, p + Vector2(16, 5), String(MapKit.KINDS[ks[i]]["name"]), HORIZONTAL_ALIGNMENT_LEFT, col_w - 32.0, 14, fg)

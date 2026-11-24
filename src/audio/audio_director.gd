@@ -174,10 +174,59 @@ func _active_speed() -> float:
 	return player.speed()
 
 
+func _driving_car() -> bool:
+	var parent := get_parent()
+	if parent != null and parent.has_method("vehicle_node"):
+		var v: Node3D = parent.call("vehicle_node")
+		return v != null and is_instance_valid(v) and v is Car
+	return false
+
+
+func _current_hour() -> float:
+	if atmosphere != null and is_instance_valid(atmosphere):
+		return atmosphere.hour
+	var parent := get_parent()
+	if parent != null:
+		var emp = parent.get("empire")
+		if emp != null and emp.has_method("hour"):
+			return float(emp.call("hour"))
+	return 12.0
+
+
+func _tod_ambience_gains(h: float) -> Vector2:
+	# Returns Vector2(city_ambience_gain, traffic_loop_gain) modulated smoothly by hour.
+	var amb_k := 1.0
+	var traf_k := 1.0
+	if h >= 2.0 and h <= 5.0:
+		amb_k = 0.54
+		traf_k = 0.36
+	elif h > 5.0 and h < 7.5:
+		var t := (h - 5.0) / 2.5
+		amb_k = lerpf(0.54, 1.12, t)
+		traf_k = lerpf(0.36, 1.20, t)
+	elif (h >= 7.5 and h <= 9.5) or (h >= 17.0 and h <= 19.5):
+		amb_k = 1.12
+		traf_k = 1.20
+	elif h > 9.5 and h < 11.0:
+		var t := (h - 9.5) / 1.5
+		amb_k = lerpf(1.12, 1.0, t)
+		traf_k = lerpf(1.20, 1.0, t)
+	elif h > 19.5 and h < 24.0:
+		var t := (h - 19.5) / 4.5
+		amb_k = lerpf(1.12, 0.62, t)
+		traf_k = lerpf(1.20, 0.48, t)
+	elif h < 2.0:
+		var t := h / 2.0
+		amb_k = lerpf(0.62, 0.54, t)
+		traf_k = lerpf(0.48, 0.36, t)
+	return Vector2(amb_k, traf_k)
+
+
 func _process(dt: float) -> void:
 	if player == null:
 		return
 	var paused := get_tree().paused
+	var in_car := _driving_car()
 	var spd := _active_speed()
 	var k := 1.0 - exp(-6.0 * dt)
 	_shelter_blend = lerpf(_shelter_blend, shelter, 1.0 - exp(-3.5 * dt))
@@ -185,11 +234,19 @@ func _process(dt: float) -> void:
 	var outside_gain := lerpf(1.0, 0.27, _shelter_blend)
 	var pause_env := lerpf(1.0, 0.32, _pause_blend)
 	var pause_wind := lerpf(1.0, 0.1, _pause_blend)
+	var hour := _current_hour()
+	var tod := _tod_ambience_gains(hour)
+	var r: float = atmosphere.w["rain"] if atmosphere else 0.0
+	var rain_duck := lerpf(1.0, 0.80, clampf(r, 0.0, 1.0))
 	var wind: AudioStreamPlayer = _loops.get("wind_loop")
 	if wind:
-		var w := smoothstep(3.0, 50.0, spd)
-		wind.volume_db = lerpf(wind.volume_db, linear_to_db(maxf(w * 0.9 * outside_gain * pause_wind, 0.003)), k)
-		wind.pitch_scale = lerpf(wind.pitch_scale, 0.75 + 0.6 * w, k)
+		if in_car:
+			# CarAudio runs its own cabin-tuned wind loop while driving: avoid double wind audio.
+			wind.volume_db = lerpf(wind.volume_db, -80.0, 1.0 - exp(-10.0 * dt))
+		else:
+			var w := smoothstep(3.0, 50.0, spd)
+			wind.volume_db = lerpf(wind.volume_db, linear_to_db(maxf(w * 0.9 * outside_gain * pause_wind, 0.003)), k)
+			wind.pitch_scale = lerpf(wind.pitch_scale, 0.75 + 0.6 * w, k)
 	var rope: AudioStreamPlayer = _loops.get("rope_tension_loop")
 	if rope:
 		var load_ := clampf(player.s.tension / 55.0, 0.0, 1.0) if (not paused and player.s.attached and player.s.taut) else 0.0
@@ -197,25 +254,26 @@ func _process(dt: float) -> void:
 		rope.pitch_scale = 0.85 + 0.4 * load_
 	var amb: AudioStreamPlayer = _loops.get("city_ambience")
 	if amb:
-		# The street hum fades as you climb above the rooftops.
+		# The street hum fades as you climb above the rooftops, and eases quietly overnight.
 		var height := clampf(player.height_above_ground() / 120.0, 0.0, 1.0)
-		amb.volume_db = lerpf(amb.volume_db, linear_to_db(maxf((0.55 - 0.35 * height) * outside_gain * pause_env, 0.002)), k)
+		amb.volume_db = lerpf(amb.volume_db, linear_to_db(maxf((0.55 - 0.35 * height) * tod.x * rain_duck * outside_gain * pause_env, 0.002)), k)
 	var traffic: AudioStreamPlayer = _loops.get("traffic_loop")
 	if traffic:
-		# Street-level traffic: loud on the pavement, gone above the rooftops.
+		# Street-level traffic: loud on the pavement, gone above the rooftops, modulated by hour.
 		var low := 1.0 - clampf(player.height_above_ground() / 60.0, 0.0, 1.0)
-		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4 * outside_gain * pause_env, 0.002)), k)
+		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4 * tod.y * rain_duck * outside_gain * pause_env, 0.002)), k)
 	var rain: AudioStreamPlayer = _loops.get("rain_loop")
 	if rain:
-		var r: float = atmosphere.w["rain"] if atmosphere else 0.0
 		rain.volume_db = lerpf(rain.volume_db, linear_to_db(maxf(r * 0.5 * outside_gain * pause_env, 0.001)), k)
 	if not paused:
 		_horn_in -= dt
 		if _horn_in <= 0.0:
 			_horn_in = randf_range(8.0, 24.0)
+			var late_night := hour >= 23.0 or hour < 6.0
+			var indoors := _shelter_blend > 0.55 or bool(player.get("indoors"))
 			var above := player.height_above_ground()
-			if above < 50.0:
-				play("horn", linear_to_db((0.12 + 0.18 * (1.0 - above / 50.0)) * outside_gain), randf_range(0.9, 1.12))
+			if not late_night and not indoors and above < 50.0:
+				play("horn", linear_to_db((0.12 + 0.18 * (1.0 - above / 50.0)) * tod.y * outside_gain), randf_range(0.9, 1.12))
 		_footsteps(dt)
 	var music: AudioStreamPlayer = _loops.get("music_loop")
 	if music:

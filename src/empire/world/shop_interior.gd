@@ -84,6 +84,7 @@ var _trade_glow: MeshInstance3D
 var _trade_board: Label3D
 var _front_seed := 0
 var _lighting_open := true
+var _lights_active := true
 var _delivery_worker: ShopPerson
 var _delivery_truck: Node3D
 var _delivery_phase := 0
@@ -255,6 +256,8 @@ func rebuild() -> void:
 		gl.mesh = _glass.commit()
 		gl.material_override = _mat("glass")
 		gl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		gl.visibility_range_end = 180.0
+		gl.visibility_range_end_margin = 14.0
 		_static.add_child(gl)
 		_glass = null
 	if _glow != null:
@@ -377,6 +380,10 @@ func _build_shop(st: _Batch) -> void:
 	if _has_mezzanine():
 		_build_mezzanine(st, part_d)
 	_decor(st, part_d, cx0, cd0, cd1)
+	if biz and biz.has_upgrade("security"):
+		_build_cctv(st, part_d)
+	if biz and (biz.reputation >= 65.0 or biz.has_upgrade("floor") or biz.has_upgrade("lighting")):
+		_build_shop_prestige(st, part_d, cx0, cx1, cd0, cd1)
 	# Back room: racking, office desk, mop.
 	_backroom(st, part_d, dw0, dw1)
 	door_in = R((door.x + door.y) * 0.5, 0.9, 0.0)
@@ -387,6 +394,8 @@ func _build_shop(st: _Batch) -> void:
 	spots.append({"kind": "pile", "pos": pile_pos, "label": "STAGING AREA"})
 	# Ceiling lights (their kind follows the shop's).
 	var bright := 1.25 if biz and biz.has_upgrade("lighting") else 0.85
+	if biz and biz.reputation >= 65.0:
+		bright += 0.12
 	var tint: Color = look.get("tint", Color(1.0, 0.97, 0.92))
 	tint = tint.lerp(Color(1.0, 0.93, 0.83), 0.18)
 	if biz and biz.has_upgrade("lighting"):
@@ -618,6 +627,57 @@ func _decor(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float) -> vo
 		_decor_corner(st, part_d, cx0, cd0, cd1)
 	else:
 		_decor_trade(st, part_d, cx0, cd0, cd1)
+
+
+## Ceiling-mounted CCTV dome cameras in the sales floor corners when the
+## "security" upgrade is installed.
+func _build_cctv(st: _Batch, part_d: float) -> void:
+	var mount_c := Color(0.14, 0.15, 0.17)
+	var collar_c := Color(0.88, 0.89, 0.91)
+	var dome_c := Color(0.06, 0.07, 0.09)
+	var corners := [R(0.42, 0.62, H), R(W - 0.48, part_d - 0.48, H)]
+	if W >= 14.0:
+		corners.append(R(0.42, part_d - 0.48, H))
+		corners.append(R(W - 0.48, 0.62, H))
+	for pos: Vector3 in corners:
+		st.box(pos + Vector3(-0.09, -0.05, -0.09), pos + Vector3(0.09, 0.0, 0.09), mount_c)
+		st.cylinder(pos + Vector3(0.0, -0.10, 0.0), 0.11, 0.055, collar_c, 10)
+		st.cylinder(pos + Vector3(0.0, -0.175, 0.0), 0.085, 0.078, dome_c, 10)
+		_glow_quad(pos + Vector3(-0.015, -0.115, 0.085), pos + Vector3(0.015, -0.095, 0.095), Color(1.0, 0.18, 0.14) * 1.8)
+
+
+## Subtle visual upgrades for high-reputation (>= 65) or upgraded shops:
+## brass counter trim, a ceramic counter accent planter, and a top-rated plaque.
+func _build_shop_prestige(st: _Batch, part_d: float, cx0: float, cx1: float, cd0: float, cd1: float) -> void:
+	var brass := Color(0.76, 0.63, 0.34)
+	# Sleek brass kick-rail and counter-front accent trim.
+	st.box(R(cx0 - 0.032, cd0 + 0.05, 0.04), R(cx0 - 0.015, cd1 - 0.05, 0.095), brass)
+	st.box(R(cx0 - 0.032, cd0 + 0.05, 0.88), R(cx0 - 0.015, cd1 - 0.05, 0.92), brass)
+	# Compact ceramic accent planter resting on the front corner of the counter top.
+	if cd1 - cd0 >= 0.85:
+		var px := cx0 + 0.14
+		var pd := cd0 + 0.12
+		st.cylinder(R(px, pd, 1.04), 0.09, 0.15, Color(0.92, 0.9, 0.85), 10)
+		st.cylinder(R(px, pd, 1.18), 0.115, 0.14, Color(0.18, 0.44, 0.22), 10)
+		st.cylinder(R(px, pd, 1.30), 0.075, 0.10, Color(0.24, 0.54, 0.26), 8)
+	# High-reputation shops earn a lit "TOP RATED" gold plaque behind the counter.
+	if biz and biz.reputation >= 65.0:
+		var md := (cd0 + cd1) * 0.5
+		st.box(R(W - 0.08, md - 0.42, 2.32), R(W - 0.04, md + 0.42, 2.74), Color(0.11, 0.12, 0.14))
+		st.box(R(W - 0.085, md - 0.44, 2.30), R(W - 0.04, md + 0.44, 2.33), brass)
+		st.box(R(W - 0.085, md - 0.44, 2.73), R(W - 0.04, md + 0.44, 2.76), brass)
+		var badge := Label3D.new()
+		badge.text = "★★★★★\nTOP RATED" if biz.reputation >= 85.0 else "★★★★\nLOCAL FAVOURITE"
+		badge.font = EmpireStyle.font("black")
+		badge.font_size = 44
+		badge.pixel_size = 0.0022
+		badge.shaded = false
+		badge.double_sided = false
+		badge.outline_size = 0
+		badge.modulate = Color(0.98, 0.84, 0.42)
+		badge.position = R(W - 0.09, md, 2.53)
+		badge.rotation.y = -PI * 0.5
+		_static.add_child(badge)
 
 
 func _decor_corner(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float) -> void:
@@ -1537,7 +1597,7 @@ func update_signs(trading: bool, night := false) -> void:
 		if _trade_glow:
 			_trade_glow.visible = _lighting_open
 		if is_instance_valid(_sign_light):
-			_sign_light.visible = trading
+			_sign_light.visible = trading and _lights_active
 	if _shutter:
 		_shutter.visible = night and not trading
 	if _sign:
@@ -1560,6 +1620,17 @@ func update_signs(trading: bool, night := false) -> void:
 			_open_sign.modulate = Color(0.4, 1.0, 0.55) if trading else Color(1.0, 0.4, 0.35)
 
 
+## Lightweight mobile light toggle so distant/unoccupied shop interiors don't
+## waste active light budget on exterior passes.
+func set_exterior_lights_active(active: bool) -> void:
+	_lights_active = active
+	for light in _sales_lights:
+		if is_instance_valid(light):
+			light.visible = active
+	if is_instance_valid(_sign_light):
+		_sign_light.visible = active and _lighting_open
+
+
 ## Fixture positions in fill order: the back wall (fridges first), then the
 ## middle gondola's two sides, then the left wall.
 func _fixture_sites(part_d: float) -> Array:
@@ -1576,18 +1647,27 @@ func _fixture_sites(part_d: float) -> Array:
 		x += BAY + bay_gap
 	if unit.get("flagship", false):
 		var aisle_ends: Array = []
-		var gx := 3.8
-		while gx < W - 4.8:
+		var min_gx := 3.8
+		var max_gx := W - 4.8
+		var gx := min_gx
+		while gx <= max_gx:
 			if absf(gx - W * 0.5) > 1.9:
 				aisle_ends.append(gx)
 			gx += 3.35
-		var d := 5.0
-		while d + BAY < part_d - 1.7:
+		var d_min := maxf(5.0, ENTRY_CLEAR + 0.4)
+		var d_max := part_d - 1.8
+		var d := d_min
+		while d + BAY <= d_max:
 			for x_pos: float in aisle_ends:
+				# Keep flagship gondolas cleanly clear of mezzanine stairs/gallery and counter zone.
+				if _has_mezzanine() and x_pos < 7.6 and d < 16.5:
+					continue
+				if x_pos + 1.0 >= W - 3.6:
+					continue
 				_append_shop_bay(sites, x_pos, d)
 			d += BAY + 0.06
 			# Leave a transverse route between the front and back of long aisles.
-			if absf(d - (5.0 + part_d) * 0.5) < BAY:
+			if absf(d - (d_min + part_d) * 0.5) < BAY:
 				d += 1.65
 	else:
 		var gx0 := 1.95
@@ -1660,7 +1740,8 @@ func _place_fixtures(st: _Batch, part_d: float) -> void:
 			site = mid_sites.pop_front()
 			_mid_used = true
 		else:
-			push_warning("ShopInterior: no room for a %s in %s" % [w[0], unit.get("id")])
+			if not unit.get("flagship", false):
+				push_warning("ShopInterior: no room for a %s in %s" % [w[0], unit.get("id")])
 			continue
 		_fixture(st, String(w[0]), int(w[1]), site)
 	# A single feature panel avoids repeating the same ad across empty bays.
@@ -1717,7 +1798,7 @@ func _end_cap(st: _Batch, gc: float, aisle_start: float) -> void:
 const WALL_LINES := {"convenience": ["OPEN LATE\nEVERY DAY", "LOCAL &\nFRIENDLY", "FRESH\nEVERY MORNING"],
 	"clothing": ["NEW\nSEASON", "STYLE\nFOR LESS"], "cafe": ["GOOD\nCOFFEE", "BAKED\nIN-HOUSE"],
 	"takeaway": ["HOT &\nFRESH", "OPEN\nTILL LATE"], "bakery": ["BAKED\nTHIS MORNING", "REAL\nBREAD"],
-	"phone": ["REPAIRS\nWHILE U WAIT", "LATEST\nDEVICES"]}
+	"phones": ["REPAIRS\nWHILE U WAIT", "LATEST\nDEVICES"]}
 
 
 func _wall_graphic(st: _Batch, site: Dictionary, i: int) -> void:
@@ -2013,7 +2094,7 @@ func _stock_door(st: _Batch, part_d: float, dw0: float, dw1: float, trim: Color)
 	# The door leaf: hinged on the right jamb.
 	var lw := dw1 - dw0 - 0.02
 	var leaf_c := brand.darkened(0.35).lerp(Color(0.55, 0.57, 0.6), 0.45)
-	var own := biz != null and rival.is_empty()
+	var own := biz != null and rival.is_empty() and not public_display
 	var lb := _Batch.new()
 	lb.box(Vector3(-lw, 0.015, -0.022), Vector3(0.0, 2.28, 0.022), leaf_c)
 	for f: float in [-1.0, 1.0]:
@@ -2049,11 +2130,12 @@ func _stock_door(st: _Batch, part_d: float, dw0: float, dw1: float, trim: Color)
 		_door_open = 0.0
 		set_process(true)
 	else:
-		# Someone else's shop: the door stays shut (part of the shell batch).
+		# Someone else's shop (or vacant/public): the door stays shut and physically solid.
 		var o := R(dw1, part_d + 0.07, 0.0)
 		st.box(o + Vector3(-lw, 0.015, -0.022), o + Vector3(0.0, 2.28, 0.022), leaf_c)
 		st.box(o + Vector3(-lw * 0.5 - 0.13, 1.46, 0.0225), o + Vector3(-lw * 0.5 + 0.13, 1.72, 0.027), Color(0.16, 0.24, 0.3))
 		st.box(o + Vector3(-lw + 0.04, 0.02, 0.0225), o + Vector3(-0.04, 0.3, 0.027), Color(0.72, 0.73, 0.75))
+		_solid(o + Vector3(-lw, 0.0, -0.07), o + Vector3(0.0, 2.3, 0.07))
 
 
 ## Opens the stockroom door for anyone walking up to it (you, your staff),
@@ -2469,6 +2551,16 @@ func _build_street(st: _Batch) -> void:
 			var d := i * 1.8
 			_wall_box(st, 0.65, 2.2, d, d + 0.59, 0.0, 0.49, Color(0.13, 0.15, 0.17))
 			st.box(R(0.73, d - 0.06, 0.26), R(2.28, d + 0.65, 0.33), Color(0.48, 0.49, 0.49))
+		# Wall-mounted dumbbell rack & mirror along the right side of the club.
+		var r_d0 := ENTRY_CLEAR + 0.4
+		var r_d1 := minf(D - 2.8, r_d0 + 3.2)
+		if r_d1 > r_d0 + 1.0 and W >= 7.5:
+			st.box(R(W - 0.10, r_d0, 0.9), R(W - 0.05, r_d1, 2.35), Color(0.74, 0.80, 0.85))
+			_wall_box(st, W - 0.52, W - 0.08, r_d0 + 0.15, r_d1 - 0.15, 0.0, 0.78, Color(0.14, 0.15, 0.17))
+			var db_d := r_d0 + 0.35
+			while db_d < r_d1 - 0.3:
+				st.cylinder(R(W - 0.30, db_d, 0.78), 0.075, 0.14, Color(0.24, 0.25, 0.28), 8)
+				db_d += 0.38
 	elif use == "furniture":
 		for z in range(5, int(D) - 3, 5):
 			_street_furniture(st, 3.2, float(z), 0.0)
@@ -2490,8 +2582,11 @@ func _build_street(st: _Batch) -> void:
 		_street_service_counter(st, mid, half, desk, accent, use == "cafe")
 	if public_display and use != "furniture":
 		spots.append({"kind": "retail_checkout", "pos": R(mid, desk - 0.64, 0.0)})
-	elif use in ["hotel", "office", "residential", "bank", "garage", "warehouse", "furniture"]:
-		spots.append({"kind": "street_reception", "pos": R(mid, desk - 0.64, 0.0)})
+	elif use in Premises.STREET_INTERACTIVE:
+		var spot_d := {"kind": "street_reception", "pos": R(mid, desk - 0.64, 0.0), "use": use}
+		if use == "fitness":
+			spot_d["label"] = "TRAIN · FITNESS CLUB"
+		spots.append(spot_d)
 	till_staff.append(R(mid, desk + 1.05, 0.0))
 	door_in = R(mid, 0.92, 0.0)
 	door_out = R(mid, -1.5, 0.0)
@@ -2641,17 +2736,35 @@ func _build_lobby(st: _Batch) -> void:
 	_floor(Color(0.86, 0.84, 0.8), 1)
 	look = {"ceiling": Color(0.12, 0.12, 0.13), "lights": "none"}
 	_shell(st, Color(0.8, 0.78, 0.74), Color(0.12, 0.12, 0.13))
+	var tier := 0 if is_office else (ShopStyle.hq_tier if ours else 0)
+	var bronze := Color(0.74, 0.59, 0.32) if tier >= 2 else Color(0.55, 0.42, 0.25)
 	# Walnut panelling on the back wall, slim bronze reveals.
 	var px := 0.0
 	while px < W - 0.01:
 		var pw := minf(1.2, W - px)
 		st.box(R(px + 0.01, D - 0.08, 0.0), R(px + pw - 0.01, D - 0.02, H), walnut.lightened(0.04 * float(int(px) % 3)))
-		st.box(R(px + pw - 0.012, D - 0.085, 0.0), R(px + pw + 0.012, D - 0.06, H), Color(0.55, 0.42, 0.25))
+		st.box(R(px + pw - 0.012, D - 0.085, 0.0), R(px + pw + 0.012, D - 0.06, H), bronze)
 		px += pw
 	# The feature wall: the name in the company's face over a lit plinth.
 	var cx := W * 0.5
-	st.box(R(cx - 3.2, D - 0.14, 2.2), R(cx + 3.2, D - 0.08, 3.9), prim if ours else Color(0.08, 0.08, 0.09))
-	_glow_quad(R(cx - 3.2, D - 0.145, 2.18), R(cx + 3.2, D - 0.145, 2.22), acc * 1.6)
+	var panel_hw := 3.2 if tier < 2 else (3.7 if tier == 2 else minf(W * 0.44, 4.4))
+	st.box(R(cx - panel_hw, D - 0.14, 2.2), R(cx + panel_hw, D - 0.08, 3.9 if tier < 3 else minf(H - 0.35, 4.35)), prim if ours else Color(0.08, 0.08, 0.09))
+	_glow_quad(R(cx - panel_hw, D - 0.145, 2.18), R(cx + panel_hw, D - 0.145, 2.22), acc * (1.9 if tier >= 2 else 1.6))
+	if tier >= 2:
+		# Tier 2+: top brass header & twin vertical architectural light coves framing the brand wall.
+		var top_y := 3.9 if tier == 2 else minf(H - 0.35, 4.35)
+		st.box(R(cx - panel_hw - 0.04, D - 0.155, top_y), R(cx + panel_hw + 0.04, D - 0.08, top_y + 0.06), bronze)
+		for side: float in [-1.0, 1.0]:
+			var fx := cx + side * (panel_hw + 0.16)
+			st.box(R(fx - 0.06, D - 0.16, 0.12), R(fx + 0.06, D - 0.08, H - 0.15), bronze)
+			_glow_quad(R(fx - 0.02, D - 0.165, 0.25), R(fx + 0.02, D - 0.165, H - 0.25), acc * 1.5)
+	if tier >= 3:
+		# Tier 3 (The Whole Tower): architectural backlit golden crown bars and marble floor runner.
+		st.box(R(cx - 2.4, D - 0.16, 3.65), R(cx + 2.4, D - 0.14, 3.71), bronze)
+		_glow_quad(R(cx - 2.4, D - 0.165, 3.72), R(cx + 2.4, D - 0.165, 3.75), Color(1.0, 0.88, 0.55) * 1.8)
+		st.box(R(cx - 1.15, 0.5, 0.015), R(cx + 1.15, D * 0.54, 0.021), prim.darkened(0.25))
+		for side2: float in [-1.15, 1.11]:
+			st.box(R(cx + side2, 0.5, 0.016), R(cx + side2 + 0.04, D * 0.54, 0.023), bronze)
 	var name_l := Label3D.new()
 	name_l.text = title if String(hi.get("face", "")) in ["script", "retro"] else title.to_upper()
 	name_l.font = ShopStyle.font(String(hi.get("face", ""))) if not hi.is_empty() else EmpireStyle.font("black")
@@ -2675,16 +2788,30 @@ func _build_lobby(st: _Batch) -> void:
 	sub.modulate = Color(0.92, 0.9, 0.86)
 	sub.position = R(cx, D - 0.16, 2.45)
 	_static.add_child(sub)
-	# Reception desk: a stone-topped block with a brand-coloured front.
+	# Reception desk: a stone-topped block with a brand-coloured front (widens and gains bronze inlays at higher HQ tiers).
 	var dd := D * 0.55
-	st.box(R(cx - 2.2, dd, 0.0), R(cx + 2.2, dd + 0.8, 1.05), walnut)
-	st.box(R(cx - 2.25, dd - 0.05, 1.05), R(cx + 2.25, dd + 0.85, 1.12), stone)
-	st.box(R(cx - 2.2, dd - 0.02, 0.1), R(cx + 2.2, dd, 0.98), prim if ours else Color(0.16, 0.17, 0.19))
-	_glow_quad(R(cx - 2.15, dd - 0.025, 0.05), R(cx + 2.15, dd - 0.025, 0.08), acc * 1.4)
+	var desk_hw := 2.2 if tier < 2 else (2.6 if tier == 2 else 3.0)
+	st.box(R(cx - desk_hw, dd, 0.0), R(cx + desk_hw, dd + 0.8, 1.05), walnut)
+	st.box(R(cx - desk_hw - 0.05, dd - 0.05, 1.05), R(cx + desk_hw + 0.05, dd + 0.85, 1.12), stone)
+	st.box(R(cx - desk_hw, dd - 0.02, 0.1), R(cx + desk_hw, dd, 0.98), prim if ours else Color(0.16, 0.17, 0.19))
+	_glow_quad(R(cx - desk_hw + 0.05, dd - 0.025, 0.05), R(cx + desk_hw - 0.05, dd - 0.025, 0.08), acc * (1.7 if tier >= 2 else 1.4))
+	if tier >= 2:
+		st.box(R(cx - desk_hw, dd - 0.032, 0.92), R(cx + desk_hw, dd - 0.015, 0.96), bronze)
+		st.box(R(cx - desk_hw, dd - 0.032, 0.12), R(cx + desk_hw, dd - 0.015, 0.16), bronze)
+		var desk_sig := Label3D.new()
+		desk_sig.text = title.to_upper()
+		desk_sig.font = name_l.font
+		desk_sig.font_size = 56
+		desk_sig.pixel_size = clampf((desk_hw * 1.6) / maxf(desk_sig.text.length() * 34.0, 1.0), 0.0016, 0.0036)
+		desk_sig.shaded = false
+		desk_sig.outline_size = 0
+		desk_sig.modulate = bronze if tier >= 3 else acc
+		desk_sig.position = R(cx, dd - 0.036, 0.54)
+		_static.add_child(desk_sig)
 	for mx: float in [-1.2, 1.2]:
 		st.box(R(cx + mx - 0.25, dd + 0.25, 1.12), R(cx + mx + 0.25, dd + 0.3, 1.45), Color(0.05, 0.05, 0.06))
 		_glow_quad(R(cx + mx - 0.23, dd + 0.245, 1.15), R(cx + mx + 0.23, dd + 0.245, 1.43), Color(0.35, 0.55, 0.85))
-	_solid(R(cx - 2.25, dd - 0.05, 0.0), R(cx + 2.25, dd + 0.85, 1.12))
+	_solid(R(cx - desk_hw - 0.05, dd - 0.05, 0.0), R(cx + desk_hw + 0.05, dd + 0.85, 1.12))
 	spots.append({"kind": "office_desk" if is_office else "hq_desk", "pos": R(cx, dd - 0.9, 0.0), "label": "RECEPTION"})
 	# Lifts on the side wall: brushed steel doors, lit call panels.
 	for i in 3:
@@ -2734,9 +2861,20 @@ func _build_lobby(st: _Batch) -> void:
 	can.modulate = acc if ours else Color(0.9, 0.8, 0.6)
 	can.position = R(mid, -2.235, oh + 0.31)
 	_static.add_child(can)
-	# Light: warm downlights and a cool wash on the feature wall.
-	_light(R(W * 0.5, D * 0.5, H - 0.4), Color(1.0, 0.92, 0.8), 1.3, maxf(W, D) * 0.9)
-	_light(R(W * 0.5, D - 1.2, H - 0.6), Color(1.0, 0.95, 0.88), 0.8, 5.0)
+	# Light: warm downlights and a cool wash on the feature wall (upgraded at HQ tiers 2-3).
+	_light(R(W * 0.5, D * 0.5, H - 0.4), Color(1.0, 0.92, 0.8), 1.3 + 0.18 * float(tier), maxf(W, D) * 0.9)
+	_light(R(W * 0.5, D - 1.2, H - 0.6), Color(1.0, 0.95, 0.88), 0.8 + 0.15 * float(tier), 5.5)
+	if tier >= 3:
+		# Architectural suspended brass halo chandelier over the grand lobby.
+		var ch_y := H - 0.58
+		var ch_d := D * 0.36
+		for rod: Vector2 in [Vector2(-1.1, -0.5), Vector2(1.1, -0.5), Vector2(-1.1, 0.5), Vector2(1.1, 0.5)]:
+			st.box(R(cx + rod.x - 0.012, ch_d + rod.y - 0.012, ch_y), R(cx + rod.x + 0.012, ch_d + rod.y + 0.012, H), bronze)
+		st.box(R(cx - 1.35, ch_d - 0.62, ch_y - 0.05), R(cx + 1.35, ch_d - 0.50, ch_y + 0.05), bronze)
+		st.box(R(cx - 1.35, ch_d + 0.50, ch_y - 0.05), R(cx + 1.35, ch_d + 0.62, ch_y + 0.05), bronze)
+		st.box(R(cx - 1.35, ch_d - 0.62, ch_y - 0.05), R(cx - 1.23, ch_d + 0.62, ch_y + 0.05), bronze)
+		st.box(R(cx + 1.23, ch_d - 0.62, ch_y - 0.05), R(cx + 1.35, ch_d + 0.62, ch_y + 0.05), bronze)
+		_glow_quad(R(cx - 1.25, ch_d - 0.52, ch_y - 0.055), R(cx + 1.25, ch_d + 0.52, ch_y - 0.055), Color(1.0, 0.92, 0.72) * 1.7, true)
 	var lx := 1.5
 	while lx < W - 1.0:
 		_glow_quad(R(lx - 0.02, 1.0, H - 0.02), R(lx + 0.02, D - 1.0, H - 0.02), Color(1.0, 0.94, 0.85) * 1.4, true)
@@ -2879,7 +3017,7 @@ func _update_headers() -> void:
 			if int(count[a2]) > bn:
 				bn = int(count[a2])
 				best = a2
-		hl.text = best if best != "" else ({"clothing": "NEW IN", "phone": "TECH", "bakery": "BAKERY"}.get(type_id, "OFFERS") as String)
+		hl.text = best if best != "" else ({"clothing": "NEW IN", "phones": "TECH", "bakery": "BAKERY"}.get(type_id, "OFFERS") as String)
 
 
 func _slot_goods(si: int, s: Dictionary, by_shape: Dictionary) -> void:
@@ -3249,7 +3387,7 @@ func _decor_trade(st: _Batch, part_d: float, cx0: float, cd0: float, cd1: float)
 	for e: float in [-0.45, 0.45]:
 		st.box(R(cx0 - 0.08, hd + e - 0.01, 3.15), R(cx0 - 0.06, hd + e + 0.01, H), Color(0.3, 0.3, 0.32))
 	var lab := Label3D.new()
-	lab.text = {"cafe": "ORDER HERE", "takeaway": "ORDER & COLLECT", "bakery": "PAY HERE", "clothing": "TILLS", "phone": "PAY & COLLECT"}.get(type_id, "PAY HERE")
+	lab.text = {"cafe": "ORDER HERE", "takeaway": "ORDER & COLLECT", "bakery": "PAY HERE", "clothing": "TILLS", "phones": "PAY & COLLECT"}.get(type_id, "PAY HERE")
 	lab.font = ShopStyle.font(String(ident.get("face", "")))
 	lab.font_size = 52
 	# Sized to stay on the 1.2 m board (long wording used to run off both
@@ -3445,9 +3583,10 @@ func _spot_light(p: Vector3, tint: Color, energy: float, radius: float, beam: fl
 	light.spot_attenuation = 1.18
 	light.spot_angle = beam
 	light.spot_angle_attenuation = 1.72
+	var is_own_shop := biz != null and rival.is_empty() and not public_display
 	light.distance_fade_enabled = true
-	light.distance_fade_begin = 47.0
-	light.distance_fade_length = 19.0
+	light.distance_fade_begin = 42.0 if is_own_shop else 32.0
+	light.distance_fade_length = 12.0
 	light.set_meta("open_energy", energy)
 	_static.add_child(light)
 	_sales_lights.append(light)
@@ -3458,9 +3597,11 @@ func _light(p: Vector3, c: Color, e: float, r: float) -> void:
 	o.position = p
 	o.light_color = c
 	InteriorKit.tune_light(o, e, r)
-	# (Someone else's shop: only lit up close, there are dozens of them.)
-	o.distance_fade_begin = 90.0 if rival.is_empty() else 35.0
-	o.distance_fade_length = 30.0 if rival.is_empty() else 10.0
+	# Tighten distance fade on non-player-occupied shops so distant interiors
+	# don't waste active mobile lights.
+	var is_own_shop := biz != null and rival.is_empty() and not public_display
+	o.distance_fade_begin = 42.0 if is_own_shop else 32.0
+	o.distance_fade_length = 12.0 if is_own_shop else 8.0
 	_static.add_child(o)
 	o.set_meta("open_energy", e)
 	_sales_lights.append(o)
@@ -3648,7 +3789,12 @@ func world_spots() -> Array:
 	if public_display or kind == "street":
 		for s: Dictionary in spots:
 			if s["kind"] in ["retail_checkout", "street_reception"]:
-				out.append({"kind": s["kind"], "world": to_world(s["pos"]), "interior": self})
+				var d: Dictionary = {"kind": s["kind"], "world": to_world(s["pos"]), "interior": self}
+				if s.has("label"):
+					d["label"] = s["label"]
+				if s.has("use"):
+					d["use"] = s["use"]
+				out.append(d)
 		return out
 	if not rival.is_empty() or (kind == "shop" and biz == null):
 		return out  # (a shop to let has its TO LET board outside, nothing inside)

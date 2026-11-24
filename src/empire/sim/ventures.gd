@@ -408,6 +408,74 @@ static func dealer_day(e: Empire) -> float:
 	return revenue - cogs - costs
 
 
+# ----------------------------------------------------------- charter ops
+## Owned aircraft and yachts (heli, plane, boat) can be listed for executive
+## charter when idle, generating daily revenue that offsets hangar/marina fees.
+static func is_charterable(v: Dictionary) -> bool:
+	if v.is_empty() or v.get("test", false):
+		return false
+	var cls := String(EmpireData.vehicle_model(String(v.get("model", ""))).get("class", "car"))
+	return cls in ["heli", "plane", "boat"]
+
+
+static func is_chartered(empire: Empire, vehicle_id: String) -> bool:
+	var ch = empire.flags.get("charters", null)
+	if not (ch is Dictionary) or not bool((ch as Dictionary).get(vehicle_id, false)):
+		return false
+	var v := empire.vehicle(vehicle_id)
+	return is_charterable(v)
+
+
+static func toggle_charter(empire: Empire, vehicle_id: String) -> bool:
+	var v := empire.vehicle(vehicle_id)
+	if not is_charterable(v):
+		return false
+	var ch: Dictionary = (empire.flags.get("charters", {}) as Dictionary).duplicate()
+	var now_on := not bool(ch.get(vehicle_id, false))
+	if now_on:
+		ch[vehicle_id] = true
+	else:
+		ch.erase(vehicle_id)
+	empire.flags["charters"] = ch
+	var nm := String(EmpireData.vehicle_model(String(v["model"])).get("name", v["model"]))
+	empire._note("%s %s executive charter" % [nm, "listed for" if now_on else "removed from"], "info")
+	empire.changed.emit()
+	return now_on
+
+
+static func vehicle_charter_daily(v: Dictionary) -> float:
+	if not is_charterable(v):
+		return 0.0
+	var md := EmpireData.vehicle_model(String(v.get("model", "")))
+	var price := float(md.get("price", 0.0))
+	var fee := float(md.get("fee", 0.0))
+	var cond := clampf(float(v.get("condition", 1.0)), 0.0, 1.0)
+	return snappedf(maxf(fee * 1.4, price * 0.0022) * smoothstep(0.20, 0.95, cond), 1.0)
+
+
+static func daily_charter_net(empire: Empire) -> float:
+	var ch = empire.flags.get("charters", null)
+	if not (ch is Dictionary) or (ch as Dictionary).is_empty():
+		return 0.0
+	var total := 0.0
+	for v in empire.vehicles:
+		if is_chartered(empire, String(v.get("id", ""))):
+			total += vehicle_charter_daily(v)
+	return total
+
+
+static func charter_day(e: Empire) -> float:
+	var total := daily_charter_net(e)
+	if total <= 0.0:
+		return 0.0
+	for v in e.vehicles:
+		if is_chartered(e, String(v.get("id", ""))) and vehicle_charter_daily(v) > 0.0:
+			v["condition"] = maxf(float(v.get("condition", 1.0)) - 0.005, 0.0)
+	e.company_cash += total
+	e._book("company", total, "charter", "Executive charter revenue")
+	return total
+
+
 # ----------------------------------------------------------- running costs
 static func craft_fees(e: Empire) -> float:
 	var total := 0.0
@@ -433,5 +501,10 @@ static func craft_fees(e: Empire) -> float:
 static func end_day(e: Empire) -> Dictionary:
 	var es := estates_day(e)
 	var dl := dealer_day(e)
+	var ch := charter_day(e)
 	var fees := craft_fees(e)
-	return {"rent": es["income"], "upkeep": es["upkeep"], "dealer": dl, "fees": fees}
+	return {"rent": es["income"], "upkeep": es["upkeep"], "dealer": dl, "charter": ch, "fees": fees}
+
+
+static func day_tick(e: Empire) -> Dictionary:
+	return end_day(e)

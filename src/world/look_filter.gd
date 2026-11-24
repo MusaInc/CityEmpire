@@ -41,8 +41,12 @@ const TUNING := {
 		"depth_edge": 0.09, "exposure": 1.06, "split_tone": 0.4, "haze_amount": 0.5, "vignette": 0.3},
 }
 
+const LOOK_SHADER := preload("res://src/world/shaders/look.gdshader")
+const CINEMATIC_SHADER := preload("res://src/world/shaders/look_cinematic.gdshader")
+
 var mat: ShaderMaterial
 var _speed := 0.0
+var _uses_depth_shader := true
 
 
 func _ready() -> void:
@@ -50,7 +54,7 @@ func _ready() -> void:
 	quad.size = Vector2(2.0, 2.0)
 	mesh = quad
 	mat = ShaderMaterial.new()
-	mat.shader = load("res://src/world/shaders/look.gdshader")
+	mat.shader = LOOK_SHADER
 	mat.render_priority = 100  # after other transparent surfaces, before the web (127)
 	material_override = mat
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -84,22 +88,33 @@ func set_style(look: String) -> void:
 	visible = id != 0
 	if id == 0:
 		return
+	# "cinematic" uses the dedicated MSAA-safe shader (hint_screen_texture only,
+	# no hint_depth_texture) so hardware MSAA stays active on Mobile.
+	var use_cinematic := look == "cinematic"
+	var want_shader: Shader = CINEMATIC_SHADER if use_cinematic else LOOK_SHADER
+	if mat.shader != want_shader:
+		mat.shader = want_shader
+	_uses_depth_shader = not use_cinematic
 	var defaults := mat.shader.get_shader_uniform_list()
+	var valid_uniforms := {}
 	for u in defaults:
-		mat.set_shader_parameter(u["name"], null)  # back to shader default
-	mat.set_shader_parameter("style", id)
-	# The screen copy only holds the opaque pass. Crisp draws FIRST among the
-	# transparent surfaces so water, glass, rain and particles land on top of
-	# it (drawn last, it painted the sea out; Cinematic too). Cartoon styles keep the old
-	# order (after transparents, before the web at 127).
+		var uname := String(u["name"])
+		valid_uniforms[uname] = true
+		mat.set_shader_parameter(uname, null)  # back to shader default
+	if valid_uniforms.has("style"):
+		mat.set_shader_parameter("style", id)
+	# The screen copy only holds the opaque pass. Crisp & Cinematic draw FIRST
+	# among the transparent surfaces so water, glass, rain and particles land
+	# on top of them. Cartoon styles keep the old order (before the web at 127).
 	mat.render_priority = -128 if look in ["crisp", "cinematic"] else 100
 	var t: Dictionary = TUNING.get(look, {})
 	for k in t:
-		mat.set_shader_parameter(k, t[k])
+		if valid_uniforms.has(k):
+			mat.set_shader_parameter(k, t[k])
 
 
 ## 0..1 how fast the hero is going (speed lines); smoothed here.
 func set_speed(amount: float, dt: float) -> void:
 	_speed = lerpf(_speed, clampf(amount, 0.0, 1.0), 1.0 - exp(-4.0 * dt))
-	if visible:
+	if visible and _uses_depth_shader:
 		mat.set_shader_parameter("speed", _speed)

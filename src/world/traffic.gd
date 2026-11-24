@@ -40,11 +40,14 @@ const SIGNAL_GREEN := 0.38
 const STOP_MARGIN := 11.0     # room for the crossing and the front overhang
 const SIGNAL_LOOK := 24.0     # brake earlier when the junction has a crossing
 static var signal_time := 0.0
+static var shared_now := 0.0
+static var _clock_frame := -1
 
 enum { EV_NONE, EV_EXIT, EV_DECIDE, EV_END, EV_JOIN, EV_LOOP, EV_FOLLOW, EV_SIGNAL }
 
 var layout: CityLayout
 var density := 1.0
+var is_primary_clock := true
 var near_range := 260.0
 var mid_range := 360.0
 var far_range := 520.0
@@ -92,13 +95,22 @@ var now := 0.0
 var _rng := RandomNumberGenerator.new()
 var _tex: ImageTexture
 var _groups: Array = []      # per kind: [near MultiMesh, far MultiMesh]
+var _buffers: Array[PackedFloat32Array] = []
 var _drawn: Array = []       # per group index (kind * 3 + band): car ids
 var _cull_t := 0.0
+var _l_rect: Array[Rect2] = []
+var _dormant := {}           # offscreen cars hibernated by time-of-day modulation
+var _atmo: Atmosphere
+var _atmo_checked := false
 
 
 func setup(p_layout: CityLayout, meshes: Array, far_meshes: Array, p_density: float, mid_meshes: Array = []) -> void:
 	layout = p_layout
 	density = p_density
+	var parent := get_parent()
+	if parent != null and bool(parent.get("secondary")):
+		is_primary_clock = false
+	now = shared_now
 	_rng.seed = layout.seed ^ 0x7aff1c
 	build_network()
 	_spawn_cars(meshes)
@@ -261,6 +273,10 @@ func _add_lane(line2: PackedVector2Array, loop: bool, v: float, piece: int, conn
 	l_feeds.append([])
 	l_cars.append([])
 	_lane_pts.append(res)
+	var lr := Rect2(Vector2(res[0].x, res[0].z), Vector2.ZERO)
+	for pt in res:
+		lr = lr.expand(Vector2(pt.x, pt.z))
+	_l_rect.append(lr)
 	return id
 
 
@@ -713,7 +729,7 @@ func _spawn_cars(meshes: Array) -> void:
 			var id := c_lane.size()
 			c_lane.append(li)
 			c_s0.append(s)
-			c_t0.append(0.0)
+			c_t0.append(now)
 			c_v.append(l_v[li])
 			c_stop.append(NO_STOP)
 			c_ease.append(EASE)
@@ -891,11 +907,83 @@ func _schedule(id: int) -> void:
 	c_ev[id] = maxf(now, _t_lin(id, decision_at)) if s < decision_at else now
 
 
+func is_dormant(id: int) -> bool:
+	return _dormant.has(id)
+
+
+## Active (non-knocked, non-dormant) car ids on lanes within `r` metres of `p`.
+func cars_near(p: Vector3, r: float) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	var query := Rect2(p.x - r, p.z - r, r * 2.0, r * 2.0)
+	for li in _l_rect.size():
+		var list: Array = l_cars[li]
+		if list.is_empty() or not _l_rect[li].intersects(query):
+			continue
+		for id in list:
+			if not knocked.has(id) and not _dormant.has(id):
+				out.append(int(id))
+	return out
+
+
+func _tod_share() -> float:
+	if not is_inside_tree():
+		return 1.0
+	if not _atmo_checked or (_atmo != null and not is_instance_valid(_atmo)):
+		_atmo_checked = true
+		_atmo = get_tree().get_first_node_in_group("atmosphere") as Atmosphere
+	if _atmo == null:
+		return 1.0
+	var h := _atmo.hour
+	if h >= 1.0 and h <= 5.0:
+		return 0.45
+	if h > 5.0 and h < 7.5:
+		return lerpf(0.45, 1.0, (h - 5.0) / 2.5)
+	if (h >= 7.5 and h <= 9.5) or (h >= 17.0 and h <= 19.5):
+		return 1.0
+	if h > 9.5 and h < 11.0:
+		return lerpf(1.0, 0.86, (h - 9.5) / 1.5)
+	if h > 19.5 and h < 24.0:
+		return lerpf(1.0, 0.52, (h - 19.5) / 4.5)
+	if h < 1.0:
+		return lerpf(0.52, 0.45, h)
+	return 0.86
+
+
+static func _car_priority(id: int) -> float:
+	return float(absi((id + 1) * 2654435761) % 10000) / 10000.0
+
+
+func _is_braking(id: int) -> bool:
+	return c_stop[id] < NO_STOP and _s_lin(id, now) >= c_stop[id] - c_ease[id]
+
+
+func _lane_slot_clear(li: int, s: float) -> bool:
+	var L := l_len[li]
+	for other in l_cars[li]:
+		var ds := car_s(int(other), now) - s
+		if l_loop[li]:
+			ds = wrapf(ds, -L * 0.5, L * 0.5)
+		if absf(ds) < GAP * 1.6:
+			return false
+	return true
+
+
 func _process(dt: float) -> void:
-	now += dt
-	RenderingServer.global_shader_parameter_set(&"traffic_time", now)
+	var frame := Engine.get_process_frames()
+	if is_primary_clock:
+		if _clock_frame != frame:
+			_clock_frame = frame
+			shared_now += dt
+		now = shared_now
+		RenderingServer.global_shader_parameter_set(&"traffic_time", now)
+	else:
+		if _clock_frame != frame:
+			_clock_frame = frame
+			shared_now += dt
+			RenderingServer.global_shader_parameter_set(&"traffic_time", shared_now)
+		now = shared_now
 	for id in c_lane.size():
-		if c_ev[id] <= now:
+		if not _dormant.has(id) and c_ev[id] <= now:
 			_event(id)
 	_cull_t -= dt
 	if _cull_t <= 0.0:
@@ -1242,6 +1330,15 @@ func _make_groups(meshes: Array, far_meshes: Array, mid_meshes: Array) -> void:
 					# paint, glass reflections and chrome – plain plastic.)
 					for p in ["tint", "use_instance_color", "emission", "roughness", "finish"]:
 						sm.set_shader_parameter(p, old.get_shader_parameter(p))
+					if sm.shader == PATH_SHADER:
+						var tint_v = old.get_shader_parameter("tint")
+						var em_v := float(old.get_shader_parameter("emission"))
+						var is_tail := false
+						if tint_v is Color:
+							var tc := tint_v as Color
+							is_tail = em_v > 0.5 and tc.r > 0.45 and tc.g < 0.12 and tc.b < 0.12
+						sm.set_shader_parameter("is_tail_lamp", is_tail)
+						sm.set_shader_parameter("is_far_lod", far)
 					sm.set_shader_parameter("lane_tex", _tex)
 					m.surface_set_material(i, sm)
 			var mm := MultiMesh.new()
@@ -1259,6 +1356,7 @@ func _make_groups(meshes: Array, far_meshes: Array, mid_meshes: Array) -> void:
 		_groups.append(pair)
 		for band in 3:
 			_drawn.append([])
+			_buffers.append(PackedFloat32Array())
 
 
 ## Which cars are drawn (and at which LOD): in range and roughly in view.
@@ -1280,15 +1378,51 @@ func _cull() -> void:
 	var nr2 := near_range * near_range
 	var mr2 := mid_range * mid_range
 	var fr2 := far_range * far_range
+	var tod_share := _tod_share()
 	for id in c_lane.size():
+		var prio := _car_priority(id)
 		var p := car_position(id)
 		var d := p - cp
 		var d2 := d.length_squared()
+		if _dormant.has(id):
+			# Wake back up out of sight when time-of-day traffic rises and lane is clear.
+			if prio <= tod_share and d2 > nr2 and not knocked.has(id):
+				var li := c_lane[id]
+				var s_w := clampf(c_s0[id], 0.0, maxf(l_len[li] - 2.0, 0.0))
+				if l_next[li] < 0 and _lane_slot_clear(li, s_w):
+					_dormant.erase(id)
+					c_s0[id] = s_w
+					c_t0[id] = now
+					c_v[id] = l_v[li]
+					c_stop[id] = NO_STOP
+					c_ease[id] = EASE
+					c_book[id] = -1
+					c_wait[id] = -1.0
+					var cs: Array = l_cars[li]
+					var at := cs.size()
+					for ci in cs.size():
+						if car_s(int(cs[ci]), now) > s_w:
+							at = ci
+							break
+					cs.insert(at, id)
+					_reset_signal(id, s_w)
+					_schedule(id)
+			c_grp[id] = -1
+			c_slot[id] = -1
+			continue
 		var g := -1
 		if d2 < fr2:
 			var dist := sqrt(d2)
 			if (dist < 35.0 or d.dot(fw) > dist * cos_lim) and not knocked.has(id):
 				g = c_kind[id] * 3 + (0 if d2 < nr2 else (1 if d2 < mr2 else 2))
+		elif prio > tod_share and not knocked.has(id) and not _held.has(id) and l_next[c_lane[id]] < 0 and _follower(id) < 0:
+			# Quiet-hours thinning: hibernate offscreen cars safely out of l_cars so nothing queues behind them.
+			var li2 := c_lane[id]
+			(l_cars[li2] as Array).erase(id)
+			c_s0[id] = car_s(id, now)
+			c_t0[id] = now
+			c_ev[id] = INF
+			_dormant[id] = true
 		if g >= 0:
 			c_grp[id] = g
 			c_slot[id] = (lists[g] as Array).size()
@@ -1302,17 +1436,21 @@ func _cull() -> void:
 		if mm == null:
 			continue
 		var ids: Array = lists[g]
-		var buf := PackedFloat32Array()
-		buf.resize(ids.size() * 20)
-		var j := 0
-		for id in ids:
-			_write(buf, j, id)
-			j += 20
-		if mm.instance_count != ids.size():
-			mm.instance_count = ids.size()
+		if ids.size() > mm.instance_count:
+			var capacity := maxi(8, mm.instance_count)
+			while capacity < ids.size():
+				capacity *= 2
+			mm.instance_count = capacity
+			_buffers[g].resize(capacity * 20)
+		mm.visible_instance_count = ids.size()
 		if not ids.is_empty():
+			var buf := _buffers[g]
+			var j := 0
+			for id in ids:
+				_write(buf, j, id)
+				j += 20
 			mm.buffer = buf
-		mm.custom_aabb = box
+			mm.custom_aabb = box
 		_drawn[g] = ids
 
 
@@ -1324,7 +1462,9 @@ func _write(buf: PackedFloat32Array, j: int, id: int) -> void:
 	buf[j + 8] = 0.0; buf[j + 9] = 0.0; buf[j + 10] = 1.0; buf[j + 11] = c_ease[id]
 	var col: Color = c_col[id]
 	buf[j + 12] = col.r; buf[j + 13] = col.g; buf[j + 14] = col.b; buf[j + 15] = 1.0
-	buf[j + 16] = 0.0; buf[j + 17] = 0.0; buf[j + 18] = 0.0; buf[j + 19] = 0.0
+	var brake_f := 1.0 if _is_braking(id) else 0.0
+	var lod_f := float(c_grp[id] % 3) * 0.5 if c_grp[id] >= 0 else 0.0
+	buf[j + 16] = brake_f; buf[j + 17] = lod_f; buf[j + 18] = 0.0; buf[j + 19] = 0.0
 
 
 func _motion(id: int) -> Transform3D:
@@ -1341,6 +1481,7 @@ func _dirty(id: int) -> void:
 	if mm == null or c_slot[id] >= mm.instance_count:
 		return
 	mm.set_instance_transform(c_slot[id], _motion(id))
+	mm.set_instance_custom_data(c_slot[id], Color(1.0 if _is_braking(id) else 0.0, float(g % 3) * 0.5, 0.0, 0.0))
 
 
 # ------------------------------------------------------------ yielding

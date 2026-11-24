@@ -11,6 +11,8 @@ extends Node3D
 var _boats: Array = []      # [Node3D, base Vector3, phase]
 var _trolleys: Array = []   # [Node3D, x]
 var _tug: Node3D
+var _tug_yaw := 0.0
+var _tug_init := false
 var _truck: Node3D
 var _t := 0.0
 
@@ -78,19 +80,37 @@ func _process(dt: float) -> void:
 		# Out along the boom over the water and back (a 40 s cycle).
 		var u := 0.5 - 0.5 * cos(_t * TAU / 40.0 + float(tr[1]) * 0.01)
 		(tr[0] as Node3D).position = Vector3(float(tr[1]), y + 41.0, lerpf(-275.0, -380.0, u))
-	# Tug: a loop along the stands and back along the terminal (90 s).
-	var a := fposmod(_t / 90.0, 1.0)
-	var pts := [Vector3(1990, y, 262), Vector3(2290, y, 262), Vector3(2290, y, 250), Vector3(1990, y, 250)]
-	var seglen := [300.0, 12.0, 300.0, 12.0]
-	var dist := a * 624.0
-	var i := 0
-	while i < 3 and dist > seglen[i]:
-		dist -= seglen[i]
-		i += 1
-	var p0: Vector3 = pts[i]
-	var p1: Vector3 = pts[(i + 1) % 4]
-	var dir := (p1 - p0).normalized()
-	_tug.transform = Transform3D(Basis.looking_at(dir, Vector3.UP), p0 + dir * dist)
+	# Tug: smooth stadium loop along the stands and back along the terminal (90 s),
+	# with semicircular 6 m turns at each end and interpolated yaw (no 90° corner snaps).
+	var rad := 6.0
+	var straight := 288.0
+	var arc := PI * rad
+	var total := 2.0 * (straight + arc)
+	var dist := fposmod(_t / 90.0, 1.0) * total
+	var pos := Vector3.ZERO
+	var dir := Vector3.RIGHT
+	if dist < straight:
+		pos = Vector3(1996.0 + dist, y, 262.0)
+		dir = Vector3(1.0, 0.0, 0.0)
+	elif dist < straight + arc:
+		var ang := (dist - straight) / rad
+		pos = Vector3(2284.0 + sin(ang) * rad, y, 256.0 + cos(ang) * rad)
+		dir = Vector3(cos(ang), 0.0, -sin(ang))
+	elif dist < 2.0 * straight + arc:
+		var u2 := dist - straight - arc
+		pos = Vector3(2284.0 - u2, y, 250.0)
+		dir = Vector3(-1.0, 0.0, 0.0)
+	else:
+		var ang2 := (dist - 2.0 * straight - arc) / rad
+		pos = Vector3(1996.0 - sin(ang2) * rad, y, 256.0 - cos(ang2) * rad)
+		dir = Vector3(-cos(ang2), 0.0, sin(ang2))
+	var target_yaw := atan2(-dir.x, -dir.z)
+	if not _tug_init:
+		_tug_yaw = target_yaw
+		_tug_init = true
+	else:
+		_tug_yaw = lerp_angle(_tug_yaw, target_yaw, 1.0 - exp(-dt * 4.5))
+	_tug.transform = Transform3D(Basis(Vector3.UP, _tug_yaw), pos)
 	# Truck: backs into a bay and pulls out again (60 s).
 	var tt := fposmod(_t, 60.0)
 	var k := smoothstep(0.0, 15.0, tt) * (1.0 - smoothstep(35.0, 50.0, tt))

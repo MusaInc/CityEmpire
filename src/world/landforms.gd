@@ -550,7 +550,7 @@ func _trees(f: Dictionary) -> void:
 			by_sp[sp] = []
 		by_sp[sp].append(Transform3D(TreeKit.shape(p, rng.randf_range(0.8, 1.15)), p))
 	for sp: String in by_sp:
-		TreeKit.instance_batch(self, sp, by_sp[sp], 900.0, false)
+		TreeKit.instance_batch(self, sp, by_sp[sp], 900.0, true, 46.0)
 
 
 func _foam(f: Dictionary) -> void:

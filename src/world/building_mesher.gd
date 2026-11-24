@@ -14,6 +14,15 @@ const KIND_SIGN := 4.0
 const KIND_SHORE := 5.0   # rock / sand round the island (ground.gdshader shades it)
 const KIND_STONE := 6.0   # dressed-stone base course (ashlar, no windows)
 const KIND_BRIDGE_ROAD := 7.0
+const TRIM_PORTAL_LAMP := 50.0    # KIND_TRIM style: warm emissive brass entrance lantern
+const TRIM_BALCONY_GLASS := 52.0  # KIND_TRIM style: dark-tinted glass balustrade panel
+const PITCHED_COLORS := [
+	Color(0.24, 0.27, 0.31),  # slate blue-grey
+	Color(0.20, 0.21, 0.23),  # dark charcoal slate
+	Color(0.56, 0.28, 0.20),  # warm terracotta
+	Color(0.46, 0.30, 0.24),  # weathered clay
+	Color(0.28, 0.31, 0.30),  # coastal lead-slate
+]
 const ROOF_COLOR := Color(0.40, 0.40, 0.41)
 ## Roof finishes picked per building: gravel, tar, pale concrete, rust, green.
 const ROOF_COLORS := [Color(0.40, 0.40, 0.41), Color(0.24, 0.25, 0.27), Color(0.6, 0.59, 0.56),
@@ -242,11 +251,28 @@ func beam(a: Vector3, b: Vector3, w: float, h: float, col: Color, kind := KIND_T
 			quad(v[0], v[1], v[2], v[3], n2, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, col, kind, 0, 0)
 
 
-## Solid axis-aligned box (walls, top, bottom) in one flat colour.
-func solid(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col: Color, kind := KIND_TRIM) -> void:
-	walls(x0, z0, x1, z1, y0, y1, col, kind, 0, 0)
-	top(x0, z0, x1, z1, y1, col, kind, 0, 0)
-	bottom(x0, z0, x1, z1, y0, col.darkened(0.25), kind, 0, 0)
+## Solid axis-aligned box (walls, top, bottom) in one flat colour, with optional
+## KIND_TRIM shader style code and baked contact AO on small architectural trim.
+func solid(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col: Color, kind := KIND_TRIM, style := 0.0) -> void:
+	var wall_start := colors.size()
+	walls(x0, z0, x1, z1, y0, y1, col, kind, style, 0)
+	if kind == KIND_TRIM and style < 49.0 and (y1 - y0) < 3.0:
+		# Subtle bottom-edge contact AO on balconies, ledges, plinths and trim.
+		for idx in range(wall_start, colors.size(), 4):
+			for bot_off in [2, 3]:
+				var c2: Color = colors[idx + bot_off]
+				colors[idx + bot_off] = Color(c2.r * 0.88, c2.g * 0.88, c2.b * 0.88, c2.a)
+	top(x0, z0, x1, z1, y1, col, kind, style, 0)
+	bottom(x0, z0, x1, z1, y0, col.darkened(0.30), kind, style, 0)
+
+
+## Darkens the bottom two vertices of every quad added since `start_idx` in
+## `colors` (used to bake zero-cost contact AO on plinths and parapet bases).
+func _bake_quad_bottom_ao(start_idx: int, factor: float) -> void:
+	for idx in range(start_idx, colors.size(), 4):
+		for bot_off in [2, 3]:
+			var c2: Color = colors[idx + bot_off]
+			colors[idx + bot_off] = Color(c2.r * factor, c2.g * factor, c2.b * factor, c2.a)
 
 
 ## Square lattice mast (4 chords, zig-zag bracing on every face).
@@ -380,29 +406,38 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 		if b["kind"] == "bridge" or _overhangs(tiers, i) or not _on_ground(b, t) and i == 0:
 			# Underside: sky bridges, cantilevered tiers, towers' first tier
 			# (hidden on their podium, but they never show a hole).
-			bottom(x0, z0, x1, z1, y0, trim if b["kind"] == "bridge" else col.darkened(0.25), KIND_TRIM, style, seed)
+			bottom(x0, z0, x1, z1, y0, trim.darkened(0.18) if b["kind"] == "bridge" else col.darkened(0.32), KIND_TRIM, style, seed)
+		var pitched := i == tiers.size() - 1 and _has_pitched_roof(b)
 		if detailed:
 			var o := cornice_out(b)
 			var ch := cornice_h(b)
+			var c_start := colors.size()
 			walls(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, y1 + ch * 0.5, trim, KIND_TRIM, style, seed)
-			bottom(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, trim, KIND_TRIM, style, seed)
+			_bake_quad_bottom_ao(c_start, 0.88)
+			bottom(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, trim.darkened(0.28), KIND_TRIM, style, seed)
 			roof_top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, roof, seed, style)
-			if b["kind"] != "bridge":
+			if pitched:
+				_pitched_roof(b, t, y1 + ch * 0.5, o, col, trim, true)
+			elif b["kind"] != "bridge":
 				_parapet(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, trim)
-				if not glassy and not has_apt:
-					_ledges(x0, z0, x1, z1, y0, y1, trim, style, seed, base)
+			if b["kind"] != "bridge" and not glassy and not has_apt:
+				_ledges(x0, z0, x1, z1, y0, y1, trim, style, seed, base)
 			# Ground-floor plinth band on the base tier.
 			if _has_plinth(b, i):
 				var plinth_color := col.darkened(0.3)
 				for section in _plinth_sections(b):
 					var p := section.position
 					var e := section.end
+					var p_start := colors.size()
 					walls(p.x, p.z, e.x, e.z, p.y, e.y, plinth_color, KIND_TRIM, style, seed)
-					top(p.x, p.z, e.x, e.z, e.y, plinth_color, KIND_TRIM, style, seed)
+					_bake_quad_bottom_ao(p_start, 0.86)
+					top(p.x, p.z, e.x, e.z, e.y, plinth_color.lightened(0.05), KIND_TRIM, style, seed)
 				for aw in awning_runs(b):
 					_awning(aw[0], aw[1], aw[2], aw[3], (aw[3] as Color).darkened(0.15))
 		else:
 			roof_top(x0, z0, x1, z1, y1, roof, seed, style)
+			if pitched:
+				_pitched_roof(b, t, y1, 0.15, col, trim, false)
 
 
 static func _facade_seed(seed: float) -> float:
@@ -531,6 +566,8 @@ func _add_features(b: Dictionary) -> void:
 			continue  # skyline pieces: drawn with the building (add_skyline)
 		if d.size() > 2 and d[2] is Vector3:
 			_fin(bx, d[2], d[1])
+		elif d.size() > 2 and d[2] is float:
+			solid(bx.position.x, bx.position.z, bx.end.x, bx.end.z, bx.position.y, bx.end.y, d[1], KIND_TRIM, float(d[2]))
 		else:
 			solid(bx.position.x, bx.position.z, bx.end.x, bx.end.z, bx.position.y, bx.end.y, d[1])
 	for bm in f["beams"]:
@@ -746,7 +783,7 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 		else:
 			out.append(_aabb(t[0], t[1], t[2], t[3], t[4], y1 - ch * 0.5))
 		out.append(_aabb(t[0] - o, t[1] - o, t[2] + o, t[3] + o, y1 - ch * 0.5, y1 + ch * 0.5))
-		if kind != "bridge":
+		if kind != "bridge" and not _has_pitched_roof(b):
 			_ring(out, t[0] - o, t[1] - o, t[2] + o, t[3] + o, y1 + ch * 0.5, y1 + ch * 0.5 + PARAPET, PARAPET_T)
 		if _has_plinth(b, i):
 			out.append_array(_plinth_sections(b))
@@ -900,8 +937,9 @@ static func _features(b: Dictionary) -> Dictionary:
 	var tt: Array = b["tiers"][-1]
 	var ry := roof_y(b) - crown_h(b)  # (the tier's own roof)
 	var o := cornice_out(b)
-	# Chimney stacks near the corners of brick roofs.
-	if style in [CityLayout.Style.BRICK, CityLayout.Style.SANDSTONE] and float(tt[5]) < 60.0:
+	# Chimney stacks near the corners of brick roofs (skip pitched roofs which
+	# build their own slope-piercing chimney stacks).
+	if style in [CityLayout.Style.BRICK, CityLayout.Style.SANDSTONE] and float(tt[5]) < 60.0 and not _has_pitched_roof(b):
 		var stack := col.darkened(0.25)
 		for c in 4:
 			if rng.randf() > 0.45:
@@ -972,6 +1010,13 @@ static func _features(b: Dictionary) -> Dictionary:
 						float(tier[4]) + 1.2, float(tier[5]) - 0.8)
 					out["draw"].append([rib, trim])
 					out["col_human"].append(rib)
+	# Vertical rainwater downpipes & cornice hoppers on selected masonry corners.
+	if style in [CityLayout.Style.BRICK, CityLayout.Style.SANDSTONE, CityLayout.Style.STONE] \
+			and _on_ground(b, t0) and h0 >= 8.0 and h0 < 55.0:
+		var drng := RandomNumberGenerator.new()
+		drng.seed = int(float(b["seed"]) * 5233.0 * 1000.0) ^ 0x91e5
+		if drng.randf() < 0.65:
+			_downpipes(out, b, t0, base, h0, drng)
 	return out
 
 
@@ -1101,7 +1146,9 @@ static func _balconies(out: Dictionary, b: Dictionary, t0: Array, style: int, h0
 	var storey := facade_storey(style, float(b["seed"]))
 	var depth := 1.25 if style == CityLayout.Style.MODERN else 1.05
 	var slab_c := Color(0.68, 0.67, 0.64) if style != CityLayout.Style.BRICK else Color(0.6, 0.58, 0.55)
-	var rail_c := Color(0.32, 0.38, 0.42) if style == CityLayout.Style.MODERN else Color(0.14, 0.15, 0.16)
+	var modern := style == CityLayout.Style.MODERN
+	var rail_c := Color(0.24, 0.27, 0.30) if modern else Color(0.13, 0.14, 0.15)
+	var glass_c := Color(0.12, 0.18, 0.22)
 	var first_floor := ceili(5.0 / storey)
 	var top := h0 - cornice_h(b) - 1.4
 	var best := 0
@@ -1118,13 +1165,63 @@ static func _balconies(out: Dictionary, b: Dictionary, t0: Array, style: int, h0
 		var wb := grid.y * 0.77
 		for bay in range(phase, int(grid.z), 2):
 			var a := grid.x + (float(bay) + 0.5) * grid.y
+			var a0 := a - wb * 0.5
+			var a1 := a + wb * 0.5
 			for fl in range(first_floor, ceili(top / storey)):
 				var y := base + (float(fl) + 0.23) * storey - 0.10
 				if y + 1.05 > base + top:
 					break
-				out["draw"].append([_fbox(f, a - wb * 0.5, a + wb * 0.5, 0.0, depth, y - 0.16, y), slab_c])
-				out["draw"].append([_fbox(f, a - wb * 0.5, a + wb * 0.5, depth - 0.06, depth, y, y + 1.05), rail_c])
-				out["col_human"].append(_fbox(f, a - wb * 0.5, a + wb * 0.5, 0.0, depth, y - 0.16, y + 1.05))
+				# Balcony floor slab.
+				out["draw"].append([_fbox(f, a0, a1, 0.0, depth, y - 0.16, y), slab_c])
+				# Front corner posts (1.05 m waist height, thin 6 cm steel/iron).
+				out["draw"].append([_fbox(f, a0, a0 + 0.06, depth - 0.06, depth, y, y + 1.05), rail_c])
+				out["draw"].append([_fbox(f, a1 - 0.06, a1, depth - 0.06, depth, y, y + 1.05), rail_c])
+				# Continuous top handrail (front + side returns back to facade).
+				out["draw"].append([_fbox(f, a0, a1, depth - 0.06, depth, y + 0.99, y + 1.05), rail_c])
+				out["draw"].append([_fbox(f, a0, a0 + 0.05, 0.0, depth - 0.06, y + 0.99, y + 1.05), rail_c])
+				out["draw"].append([_fbox(f, a1 - 0.05, a1, 0.0, depth - 0.06, y + 0.99, y + 1.05), rail_c])
+				# Bottom kick-rail.
+				out["draw"].append([_fbox(f, a0 + 0.06, a1 - 0.06, depth - 0.05, depth - 0.01, y + 0.07, y + 0.12), rail_c])
+				if modern:
+					# Recessed dark-tinted balustrade glass panel (front + sides).
+					out["draw"].append([_fbox(f, a0 + 0.06, a1 - 0.06, depth - 0.05, depth - 0.02, y + 0.12, y + 0.96), glass_c, TRIM_BALCONY_GLASS])
+					out["draw"].append([_fbox(f, a0 + 0.01, a0 + 0.04, 0.04, depth - 0.06, y + 0.12, y + 0.96), glass_c, TRIM_BALCONY_GLASS])
+					out["draw"].append([_fbox(f, a1 - 0.04, a1 - 0.01, 0.04, depth - 0.06, y + 0.12, y + 0.96), glass_c, TRIM_BALCONY_GLASS])
+				else:
+					# Open vertical iron balusters + side return bars so light passes through.
+					var bars := maxi(3, int(wb / 0.48))
+					for bi in range(1, bars):
+						var bx := lerpf(a0 + 0.06, a1 - 0.06, float(bi) / float(bars))
+						out["draw"].append([_fbox(f, bx - 0.018, bx + 0.018, depth - 0.048, depth - 0.012, y + 0.12, y + 0.99), rail_c])
+					for sy: float in [0.38, 0.68]:
+						out["draw"].append([_fbox(f, a0 + 0.01, a0 + 0.045, 0.0, depth - 0.06, y + sy, y + sy + 0.035), rail_c])
+						out["draw"].append([_fbox(f, a1 - 0.045, a1 - 0.01, 0.0, depth - 0.06, y + sy, y + sy + 0.035), rail_c])
+				out["col_human"].append(_fbox(f, a0, a1, 0.0, depth, y - 0.16, y + 1.05))
+
+
+## Slim cast-iron rainwater downpipes with cornice hopper heads on masonry corners.
+static func _downpipes(out: Dictionary, b: Dictionary, t0: Array, base: float, h0: float,
+		rng: RandomNumberGenerator) -> void:
+	var y_top := float(t0[5]) - cornice_h(b) * 0.5
+	var y_bot := base + (PLINTH_H + 0.05 if _has_plinth(b, 0) else 0.15)
+	if y_top - y_bot < 4.0:
+		return
+	var pipe_c := Color(0.14, 0.15, 0.16)
+	var start_k := rng.randi() % 4
+	var count := 1 + int(rng.randf() < 0.45)
+	for i in count:
+		var f := _face(t0, (start_k + i * 2) % 4)
+		var L: float = f[3]
+		if L < 6.0:
+			continue
+		var along := 0.34 if (i % 2 == 0) else (L - 0.34)
+		var pipe := _fbox(f, along - 0.055, along + 0.055, 0.0, 0.11, y_bot, y_top)
+		if b.has("venue_void") and pipe.intersects(b["venue_void"]):
+			continue
+		out["draw"].append([pipe, pipe_c])
+		# Rainwater hopper box just below the cornice.
+		var hopper := _fbox(f, along - 0.14, along + 0.14, 0.0, 0.22, y_top - 0.34, y_top - 0.04)
+		out["draw"].append([hopper, pipe_c.lightened(0.06)])
 
 static func _fire_escape(out: Dictionary, f: Array, style: int, seed: float, h: float, iron: Color,
 		rng: RandomNumberGenerator, base := 0.0) -> void:
@@ -1217,9 +1314,9 @@ static func _portal(out: Dictionary, f: Array, style: int, col: Color, trim: Col
 	for pt in parts:
 		out["draw"].append(pt)
 		out["col"].append(pt[0])
-	# Brass lamps either side of the door.
+	# Emissive brass lanterns either side of the door (glow warm at night).
 	for e in [c - 2.6 - pw * 0.5, c + 2.6 + pw * 0.5]:
-		out["draw"].append([_fbox(f, e - 0.14, e + 0.14, 0.55, 0.85, 3.0, 3.5), Color(0.95, 0.78, 0.4)])
+		out["draw"].append([_fbox(f, e - 0.14, e + 0.14, 0.55, 0.85, 3.0, 3.5), Color(0.95, 0.78, 0.4), TRIM_PORTAL_LAMP])
 		out["col"].append(_fbox(f, e - 0.14, e + 0.14, 0.55, 0.85, 3.0, 3.5))
 
 
@@ -1261,11 +1358,229 @@ func _parapet(x0: float, z0: float, x1: float, z1: float, y: float, col: Color) 
 	var t := PARAPET_T
 	var y1 := y + PARAPET
 	walls(x0, z0, x1, z1, y, y1, col, KIND_TRIM, 0, 0)
+	var in_start := colors.size()
 	_inner_walls(Rect2(x0 + t, z0 + t, x1 - x0 - t * 2.0, z1 - z0 - t * 2.0), y, y1, col.darkened(0.15), KIND_TRIM)
+	_bake_quad_bottom_ao(in_start, 0.80)
 	top(x0, z0, x1, z0 + t, y1, col, KIND_TRIM, 0, 0)
 	top(x0, z1 - t, x1, z1, y1, col, KIND_TRIM, 0, 0)
 	top(x0, z0 + t, x0 + t, z1 - t, y1, col, KIND_TRIM, 0, 0)
 	top(x1 - t, z0 + t, x1, z1 - t, y1, col, KIND_TRIM, 0, 0)
+
+
+## Eligible low-rise residential buildings in Georgian/Old Town & Westbank get
+## pitched / hipped / mansard roofs with slate or terracotta tones and chimney
+## stacks. Carefully excludes apartments, rooftop props/billboards/huts, shaped
+## towers, Skyport buildings and anything tall enough for roof mantling tests.
+static func _has_pitched_roof(b: Dictionary) -> bool:
+	if b["kind"] != "normal" or b.has("shape") or b.has("apt") \
+			or b.get("roof_blocked", false) or b.has("venue_void"):
+		return false
+	var tiers: Array = b["tiers"]
+	if tiers.size() != 1:
+		return false
+	var style := int(b["style"])
+	if style not in [CityLayout.Style.BRICK, CityLayout.Style.SANDSTONE, CityLayout.Style.STONE]:
+		return false
+	var t: Array = tiers[0]
+	var h0 := float(t[5]) - base_of(b)
+	if h0 < 7.0 or h0 > 24.0:
+		return false
+	var w := float(t[2]) - float(t[0])
+	var d := float(t[3]) - float(t[1])
+	var mn := minf(w, d)
+	var mx := maxf(w, d)
+	if mn < 7.5 or mn > 16.5 or mx > 34.0:
+		return false
+	var cen: Vector3 = CityLayout.bxf(b) * Vector3((float(t[0]) + float(t[2])) * 0.5, 0.0, (float(t[1]) + float(t[3])) * 0.5)
+	# Exclude Skyport Island local coordinates (x > 1200).
+	if cen.x > 1150.0:
+		return false
+	var old_town := cen.x > 740.0 or cen.z < -500.0 or cen.z > 480.0
+	var westbank := cen.x < 30.0
+	if not (old_town or westbank):
+		return false
+	var seed := float(b["seed"])
+	return fposmod(seed * 37.91 + 0.17, 1.0) < 0.62
+
+
+## Pitched, hipped, or mansard roof with slate/terracotta tones, eaves AO,
+## ridge cap and subtle chimney stacks.
+func _pitched_roof(b: Dictionary, t: Array, ry: float, overhang: float, wall_col: Color,
+		trim: Color, detailed: bool, collision_only := false) -> PackedVector3Array:
+	var seed := float(b["seed"])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(seed * 8831.0 * 1000.0) ^ 0x400f
+	var x0 := float(t[0]) - overhang
+	var z0 := float(t[1]) - overhang
+	var x1 := float(t[2]) + overhang
+	var z1 := float(t[3]) + overhang
+	var w := x1 - x0
+	var d := z1 - z0
+	var cx := (x0 + x1) * 0.5
+	var cz := (z0 + z1) * 0.5
+	var roof_c: Color = PITCHED_COLORS[rng.randi() % PITCHED_COLORS.size()]
+	var eave_c := roof_c.darkened(0.16)   # baked vertex contact AO at eaves
+	var ridge_c := roof_c.lightened(0.06)
+	var kind_roll := rng.randf()
+	var along_x := w >= d
+	var span := d if along_x else w
+	var run := w if along_x else d
+	var peak_h := clampf(span * rng.randf_range(0.22, 0.30), 2.0, 4.2)
+	var p00 := Vector3(x0, ry, z0)
+	var p10 := Vector3(x1, ry, z0)
+	var p11 := Vector3(x1, ry, z1)
+	var p01 := Vector3(x0, ry, z1)
+	var ridge_a: Vector3
+	var ridge_b: Vector3
+	var crown := PackedVector3Array()
+	if kind_roll < 0.30 and span > 10.0:
+		# Mansard roof: steep slate skirt sloping inward to a flat upper deck.
+		var mh := clampf(rng.randf_range(2.0, 2.7), 1.9, 2.8)
+		var inset := clampf(span * 0.14, 1.2, 2.2)
+		var q00 := Vector3(x0 + inset, ry + mh, z0 + inset)
+		var q10 := Vector3(x1 - inset, ry + mh, z0 + inset)
+		var q11 := Vector3(x1 - inset, ry + mh, z1 - inset)
+		var q01 := Vector3(x0 + inset, ry + mh, z1 - inset)
+		crown.append_array([q00, q10, q11, q01])
+		_roof_quad(p00, p10, q10, q00, eave_c, ridge_c, seed)
+		_roof_quad(p10, p11, q11, q10, eave_c, ridge_c, seed)
+		_roof_quad(p11, p01, q01, q11, eave_c, ridge_c, seed)
+		_roof_quad(p01, p00, q00, q01, eave_c, ridge_c, seed)
+		roof_top(x0 + inset, z0 + inset, x1 - inset, z1 - inset, ry + mh, roof_c.darkened(0.10), seed)
+		if detailed:
+			# Thin coping lip at top of mansard apron.
+			var c_col := trim.darkened(0.08)
+			beam(q00, q10, 0.16, 0.14, c_col)
+			beam(q10, q11, 0.16, 0.14, c_col)
+			beam(q11, q01, 0.16, 0.14, c_col)
+			beam(q01, q00, 0.16, 0.14, c_col)
+		ridge_a = Vector3(lerpf(x0 + inset, x1 - inset, 0.3), ry + mh, lerpf(z0 + inset, z1 - inset, 0.3))
+		ridge_b = Vector3(lerpf(x0 + inset, x1 - inset, 0.7), ry + mh, lerpf(z0 + inset, z1 - inset, 0.7))
+	elif kind_roll < 0.72:
+		# Hipped roof: four sloped faces meeting along a central ridge.
+		var hip := minf(span * 0.45, run * 0.38)
+		if along_x:
+			ridge_a = Vector3(x0 + hip, ry + peak_h, cz)
+			ridge_b = Vector3(x1 - hip, ry + peak_h, cz)
+			_roof_quad(p00, p10, ridge_b, ridge_a, eave_c, ridge_c, seed)
+			_roof_quad(p11, p01, ridge_a, ridge_b, eave_c, ridge_c, seed)
+			_roof_tri(p01, p00, ridge_a, eave_c, eave_c, ridge_c, seed)
+			_roof_tri(p10, p11, ridge_b, eave_c, eave_c, ridge_c, seed)
+		else:
+			ridge_a = Vector3(cx, ry + peak_h, z0 + hip)
+			ridge_b = Vector3(cx, ry + peak_h, z1 - hip)
+			_roof_quad(p10, p11, ridge_b, ridge_a, eave_c, ridge_c, seed)
+			_roof_quad(p01, p00, ridge_a, ridge_b, eave_c, ridge_c, seed)
+			_roof_tri(p00, p10, ridge_a, eave_c, eave_c, ridge_c, seed)
+			_roof_tri(p11, p01, ridge_b, eave_c, eave_c, ridge_c, seed)
+		if detailed:
+			beam(ridge_a, ridge_b, 0.22, 0.16, roof_c.darkened(0.22))
+	else:
+		# Gabled roof: two main slopes + masonry gable end triangles.
+		var gable_c := wall_col.darkened(0.06)
+		if along_x:
+			ridge_a = Vector3(x0, ry + peak_h, cz)
+			ridge_b = Vector3(x1, ry + peak_h, cz)
+			_roof_quad(p00, p10, ridge_b, ridge_a, eave_c, ridge_c, seed)
+			_roof_quad(p11, p01, ridge_a, ridge_b, eave_c, ridge_c, seed)
+			_roof_tri(p01, p00, ridge_a, gable_c, gable_c, gable_c, seed, KIND_TRIM)
+			_roof_tri(p10, p11, ridge_b, gable_c, gable_c, gable_c, seed, KIND_TRIM)
+		else:
+			ridge_a = Vector3(cx, ry + peak_h, z0)
+			ridge_b = Vector3(cx, ry + peak_h, z1)
+			_roof_quad(p10, p11, ridge_b, ridge_a, eave_c, ridge_c, seed)
+			_roof_quad(p01, p00, ridge_a, ridge_b, eave_c, ridge_c, seed)
+			_roof_tri(p00, p10, ridge_a, gable_c, gable_c, gable_c, seed, KIND_TRIM)
+			_roof_tri(p11, p01, ridge_b, gable_c, gable_c, gable_c, seed, KIND_TRIM)
+		if detailed:
+			beam(ridge_a, ridge_b, 0.22, 0.16, roof_c.darkened(0.22))
+	if collision_only:
+		var hull := PackedVector3Array([p00, p10, p11, p01])
+		if crown.is_empty():
+			hull.append_array([ridge_a, ridge_b])
+		else:
+			hull.append_array(crown)
+		return hull
+	if detailed:
+		# 1-2 brick/stone chimney stacks with cap and terracotta chimney pots.
+		var stack_c := wall_col.darkened(0.24)
+		var pot_c := Color(0.62, 0.34, 0.22)
+		var n_ch := 1 + int(run > 16.0 and rng.randf() < 0.65)
+		for ci in n_ch:
+			var frac := 0.28 if (n_ch == 1 and rng.randf() < 0.5) else (0.24 if ci == 0 else 0.76)
+			var base_p := ridge_a.lerp(ridge_b, frac)
+			var side_off := (Vector3(0.0, 0.0, 1.0) if along_x else Vector3(1.0, 0.0, 0.0)) * (0.9 if (ci % 2 == 0) else -0.9)
+			var cp := base_p + side_off
+			var ch_top := base_p.y + rng.randf_range(0.75, 1.35)
+			solid(cp.x - 0.44, cp.z - 0.36, cp.x + 0.44, cp.z + 0.36, ry + 0.2, ch_top, stack_c)
+			solid(cp.x - 0.52, cp.z - 0.44, cp.x + 0.52, cp.z + 0.44, ch_top, ch_top + 0.14, trim.darkened(0.08))
+			for px: float in [-0.22, 0.22]:
+				solid(cp.x + px - 0.08, cp.z - 0.08, cp.x + px + 0.08, cp.z + 0.08, ch_top + 0.14, ch_top + 0.42, pot_c)
+
+	return PackedVector3Array()
+
+func _roof_quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, col_bot: Color, col_top: Color,
+		seed: float, kind := KIND_ROOF) -> void:
+	var n := (b - a).cross(d - a)
+	if n.y < 0.0:
+		n = -n
+	n = n.normalized()
+	var qa := a
+	var qb := b
+	var qc := c
+	var qd := d
+	var ca := col_bot
+	var cb := col_bot
+	var cc := col_top
+	var cd := col_top
+	if (qb - qa).cross(qc - qa).dot(n) > 0.0:
+		var tv := qb; qb = qd; qd = tv
+		var tc := cb; cb = cd; cd = tc
+	var u_ab := a.distance_to(b)
+	var u_ad := a.distance_to(d)
+	var start := colors.size()
+	quad(qa, qb, qc, qd, n, Vector2(0.0, 0.0), Vector2(u_ab, 0.0), Vector2(u_ab, u_ad), Vector2(0.0, u_ad),
+		ca, kind, 0.0, seed)
+	var cols := [ca, cb, cc, cd]
+	for k in 4:
+		var ck: Color = cols[k]
+		colors[start + k] = Color(ck.r, ck.g, ck.b, kind / 8.0)
+
+
+func _roof_tri(a: Vector3, b: Vector3, c: Vector3, ca: Color, cb: Color, cc: Color,
+		seed: float, kind := KIND_ROOF) -> void:
+	var n := (b - a).cross(c - a)
+	if n.y < 0.0:
+		n = -n
+	if n.length_squared() < 1e-6:
+		return
+	n = n.normalized()
+	var qa := a
+	var qb := b
+	var qc := c
+	var c0 := ca
+	var c1 := cb
+	var c2 := cc
+	if _xf_on:
+		qa = xf * qa
+		qb = xf * qb
+		qc = xf * qc
+		n = xf.basis * n
+	if (qb - qa).cross(qc - qa).dot(n) > 0.0:
+		var tv := qb; qb = qc; qc = tv
+		var tc := c1; c1 = c2; c2 = tc
+	var i := verts.size()
+	verts.append_array([qa, qb, qc])
+	normals.append_array([n, n, n])
+	colors.append_array([
+		Color(c0.r, c0.g, c0.b, kind / 8.0),
+		Color(c1.r, c1.g, c1.b, kind / 8.0),
+		Color(c2.r, c2.g, c2.b, kind / 8.0),
+	])
+	uvs.append_array([Vector2(a.x, a.z), Vector2(b.x, b.z), Vector2(c.x, c.z)])
+	var s2 := Vector2(0.0, seed)
+	uv2s.append_array([s2, s2, s2])
+	indices.append_array([i, i + 1, i + 2])
 
 
 ## Projecting stone courses every few floors (relief the shader can't fake).
@@ -1335,19 +1650,47 @@ static func awning_runs(b: Dictionary) -> Array:
 
 
 ## One awning from wall points a→b (a on the left looking out), sticking out
-## by `out`: canopy top and underside, a front valance. 6 triangles.
+## by `out`: sloped canopy top, shaded underside contact AO, front valance with
+## fascia trim hem, and closed side gussets (stays within ay - 0.38 .. ay + 0.18).
 func _awning(a: Vector3, b: Vector3, out: Vector3, col: Color, drop: Color) -> void:
 	var n := out.normalized()
-	var up := Vector3.UP * 0.18
+	var up_wall := Vector3.UP * 0.18
+	var up_front := Vector3.UP * 0.02
+	var down_hem := Vector3.DOWN * 0.38
+	var down_trim := Vector3.DOWN * 0.31
 	var fa := a + out
 	var fb := b + out
-	# (Clockwise from the visible side, like top(): a → fa → fb → b from above.)
-	quad(a + up, fa + up, fb + up, b + up, Vector3.UP, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO,
-		col, KIND_TRIM, 0, 0)
-	quad(a, b, fb, fa, Vector3.DOWN, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO,
-		col.darkened(0.3), KIND_TRIM, 0, 0)
-	quad(fa + up, fa + Vector3.DOWN * 0.38, fb + Vector3.DOWN * 0.38, fb + up, n, Vector2.ZERO, Vector2.ZERO,
-		Vector2.ZERO, Vector2.ZERO, drop, KIND_TRIM, 0, 0)
+	var slope_n := (Vector3.UP * out.length() + n * 0.16).normalized()
+	# Sloped canopy top (clockwise from above: a -> fa -> fb -> b).
+	quad(a + up_wall, fa + up_front, fb + up_front, b + up_wall, slope_n,
+		Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, col, KIND_TRIM, 0, 0)
+	# Deep contact-AO shaded underside.
+	quad(a, b, fb + Vector3.DOWN * 0.02, fa + Vector3.DOWN * 0.02, Vector3.DOWN,
+		Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, col.darkened(0.38), KIND_TRIM, 0, 0)
+	# Front valance + contrast fascia trim band along the bottom hem.
+	quad(fa + up_front, fa + down_trim, fb + down_trim, fb + up_front, n,
+		Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, drop, KIND_TRIM, 0, 0)
+	var hem_c := col.lightened(0.26) if col.get_luminance() < 0.45 else drop.darkened(0.30)
+	quad(fa + down_trim, fa + down_hem, fb + down_hem, fb + down_trim, n,
+		Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, hem_c, KIND_TRIM, 0, 0)
+	# Side gussets closing both ends (a side and b side).
+	var side_dir := (a - b).normalized()
+	var gusset_c := drop.darkened(0.14)
+	_roof_tri(a + up_wall, fa + up_front, fa + down_hem, gusset_c.darkened(0.12), gusset_c, gusset_c, 0.0, KIND_TRIM)
+	_roof_tri(a + up_wall, fa + down_hem, a, gusset_c.darkened(0.12), gusset_c, gusset_c.darkened(0.18), 0.0, KIND_TRIM)
+	# Opposite side gusset (normal pointing along -side_dir).
+	var gb0 := b + up_wall
+	var gb1 := fb + up_front
+	var gb2 := fb + down_hem
+	var gb3 := b
+	for tri_v in [[gb0, gb2, gb1], [gb0, gb3, gb2]]:
+		var p0: Vector3 = tri_v[0]
+		var p1: Vector3 = tri_v[1]
+		var p2: Vector3 = tri_v[2]
+		var gn := -side_dir
+		if (p1 - p0).cross(p2 - p0).dot(gn) > 0.0:
+			var tv := p1; p1 = p2; p2 = tv
+		_tri(p0, p1, p2, gn, gusset_c)
 
 
 static func tiers_top(b: Dictionary) -> float:
@@ -2854,6 +3197,10 @@ func ring_poly(outer: PackedVector2Array, inner: PackedVector2Array, y: float, c
 static func collision_hulls(b: Dictionary) -> Array[PackedVector3Array]:
 	var out: Array[PackedVector3Array] = []
 	if not shaped(b):
+		if _has_pitched_roof(b):
+			var tier: Array = b["tiers"][0]
+			var eave := float(tier[5]) + cornice_h(b) * 0.5
+			out.append(BuildingMesher.new()._pitched_roof(b, tier, eave, cornice_out(b), Color.WHITE, Color.WHITE, false, true))
 		return out
 	var o := cornice_out(b)
 	var ch := cornice_h(b)

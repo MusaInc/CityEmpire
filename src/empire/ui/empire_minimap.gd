@@ -22,6 +22,12 @@ var _radius := R_WALK
 var _yaw := 0.0
 ## The route this view last drew (world points; scenario checks compare views).
 var drawn_route := PackedVector3Array()
+var _last_pos := Vector2(INF, INF)
+var _last_yaw := INF
+var _last_radius := -1.0
+var _last_route_sig := ""
+var _last_redraw_ms := -1000000
+var _last_tex: Texture2D = null
 
 
 ## Bakes the city map once (both islands); awaitable, no-op headless.
@@ -84,10 +90,12 @@ func _focus() -> Vector3:
 func _process(dt: float) -> void:
 	if game == null or not is_visible_in_tree():
 		return
+	var tex_changed := map_tex != _last_tex
 	if map_tex and _mat.get_shader_parameter("map") != map_tex:
 		_mat.set_shader_parameter("map", map_tex)
 		_mat.set_shader_parameter("origin", Minimap.BOUNDS.position)
 		_mat.set_shader_parameter("extent", Minimap.BOUNDS.size)
+		tex_changed = true
 	var view := game.view_yaw()
 	_yaw = lerp_angle(_yaw, view, 1.0 - exp(-10.0 * dt))
 	var want := R_WALK
@@ -99,7 +107,26 @@ func _process(dt: float) -> void:
 			want = lerpf(R_DRIVE_FAST, 900.0, clampf((vn2 as Craft).altitude / 150.0, 0.0, 1.0))  # (flying: see further)
 	_radius = lerpf(_radius, want, 1.0 - exp(-1.5 * dt))
 	var c := _focus()
-	_mat.set_shader_parameter("center", Vector2(c.x, c.z))
+	var c2 := Vector2(c.x, c.z)
+	var gps: Gps = game.gps
+	var route_sig := ""
+	if gps and gps.active():
+		route_sig = "%d|%.1f,%.1f|%s" % [gps.points.size(), gps.dest.x, gps.dest.z, gps.message]
+	var now_ms := Time.get_ticks_msec()
+	var moved := c2.distance_to(_last_pos) > 0.5
+	var turned := absf(angle_difference(_yaw, _last_yaw)) > 0.02
+	var zoomed := absf(_radius - _last_radius) > 0.5
+	var routed := route_sig != _last_route_sig
+	var stale := (now_ms - _last_redraw_ms) >= 500
+	if not (tex_changed or moved or turned or zoomed or routed or stale):
+		return
+	_last_tex = map_tex
+	_last_pos = c2
+	_last_yaw = _yaw
+	_last_radius = _radius
+	_last_route_sig = route_sig
+	_last_redraw_ms = now_ms
+	_mat.set_shader_parameter("center", c2)
 	_mat.set_shader_parameter("forward", Vector2(-sin(_yaw), -cos(_yaw)))
 	_mat.set_shader_parameter("radius_m", _radius)
 	queue_redraw()

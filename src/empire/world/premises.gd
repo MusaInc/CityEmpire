@@ -494,11 +494,16 @@ static func _street_use(c: Dictionary) -> String:
 const STREET_TRADE := {"supermarket": "convenience", "department": "clothing", "electronics": "phones",
 	"clothing": "clothing", "furniture": "convenience", "convenience": "convenience", "cafe": "cafe",
 	"restaurant": "takeaway"}
+const STREET_INTERACTIVE := ["hotel", "office", "residential", "bank", "garage", "warehouse", "furniture", "fitness"]
 const STREET_TITLES := {"residential": "Residences", "office": "Offices", "hotel": "Hotel",
 	"bank": "Bank", "cafe": "Coffee House", "restaurant": "Kitchen", "fitness": "Fitness Club",
 	"garage": "Motor Works", "warehouse": "Distribution", "convenience": "Local Market",
 	"supermarket": "Food Hall", "electronics": "Electronics", "clothing": "Clothing",
 	"furniture": "Interiors", "department": "Department Store"}
+
+
+static func is_interactive_street(use: String) -> bool:
+	return STREET_TRADE.has(use) or use in STREET_INTERACTIVE
 const STREET_NAMES := ["Alder", "Bramley", "Cedar", "Dunlin", "Elm", "Fenwick", "Granary", "Harbour",
 	"Hawthorn", "Juniper", "Kingsley", "Larch", "Mill", "Northgate", "Orchard", "Parkside"]
 

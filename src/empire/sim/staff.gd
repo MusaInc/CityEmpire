@@ -54,12 +54,32 @@ static func wage_for(e: Dictionary) -> float:
 	return snappedf(base * k, 0.05)
 
 
+static func has_trait(e: Dictionary, trait_id: String) -> bool:
+	return (e.get("traits", []) as Array).has(trait_id)
+
+
 ## Work rate multiplier: skill 3 = 1.0, with traits.
+## "punctual" boosts shift throughput +5% (never loses early-morning minutes).
 static func speed(e: Dictionary) -> float:
 	var k := lerpf(0.7, 1.35, (float(e["skill"]) - 1.0) / 4.0)
 	for t in e.get("traits", []):
 		k += float(EmpireData.trait_info(t).get("speed", 0.0))
+	if has_trait(e, "punctual"):
+		k += 0.05
 	return maxf(k, 0.3)
+
+
+## Grants a modest raise to an employee and returns the new hourly wage.
+static func give_raise(e: Dictionary, pct := 0.08) -> float:
+	var next := snappedf(float(e.get("wage", wage_for(e))) * (1.0 + pct), 0.05)
+	e["wage"] = maxf(next, wage_for(e))
+	e["raised_at"] = int(e.get("skill", 1))
+	return float(e["wage"])
+
+
+## True when an ambitious employee at skill 4+ is well-paid (at or above market wage).
+static func is_ambitious_star(e: Dictionary) -> bool:
+	return has_trait(e, "ambitious") and int(e.get("skill", 1)) >= 4 and float(e.get("wage", 0.0)) >= wage_for(e) - 0.01
 
 
 ## Shoppers a cashier can serve per hour.

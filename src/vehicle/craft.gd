@@ -42,6 +42,7 @@ var _yaw := 0.0
 var _pitch := 0.0
 var _roll := 0.0
 var _vy := 0.0
+var _td_shock := 0.0        # plane touchdown suspension settle impulse
 var _visual: Node3D
 var _rotor_node: Node3D
 var _t := 0.0
@@ -96,6 +97,7 @@ func place(xf: Transform3D) -> void:
 	forward_speed = 0.0
 	altitude = 0.0
 	_vy = 0.0
+	_td_shock = 0.0
 	if kind == "boat":
 		global_position.y = SEA_Y
 	state = "moored" if kind == "boat" else ("parked" if kind == "plane" else "landed")
@@ -229,24 +231,37 @@ func _heli(dt: float) -> void:
 			rotor = 1.0
 			# Vertical: up climbs, down descends, otherwise hold height.
 			var want_vy := 0.0
+			var brk_in := float(input["brake"])
 			if input["kick"]:
 				want_vy = climb
-			elif float(input["brake"]) > 0.0:
-				want_vy = -climb * float(input["brake"])
+			elif brk_in > 0.0:
+				want_vy = -climb * brk_in
 				if altitude < 8.0:
 					want_vy = maxf(want_vy, -1.6)   # (flare: gentle near the ground)
+			# Ground-effect hover cushion near solid surfaces (< 6 m): adds subtle buoyant
+			# lift when hovering or easing down, while allowing crisp landing on full down.
+			if not over_water and altitude > 0.3 and altitude < 6.0 and want_vy <= 0.2:
+				var ge := clampf(1.0 - altitude / 6.0, 0.0, 1.0)
+				if brk_in < 0.25:
+					want_vy += ge * 0.42
+				elif brk_in < 0.85:
+					want_vy *= lerpf(1.0, 0.72, ge)
 			_vy = move_toward(_vy, want_vy, dt * 6.0)
 			# Forward: holding the pad flies on at cruise; letting go hovers.
 			var want_f := cruise if (on and (float(input["gas"]) > 0.0 or input["kick"])) else 0.0
-			if float(input["brake"]) > 0.0:
+			if brk_in > 0.0:
 				want_f = 0.0
 			var hv := Vector3(velocity.x, 0.0, velocity.z)
 			var target := forward() * want_f
 			hv = hv.move_toward(target, dt * float(spec.get("accel", 9.0)))
 			var turn := float(input["steer"]) * float(spec.get("yaw", 1.1))
 			_yaw = wrapf(_yaw - turn * dt, -PI, PI)
-			_pitch = lerpf(_pitch, -0.18 * clampf(want_f / cruise, 0.0, 1.0) + 0.05 * float(input["brake"]), 1.0 - exp(-3.0 * dt))
-			_roll = lerpf(_roll, -turn * 0.35 * clampf(hv.length() / 10.0, 0.25, 1.0), 1.0 - exp(-3.0 * dt))
+			# Subtle altitude wind sway so hovering high feels alive without fighting input.
+			var sway_k := clampf((altitude - 6.0) / 36.0, 0.0, 1.0)
+			var sway_pitch := sin(_t * 0.61) * 0.014 * sway_k
+			var sway_roll := cos(_t * 0.79) * 0.018 * sway_k
+			_pitch = lerpf(_pitch, -0.18 * clampf(want_f / cruise, 0.0, 1.0) + 0.05 * brk_in + sway_pitch, 1.0 - exp(-3.0 * dt))
+			_roll = lerpf(_roll, -turn * 0.35 * clampf(hv.length() / 10.0, 0.25, 1.0) + sway_roll, 1.0 - exp(-3.0 * dt))
 			var pre_v := Vector3(hv.x, _vy, hv.z)
 			velocity = pre_v
 			var col := move_and_slide()
@@ -352,7 +367,9 @@ func _plane(dt: float) -> void:
 			_roll = lerpf(_roll, 0.0, dt * 4.0)
 			state = "parked" if v < 0.3 and throttle < 0.05 else ("roll" if throttle > 0.6 else "taxi")
 			# Rotate at Vr with full power: the assisted takeoff.
-			_pitch = lerpf(_pitch, 0.12 if (v > vr * 0.92 and throttle > 0.8) else 0.0, dt * 2.0)
+			_td_shock = move_toward(_td_shock, 0.0, dt * 0.22)
+			var target_gpitch := (0.12 if (v > vr * 0.92 and throttle > 0.8) else 0.0) - _td_shock
+			_pitch = lerpf(_pitch, target_gpitch, 1.0 - exp(-5.0 * dt))
 			if v > vr and throttle > 0.8:
 				state = "air"
 				_vy = 3.0
@@ -367,15 +384,18 @@ func _plane(dt: float) -> void:
 				global_position.y = maxf(g, global_position.y - dt * 6.0)
 		"air", "stall":
 			# Speed: hold = cruise, up = full power and climb, down = descend.
-			var want_v := cruise if on else cruise * 0.85
+			# Deployed landing gear adds subtle aerodynamic drag on approach.
+			var gear_drag := 1.0 - 0.075 * gear_down
+			var want_v := (cruise if on else cruise * 0.85) * gear_drag
 			var want_vy := 0.0
 			if on and input["kick"]:
-				want_v = vmax
+				want_v = vmax * gear_drag
 				want_vy = float(spec.get("climb", 9.0))
 			elif float(input["brake"]) > 0.0:
-				want_v = lerpf(cruise, stall * 1.15, float(input["brake"]))
+				want_v = lerpf(cruise * gear_drag, stall * 1.12, float(input["brake"]))
 				want_vy = -float(spec.get("climb", 9.0)) * 0.9 * float(input["brake"])
-			v = move_toward(v, want_v, dt * thrust * 0.6)
+			var speed_rate := thrust * (0.6 + 0.22 * gear_down if want_v < v else 0.6)
+			v = move_toward(v, want_v, dt * speed_rate)
 			if v < stall:
 				# Stall protection: nose down, gain speed, never fall out of the sky.
 				state = "stall"
@@ -397,16 +417,18 @@ func _plane(dt: float) -> void:
 				var land_max: float = float(spec.get("land_max", 62.0))
 				var flat_ok := _can_land_plane(g)
 				if flat_ok and v < land_max and _vy > -6.0:
+					# Soft oleo-strut touchdown compression & bounce damping.
+					_td_shock = clampf(absf(_vy) * 0.024, 0.015, 0.11)
 					state = "landing_roll"
 					_vy = 0.0
-					_pitch = 0.0
+					_pitch = -_td_shock * 0.5
 					_roll = 0.0
 					if not is_nan(g):
 						global_position.y = g
 				elif not flat_ok and (altitude < 1.0 or _vy <= -3.5 or v >= land_max * 0.85):
 					_crash()   # (steep cliff, narrow roof or uneven ground)
 				elif not flat_ok or _vy <= -6.0 or v >= land_max:
-					_vy = maxf(2.5, absf(_vy) * 0.5)   # (a firm bounce: too fast or unsuitable surface)
+					_vy = maxf(2.2, absf(_vy) * 0.42)   # (damped bounce: too fast or unsuitable surface)
 			if col and get_slide_collision_count() > 0 and v > 25.0:
 				var n := get_slide_collision(0).get_normal()
 				if n.y < 0.5:
@@ -478,8 +500,17 @@ func _boat(dt: float) -> void:
 	if cur_hits == 0 and int(_hull_land_probe(global_position, _yaw)["hits"]) > 0:
 		_yaw = prev_yaw
 	var fwd := forward()
-	_roll = lerpf(_roll, steer * 0.08 * clampf(absf(v) / vmax, 0.0, 1.0), dt * 3.0)
-	_pitch = lerpf(_pitch, 0.07 * clampf(v / vmax, 0.0, 1.0), dt * 2.0)
+	var sp_norm := clampf(v / maxf(vmax, 1.0), 0.0, 1.0)
+	var sz_boat: Vector3 = spec.get("size", Vector3(2.4, 1.3, 8.0))
+	var sport_hull := clampf(1.0 - (sz_boat.z - 6.0) / 22.0, 0.25, 1.0)
+	# Crisp inward banking into turns (deeper on V-hull sport boats, measured on yachts)
+	# and speed-dependent bow planing pitch (hump rise then levelling onto the plane).
+	var bank_max := lerpf(0.06, 0.20, sport_hull)
+	var target_bank := -steer * bank_max * clampf(absf(v) / maxf(vmax, 1.0), 0.0, 1.0) * signf(v if absf(v) > 0.2 else 1.0)
+	_roll = lerpf(_roll, target_bank, 1.0 - exp(-5.0 * dt))
+	var hump := sin(clampf(sp_norm * 1.45, 0.0, 1.0) * PI) * 0.055 * sport_hull
+	var plane_trim := (0.04 + 0.045 * sport_hull) * smoothstep(0.15, 0.95, sp_norm)
+	_pitch = lerpf(_pitch, hump + plane_trim, 1.0 - exp(-3.5 * dt))
 	var step_pos := global_position + fwd * v * maxf(dt * 3.0, 0.15)
 	var next_probe := _hull_land_probe(step_pos, _yaw)
 	var next_hits: int = int(next_probe["hits"])
@@ -500,7 +531,9 @@ func _boat(dt: float) -> void:
 	if col and get_slide_collision_count() > 0:
 		velocity.y = 0.0
 		v = Vector3(velocity.x, 0.0, velocity.z).dot(fwd)
-	global_position.y = SEA_Y + float(spec.get("float", 0.0)) + 0.08 * sin(_t * 1.3) + 0.04 * sin(_t * 2.9)
+	var plane_lift := smoothstep(0.32, 0.90, sp_norm) * 0.16 * sport_hull
+	var bob_k := lerpf(1.0, 0.45, smoothstep(0.35, 0.85, sp_norm))
+	global_position.y = SEA_Y + float(spec.get("float", 0.0)) + plane_lift + (0.08 * sin(_t * 1.3) + 0.04 * sin(_t * 2.9)) * bob_k
 	state = "underway" if absf(v) > 0.5 else "moored"
 	# Docking assist: slow, close to a free berth and nobody on the throttle
 	# – slide smoothly into the berth via collision-checked motion.

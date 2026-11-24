@@ -11,6 +11,7 @@ render_mode diffuse_burley;
 #include "res://src/world/shaders/rock.gdshaderinc"
 
 global uniform float wetness;
+global uniform float rain;
 global uniform float night;
 global uniform vec3 sky_horizon;
 uniform sampler2D asph_tex : filter_linear_mipmap_anisotropic, repeat_enable, hint_default_white;
@@ -42,6 +43,31 @@ float vnoise(vec2 p) {
 
 float band(float d, float h, float aa) {
 	return 1.0 - smoothstep(h - aa, h + aa, abs(d));
+}
+
+// Synced with ground.gdshader + LampLights: dual-lobe wet reflection falloff
+// with aggregate breakup and per-lamp color temperature in lamp.w.
+float wet_lamp_reflection(vec4 lamp, vec3 road, vec3 cam, float puddle, float aggregate) {
+	float lamp_height = lamp.y - road.y;
+	float eye_height = cam.y - road.y;
+	if (lamp.w == 0.0 || lamp_height < 1.0 || eye_height < 0.35) {
+		return 0.0;
+	}
+	vec2 ray = lamp.xz - cam.xz;
+	float separation = length(ray);
+	vec2 axis = ray / max(separation, 0.1);
+	vec2 mirror = cam.xz + ray * eye_height / (eye_height + lamp_height);
+	vec2 delta = road.xz - mirror;
+	float across = dot(delta, vec2(-axis.y, axis.x));
+	float along = dot(delta, axis);
+	float length_scale = 0.9 + 0.061 * separation;
+	float core_width = mix(0.44, 0.21, puddle);
+	across += (aggregate - 0.5) * (0.14 - 0.10 * puddle);
+	vec2 ellipse = vec2(across / core_width, along / length_scale);
+	float fade = 1.0 - smoothstep(27.0, 59.0, separation);
+	float core = exp2(-1.65 * dot(ellipse, ellipse));
+	float fringe = exp2(-1.8 * dot(ellipse * vec2(0.58, 0.74), ellipse * vec2(0.58, 0.74)));
+	return (core + 0.15 * fringe) * fade;
 }
 
 // Shore surfaces: sand, rock or quay concrete, chosen by colour c.
@@ -298,32 +324,40 @@ void fragment() {
 		albedo *= 1.0 - 0.11 * wetness;
 	}
 	vec3 emit = vec3(0.0);
-	if (is_road) {
-		emit = albedo * vec3(0.11, 0.14, 0.18) * night;
+	if (is_paved && v_wn.y > 0.85) {
+		float agg_n = vnoise(p * 0.35) * 0.6 + vnoise(p * 2.1) * 0.4;
+		if (is_road) {
+			emit = albedo * vec3(0.11, 0.14, 0.18) * night;
+		}
 		if (puddle > 0.02) {
-			float facing = clamp(dot(normalize(v_wn), normalize(CAMERA_POSITION_WORLD - v_world)), 0.0, 1.0);
+			vec3 plane_normal = normalize(v_wn);
+			vec3 to_eye = normalize(CAMERA_POSITION_WORLD - v_world);
+			float facing = clamp(dot(plane_normal, to_eye), 0.0, 1.0);
 			float grazing = (1.0 - facing) * (1.0 - facing);
-			emit += sky_horizon * puddle * grazing * (0.03 + 0.035 * (1.0 - night));
+			vec3 reflected = reflect(-to_eye, plane_normal);
+			float ripple = 1.0;
+			if (v_dist < 19.0 && aa < 0.12) {
+				float rip = sin(dot(p, vec2(11.0, 8.3)) + TIME * 9.0 + agg_n * 9.0);
+				float rip_w = (0.35 + 0.65 * clamp(rain, 0.0, 1.0));
+				ripple += rip * 0.11 * rip_w * (1.0 - smoothstep(7.0, 19.0, v_dist)) * (1.0 - smoothstep(0.025, 0.12, aa));
+			}
+			vec3 rain_sky = mix(sky_horizon * 0.18, max(sky_horizon * 0.33, vec3(0.040, 0.047, 0.060)), night);
+			float hemisphere = mix(0.42, 1.0, smoothstep(-0.04, 0.22, reflected.y));
+			emit += rain_sky * puddle * grazing * hemisphere * ripple * (is_road ? 1.0 : 0.72);
 		}
 		if (surface_wet > 0.18 && night > 0.24 && v_dist < 58.0) {
-			float glint = 0.0;
+			vec3 glint = vec3(0.0);
 			for (int i = 0; i < 4; i++) {
 				vec4 lamp = wet_road_lamps[i];
-				float lh = lamp.y - v_world.y;
-				float eh = CAMERA_POSITION_WORLD.y - v_world.y;
-				if (lamp.w > 0.0 && lh >= 1.0 && eh >= 0.35) {
-					vec2 ray = lamp.xz - CAMERA_POSITION_WORLD.xz;
-					float sep = length(ray);
-					vec2 axis = ray / max(sep, 0.1);
-					vec2 mir = CAMERA_POSITION_WORLD.xz + ray * eh / (eh + lh);
-					vec2 dlt = v_world.xz - mir;
-					vec2 ell = vec2(dot(dlt, vec2(-axis.y, axis.x)) / 0.62, dot(dlt, axis) / (1.7 + 0.072 * sep));
-					glint += exp2(-1.4 * dot(ell, ell)) * (1.0 - smoothstep(27.0, 59.0, sep));
-				}
+				vec3 light_colour = mix(vec3(1.0, 0.61, 0.29), vec3(0.78, 0.87, 1.0), lamp.w);
+				glint += light_colour * wet_lamp_reflection(lamp, v_world, CAMERA_POSITION_WORLD, puddle, agg_n);
 			}
+			float coat = smoothstep(0.18, 0.9, surface_wet);
+			float texture_breakup = mix(0.23 + 0.75 * agg_n, 1.0, puddle);
 			float fade = 1.0 - smoothstep(32.0, 58.0, v_dist);
-			emit += vec3(1.0, 0.65, 0.35) * min(glint, 1.0) * smoothstep(0.18, 0.9, surface_wet)
-				* fade * (0.07 + 0.16 * puddle) * smoothstep(0.24, 0.7, night);
+			float surface_k = is_road ? 1.0 : 0.68;
+			emit += min(glint, vec3(1.25)) * coat * fade * surface_k
+				* texture_breakup * (0.08 + 0.28 * puddle) * smoothstep(0.24, 0.7, night);
 		}
 	}
 	ALBEDO = albedo;

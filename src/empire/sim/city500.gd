@@ -23,6 +23,9 @@ const SEED := 500_2026
 const EARN_MULTIPLE := 3.2       # years of operating profit an investor pays for
 const TOP_VALUE := 3.4e9         # #1 on day 1
 const FLOOR_VALUE := 3.0e5       # ≈ #500 on day 1
+const BROKERAGE_FEE := 0.015     # 1.5% sell fee prevents buy/sell flip exploits
+const DAILY_DIVIDEND_RATE := 0.0018  # ~0.18% daily yield on equity stake value
+const CONTROL_PCT := 51.0        # >=51% controlling acquisition (1.35x operating dividend)
 
 ## Sector: [label, colour, revenue multiple (value / annual revenue), margin,
 ## revenue per employee £, typical operations]
@@ -204,8 +207,9 @@ static func empire_value(e: Empire) -> Dictionary:
 		debt += float(l["principal"])
 	var od := maxf(-e.company_cash, 0.0)
 	var cash := maxf(e.company_cash, 0.0) + e.personal_cash
+	var pv := portfolio_value(e)
 	var assets := cash + e.stock_value() + e.premises_value() + e.vehicles_value() + float(e.hq.get("paid", 0.0)) \
-		+ Club.value(e) + Ventures.assets_value(e)
+		+ Club.value(e) + Ventures.assets_value(e) + pv
 	for q in e.properties:
 		assets += float(q.get("price", 0.0))
 	var liab := debt + od
@@ -217,7 +221,7 @@ static func empire_value(e: Empire) -> Dictionary:
 	var prof := 0.0
 	var rev := 0.0
 	for r in rs:
-		prof += float(r.get("profit", 0.0))
+		prof += float(r.get("profit", 0.0)) - float(r.get("dividends", 0.0))
 		rev += float(r.get("revenue", 0.0))
 	var n := maxf(1.0, float(rs.size()))
 	var daily := prof / n
@@ -232,9 +236,177 @@ static func empire_value(e: Empire) -> Dictionary:
 	var rep_k := lerpf(0.8, 1.2, clampf(rep / 100.0, 0.0, 1.0))
 	var earn := maxf(0.0, rolling_daily) * 365.0 * EARN_MULTIPLE * rep_k
 	var val := maxf(0.0, assets - liab + earn)
-	return {"value": val, "assets": assets, "debt": liab, "earnings_value": earn, "profit_day": daily,
+	return {"value": val, "assets": assets, "portfolio": pv, "debt": liab, "earnings_value": earn, "profit_day": daily,
 		"revenue_year": rev / n * 365.0, "profit_year": rolling_daily * 365.0, "reputation": rep,
 		"staff": int(e.stat("staff")), "sites": e.businesses.size() + e.offices.size()}
+
+
+## Scalar empire valuation helper (matches empire_value(e)["value"]).
+static func player_value(empire: Empire) -> float:
+	return float(empire_value(empire)["value"])
+
+
+# ------------------------------------------------------- equity & M&A
+static func company(idx: int) -> Dictionary:
+	var cs := companies()
+	if idx < 0 or idx >= cs.size():
+		return {}
+	return cs[idx]
+
+
+static func _stakes(empire: Empire) -> Dictionary:
+	var s = empire.flags.get("c500_stakes", null)
+	return s if s is Dictionary else {}
+
+
+## Summary of the player's equity stake in company `idx`.
+static func stake_of(empire: Empire, idx: int) -> Dictionary:
+	var c := company(idx)
+	var key := str(idx)
+	var rec: Dictionary = _stakes(empire).get(key, {})
+	var pct := clampf(float(rec.get("pct", 0.0)), 0.0, 100.0)
+	var cost := float(rec.get("cost", 0.0))
+	if c.is_empty() or pct <= 0.0001:
+		return {"idx": idx, "pct": 0.0, "cost": 0.0, "value": 0.0, "gain": 0.0, "control": false, "buyout": false}
+	var val := value(c, empire.day) * (pct / 100.0)
+	return {"idx": idx, "pct": pct, "cost": cost, "value": val, "gain": val - cost,
+		"control": pct >= CONTROL_PCT - 0.001, "buyout": pct >= 99.999}
+
+
+## Buys up to `pct`% (default 5%) of company `idx`, capped at 100% full buyout.
+static func buy_stake(empire: Empire, idx: int, pct: float = 5.0) -> Dictionary:
+	var c := company(idx)
+	if c.is_empty() or not is_finite(pct) or pct <= 0.0:
+		return {"ok": false, "error": "Invalid company or stake size"}
+	var stakes: Dictionary = _stakes(empire).duplicate(true)
+	var key := str(idx)
+	var rec: Dictionary = stakes.get(key, {"pct": 0.0, "cost": 0.0})
+	var old_pct := clampf(float(rec.get("pct", 0.0)), 0.0, 100.0)
+	var buy_pct := minf(pct, 100.0 - old_pct)
+	if buy_pct <= 0.001:
+		return {"ok": false, "error": "You already own 100%% of %s" % c["name"]}
+	var price := value(c, empire.day) * (buy_pct / 100.0)
+	if not empire.pay(price, "investment", "Bought %.1f%% of %s" % [buy_pct, c["name"]]):
+		return {"ok": false, "error": "Not enough money (%s)" % money(price)}
+	var new_pct := clampf(old_pct + buy_pct, 0.0, 100.0)
+	if new_pct >= 99.999:
+		new_pct = 100.0
+	stakes[key] = {"pct": new_pct, "cost": float(rec.get("cost", 0.0)) + price}
+	empire.flags["c500_stakes"] = stakes
+	var is_buyout := new_pct >= 99.999
+	var is_control := new_pct >= CONTROL_PCT - 0.001
+	if is_buyout and old_pct < 99.999:
+		empire._note("Full acquisition: %s is now 100%% yours!" % c["name"], "good")
+	elif is_control and old_pct < CONTROL_PCT - 0.001:
+		empire._note("Controlling stake in %s (%.0f%%) — operating dividends boosted!" % [c["name"], new_pct], "good")
+	else:
+		empire._note("Acquired %.1f%% of %s for %s" % [buy_pct, c["name"], money(price)], "good")
+	empire._check_goals()
+	empire.changed.emit()
+	return {"ok": true, "idx": idx, "bought_pct": buy_pct, "pct": new_pct, "cost": price,
+		"control": is_control, "buyout": is_buyout, "error": ""}
+
+
+## Sells up to `pct`% (default 5%) of company `idx` at market value minus 1.5% brokerage fee.
+static func sell_stake(empire: Empire, idx: int, pct: float = 5.0) -> Dictionary:
+	var c := company(idx)
+	if c.is_empty() or not is_finite(pct) or pct <= 0.0:
+		return {"ok": false, "error": "Invalid company or stake size"}
+	var stakes: Dictionary = _stakes(empire).duplicate(true)
+	var key := str(idx)
+	if not stakes.has(key):
+		return {"ok": false, "error": "You hold no stake in %s" % c["name"]}
+	var rec: Dictionary = stakes[key]
+	var old_pct := clampf(float(rec.get("pct", 0.0)), 0.0, 100.0)
+	var old_cost := float(rec.get("cost", 0.0))
+	var sell_pct := minf(pct, old_pct)
+	if sell_pct <= 0.001:
+		return {"ok": false, "error": "No shares to sell"}
+	var gross := value(c, empire.day) * (sell_pct / 100.0)
+	var fee := gross * BROKERAGE_FEE
+	var proceeds := gross - fee
+	var cost_removed := old_cost * (sell_pct / maxf(old_pct, 0.0001))
+	var rem_pct := old_pct - sell_pct
+	if rem_pct <= 0.001:
+		stakes.erase(key)
+		rem_pct = 0.0
+	else:
+		stakes[key] = {"pct": rem_pct, "cost": maxf(0.0, old_cost - cost_removed)}
+	empire.flags["c500_stakes"] = stakes
+	empire.company_cash += proceeds
+	empire._book("company", proceeds, "investment", "Sold %.1f%% of %s" % [sell_pct, c["name"]])
+	empire.changed.emit()
+	return {"ok": true, "idx": idx, "sold_pct": sell_pct, "pct": rem_pct, "gross": gross, "fee": fee,
+		"proceeds": proceeds, "realised_gain": proceeds - cost_removed, "error": ""}
+
+
+## Current market value of all held City500 equity stakes (at net asset value).
+static func portfolio_value(empire: Empire) -> float:
+	var stakes := _stakes(empire)
+	if stakes.is_empty():
+		return 0.0
+	var cs := companies()
+	var total := 0.0
+	for key in stakes:
+		var idx := String(key).to_int()
+		if idx < 0 or idx >= cs.size():
+			continue
+		var pct := clampf(float((stakes[key] as Dictionary).get("pct", 0.0)), 0.0, 100.0)
+		if pct > 0.0001:
+			total += value(cs[idx], empire.day) * (pct / 100.0)
+	return total
+
+
+static func stake_dividend(c: Dictionary, day: int, pct: float) -> float:
+	var val := value(c, day) * (pct / 100.0)
+	var momentum := clampf(_sector_k(String(c["sector"]), day), 0.85, 1.2)
+	var ctrl := 1.35 if pct >= CONTROL_PCT - 0.001 else 1.0
+	return val * DAILY_DIVIDEND_RATE * momentum * ctrl
+
+
+## Daily dividend income across all held City500 stakes (~0.18%/day, 1.35x for >=51% control).
+static func daily_dividend(empire: Empire) -> float:
+	var stakes := _stakes(empire)
+	if stakes.is_empty():
+		return 0.0
+	var cs := companies()
+	var total := 0.0
+	for key in stakes:
+		var idx := String(key).to_int()
+		if idx < 0 or idx >= cs.size():
+			continue
+		var pct := clampf(float((stakes[key] as Dictionary).get("pct", 0.0)), 0.0, 100.0)
+		if pct > 0.0001:
+			total += stake_dividend(cs[idx], empire.day, pct)
+	return total
+
+
+## All held equity stakes, sorted by current market value descending.
+static func all_stakes(empire: Empire) -> Array:
+	var stakes := _stakes(empire)
+	if stakes.is_empty():
+		return []
+	var cs := companies()
+	var out: Array = []
+	for key in stakes:
+		var idx := String(key).to_int()
+		if idx < 0 or idx >= cs.size():
+			continue
+		var rec: Dictionary = stakes[key]
+		var pct := clampf(float(rec.get("pct", 0.0)), 0.0, 100.0)
+		if pct <= 0.0001:
+			continue
+		var c: Dictionary = cs[idx]
+		var cost := float(rec.get("cost", 0.0))
+		var val := value(c, empire.day) * (pct / 100.0)
+		out.append({
+			"idx": idx, "c": c, "name": c["name"], "sector": c["sector"],
+			"pct": pct, "cost": cost, "value": val, "gain": val - cost,
+			"control": pct >= CONTROL_PCT - 0.001, "buyout": pct >= 99.999,
+			"daily_div": stake_dividend(c, empire.day, pct),
+		})
+	out.sort_custom(func(a, b): return float(a["value"]) > float(b["value"]))
+	return out
 
 
 ## Table for a day: [[value, index]] sorted by value, highest first.

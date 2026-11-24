@@ -147,6 +147,9 @@ func _ready() -> void:
 	rain_fx = RainFx.new()
 	rain_fx.name = "Rain"
 	add_child(rain_fx)
+	if settings and not settings.changed.is_connected(_on_settings_changed):
+		settings.changed.connect(_on_settings_changed)
+	_apply_quality_preset()
 	_apply(0.0, true)
 
 
@@ -168,9 +171,10 @@ func configure(args: Dictionary, world: Node) -> void:
 		set_weather(args["weather"], true)
 	elif live:
 		_from_settings(true)
-	if live and _settings():
-		if not _settings().changed.is_connected(_on_settings_changed):
-			_settings().changed.connect(_on_settings_changed)
+	var st := _settings()
+	if st and not st.changed.is_connected(_on_settings_changed):
+		st.changed.connect(_on_settings_changed)
+	_apply_quality_preset()
 	_apply(0.0, true)
 
 
@@ -181,7 +185,30 @@ func _exit_tree() -> void:
 
 
 func _on_settings_changed() -> void:
-	_from_settings(false)
+	_apply_quality_preset()
+	if live:
+		_from_settings(false)
+
+
+func _apply_quality_preset() -> void:
+	var st := _settings()
+	if st == null:
+		return
+	var preset: Dictionary = st.preset()
+	if env:
+		env.glow_enabled = bool(preset.get("glow", true))
+	if sun:
+		sun.shadow_enabled = bool(preset.get("shadows", true))
+		var q := int(st.get("quality"))
+		if q <= 0:
+			sun.directional_shadow_max_distance = 120.0
+			sun.directional_shadow_split_1 = 0.12
+		elif q == 1:
+			sun.directional_shadow_max_distance = 160.0
+			sun.directional_shadow_split_1 = 0.11
+		else:
+			sun.directional_shadow_max_distance = 240.0
+			sun.directional_shadow_split_1 = 0.085
 
 
 ## The Settings autoload (looked up, not named: tool scripts run without it).

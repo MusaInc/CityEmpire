@@ -41,25 +41,28 @@ static func _owned(ui: EmpireUI, model: String) -> int:
 static func vehicle_card(ui: EmpireUI, model: String, site: String) -> void:
 	var md := EmpireData.vehicle_model(model)
 	var cls := String(md.get("class", "car"))
-	var v := ui._open(String(md.get("name", model)), 640 if cls == "car" else 825, 420 if cls == "car" else 465)
-	var detail := v
-	if cls != "car":
-		var gallery := S.hbox(22)
-		v.add_child(gallery)
-		var preview := S.vbox(5)
-		gallery.add_child(preview)
+	var price := float(md.get("price", 0))
+	var v := ui._open(String(md.get("name", model)), 790 if cls == "car" else 825, 440 if cls == "car" else 465)
+	var gallery := S.hbox(22)
+	v.add_child(gallery)
+	var preview := S.vbox(5)
+	gallery.add_child(preview)
+	if cls == "car":
+		var car_shot := Glass.rounded(ui.thumbs.vehicle(model, Vector2(310, 195)), Vector2(310, 195), 20)
+		preview.add_child(car_shot)
+	else:
 		preview.add_child(_craft_preview(model, cls))
 		preview.add_child(S.label("Drag to rotate", 13, S.MUTED))
-		detail = S.vbox(10)
-		detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		detail.alignment = BoxContainer.ALIGNMENT_CENTER
-		gallery.add_child(detail)
+	var detail := S.vbox(10)
+	detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	detail.alignment = BoxContainer.ALIGNMENT_CENTER
+	gallery.add_child(detail)
 	var description := S.label(String(md.get("desc", "A good everyday car" if cls == "car" else "")), 17, S.MUTED)
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if not description.text.is_empty():
 		detail.add_child(description)
 	var top := S.hbox(16)
-	top.add_child(S.label(EmpireData.money(float(md.get("price", 0))), 40, S.PAPER, "black"))
+	top.add_child(S.label(EmpireData.money(price), 40, S.PAPER, "black"))
 	var own := _owned(ui, model)
 	if own > 0:
 		top.add_child(S.chip("You own %d" % own, S.GREEN))
@@ -71,7 +74,7 @@ static func vehicle_card(ui: EmpireUI, model: String, site: String) -> void:
 		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		detail.add_child(line)
 	var acts := S.hbox(10)
-	acts.add_child(S.button("Buy · %s" % EmpireData.money(float(md.get("price", 0))), func():
+	var buy_cb := func() -> void:
 		var err := ""
 		if cls == "car":
 			err = ui.game.skyport_play.buy_car(model, site)
@@ -83,7 +86,14 @@ static func vehicle_card(ui: EmpireUI, model: String, site: String) -> void:
 		Sfx.play("cash", -3.0)
 		ui.close_panel(true)
 		ui.toast("It's yours: %s" % ({"car": "parked on the forecourt", "heli": "on the helipad – the GPS shows where",
-			"plane": "on a stand by the hangars", "boat": "in a berth at the marina"}.get(cls, "")), "good"), true, 220))
+			"plane": "on a stand by the hangars", "boat": "in a berth at the marina"}.get(cls, "")), "good")
+	var buy_lbl := "Buy · %s" % EmpireData.money(price)
+	if price >= 25000.0:
+		var cb := Glass.confirm_button(buy_lbl, "Confirm · %s" % EmpireData.money(price), buy_cb, "regular")
+		cb.custom_minimum_size.x = 220
+		acts.add_child(cb)
+	else:
+		acts.add_child(S.button(buy_lbl, buy_cb, true, 220))
 	acts.add_child(S.button({"car": "Test drive", "boat": "Test sail"}.get(cls, "Test flight"), func():
 		ui.game.skyport_play.start_test(model, site), false, 180))
 	acts.add_child(S.spacer())
@@ -145,19 +155,31 @@ static func _craft_preview(model: String, cls: String) -> Control:
 	return container
 
 
-## A showroom's list (dealers, aviation, marina): one row each, tap for
-## the card. Kestrel Motors adds "run this dealership".
+## A showroom's list (dealers, aviation, marina): one row each with a real
+## thumbnail, tap for the card. Kestrel Motors adds "run this dealership".
 static func showroom(ui: EmpireUI, site: String) -> void:
 	var st := ui.game.skyport_play.site(site)
-	var v := ui._open(String(st.get("name", "Showroom")), 720, 520)
+	var v := ui._open(String(st.get("name", "Showroom")), 780, 540)
 	var list := S.vbox(8)
 	for model in SkyportPlay.STOCK.get(site, []):
 		var md := EmpireData.vehicle_model(model)
 		var m := String(model)
-		list.add_child(ui._row([ui._fixed(String(md.get("name", m)), 230, 19, S.PAPER, "bold"),
-			ui._fixed(_specs(md), 280, 15, S.MUTED), S.spacer(),
-			S.button(EmpireData.money(float(md.get("price", 0))), func(): vehicle_card(ui, m, site), true, 150)]))
-	v.add_child(ui._scroll(list, 330))
+		var thumb := Glass.rounded(ui.thumbs.vehicle(m, Vector2(124, 72)), Vector2(124, 72), 14)
+		thumb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var info := Glass.vbox(2)
+		info.alignment = BoxContainer.ALIGNMENT_CENTER
+		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var own := _owned(ui, m)
+		var nh := Glass.hbox(8)
+		nh.add_child(Glass.line(String(md.get("name", m)), "headline"))
+		if own > 0:
+			nh.add_child(Glass.badge("OWN %d" % own, Glass.GREEN))
+		info.add_child(nh)
+		info.add_child(Glass.line(_specs(md), "footnote", Glass.LABEL2))
+		var price_btn := S.button(EmpireData.money(float(md.get("price", 0))), func(): vehicle_card(ui, m, site), true, 150)
+		price_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		list.add_child(ui._row([thumb, info, price_btn]))
+	v.add_child(ui._scroll(list, 340))
 	if site == "dealer_budget":
 		v.add_child(dealership_box(ui))
 
@@ -169,10 +191,13 @@ static func dealership_box(ui: EmpireUI) -> Control:
 		var h := S.hbox(10)
 		h.add_child(S.label("This dealership is for sale: run it as a business.", 16, S.MUTED))
 		h.add_child(S.spacer())
-		h.add_child(S.button("Buy the business · %s" % EmpireData.money(Ventures.DEALER_PRICE), func():
+		var buy_dl := Glass.confirm_button("Buy the business · %s" % EmpireData.money(Ventures.DEALER_PRICE),
+			"Confirm · %s" % EmpireData.money(Ventures.DEALER_PRICE), func():
 			var err := Ventures.buy_dealer(e)
 			ui.toast(err if err != "" else "Kestrel Motors is yours", "bad" if err != "" else "good")
-			showroom(ui, "dealer_budget"), true, 280))
+			showroom(ui, "dealer_budget"), "regular")
+		buy_dl.custom_minimum_size.x = 280
+		h.add_child(buy_dl)
 		box.add_child(h)
 		return box
 	var dl: Dictionary = e.flags["dealership"]
@@ -354,16 +379,36 @@ static func estates(ui: EmpireUI, v: VBoxContainer) -> void:
 			acts.add_child(S.button("GPS", func():
 				ui.game.set_gps(Ventures.estate_at(d), String(d["name"]), {"kind": "place", "id": id})
 				ui.close_panel(true), false, 80))
+			var sell_val := Ventures.valuation(e, id)
+			var sell_btn := Glass.confirm_button("Sell · %s" % EmpireData.money(sell_val),
+				"Confirm sell · %s" % EmpireData.money(sell_val), func():
+				var err := Ventures.sell_estate(e, id)
+				if err != "":
+					ui.toast(err, "bad")
+					return
+				Sfx.play("cash", -4.0)
+				ui.toast("Sold %s for %s" % [String(d["name"]), EmpireData.money(sell_val)], "good")
+				if ui.phone and is_instance_valid(ui.phone):
+					ui.phone.refresh()
+				else:
+					ui.open_phone("property"), "small", Glass.RED, "tinted")
+			acts.add_child(sell_btn)
 		else:
 			c.add_child(S.label("%s" % ("Up to %s a day in rent" % EmpireData.money(float(d["rent"]) * float(d["units"])) if int(d["units"]) > 0 else "Upkeep %s a day" % EmpireData.money(float(d["upkeep"]))), 15, S.PAPER))
 			acts.add_child(S.spacer())
 			acts.add_child(S.button("GPS", func():
 				ui.game.set_gps(Ventures.estate_at(d), String(d["name"]), {"kind": "place", "id": id})
 				ui.close_panel(true), false, 80))
-			acts.add_child(S.button("Buy · %s" % EmpireData.money(float(d["price"])), func():
+			var buy_est := Glass.confirm_button("Buy · %s" % EmpireData.money(float(d["price"])),
+				"Confirm · %s" % EmpireData.money(float(d["price"])), func():
 				var err := Ventures.buy_estate(e, id)
 				ui.toast(err if err != "" else "%s is yours" % d["name"], "bad" if err != "" else "good")
-				ui.open_phone("property"), true, 200))
+				if ui.phone and is_instance_valid(ui.phone):
+					ui.phone.refresh()
+				else:
+					ui.open_phone("property"), "regular")
+			buy_est.custom_minimum_size.x = 200
+			acts.add_child(buy_est)
 		c.add_child(acts)
 		list.add_child(cv[0])
 	v.add_child(list)

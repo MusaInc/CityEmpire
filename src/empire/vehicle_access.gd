@@ -34,6 +34,8 @@ var _last_clear_check := 0.0
 var _walk_speed := 0.0
 var _duration := 1.42
 var _cross_cabin := false
+var _door_opened_sfx := false
+var _door_closed_sfx := false
 static var _profiles := {}
 
 
@@ -57,11 +59,13 @@ static func geometry(body: PhysicsBody3D) -> Dictionary:
 		var seat_x: float = float(authored.get("seat_x", minf(dims.x * 0.23, dims.x * 0.5 - 0.42)))
 		var sill_y: float = float(authored.get("sill_y", maxf(float(hip[1]) - 0.16, 0.28)))
 		var int_pull: Array = authored.get("interior_pull", [lerpf(float(hinge[0]), float(pull[0]), 0.58), float(pull[1]) - 0.06])
+		var wh: Array = authored.get("wheel", [0.0, 0.02, -0.44])
 		# The profile names the seated pelvis. The rig's pelvis is 8 cm
 		# above the player's root, so use that same offset in both transitions.
 		var seat_y := float(hip[1]) - CharacterRig.PELVIS_ABOVE_PLAYER_ROOT
 		return {"edge": dims.x * 0.5 - 0.06, "hinge": hinge, "handle": pull, "interior_pull": int_pull,
 			"seat": Vector3(seat_x * driver_side, seat_y, float(hip[0])),
+			"wheel": Vector3(float(wh[0]), float(wh[1]), float(wh[2])),
 			"seat_x": seat_x, "driver_side": driver_side, "sill_y": sill_y,
 			"step": clampf(float(hip[1]), 0.37, 0.95), "swing": absf(float(hinge[0]) - float(pull[0])) + 0.15}
 	var craft := body as Craft
@@ -227,6 +231,8 @@ func start(body: PhysicsBody3D, board: bool, found: Dictionary, done: Callable, 
 	game.world.set_viewer(game.camera)
 	elapsed = 0.0
 	_last_clear_check = 0.0
+	_door_opened_sfx = false
+	_door_closed_sfx = false
 	if not board:
 		var root := vehicle.global_transform
 		game.player.global_position = root * driver_seat
@@ -350,6 +356,14 @@ func tick(dt: float) -> void:
 	if vehicle is Car and (vehicle as Car).visual:
 		handle = (vehicle as Car).visual.pose_access(side, door, profile)
 		_ensure_interior_grip()
+		if not _door_opened_sfx and door > 0.16:
+			_door_opened_sfx = true
+			if game.car_audio and game.car_audio.has_method("play_door"):
+				game.car_audio.call("play_door", true)
+		elif _door_opened_sfx and not _door_closed_sfx and door < 0.08 and u > 0.65:
+			_door_closed_sfx = true
+			if game.car_audio and game.car_audio.has_method("play_door"):
+				game.car_audio.call("play_door", false)
 
 	# Clean quadratic Bezier arc through the open door aperture so the body clears
 	# the door sill without clipping the sill, seat bolster, or roof header.

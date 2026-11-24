@@ -668,3 +668,40 @@ func test_custom_shop_hours_control_trade_shifts_and_survive_save(t) -> void:
 	t.check(is_equal_approx(float(b.today["wages"]), b.wages_per_hour() * 2.0), "wages cover only scheduled hours")
 	b.reset_hours()
 	t.check(b.hours() == Vector2(7, 22), "reset restores the business type schedule")
+
+
+func test_equity_dividends_are_booked_without_capitalising_them_twice(t) -> void:
+	var e := _game()
+	e.company_cash = 1.0e10
+	var idx := City500.N - 1
+	var value_before := City500.player_value(e)
+	var buy := City500.buy_stake(e, idx, 51.0)
+	t.check(buy["ok"] and buy["control"], "51% establishes control")
+	t.check(is_equal_approx(City500.player_value(e), value_before), "buying at fair value exchanges cash for equity")
+	var dividend := City500.daily_dividend(e)
+	e.end_day()
+	t.check(dividend > 0.0 and is_equal_approx(float(e.day_reports[-1]["dividends"]), dividend), "the daily report includes dividends")
+	var restored := Empire.from_dict(e.to_dict())
+	t.check(is_equal_approx(City500.stake_of(restored, idx)["pct"], 51.0), "the holding survives save and reload")
+	t.check(is_zero_approx(float(City500.empire_value(restored)["earnings_value"])), "portfolio income is excluded from operating earnings valuation")
+	var sold := City500.sell_stake(restored, idx, 51.0)
+	t.check(sold["ok"] and sold["proceeds"] < sold["gross"], "the sale charges brokerage")
+
+
+func test_lifestyle_purchases_and_discovery_rewards_survive_reload(t) -> void:
+	var e := _game()
+	var cash := e.personal_cash
+	e.minute = 23.0 * 60.0
+	var r := e.consume_public_item("cola", 3.0, "Corner shop")
+	t.check(r["ok"] and is_equal_approx(e.personal_cash, cash - 3.0), "food and drink are paid from personal cash")
+	t.check(e.carried.is_empty(), "consumables do not create stock")
+	var restored := Empire.from_dict(e.to_dict())
+	t.check(is_equal_approx(float(restored.active_buff()["walk_speed"]), 1.15), "the movement perk survives reload")
+	restored.day += 1
+	restored.minute = 180.0
+	t.check(restored.active_buff().is_empty(), "the perk expires across midnight")
+	restored.record_discovery("vacant", "Empty unit", false)
+	for i in 4:
+		t.check(not restored.record_discovery(str(i), "Place")["milestone"], "the empty unit does not count toward the reward")
+	var milestone := restored.record_discovery("fifth", "Quayside")
+	t.check(milestone["milestone"] and not restored.record_discovery("fifth", "Quayside")["new"], "five distinct destinations pay once")

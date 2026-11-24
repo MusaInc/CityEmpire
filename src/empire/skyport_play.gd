@@ -298,6 +298,7 @@ func track(dt: float) -> void:
 	if c.state == "crashed" and c.crashed_t <= 0.0:
 		_recover(c)
 	game.player.global_position = c.global_position + Vector3.UP * 1.5
+	RenderingServer.global_shader_parameter_set(&"player_pos", c.global_position)
 	var p := c.global_position
 	_km_acc += p.distance_to(_last) / 1000.0
 	_last = p

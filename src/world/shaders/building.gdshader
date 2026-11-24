@@ -432,6 +432,11 @@ void fragment() {
 	vec3 bend_n = vec3(0.0);  // world-space relief normal (reveals, sills), when relief > 0
 	float relief = 0.0;
 	float front_insert = 0.0;
+	vec2 wall_csize = vec2(3.0, 3.6);
+	vec2 wall_whalf = vec2(0.8, 1.0);
+	float wall_origin = 0.0;
+	float wall_corner = 0.85;
+	bool wall_curtain = false;
 	float age = building_age(v_wpos.xz, seed);
 	float qd = quarter(v_wpos.xz);
 
@@ -506,29 +511,25 @@ void fragment() {
 			rough = mix(0.42, 0.75, rusty);
 			metal = 0.45 * (1.0 - rusty) * (1.0 - sky);
 		}
-		if (style == 3.0) {
-			// Warehouses: profiled metal sheeting – ribs every 0.33 m along
-			// the shorter span, 1.1 m sheets with lapped seams, a few
-			// translucent roof lights, and (older buildings) rust weeping
-			// from the fixings and the edges. Catches the sun a little.
-			bool along_x = fract(seed * 9.7) < 0.5;
-			float run = along_x ? uv.x : uv.y;
-			float cross_ = along_x ? uv.y : uv.x;
-			float rib = smoothstep(0.35, 0.5, abs(fract(run / 0.33) - 0.5) * 2.0);
-			float sheet = hash12(vec2(floor(run / 1.1), floor(cross_ / 6.0)) + seed * 13.0);
-			vec3 metal_c = mix(vec3(0.55, 0.58, 0.6), base * 1.1, 0.35) * (0.9 + 0.12 * sheet);
-			albedo = metal_c * (1.0 - 0.18 * rib * detail);
-			float roof_light = step(0.86, hash12(vec2(floor(run / 4.4), floor(cross_ / 7.0)) + seed)) * step(0.15, fract(cross_ / 7.0));
-			albedo = mix(albedo, vec3(0.72, 0.76, 0.74), roof_light * 0.8);
-			float rust = smoothstep(0.55, 0.9, vnoise_b(uv * vec2(0.3, 1.6) + seed * 7.0)) * age;
-			rust = max(rust, (1.0 - smoothstep(0.0, 1.5, edge)) * age * 0.8);
-			albedo = mix(albedo, vec3(0.42, 0.24, 0.13), rust * 0.6 * detail);
-			rough = mix(0.45, 0.8, rust);
-			metal = 0.35 * (1.0 - rust);
-		}
 	} else if (v_kind == KIND_TRIM || v_kind == KIND_BRIDGE_ROAD) {
 		albedo = base;
 		rough = 0.7;
+		if (v_kind == KIND_TRIM && style > 49.5 && style < 51.5) {
+			// Entrance portal brass lantern: subtle warm emissive glow at night.
+			rough = 0.28;
+			metal = 0.35;
+			emit = vec3(1.0, 0.76, 0.42) * (0.10 + 1.75 * night);
+		} else if (v_kind == KIND_TRIM && style > 51.5 && style < 53.5) {
+			// Dark-tinted balcony balustrade glass panel.
+			rough = 0.16;
+			metal = 0.08;
+			vec3 vw_b = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
+			vec3 nw_b = normalize(v_world_normal);
+			float fr_b = pow(1.0 - clamp(dot(vw_b, nw_b), 0.0, 1.0), 3.0);
+			vec3 rb = reflect(-vw_b, nw_b);
+			vec3 sky_b = mix(sky_horizon, sky_top, clamp(rb.y * 1.6, 0.0, 1.0));
+			albedo = mix(base, sky_b * 0.75, 0.22 + 0.52 * fr_b);
+		}
 	} else if (v_kind == KIND_STONE) {
 		// Dressed-stone base course: ashlar in 0.45 m courses, joints
 		// staggered every other course, a little tone per block, and a
@@ -575,6 +576,11 @@ void fragment() {
 		vec2 csize;
 		float face_origin = uv.x - face_t * face_w;
 		window_layout(style, seed, uv, face_origin, face_w, glass, cell, frame, wpos, whalf, csize);
+		wall_csize = csize;
+		wall_whalf = whalf;
+		wall_origin = face_origin;
+		wall_curtain = (style == 2.0 || style == 6.0);
+		wall_corner = face_w > 1.0 ? min(face_w * 0.16, wall_curtain ? 0.36 : 0.85) : 0.0;
 		bool corner_clear = face_w <= 1.0 || min(face_t, 1.0 - face_t) * face_w
 			>= min(face_w * 0.16, (style == 2.0 || style == 6.0) ? 0.36 : 0.85);
 		float sill_y = uv.y - wpos.y - whalf.y;
@@ -663,99 +669,138 @@ void fragment() {
 		}
 		vec3 wall = base * tex;
 
-		// Glass: the world reflected (each pane a hair off true, so
-		// reflections break up pane by pane like real glazing) over the room
-		// behind it (interior mapping), blended by Fresnel.
+		// Glass: gate expensive city_reflection() + room() interior mapping behind
+		// glass > 0.005 so opaque masonry/spandrel pixels skip glazing ALU.
 		vec3 view_w = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 		vec3 n_w = normalize(v_world_normal);
 		vec3 tang = normalize(cross(vec3(0.0, 1.0, 0.0), n_w));
 		bool curtain = style == 2.0 || style == 6.0 || v_kind == KIND_GLASS;
-		vec2 jt = vec2(hash12(cell * 1.7 + seed * 5.0), hash12(cell * 2.3 + seed * 3.0)) - 0.5;
-		vec3 n_g = normalize(n_w + (tang * jt.x + vec3(0.0, 1.0, 0.0) * jt.y) * (curtain ? 0.014 : 0.010) * detail);
-		vec3 r = reflect(-view_w, n_g);
-		float fres = pow(1.0 - clamp(dot(view_w, n_w), 0.0, 1.0), 3.0);
-		vec3 refl = mix(sky_horizon, sky_top, clamp(r.y * 1.6, 0.0, 1.0));
-		if (detail > 0.02) {
-			refl = mix(refl, city_reflection(r, v_wpos, sky_top, sky_horizon, sun_dir, night),
-				smoothstep(0.02, 0.4, detail));
-		}
-		float rnd = hash12(cell + seed * 113.0);
-		vec3 tint = style == 6.0 ? vec3(0.12, 0.16, 0.2) : (style == 2.0 ? vec3(0.2, 0.32, 0.38) : vec3(0.1, 0.11, 0.12));
-		// Curtain-wall towers pick a glass colour per building (teal, bronze,
-		// green, blue, champagne, silver) so the skyline isn't one blue mass;
-		// reflections are seen through that coating like real glass.
-		float pick = fract(seed * 7.31);
-		if (style == 2.0) {
-			tint = pick < 0.18 ? vec3(0.16, 0.34, 0.36) : (pick < 0.36 ? vec3(0.42, 0.28, 0.15)
-				: (pick < 0.5 ? vec3(0.17, 0.33, 0.24) : (pick < 0.64 ? vec3(0.18, 0.27, 0.42)
-				: (pick < 0.82 ? vec3(0.46, 0.42, 0.34) : vec3(0.36, 0.38, 0.4)))));
-		} else if (style == 6.0) {
-			tint = pick < 0.4 ? vec3(0.1, 0.14, 0.2) : (pick < 0.75 ? vec3(0.22, 0.15, 0.09) : vec3(0.13, 0.13, 0.12));
-		}
-		if (curtain) {
-			float lum = dot(refl, vec3(0.3, 0.55, 0.15));
-			refl = mix(refl, clamp(tint * 1.85, 0.0, 1.0) * lum * 1.35, 0.40);
-		}
-		// Neighbours often share the same fittings, but adjust them independently.
-		float blind_setting = hash12(cell * 2.7 + seed * 17.0);
-		float blind_h = smoothstep(0.56, 0.62, blind_setting) * (shop ? 0.0 : 1.0);
-		float blind_edge = mix(-0.88, 0.67, hash12(cell + 5.1 + seed)) * whalf.y;
-		float window_pixel = clamp(max(length(uv_dx), length(uv_dy)) * 0.65, 0.008, 0.23);
 		bool punched = !shop && style != 2.0 && style != 6.0 && v_kind != KIND_GLASS;
-		// Project the sight line back to the actual inset of the pane. What
-		// falls outside it is the masonry return inside the same aperture.
-		float recess_depth = punched ? mix(0.19, 0.36, fract(seed * 17.73)) : 0.035;
-		vec3 v_local = vec3(dot(view_w, tang), view_w.y, max(dot(view_w, n_w), 0.12));
-		vec2 pane_pos = wpos - v_local.xy * recess_depth / v_local.z;
-		vec2 margin = whalf - abs(pane_pos);
-		float clear_pane = smoothstep(-window_pixel, window_pixel, min(margin.x, margin.y));
-		float in_blind = blind_h * smoothstep(blind_edge - window_pixel, blind_edge + window_pixel, pane_pos.y);
-		// Lit rooms: a few by day; after dusk they come on one by one (each
-		// window has its own threshold) up to a per-building share, in warm
-		// tungsten, cool office white or the odd blue TV glow.
-		// (Offices keep plenty of lights on by day too; homes hardly any.)
-		bool office = style == 0.0 || style == 2.0 || style == 4.0 || style == 6.0 || style == 7.0;
-		float day_share = office ? 0.18 + 0.16 * fract(seed * 5.3) : lit_fraction;
-		// At night buildings differ a lot: some nearly dark, some busy
-		// (6-50 % of windows), and offices light whole floors (cleaners,
-		// late shifts) – bands of light instead of an even sprinkle.
-		float night_share = mix(0.06, 0.5, pow(fract(seed * 3.7), 1.4));
-		float lit_share = mix(day_share, night_share, night);
-		float lit = step(1.0 - lit_share, hash12(cell * 1.31 + seed * 7.0)) * (shop ? 1.0 : 0.7);
-		if (office && !shop) {
-			float floors_on = night * (0.04 + 0.15 * fract(seed * 9.1));
-			float occupied = step(1.0 - floors_on, hash12(vec2(cell.y * 1.7, seed * 31.0)));
-			lit = max(lit, occupied * mix(0.32, 0.82, rnd) * step(0.18, rnd));
+		float fres = pow(1.0 - clamp(dot(view_w, n_w), 0.0, 1.0), 3.0);
+		vec3 r_sky = reflect(-view_w, n_w);
+		vec3 refl = mix(sky_horizon, sky_top, clamp(r_sky.y * 1.6, 0.0, 1.0));
+		float rnd = 0.5;
+		float clear_pane = 0.0;
+		// Lightweight fallback glass colour (used by doorway fanlights when glass == 0).
+		vec3 gcol = mix(vec3(0.07, 0.08, 0.10), refl * 0.72, 0.22 + 0.55 * fres)
+			+ interior_warm * 0.16 * night;
+		if (glass > 0.005) {
+			vec2 jt = vec2(hash12(cell * 1.7 + seed * 5.0), hash12(cell * 2.3 + seed * 3.0)) - 0.5;
+			vec3 n_g = normalize(n_w + (tang * jt.x + vec3(0.0, 1.0, 0.0) * jt.y) * (curtain ? 0.014 : 0.010) * detail);
+			vec3 r = reflect(-view_w, n_g);
+			refl = mix(sky_horizon, sky_top, clamp(r.y * 1.6, 0.0, 1.0));
+			if (detail > 0.02) {
+				refl = mix(refl, city_reflection(r, v_wpos, sky_top, sky_horizon, sun_dir, night),
+					smoothstep(0.02, 0.4, detail));
+			}
+			rnd = hash12(cell + seed * 113.0);
+			vec3 tint = style == 6.0 ? vec3(0.12, 0.16, 0.2) : (style == 2.0 ? vec3(0.2, 0.32, 0.38) : vec3(0.1, 0.11, 0.12));
+			// Curtain-wall towers pick a glass colour per building (teal, bronze,
+			// green, blue, champagne, silver) so the skyline isn't one blue mass;
+			// reflections are seen through that coating like real glass.
+			float pick = fract(seed * 7.31);
+			if (style == 2.0) {
+				tint = pick < 0.18 ? vec3(0.16, 0.34, 0.36) : (pick < 0.36 ? vec3(0.42, 0.28, 0.15)
+					: (pick < 0.5 ? vec3(0.17, 0.33, 0.24) : (pick < 0.64 ? vec3(0.18, 0.27, 0.42)
+					: (pick < 0.82 ? vec3(0.46, 0.42, 0.34) : vec3(0.36, 0.38, 0.4)))));
+			} else if (style == 6.0) {
+				tint = pick < 0.4 ? vec3(0.1, 0.14, 0.2) : (pick < 0.75 ? vec3(0.22, 0.15, 0.09) : vec3(0.13, 0.13, 0.12));
+			}
+			if (curtain) {
+				float lum = dot(refl, vec3(0.3, 0.55, 0.15));
+				refl = mix(refl, clamp(tint * 1.85, 0.0, 1.0) * lum * 1.35, 0.40);
+			}
+			// Neighbours often share the same fittings, but adjust them independently.
+			float blind_setting = hash12(cell * 2.7 + seed * 17.0);
+			float blind_h = smoothstep(0.56, 0.62, blind_setting) * (shop ? 0.0 : 1.0);
+			float blind_edge = mix(-0.88, 0.67, hash12(cell + 5.1 + seed)) * whalf.y;
+			float window_pixel = clamp(max(length(uv_dx), length(uv_dy)) * 0.65, 0.008, 0.23);
+			// Project the sight line back to the actual inset of the pane. What
+			// falls outside it is the masonry return inside the same aperture.
+			float recess_depth = punched ? mix(0.19, 0.36, fract(seed * 17.73)) : 0.035;
+			vec3 v_local = vec3(dot(view_w, tang), view_w.y, max(dot(view_w, n_w), 0.12));
+			vec2 pane_pos = wpos - v_local.xy * recess_depth / v_local.z;
+			vec2 margin = whalf - abs(pane_pos);
+			clear_pane = smoothstep(-window_pixel, window_pixel, min(margin.x, margin.y));
+			float in_blind = blind_h * smoothstep(blind_edge - window_pixel, blind_edge + window_pixel, pane_pos.y);
+			// Lit rooms: a few by day; after dusk they come on one by one (each
+			// window has its own threshold) up to a per-building share, in warm
+			// tungsten, cool office white or the odd blue TV glow.
+			bool office = style == 0.0 || style == 2.0 || style == 4.0 || style == 6.0 || style == 7.0;
+			float day_share = office ? 0.18 + 0.16 * fract(seed * 5.3) : lit_fraction;
+			float night_share = mix(0.06, 0.5, pow(fract(seed * 3.7), 1.4));
+			float lit_share = mix(day_share, night_share, night);
+			float lit = step(1.0 - lit_share, hash12(cell * 1.31 + seed * 7.0)) * (shop ? 1.0 : 0.7);
+			if (office && !shop) {
+				float floors_on = night * (0.04 + 0.15 * fract(seed * 9.1));
+				float occupied = step(1.0 - floors_on, hash12(vec2(cell.y * 1.7, seed * 31.0)));
+				lit = max(lit, occupied * mix(0.32, 0.82, rnd) * step(0.18, rnd));
+			}
+			float lk = hash12(cell * 3.17 + seed * 11.0);
+			vec3 lamp_col = lk < 0.55 ? interior_warm : (lk < 0.88 ? vec3(0.86, 0.9, 1.0) : vec3(0.5, 0.66, 1.0));
+			lamp_col = mix(office ? vec3(0.95, 0.95, 0.9) : interior_warm, lamp_col, night);
+			float lit_k = mix(lit_strength, 1.3, night) * (0.45 + 0.75 * hash12(cell * 0.71 + seed));
+			vec3 interior = tint * (0.75 + 0.35 * rnd);
+			if (detail > 0.0 && !shop) {
+				vec3 d_in = -view_w;
+				vec3 dl = vec3(dot(d_in, tang), d_in.y, dot(d_in, -n_w));
+				vec2 o = clamp(pane_pos, -whalf, whalf);
+				vec3 rs = vec3(csize.x * (curtain ? 2.0 : 1.0), csize.y, curtain ? 6.0 : 4.2);
+				float daylight = dot(sky_horizon, vec3(0.3, 0.55, 0.15)) * 0.5 * (1.0 - 0.85 * night);
+				vec3 rm = room(o, dl, rs, rnd, lit, lamp_col * mix(0.7, lit_k, night), daylight);
+				rm *= curtain ? (tint * 2.2 + 0.15) : vec3(0.85, 0.88, 0.9);
+				interior = mix(interior, rm * 0.64, detail * 0.83);
+			}
+			gcol = mix(interior, refl, curtain ? 0.30 + 0.62 * fres : 0.16 + 0.68 * fres);
+			vec3 fabric = mix(vec3(0.26, 0.25, 0.23), vec3(0.48, 0.45, 0.39), rnd);
+			fabric = mix(fabric, lamp_col * (0.35 + 0.16 * rnd), lit);
+			float blind_slats = sin(pane_pos.y * 105.0) * (1.0 - smoothstep(0.01, 0.05, window_pixel));
+			gcol = mix(gcol, fabric * (0.94 + 0.06 * blind_slats), in_blind * detail * mix(0.70, 0.8, night));
+			gcol += lamp_col * lit * lit_k * mix(0.04, 0.095, night) * (1.0 - detail * 0.7);
+			vec3 room_glow = mix(lamp_col * lit_k * 0.38, interior * 0.86, detail);
+			room_glow *= 1.0 - in_blind * 0.58 * detail;
+			float head_shade = smoothstep(whalf.y * 0.55, whalf.y, wpos.y);
+			float sill_shade = 1.0 - smoothstep(-whalf.y, -whalf.y * 0.57, wpos.y);
+			float aperture = 1.0 - detail * max(head_shade * 0.34, sill_shade * 0.48);
+			emit = room_glow * lit * glass * mix(0.24, 1.0, night) * aperture * (1.0 - 0.48 * fres);
+			// Recessed glazing: sun shadow across top and sun-side edge of glass.
+			float lit_face = dot(n_w, sun_dir);
+			float depth = recess_depth;
+			float reveal = 0.0;
+			if (!shop) {
+				if (lit_face > 0.04) {
+					float top_sh = clamp(depth * max(sun_dir.y, 0.0) / lit_face, 0.0, whalf.y * 1.2);
+					float lt = dot(sun_dir, tang);
+					float side_sh = clamp(depth * abs(lt) / lit_face, 0.0, whalf.x * 1.2);
+					float side_edge = lt > 0.0 ? wpos.x - (whalf.x - side_sh) : -(whalf.x - side_sh) - wpos.x;
+					reveal = max(step(whalf.y - top_sh, wpos.y), step(0.0, side_edge));
+				}
+				float rim = 1.0 - smoothstep(0.0, 0.07, min(whalf.x - abs(wpos.x), whalf.y - abs(wpos.y)));
+				reveal = max(reveal * 0.85, rim * 0.6);
+			}
+			gcol *= 1.0 - reveal * 0.55 * detail;
+			if (punched) {
+				float return_weight = (1.0 - clear_pane) * detail;
+				float lower_return = step(margin.y, margin.x) * step(pane_pos.y, 0.0);
+				gcol = mix(gcol, wall * mix(0.46, 0.78, lower_return), return_weight);
+				emit *= 1.0 - return_weight;
+			}
+			// Punched sash windows get a visible frame at walking distance.
+			if (punched && window_zone && detail > 0.0 && whalf.x > 0.42) {
+				float window_near = (1.0 - smoothstep(18.0, 88.0, camera_distance)) * glass;
+				float rail = (1.0 - smoothstep(0.027 - window_pixel, 0.027 + window_pixel,
+					abs(pane_pos.y + whalf.y * 0.12))) * (0.027 / (0.027 + window_pixel));
+				float stile = (1.0 - smoothstep(0.021 - window_pixel, 0.021 + window_pixel, abs(pane_pos.x)))
+					* (0.021 / (0.021 + window_pixel)) * step(0.53, rnd);
+				float sash = max(rail, stile) * window_near * clear_pane;
+				gcol = mix(gcol, wall * 0.73, sash);
+				emit *= 1.0 - sash * 0.91;
+			}
+			// Dirty glass on older buildings: heavier at the bottom of each pane.
+			float grime = age * (0.3 + 0.7 * vnoise_b(uv * vec2(1.3, 0.8) + seed * 3.0))
+				* (0.6 + 0.4 * (1.0 - smoothstep(-whalf.y, 0.0, wpos.y)));
+			gcol = mix(gcol, gcol * 0.72 + vec3(0.07, 0.065, 0.055), grime * 0.55 * detail);
 		}
-		float lk = hash12(cell * 3.17 + seed * 11.0);
-		vec3 lamp_col = lk < 0.55 ? interior_warm : (lk < 0.88 ? vec3(0.86, 0.9, 1.0) : vec3(0.5, 0.66, 1.0));
-		lamp_col = mix(office ? vec3(0.95, 0.95, 0.9) : interior_warm, lamp_col, night);
-		float lit_k = mix(lit_strength, 1.3, night) * (0.45 + 0.75 * hash12(cell * 0.71 + seed));
-		vec3 interior = tint * (0.75 + 0.35 * rnd);
-		if (detail > 0.0) {
-			vec3 d_in = -view_w;
-			vec3 dl = vec3(dot(d_in, tang), d_in.y, dot(d_in, -n_w));
-			vec2 o = shop ? vec2(fract(uv.x / 6.0) * 6.0 - 3.0, uv.y - 2.3) : clamp(pane_pos, -whalf, whalf);
-			vec3 rs = shop ? vec3(6.0, 4.6, 7.0) : vec3(csize.x * (curtain ? 2.0 : 1.0), csize.y, curtain ? 6.0 : 4.2);
-			float daylight = dot(sky_horizon, vec3(0.3, 0.55, 0.15)) * 0.5 * (1.0 - 0.85 * night);
-			vec3 rm = room(o, dl, rs, rnd, lit, lamp_col * mix(0.7, lit_k, night), daylight);
-			// Seen through the glass's own tint (strongly for coated curtain walls).
-			rm *= curtain ? (tint * 2.2 + 0.15) : vec3(0.85, 0.88, 0.9);
-			interior = mix(interior, rm * 0.64, detail * 0.83);
-		}
-		vec3 gcol = mix(interior, refl, curtain ? 0.30 + 0.62 * fres : 0.16 + 0.68 * fres);
-		// Diffuse fabric, partially drawn, leaves the room visible below it.
-		vec3 fabric = mix(vec3(0.26, 0.25, 0.23), vec3(0.48, 0.45, 0.39), rnd);
-		fabric = mix(fabric, lamp_col * (0.35 + 0.16 * rnd), lit);
-		float blind_slats = sin(pane_pos.y * 105.0) * (1.0 - smoothstep(0.01, 0.05, window_pixel));
-		gcol = mix(gcol, fabric * (0.94 + 0.06 * blind_slats), in_blind * detail * mix(0.70, 0.8, night));
-		gcol += lamp_col * lit * lit_k * mix(0.04, 0.095, night) * (1.0 - detail * 0.7);
-		vec3 room_glow = mix(lamp_col * lit_k * 0.38, interior * 0.86, detail);
-		room_glow *= 1.0 - in_blind * 0.58 * detail;
-		float head_shade = smoothstep(whalf.y * 0.55, whalf.y, wpos.y);
-		float sill_shade = 1.0 - smoothstep(-whalf.y, -whalf.y * 0.57, wpos.y);
-		float aperture = 1.0 - detail * max(head_shade * 0.34, sill_shade * 0.48);
-		emit = room_glow * lit * glass * mix(0.24, 1.0, night) * aperture * (1.0 - 0.48 * fres);
 		// Night walls never go black: a faint city-glow bounce everywhere and
 		// warm light washing up from the street lamps over the lowest floors.
 		emit += wall * (1.0 - glass) * night * (0.012 + 0.045 * exp(-uv.y / 5.5)) * vec3(1.0, 0.87, 0.74);
@@ -772,42 +817,6 @@ void fragment() {
 			framed = mix(framed, stone * 0.55, in_x * step(-whalf.y - 0.22, wpos.y) * step(wpos.y, -whalf.y - 0.16)
 				* detail * 0.6);
 		}
-		// Recessed glazing: the reveal casts a sun shadow across the top and
-		// the sun-side edge of the glass (a deep punched window on masonry,
-		// a shallow one on curtain walls), and the frame inside darkens.
-		float lit_face = dot(n_w, sun_dir);
-		float depth = recess_depth;
-		float reveal = 0.0;
-		if (!shop) {
-			if (lit_face > 0.04) {
-				float top_sh = clamp(depth * max(sun_dir.y, 0.0) / lit_face, 0.0, whalf.y * 1.2);
-				float lt = dot(sun_dir, tang);
-				float side_sh = clamp(depth * abs(lt) / lit_face, 0.0, whalf.x * 1.2);
-				float side_edge = lt > 0.0 ? wpos.x - (whalf.x - side_sh) : -(whalf.x - side_sh) - wpos.x;
-				reveal = max(step(whalf.y - top_sh, wpos.y), step(0.0, side_edge));
-			}
-			float rim = 1.0 - smoothstep(0.0, 0.07, min(whalf.x - abs(wpos.x), whalf.y - abs(wpos.y)));
-			reveal = max(reveal * 0.85, rim * 0.6);
-		}
-		gcol *= 1.0 - reveal * 0.55 * detail;
-		if (punched) {
-			float return_weight = (1.0 - clear_pane) * detail;
-			float lower_return = step(margin.y, margin.x) * step(pane_pos.y, 0.0);
-			gcol = mix(gcol, wall * mix(0.46, 0.78, lower_return), return_weight);
-			emit *= 1.0 - return_weight;
-		}
-		// Punched sash windows get a visible frame at walking distance. Fade
-		// the fine frame by its pixel footprint to avoid distant crawling.
-		if (punched && window_zone && detail > 0.0 && whalf.x > 0.42) {
-			float window_near = (1.0 - smoothstep(18.0, 88.0, camera_distance)) * glass;
-			float rail = (1.0 - smoothstep(0.027 - window_pixel, 0.027 + window_pixel,
-				abs(pane_pos.y + whalf.y * 0.12))) * (0.027 / (0.027 + window_pixel));
-			float stile = (1.0 - smoothstep(0.021 - window_pixel, 0.021 + window_pixel, abs(pane_pos.x)))
-				* (0.021 / (0.021 + window_pixel)) * step(0.53, rnd);
-			float sash = max(rail, stile) * window_near * clear_pane;
-			gcol = mix(gcol, wall * 0.73, sash);
-			emit *= 1.0 - sash * 0.91;
-		}
 		// Shutters beside the windows on some homes in the old town, the
 		// waterfront and Westbank (each building its own colour).
 		bool residential = style == 1.0 || style == 5.0 || style == 0.0;
@@ -823,10 +832,6 @@ void fragment() {
 			framed = mix(framed, sc, sh * detail);
 		}
 		albedo = mix(framed, gcol, glass);
-		// Dirty glass on older buildings: a film of grime, heavier at the
-		// bottom of each pane.
-		float grime = age * (0.3 + 0.7 * vnoise_b(uv * vec2(1.3, 0.8) + seed * 3.0)) * (0.6 + 0.4 * (1.0 - smoothstep(-whalf.y, 0.0, wpos.y)));
-		albedo = mix(albedo, albedo * 0.72 + vec3(0.07, 0.065, 0.055), glass * grime * 0.55 * detail);
 		float pane_coverage = glass * (punched ? mix(1.0, clear_pane, detail) : 1.0);
 		rough = mix(0.86, 0.12 + 0.06 * rnd, pane_coverage);
 		metal = mix(0.0, 0.06, pane_coverage);
@@ -1001,7 +1006,8 @@ void fragment() {
 				albedo = mix(albedo, qcol * (1.0 - 0.25 * joint), q);
 			}
 			float arris = 1.0 - smoothstep(0.0, fwidth(dc) * 1.5 + 0.02, dc);
-			albedo *= 1.0 - 0.32 * arris * detail;
+			float corner_ao = (1.0 - smoothstep(0.0, 0.42, dc)) * 0.085;
+			albedo *= 1.0 - (0.32 * arris + corner_ao) * detail;
 		}
 		// Contact shading: walls darken toward the street (light blocked by
 		// the canyon), so buildings sit on the ground instead of floating;
@@ -1077,36 +1083,50 @@ void fragment() {
 				// (Base course: style = 10 + its height in quarter metres; its
 				// foot is buried, its top is a kerb over the lot.)
 				float ptop = (style - 10.0) * 0.25;
-				// The piece as sized; failing that (it would cross a window), a
-				// small tag under the ground-floor sills.
+				// Analytic sill/pier/height clearance check (zero window_layout()
+				// calls or fwidth() inside dynamic branches).
 				float sz = 0.0;
 				float x0 = 0.0;
 				float y0 = 0.0;
 				float clear = 0.0;
-				for (int cand = 0; cand < 2 && clear < 0.5; cand++) {
-					if (cand == 0) {
-						sz = sk < 0.38 ? mix(0.45, 0.9, fract(gh * 7.7))
-							: (sk < 0.84 ? mix(1.1, 1.8, fract(gh * 7.7)) : mix(2.2, 3.0, fract(gh * 7.7)));
-						// Small ones at eye/hand height; big ones from near the pavement.
-						y0 = sz < 1.0 ? mix(0.9, 1.6, fract(gh * 3.3)) : mix(0.3, 0.5, fract(gh * 3.3));
-						if (plinth) {
-							sz = min(mix(0.5, 1.3, fract(gh * 7.7)), ptop - 0.85);
-							y0 = ptop - 0.2 - sz;
-						}
-					} else {
-						sz = mix(0.5, 0.8, fract(gh * 7.7));
-						y0 = 0.3;
-					}
+				float gf_sill = wall_curtain ? 0.14 * wall_csize.y : max(0.23 * wall_csize.y, 1.04);
+				bool no_low_win = plinth || real_street_floor || solid_belt;
+				if (plinth) {
+					sz = min(mix(0.5, 1.3, fract(gh * 7.7)), ptop - 0.85);
+					y0 = ptop - 0.2 - sz;
 					x0 = 0.2 + (3.2 - sz) * fract(gh * 53.1);
 					clear = 1.0;
-					for (int k = 0; k < (plinth ? 0 : 5); k++) {
-						vec2 o = k == 4 ? vec2(0.5) : vec2(float(k & 1), float(k >> 1));
-						vec2 wp = vec2((gc - 13.0) * 3.6 + x0 + o.x * sz, y0 + o.y * sz);
-						float gl; vec2 c1; float fr; vec2 c2; vec2 c3; vec2 c4;
-						window_layout(style, seed, wp, uv.x - face_t * face_w, face_w, gl, c1, fr, c2, c3, c4);
-						clear *= 1.0 - step(0.5, max(gl, fr));
+				} else if (!wall_curtain) {
+					sz = sk < 0.38 ? mix(0.45, 0.9, fract(gh * 7.7))
+						: (sk < 0.84 ? mix(1.1, 1.8, fract(gh * 7.7)) : mix(2.2, 3.0, fract(gh * 7.7)));
+					y0 = sz < 1.0 ? mix(0.9, 1.6, fract(gh * 3.3)) : mix(0.3, 0.5, fract(gh * 3.3));
+					x0 = 0.2 + (3.2 - sz) * fract(gh * 53.1);
+					if (no_low_win || (y0 + sz <= gf_sill - 0.06)) {
+						clear = 1.0;
+					} else {
+						// Check if horizontal span [gx0, gx1] sits on a solid pier or corner.
+						float gx0 = (gc - 13.0) * 3.6 + x0;
+						float gx1 = gx0 + sz;
+						float run_lo = wall_origin + wall_corner;
+						float run_hi = wall_origin + face_w - wall_corner;
+						bool on_corner = face_w > 1.0 && (gx1 <= run_lo - 0.05 || gx0 >= run_hi + 0.05);
+						float bay_x0 = gx0 - run_lo;
+						float bay_x1 = gx1 - run_lo;
+						float bay_i = floor((bay_x0 + bay_x1) * 0.5 / wall_csize.x);
+						float bay_c = (bay_i + 0.5) * wall_csize.x;
+						float half_open = wall_whalf.x + 0.09;
+						bool clear_bay = (bay_x1 < bay_c - half_open || bay_x0 > bay_c + half_open)
+							&& (bay_x1 - bay_x0 < max(wall_csize.x - 2.0 * half_open, 0.0));
+						if (on_corner || clear_bay) {
+							clear = 1.0;
+						} else {
+							// Fallback: compact tag below the ground-floor sill.
+							sz = mix(0.45, min(0.72, gf_sill - 0.32), fract(gh * 7.7));
+							y0 = 0.24;
+							x0 = 0.2 + (3.2 - sz) * fract(gh * 53.1);
+							clear = step(0.40, sz);
+						}
 					}
-					if (plinth) break;
 				}
 				vec2 q = vec2((lx - x0) / sz, 1.0 - (uv.y - y0) / sz);
 				if (q.x > 0.0 && q.x < 1.0 && q.y > 0.0 && q.y < 1.0 && sz > 0.4) {
@@ -1140,14 +1160,17 @@ void fragment() {
 		// different batches of brick) so long walls aren't one flat colour.
 		albedo *= 1.0 + (vnoise_b(uv * vec2(0.08, 0.03) + seed * 5.0) - 0.5) * 0.1 * detail;
 	}
-	if ((v_kind == KIND_STONE || v_kind == KIND_WALL) && uv.y >= 0.0 && uv.y < 0.48 && abs(v_world_normal.y) < 0.18) {
-		float base_contact = 1.0 - smoothstep(0.02, 0.48, uv.y);
-		albedo *= 1.0 - base_contact * detail * (0.19 + 0.06 * wetness);
+	if ((v_kind == KIND_STONE || v_kind == KIND_WALL) && uv.y >= 0.0 && uv.y < 0.56 && abs(v_world_normal.y) < 0.18) {
+		float base_contact = 1.0 - smoothstep(0.02, 0.56, uv.y);
+		albedo *= 1.0 - base_contact * detail * (0.21 + 0.06 * wetness);
 	}
-	// Rain: surfaces darken and gloss (glass is already glossy).
+	// Preserve window reveal/sill normal relief (bend_n) when blending PBR
+	// masonry detail up close instead of overwriting it.
+	vec3 base_wn = relief > 0.0
+		? normalize(mix(normalize(v_world_normal), bend_n, relief))
+		: normalize(v_world_normal);
 	if (relief > 0.0) {
-		vec3 nv = normalize((VIEW_MATRIX * vec4(bend_n, 0.0)).xyz);
-		NORMAL = normalize(mix(NORMAL, nv, relief));
+		NORMAL = normalize((VIEW_MATRIX * vec4(base_wn, 0.0)).xyz);
 	}
 	{
 	// Road decks (bridge approaches, viaducts, ramps: dark neutral kit tops)
@@ -1193,8 +1216,10 @@ void fragment() {
 			vec4 d = brick ? brick_d : texture(wall_tex, uv / 2.2);
 			albedo *= brick ? 1.0 : mix(1.0, d.r * 2.0, 0.55 * kw);   // (brick: already in tex)
 			rough = mix(rough, max(rough, d.a), 0.5 * kw);
-			vec3 nw = pbr_wall_normal(d, normalize(v_world_normal), 0.49 * kw);
-			NORMAL = normalize(mix(NORMAL, (VIEW_MATRIX * vec4(nw, 0.0)).xyz, kw));
+			vec3 t_w = normalize(cross(vec3(0.0, 1.0, 0.0), normalize(v_world_normal)) + vec3(1e-4));
+			vec2 nxy = (d.gb * 2.0 - 1.0) * (0.49 * kw * (1.0 - 0.35 * relief));
+			vec3 nw = normalize(base_wn + t_w * nxy.x + vec3(0.0, 1.0, 0.0) * nxy.y);
+			NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 		}
 	}
 	// Structures (2026-11-21): bridges, viaducts, pylons, parapets (kit TRIM
@@ -1221,9 +1246,10 @@ void fragment() {
 		}
 	}
 	ALBEDO = albedo * (1.0 - 0.16 * wetness);
-	ROUGHNESS = mix(rough, min(rough, 0.32), wetness * 0.75);
+	float wet_rough = mix(rough, min(rough, 0.32), wetness * 0.75);
+	ROUGHNESS = wet_rough;
 	METALLIC = metal;
-	SPECULAR = mix(0.28, 0.62, 1.0 - smoothstep(0.14, 0.52, rough));
+	SPECULAR = mix(0.28, 0.62, 1.0 - smoothstep(0.14, 0.52, wet_rough));
 	EMISSION = emit;
 	}
 }

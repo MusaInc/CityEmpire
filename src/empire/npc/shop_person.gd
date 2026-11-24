@@ -9,8 +9,10 @@ extends Node3D
 const MODEL := Crowd.MODEL
 static var _meshes: Array = []
 static var _mat: ShaderMaterial
+static var _carry_mats := {}
 
 var speed := 1.25
+var _cur_speed := 0.0
 var path := PackedVector3Array()   # parent-space points
 var _pi := 0
 var stride := 0.0
@@ -116,9 +118,13 @@ func set_carry(on: bool, colour := Color(0.7, 0.55, 0.35)) -> void:
 
 
 static func _carry_mat(c: Color) -> StandardMaterial3D:
+	var key := c.to_rgba32()
+	if _carry_mats.has(key):
+		return _carry_mats[key] as StandardMaterial3D
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
 	m.roughness = 0.8
+	_carry_mats[key] = m
 	return m
 
 
@@ -131,7 +137,8 @@ func _process(dt: float) -> void:
 		_bubble_t -= dt
 		if _bubble_t <= 0.0:
 			_bubble.text = ""
-	var moving := false
+	var target_speed := 0.0
+	var mv := Vector3.ZERO
 	if _pi < path.size():
 		var tgt := path[_pi]
 		var to := tgt - position
@@ -140,10 +147,13 @@ func _process(dt: float) -> void:
 		if dist < 0.12:
 			_pi += 1
 		else:
-			var step := speed * dt
 			var dir := to / dist
 			var ahead := position + dir * minf(0.5, dist + 0.3)
-			var mv := dir * minf(step, dist)
+			var move_dir := dir
+			var speed_scale := 1.0
+			# Ease gently into the final stop instead of snapping to zero.
+			if _pi == path.size() - 1 and dist < 0.45:
+				speed_scale = lerpf(0.35, 1.0, clampf(dist / 0.45, 0.0, 1.0))
 			var who: int = int(blocked_by.call(ahead)) if blocked_by.is_valid() else 0
 			if who != 0:
 				# Someone in the way: step to the left of them (as on the
@@ -155,30 +165,49 @@ func _process(dt: float) -> void:
 				var side_at := position + (dir * 0.25 + left * 0.45)
 				_wait_t += dt
 				if int(blocked_by.call(side_at)) == 0 and _floor_ok(side_at):
-					mv = (dir * 0.35 + left * 0.65).normalized() * step * 0.6
+					move_dir = (dir * 0.35 + left * 0.65).normalized()
+					speed_scale = 0.6
 				elif _wait_t > 1.0 and int(blocked_by.call(position - left * 0.45)) == 0 and _floor_ok(position - left * 0.45):
-					mv = -left * step * 0.5
+					move_dir = -left
+					speed_scale = 0.5
 				elif _wait_t > (2.5 if who == 1 else 3.5):
-					mv = dir * minf(step * 0.35, dist)
+					move_dir = dir
+					speed_scale = 0.35
 					if who == 2 and not _excused:
 						_excused = true
 						say("Excuse me", Color(0.9, 0.9, 0.95), 1.4)
 				else:
-					mv = Vector3.ZERO
+					speed_scale = 0.0
 			else:
 				_wait_t = maxf(_wait_t - dt * 2.0, 0.0)
 				_excused = false
-			position += mv
-			stride += mv.length()
+			target_speed = speed * speed_scale
+			var accel := 5.4 if target_speed < _cur_speed else 4.2
+			_cur_speed = move_toward(_cur_speed, target_speed, dt * accel)
+			var step_len := _cur_speed * dt
+			if speed_scale > 0.0 or _cur_speed > 0.01:
+				mv = move_dir * (minf(step_len, dist) if move_dir == dir else step_len)
+				if move_dir == dir or _floor_ok(position + mv):
+					position += mv
+				else:
+					mv = Vector3.ZERO
+					_cur_speed = 0.0
 			_yaw_goal = atan2(-to.x, -to.z)
-			moving = mv.length() > 0.0005
-	elif face_goal != Vector3.INF:
-		var f := face_goal - position
-		if Vector2(f.x, f.z).length() > 0.05:
-			_yaw_goal = atan2(-f.x, -f.z)
+	else:
+		_cur_speed = move_toward(_cur_speed, 0.0, dt * 6.0)
+		if face_goal != Vector3.INF:
+			var f := face_goal - position
+			if Vector2(f.x, f.z).length() > 0.05:
+				_yaw_goal = atan2(-f.x, -f.z)
 	if floor_height.is_valid():
 		position.y = move_toward(position.y, float(floor_height.call(position)), dt * 2.4)
-	walk = move_toward(walk, 1.0 if moving else 0.0, dt * 4.0)
+	var actual_dist := mv.length()
+	var target_walk := clampf(_cur_speed / maxf(speed, 0.25), 0.0, 1.0)
+	walk = lerpf(walk, target_walk, 1.0 - exp(-(7.0 if target_walk < walk else 5.5) * dt))
+	if walk < 0.01 and target_walk <= 0.0:
+		walk = 0.0
+	if actual_dist > 0.0004:
+		stride += actual_dist / maxf(walk, 0.42)
 	rotation.y = lerp_angle(rotation.y, _yaw_goal, 1.0 - exp(-dt * 9.0))
 	_mi.set_instance_shader_parameter("stride", stride)
 	_mi.set_instance_shader_parameter("walk", walk)

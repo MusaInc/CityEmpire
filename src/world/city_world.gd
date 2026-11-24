@@ -127,7 +127,10 @@ var walker_mesh: Mesh
 var walker_meshes: Array = []   # one per body type
 ## Within this many metres of the hero a CPU crowd draws the pavements (0: none).
 static var walker_crowd_radius := 0.0
-var furniture_mat: StandardMaterial3D
+var furniture_mat: Material
+var _shadow_mat: StandardMaterial3D
+var _lamps_by_chunk := {}   # Vector2i -> Array[Transform3D] (cached per prop_density)
+var _lamps_density := -1.0
 var trains: Trains
 var sea_sky: SeaAndSky   # port ships, boats, helicopter, airliner, gulls (visual only)
 var ads: AdScreens
@@ -227,6 +230,7 @@ func _ready() -> void:
 	if traffic_density > 0.0 and not car_meshes.is_empty():
 		traffic = Traffic.new()
 		traffic.name = "Traffic"
+		traffic.is_primary_clock = not secondary
 		traffic.near_range = CAR_NEAR
 		traffic.mid_range = CAR_MID
 		traffic.far_range = CAR_FAR
@@ -238,6 +242,8 @@ func _ready() -> void:
 			if not _props_by_chunk.has(key):
 				_props_by_chunk[key] = []
 			_props_by_chunk[key].append(pole)
+	if settings and not settings.changed.is_connected(_on_settings_changed):
+		settings.changed.connect(_on_settings_changed)
 	var land := layout.island.grow(130.0)  # (the shore apron reaches past the coast)
 	var kx := Vector2i(floori(land.position.x / CHUNK) - 1, ceili(land.end.x / CHUNK))
 	var kz := Vector2i(floori(land.position.y / CHUNK), ceili(land.end.y / CHUNK))
@@ -303,12 +309,43 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	var settings := get_node_or_null("/root/Settings")
+	if settings and settings.changed.is_connected(_on_settings_changed):
+		settings.changed.disconnect(_on_settings_changed)
 	for task in _pending.values():
 		WorkerThreadPool.wait_for_task_completion(task)
 	_pending.clear()
 	_results.clear()
+	_lamps_by_chunk.clear()
 	if not secondary:
 		GrappleTargeting.anchor_lines = []
+
+
+func _on_settings_changed() -> void:
+	var settings := get_node_or_null("/root/Settings")
+	if settings == null:
+		return
+	var p: Dictionary = settings.preset()
+	view_distance = p["view_distance"]
+	prop_density = p["props"]
+	detail_range = minf(380.0, view_distance * 0.45)
+	_lamps_by_chunk.clear()
+	_lamps_density = -1.0
+
+
+## Cached streetlamp transforms for LampLights (avoids rebuilding chunk_props every 0.3 s).
+func chunk_lamps(key: Vector2i) -> Array:
+	if _lamps_density != prop_density:
+		_lamps_by_chunk.clear()
+		_lamps_density = prop_density
+	if _lamps_by_chunk.has(key):
+		return _lamps_by_chunk[key]
+	var out: Array = []
+	for p in chunk_props(key):
+		if p[0] == "streetlight":
+			out.append(p[1])
+	_lamps_by_chunk[key] = out
+	return out
 
 
 func set_viewer(v: Node3D) -> void:
@@ -747,7 +784,11 @@ func set_sky_colors(_top: Color, _horizon: Color) -> void:
 ## Lamps on (0 = day, 1 = full night): streetlight heads glow, their light
 ## pools and halos fade in. Called by Atmosphere every frame (cheap: two
 ## material values and, on a change of state, the glow nodes' visibility).
+var night_amount := 0.0
+
+
 func set_night(n: float) -> void:
+	night_amount = n
 	if trains:
 		trains.set_night(n)
 	if sea_sky:
@@ -864,10 +905,18 @@ func _load_props() -> void:
 	# Procedural street clutter and district banners (StreetClutter).
 	for k in StreetClutter.kinds():
 		_furn_src[k] = StreetClutter.build(k)
-	furniture_mat = StandardMaterial3D.new()
-	furniture_mat.vertex_color_use_as_albedo = true
-	furniture_mat.vertex_color_is_srgb = true
-	furniture_mat.roughness = 0.75
+	if ResourceLoader.exists("res://src/world/shaders/furniture.gdshader"):
+		var fsh := ShaderMaterial.new()
+		fsh.shader = load("res://src/world/shaders/furniture.gdshader")
+		furniture_mat = fsh
+	else:
+		var fm_std := StandardMaterial3D.new()
+		fm_std.vertex_color_use_as_albedo = true
+		fm_std.vertex_color_is_srgb = true
+		fm_std.roughness = 0.75
+		furniture_mat = fm_std
+	_shadow_mat = StandardMaterial3D.new()
+	_shadow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_furniture_by_chunk = _place_furniture()
 
 
@@ -2106,7 +2155,7 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 			var sh := MeshInstance3D.new()
 			sh.name = "ShadowProxy"
 			sh.mesh = low
-			sh.material_override = building_mat
+			sh.material_override = _shadow_mat if _shadow_mat else building_mat
 			sh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
 			sh.visibility_range_end = detail_range
 			sh.visibility_range_end_margin = 30.0
@@ -2375,6 +2424,8 @@ func _add_lamp_glow(root: Node3D, lamps: Array, pools: Variant) -> void:
 	mmi.visible = _glow_on
 	root.add_child(mmi)
 	_glow_nodes.append(mmi)
+	if _glow_nodes.size() > 160:
+		_glow_nodes = _glow_nodes.filter(func(g): return is_instance_valid(g))
 
 
 func _add_traffic(root: Node3D, key: Vector2i) -> void:
@@ -2417,6 +2468,7 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 		# One packed buffer for both LODs (much cheaper than per-instance setters
 		# on the main thread while chunks stream in).
 		var buf := _instance_buffer(g)
+		var band_nodes: Array[MultiMeshInstance3D] = []
 		for band in 3:   # near full model / mid LOD / far boxes
 			var mm := MultiMesh.new()
 			mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -2431,12 +2483,15 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 			mmi.multimesh = mm
 			mmi.visibility_range_begin = [0.0, CAR_NEAR, CAR_MID][band]
 			mmi.visibility_range_end = [CAR_NEAR, CAR_MID, CAR_FAR][band]
-			if band == 2:
-				mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			mmi.visibility_range_begin_margin = 20.0
-			mmi.visibility_range_end_margin = 20.0
+			mmi.visibility_range_begin_margin = 0.0 if band == 0 else 12.0
+			mmi.visibility_range_end_margin = 12.0
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			root.add_child(mmi)
+			band_nodes.append(mmi)
+		# Link parked-car LOD bands so transitions never double-draw two bands at once.
+		if band_nodes.size() == 3:
+			link_lods(band_nodes[0], band_nodes[1])
+			link_lods(band_nodes[1], band_nodes[2])
 
 
 ## MultiMesh buffer (TRANSFORM_3D + colour + custom) for [xform, custom, colour] items.

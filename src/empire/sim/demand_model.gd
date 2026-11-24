@@ -28,12 +28,19 @@ static func arrivals_per_hour(b: Business, hour: float, competitors := 0.0, k :=
 	return float(d.get("footfall", 6.0)) * float(EmpireData.economy().get("footfall_scale", 1.0)) * EmpireData.hour_curve(hour) * rep * (1.0 + b.footfall_bonus()) * comp * k * tk
 
 
-## Multiplier on what shoppers will pay: upgrades (lighting, floor) and a clean shop.
+## Multiplier on what shoppers will pay: upgrades (lighting, floor), high
+## reputation and a clean shop. Affluent districts reward presentation more strongly.
 static func appeal(b: Business) -> float:
-	return (1.0 + b.quality_bonus()) * (0.82 + 0.18 * clampf(b.cleanliness, 0.0, 1.0))
+	var q := b.quality_bonus()
+	var aff := float(b.district().get("affluence", 1.0))
+	var aff_over := maxf(aff - 1.0, 0.0)
+	var aff_q := q * (1.0 + aff_over * 0.85)
+	var rep_excess := clampf((b.reputation - 50.0) / 50.0, 0.0, 1.0)
+	var rep_bonus := rep_excess * (aff_over * 0.25 + (0.04 if q > 0.0 else 0.0))
+	return (1.0 + aff_q + rep_bonus) * (0.82 + 0.18 * clampf(b.cleanliness, 0.0, 1.0))
 
 
-static func make_shopper(b: Business, rng: RandomNumberGenerator, mix_k := {}) -> Dictionary:
+static func make_shopper(b: Business, rng: RandomNumberGenerator, mix_k := {}, wtp_k := 1.0) -> Dictionary:
 	var d := b.district()
 	var bk: Dictionary = EmpireData.economy().get("basket", {})
 	var tb: Array = b.type_def().get("basket", [bk.get("min", 1), bk.get("max", 3)])
@@ -48,7 +55,7 @@ static func make_shopper(b: Business, rng: RandomNumberGenerator, mix_k := {}) -
 		if pid != "" and not wants.has(pid):
 			wants.append(pid)
 	var spread: Array = EmpireData.economy().get("wtp_spread", [0.9, 1.7])
-	var aff := float(d.get("affluence", 1.0))
+	var aff := float(d.get("affluence", 1.0)) * wtp_k
 	var wtp := {}
 	for pid in wants:
 		wtp[pid] = EmpireData.rrp(pid) * aff * rng.randf_range(float(spread[0]), float(spread[1]))
@@ -125,9 +132,9 @@ static func impulse_pick(b: Business, shopper: Dictionary) -> String:
 
 ## The share of shoppers who'd pay `price` for pid in this business
 ## (analytic: used by the pricing panel's demand hint and the tests).
-static func buy_share(b: Business, pid: String, p: float) -> float:
+static func buy_share(b: Business, pid: String, p: float, wtp_k := 1.0) -> float:
 	var spread: Array = EmpireData.economy().get("wtp_spread", [0.9, 1.7])
-	var aff := float(b.district().get("affluence", 1.0))
+	var aff := float(b.district().get("affluence", 1.0)) * wtp_k
 	var lo := EmpireData.rrp(pid) * aff * float(spread[0]) * appeal(b)
 	var hi := EmpireData.rrp(pid) * aff * float(spread[1]) * appeal(b)
 	return clampf((hi - p) / maxf(hi - lo, 0.001), 0.0, 1.0)

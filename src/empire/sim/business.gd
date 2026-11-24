@@ -74,6 +74,21 @@ func rent_per_day() -> float:
 	return 0.0 if owned else float(premises.get("rent", 0.0))
 
 
+func flagship_scale() -> int:
+	if not premises.get("flagship", false):
+		return 1
+	var area := float(premises.get("size", 360.0))
+	return clampi(roundi(area / 92.0), 3, 14)
+
+
+func expected_backroom_capacity() -> int:
+	var scale := flagship_scale()
+	var base := int(type_def().get("backroom_cases", 20)) * scale
+	if has_upgrade("backroom"):
+		base += int(EmpireData.upgrade("backroom").get("backroom", 0)) * scale
+	return base
+
+
 # ------------------------------------------------------------- setup
 func setup_new(p_premises: Dictionary, day: int) -> void:
 	premises = p_premises.duplicate()
@@ -81,15 +96,13 @@ func setup_new(p_premises: Dictionary, day: int) -> void:
 	opened_day = day
 	var t := type_def()
 	fixtures = (t.get("base_fixtures", {}) as Dictionary).duplicate()
-	backroom.case_capacity = int(t.get("backroom_cases", 20))
+	var scale_factor := flagship_scale()
+	backroom.case_capacity = int(t.get("backroom_cases", 20)) * scale_factor
 	if premises.get("flagship", false):
-		var area := float(premises.get("size", 360.0))
-		var scale_factor := clampi(roundi(area / 92.0), 3, 14)
 		for key in fixtures:
 			if key != "till":
 				fixtures[key] = int(fixtures[key]) * (mini(scale_factor, 9) if key == "fridge" else scale_factor)
 		fixtures["till"] = 3
-		backroom.case_capacity *= scale_factor
 	reputation = EmpireData.rep_param("start")
 	for pid in EmpireData.product_ids():
 		prices[pid] = EmpireData.rrp(pid)
@@ -304,7 +317,7 @@ func apply_upgrade(u: String) -> void:
 	for k in d.get("adds", {}):
 		fixtures[k] = int(fixtures.get(k, 0)) + int(d["adds"][k])
 	if d.has("backroom"):
-		backroom.case_capacity += int(d["backroom"])
+		backroom.case_capacity += int(d["backroom"]) * flagship_scale()
 	rebuild_slots()
 
 
@@ -327,10 +340,19 @@ func dirt_factor() -> float:
 	return maxf(1.0 + _upgrade_sum("dirt"), 0.2)
 
 
+func has_honest_staff() -> bool:
+	for e in staff:
+		if not e.get("off", false) and String(e.get("role", "")) in ["cashier", "manager"] and Staff.has_trait(e, "honest"):
+			return true
+	return false
+
+
 func theft_rate() -> float:
-	if has_upgrade("security"):
-		return float(EmpireData.upgrade("security").get("theft", 0.005))
-	return float(EmpireData.file("business_types").get("theft_base", 0.03))
+	var rate := float(EmpireData.upgrade("security").get("theft", 0.005)) if has_upgrade("security") \
+		else float(EmpireData.file("business_types").get("theft_base", 0.03))
+	if has_honest_staff():
+		rate *= 0.5
+	return rate
 
 
 func utilities_per_day() -> float:

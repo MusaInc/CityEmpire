@@ -44,6 +44,7 @@ class Controls:
 	var indoors := false
 	## Ordinary on-foot traversal, with a walk range and weight-bearing turns.
 	var everyday := false
+	var walk_speed_scale := 1.0
 
 
 static func attach(s: State, anchor: Vector3, p: SwingParams) -> bool:
@@ -261,7 +262,7 @@ static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> V
 	var vh := Vector3(v.x, 0.0, v.z)
 	var m := Vector3(c.move.x, 0.0, c.move.z).limit_length(1.0)
 	if c.everyday:
-		vh = _everyday_move(vh, m, INDOOR_SPEED if c.indoors else p.player_run_speed, c.indoors, h)
+		vh = _everyday_move(vh, m, INDOOR_SPEED if c.indoors else p.player_run_speed, c.indoors, h, c.walk_speed_scale)
 		return Vector3(vh.x, minf(v.y, 0.0), vh.z)
 	if c.indoors:
 		# Indoors: speed follows the stick directly (top 4.6 m/s, a brisk
@@ -309,14 +310,14 @@ static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> V
 
 ## The inner stick range is a walk. A fast change of direction spends
 ## some forward speed on turning, and an about-face needs a braking step.
-static func _everyday_move(v: Vector3, m: Vector3, top: float, indoors: bool, dt: float) -> Vector3:
+static func _everyday_move(v: Vector3, m: Vector3, top: float, indoors: bool, dt: float, pace: float) -> Vector3:
 	var speed := v.length()
 	var strength := m.length()
 	if strength < 0.035:
 		return v.move_toward(Vector3.ZERO, (10.0 + speed * 2.25) * dt)
 	var walk_input := minf(strength / 0.56, 1.0)
 	var run_input := smoothstep(0.51, 1.0, strength)
-	var desired_speed := lerpf(1.85 * walk_input, top, run_input)
+	var desired_speed := lerpf(1.85 * walk_input, top, run_input) * pace
 	var wish := m / strength
 	var run := smoothstep(1.6, 5.0, speed)
 	var accel := lerpf(9.5, 15.0, run)
@@ -333,7 +334,7 @@ static func _everyday_move(v: Vector3, m: Vector3, top: float, indoors: bool, dt
 	desired_speed *= 1.0 - corner * 0.52
 	var decel := lerpf(13.0, 20.0, corner)
 	# A doorway changes the speed cap mid-stride. Ease into the new pace.
-	if speed > top + 0.15 and turn_size < 0.45:
+	if speed > top * pace + 0.15 and turn_size < 0.45:
 		decel = 10.0
 	return heading * move_toward(speed, desired_speed, (accel if desired_speed > speed else decel) * dt)
 

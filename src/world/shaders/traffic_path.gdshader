@@ -19,7 +19,12 @@ uniform float emission = 0.0;
 uniform float roughness = 0.4;
 // 0 plain, 1 paint (clearcoat), 2 glass (sky reflections), 3 chrome.
 uniform int finish = 0;
+uniform bool is_tail_lamp = false;
+uniform bool is_far_lod = false;
 uniform sampler2D lane_tex : filter_nearest, repeat_disable;
+
+varying float v_braking;
+varying float v_dist;
 
 const float EASE = 12.0;     // Traffic.EASE
 const float STEP = 3.0;      // Traffic.STEP
@@ -48,6 +53,7 @@ void vertex() {
 	if (u > 0.0) {
 		s = u < 2.0 * e ? stop - e + u - u * u / (4.0 * e) : stop;
 	}
+	v_braking = max(INSTANCE_CUSTOM.x, (stop < 1.0e8 && u > 0.0) ? 1.0 : 0.0);
 	int capacity = textureSize(lane_tex, 0).y * TEX_W;
 	bool has_lane = base_f >= 1.0 && base_f < float(capacity - 1);
 	int base = has_lane ? int(base_f + 0.5) : 1;
@@ -77,9 +83,11 @@ void vertex() {
 		vec3 world = pos + B * VERTEX;
 		VERTEX = (VIEW_MATRIX * vec4(world, 1.0)).xyz;
 		NORMAL = normalize(mat3(VIEW_MATRIX) * (B * NORMAL));
+		v_dist = length(VERTEX);
 	} else {
 		// The instance has no complete lane; collapse it to one point.
 		VERTEX = vec3(0.0, 0.0, -1.0);
+		v_dist = 9999.0;
 	}
 }
 
@@ -107,18 +115,31 @@ void fragment() {
 		ROUGHNESS = 0.16;
 		ALBEDO = max(c, vec3(0.55));
 	}
-	EMISSION = tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
+	bool brake_on = v_braking > 0.5 && (is_tail_lamp || (emission > 0.5 && tint.r > 0.45 && tint.g < 0.12 && tint.b < 0.12));
+	if (brake_on) {
+		EMISSION = vec3(1.0, 0.04, 0.02) * (3.4 + 2.8 * night);
+	} else {
+		EMISSION = tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
+	}
 	if (finish > 0) {
-		// The city in paint, glass and chrome (fake_reflect.gdshaderinc).
-		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
-		vec3 vw = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
-		vec3 rw = reflect(-vw, nw);
-		vec3 wp = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
-		vec3 env = finish == 1 ? paint_reflection(rw, wp, sky_top, sky_horizon, sun_dir, night)
-			: city_reflection(rw, wp, sky_top, sky_horizon, sun_dir, night);
-		float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), finish == 2 ? 3.0 : 4.0);
-		float k = finish == 1 ? mix(0.09, 0.36, fres) : (finish == 2 ? mix(0.11, 0.48, fres) : 0.65);
-		float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 220.0 : 300.0) * (finish == 1 ? 0.9 : 0.75);
-		EMISSION += (env * k + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night);
+		if (!is_far_lod && v_dist < 140.0) {
+			// The city in paint, glass and chrome (fake_reflect.gdshaderinc).
+			vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+			vec3 vw = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
+			vec3 rw = reflect(-vw, nw);
+			vec3 wp = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+			vec3 env = finish == 1 ? paint_reflection(rw, wp, sky_top, sky_horizon, sun_dir, night)
+				: city_reflection(rw, wp, sky_top, sky_horizon, sun_dir, night);
+			float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), finish == 2 ? 3.0 : 4.0);
+			float k = finish == 1 ? mix(0.09, 0.36, fres) : (finish == 2 ? mix(0.11, 0.48, fres) : 0.65);
+			float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 220.0 : 300.0) * (finish == 1 ? 0.9 : 0.75);
+			EMISSION += (env * k + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night);
+		} else {
+			// Far-LOD lightweight sky sheen (skips INV_VIEW_MATRIX & procedural skyline reflection).
+			float fres_far = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
+			vec3 sky_far = mix(sky_horizon, sky_top, 0.45) * (1.0 - 0.55 * night);
+			float k_far = finish == 1 ? mix(0.08, 0.24, fres_far) : (finish == 2 ? mix(0.10, 0.34, fres_far) : 0.45);
+			EMISSION += sky_far * k_far;
+		}
 	}
 }

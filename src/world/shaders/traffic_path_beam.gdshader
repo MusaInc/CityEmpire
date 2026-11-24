@@ -106,13 +106,20 @@ void vertex() {
 }
 
 void fragment() {
-	// UV.y 0 at the bumper .. 1 at the far end, UV.x across. Two lamps whose
-	// throws merge a few metres out; bright from ~2 m to ~12 m, then a long
-	// fade (dipped beam), stronger on a wet road.
-	float t = UV.y;
-	float x = abs(UV.x - 0.5) * 2.0;
-	float lobes = exp(-pow((x - 0.25) / 0.45, 2.0));
-	float edge = (1.0 - smoothstep(0.75, 1.0, x));
-	float a = smoothstep(0.0, 0.1, t) * pow(1.0 - t, 1.5) * lobes * edge * (0.6 + 0.4 * wetness);
-	ALBEDO = vec3(1.0, 0.92, 0.78) * a * beam * smoothstep(0.25, 0.7, night) * moving;
+	// UV.y 0 ahead of the bumper .. 1 at the far throw, UV.x across the beam quad.
+	// Dual dipped-beam cones emerge cleanly from left/right headlamps and merge
+	// smoothly down the carriageway with soft feathering well inside every quad edge.
+	float t = clamp(UV.y, 0.0, 1.0);
+	float x = (UV.x - 0.5) * 2.0;
+	float sep = mix(0.30, 0.15, smoothstep(0.0, 0.45, t));
+	float spread = mix(0.18, 0.44, smoothstep(0.0, 0.65, t));
+	float left_lobe = exp(-pow((x + sep) / spread, 2.0));
+	float right_lobe = exp(-pow((x - sep) / spread, 2.0));
+	float lobes = clamp(left_lobe + right_lobe, 0.0, 1.25);
+	float near_fade = smoothstep(0.02, 0.16, t);
+	float far_fade = pow(1.0 - smoothstep(0.05, 1.0, t), 1.65) * (1.0 - smoothstep(0.82, 1.0, t));
+	float side_fade = 1.0 - smoothstep(0.55, 0.98, abs(x));
+	float a = near_fade * far_fade * lobes * side_fade * (0.62 + 0.45 * wetness);
+	vec3 col = mix(vec3(1.0, 0.95, 0.84), vec3(0.92, 0.86, 0.74), t);
+	ALBEDO = col * a * beam * smoothstep(0.25, 0.7, night) * moving;
 }

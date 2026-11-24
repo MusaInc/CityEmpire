@@ -150,7 +150,7 @@ func _minute_tick() -> void:
 # ------------------------------------------------------------- shoppers
 ## A shopper in a shop nobody is watching: browse, take, queue, pay.
 func visit_offscreen(b: Business) -> void:
-	var shopper := DemandModel.make_shopper(b, rng, CityLife.mix_k(self))
+	var shopper := DemandModel.make_shopper(b, rng, CityLife.mix_k(self), CityLife.price_sensitivity_k(self, b))
 	var basket := Stock.new(0, "basket")
 	b.today["customers"] = int(b.today["customers"]) + 1
 	var mood := 0.0
@@ -259,6 +259,8 @@ func checkout(b: Business, basket: Stock, server := {}) -> float:
 	stats["revenue"] = float(stats["revenue"]) + total
 	if "friendly" in server.get("traits", []):
 		b.add_rep(float(EmpireData.trait_info("friendly").get("rep", 0.1)))
+	if Staff.is_ambitious_star(server):
+		b.add_rep(0.04)
 	sold.emit(b.id, total)
 	if int(stats["sales"]) == 1:
 		_note("First sale! %s" % EmpireData.money(total, true), "good")
@@ -289,6 +291,10 @@ func _staff_work(b: Business, h: float) -> void:
 				b.cleanliness = minf(b.cleanliness + float(EmpireData.role("cleaner").get("rate", 0.3)) * Staff.speed(e) / 60.0, 1.0)
 		if int(minute) % 60 == 0 and Staff.gain_xp(e, 1.0):
 			_note("%s (%s) is now skill %d" % [e["name"], EmpireData.role(e["role"]).get("name", ""), e["skill"]], "good")
+			if Staff.has_trait(e, "ambitious") and int(e["skill"]) >= 4 and int(e.get("raised_at", 0)) < int(e["skill"]):
+				var new_wage := Staff.give_raise(e, 0.08)
+				b.add_rep(1.5)
+				_note("%s earned a promotion raise to %s/hr (+★ %s)" % [e["name"], EmpireData.money(new_wage, true), b.name], "info", {"kind": "biz", "id": b.id, "tab": "staff"})
 
 
 ## Moves up to n units from the back room onto the shelves: anything in
@@ -513,6 +519,94 @@ func buy_retail(store: String, pid: String, cost: float) -> String:
 	return ""
 
 
+const CONSUMABLE_CATEGORIES := ["hot", "drinks", "bakery", "takeaway", "snacks", "sweets", "groceries"]
+
+
+## Public food and drink use personal cash and give a temporary perk.
+func consume_public_item(product_id: String, price: float, place_name := "") -> Dictionary:
+	var product := EmpireData.product(product_id)
+	var category := String(product.get("cat", ""))
+	if not is_finite(price) or price <= 0.0 or category not in CONSUMABLE_CATEGORIES:
+		return {"ok": false, "error": "This item is unavailable"}
+	if personal_cash < price:
+		return {"ok": false, "error": "Not enough personal cash (%s)" % EmpireData.money(price, true)}
+	var item_name := String(product["name"])
+	personal_cash -= price
+	_book("personal", -price, "lifestyle", "%s · %s" % [place_name, item_name])
+	var drink := category == "drinks" or product_id in ["coffee", "tea"]
+	var buff := _set_buff("energised" if drink else "well_fed",
+		"Energised · +15% movement speed" if drink else "Well-fed · +10% checkout speed",
+		1.15 if drink else 1.0, 1.0 if drink else 1.10, 240.0)
+	_note("%s (%s)" % [item_name, buff["label"]], "good")
+	changed.emit()
+	return {"ok": true, "buff": buff, "cost": price}
+
+
+func _set_buff(kind: String, label: String, movement: float, service: float, duration: float) -> Dictionary:
+	var expires := day * 1440.0 + minute + duration
+	var buff := {
+		"kind": kind, "label": label, "walk_speed": movement, "service_speed": service,
+		"until_day": floori(expires / 1440.0), "until_min": fmod(expires, 1440.0),
+	}
+	flags["buff"] = buff
+	return buff
+
+
+## Interactive fitness club workout session: pays a modest personal fee and
+## grants an active stamina/mood buff stored in `flags["buff"]`.
+func fitness_session(place_name := "Fitness Club", fee := 12.0) -> Dictionary:
+	if fee > 0.0 and personal_cash < fee - 0.0001:
+		return {"ok": false, "error": "Not enough personal cash (%s)" % EmpireData.money(fee, true)}
+	if fee > 0.0:
+		personal_cash -= fee
+		_book("personal", -fee, "lifestyle", "%s · Workout session" % place_name)
+	var buff := _set_buff("trained", "Trained · +18% movement speed · +10% checkout speed", 1.18, 1.10, 360.0)
+	_note("Great session at %s! %s" % [place_name, buff["label"]], "good")
+	changed.emit()
+	return {"ok": true, "buff": buff, "cost": fee, "error": ""}
+
+
+## Returns the currently active lifestyle buff dictionary, or {} if expired/none.
+func active_buff() -> Dictionary:
+	var b = flags.get("buff", null)
+	if not (b is Dictionary) or (b as Dictionary).is_empty():
+		return {}
+	var bd := b as Dictionary
+	var now_t := day * 1440.0 + minute
+	var end_t := float(bd.get("until_day", 0)) * 1440.0 + float(bd.get("until_min", 0.0))
+	if now_t >= end_t:
+		flags.erase("buff")
+		return {}
+	return bd
+
+
+## Records a discovered landmark/place in `flags["seen"]` and awards milestone
+## explorer bonuses every 5 unique places discovered.
+func record_discovery(place_id: String, label: String, counts_towards_reward := true) -> Dictionary:
+	var seen: Dictionary = (flags.get("seen", {}) as Dictionary)
+	if seen.has(place_id):
+		return {"new": false, "count": seen.size(), "milestone": false, "reward": 0.0, "rep": 0.0, "label": label}
+	seen[place_id] = day
+	flags["seen"] = seen
+	if counts_towards_reward:
+		flags["places_explored"] = int(flags.get("places_explored", 0)) + 1
+	var count := int(flags.get("places_explored", 0))
+	var prev_ms := int(flags.get("seen_milestone", 0))
+	if count % 5 == 0 and count > prev_ms:
+		flags["seen_milestone"] = count
+		var bonus := minf(500.0, float(75 + (count / 5) * 25))
+		var rep := 1.5
+		reward(bonus, "City explorer milestone (%d places)" % count)
+		for b: Business in businesses:
+			b.add_rep(rep)
+		news.append({"day": day, "text": "City prestige: you discovered %d landmarks (%s explorer bonus)!" % [count, EmpireData.money(bonus)], "kind": "good"})
+		if news.size() > 40:
+			news = news.slice(news.size() - 40)
+		_note("Explorer milestone (%d places): +%s & city prestige!" % [count, EmpireData.money(bonus)], "good")
+		return {"new": true, "count": count, "milestone": true, "reward": bonus, "rep": rep, "label": label}
+	return {"new": true, "count": count, "milestone": false, "reward": 0.0, "rep": 0.0, "label": label}
+
+
 ## Today's wholesale price of one case (deals and shortages from CityLife).
 func case_price(pid: String) -> float:
 	return float(EmpireData.product(pid).get("case_cost", 0.0)) * CityLife.price_k(self, pid) * hq_wholesale_k()
@@ -669,11 +763,9 @@ func _deliver_orders() -> void:
 			else:
 				keep.append(o)
 		b.orders = keep
-		# Overflow from deliveries settles back to the racking size overnight.
-		var base := int(b.type_def().get("backroom_cases", 20))
-		if b.has_upgrade("backroom"):
-			base += int(EmpireData.upgrade("backroom").get("backroom", 0))
-		b.backroom.case_capacity = maxi(base, b.backroom.cases_used())
+		# Overflow from deliveries settles back to the racking size overnight
+		# (preserving flagship scale_factor + backroom upgrade capacity).
+		b.backroom.case_capacity = maxi(b.expected_backroom_capacity(), b.backroom.cases_used())
 		if delivered:
 			stock_delivered.emit(b)
 
@@ -1013,6 +1105,11 @@ func end_day() -> void:
 		report["businesses"].append(rep)
 		report["revenue"] = float(report["revenue"]) + float(t["revenue"])
 		report["profit"] = float(report["profit"]) + profit
+		# Well-paid ambitious skill-4+ staff elevate store reputation on trading days.
+		if int(t["served"]) > 0:
+			for st in b.staff:
+				if not st.get("off", false) and Staff.is_ambitious_star(st):
+					b.add_rep(0.25)
 		# Reputation drifts back toward the middle; dirt builds overnight a little.
 		var mid := EmpireData.rep_param("daily_decay_to")
 		b.reputation = lerpf(b.reputation, mid, EmpireData.rep_param("daily_decay"))
@@ -1038,11 +1135,18 @@ func end_day() -> void:
 			personal_cash += inc
 			_book("personal", inc, "rent_in", "Tenant rent: %s" % q.get("name", ""))
 			report["personal"] = float(report["personal"]) + inc
-	# Skyport ventures: rents, upkeep, the dealership, hangar/marina fees
+	# Skyport ventures: rents, upkeep, the dealership, charters, hangar/marina fees
 	# (part of the day's profit like any other business).
 	var vt := Ventures.end_day(self)
 	report["ventures"] = vt
-	report["profit"] = float(report["profit"]) + float(vt["rent"]) - float(vt["upkeep"]) + float(vt["dealer"]) - float(vt["fees"])
+	report["profit"] = float(report["profit"]) + float(vt["rent"]) - float(vt["upkeep"]) + float(vt["dealer"]) + float(vt.get("charter", 0.0)) - float(vt["fees"])
+	# City500 equity dividends (booked as investment income when stakes are held).
+	var c500_div := City500.daily_dividend(self)
+	if c500_div > 0.0:
+		company_cash += c500_div
+		_book("company", c500_div, "dividend", "City500 investment dividends")
+		report["dividends"] = c500_div
+		report["profit"] = float(report["profit"]) + c500_div
 	if hq_tier() > 0:
 		var up := float(hq_def(hq_tier()).get("upkeep", 0.0))
 		company_cash -= up
@@ -1063,7 +1167,7 @@ func end_day() -> void:
 	var liabilities := debt_value()
 	day_reports.append({"day": day, "revenue": report["revenue"], "profit": report["profit"],
 		"company": company_cash, "personal": personal_cash, "net_worth": assets - liabilities,
-		"assets": assets, "debt": liabilities})
+		"assets": assets, "debt": liabilities, "dividends": c500_div})
 	if day_reports.size() > 30:
 		day_reports = day_reports.slice(day_reports.size() - 30)
 	day += 1
@@ -1121,6 +1225,8 @@ func sell_vehicle(x: Dictionary) -> float:
 	if sell_vehicle_block(x) != "":
 		return -1.0
 	var val := vehicle_value(x)
+	if flags.has("charters") and flags["charters"] is Dictionary:
+		(flags["charters"] as Dictionary).erase(String(x.get("id", "")))
 	vehicles.erase(x)
 	company_cash += val
 	_book("company", val, "vehicle", "Sold the %s" % EmpireData.vehicle_model(x["model"]).get("name", x["model"]))
@@ -1144,7 +1250,7 @@ func asset_value() -> float:
 	for q in properties:
 		props += float(q.get("price", 0.0))
 	return maxf(personal_cash, 0.0) + maxf(company_cash, 0.0) + stock_value() + premises_value() + vehicles_value() + props \
-		+ float(hq.get("paid", 0.0)) + Club.value(self) + Ventures.assets_value(self)
+		+ float(hq.get("paid", 0.0)) + Club.value(self) + Ventures.assets_value(self) + City500.portfolio_value(self)
 
 
 func net_worth() -> float:

@@ -10,7 +10,7 @@ extends RefCounted
 ## Arrays as CityWorld._flatten_colors: [verts, normals, colours, indices].
 ## Colours are sRGB (the furniture material converts).
 
-const NO_COLLISION := ["litter", "banner_cbd", "banner_midtown", "banner_waterfront", "banner_docks",
+const NO_COLLISION := ["litter", "tree_grate", "banner_cbd", "banner_midtown", "banner_waterfront", "banner_docks",
 	"banner_georgian", "banner_shops"]
 ## Banner colours per district: [field, stripe].
 const BANNERS := {
@@ -24,10 +24,43 @@ const BANNERS := {
 
 
 static func kinds() -> Array:
-	var out := ["utility_box", "crates", "litter"]
+	var out := ["utility_box", "crates", "litter", "tree_grate"]
 	for d in BANNERS:
 		out.append("banner_" + d)
 	return out
+
+
+## Flush cast-iron tree grate & dark soil surround (no sidewalk obstruction).
+static func tree_grate_box(size := 1.5) -> Array:
+	var b := _B.new()
+	var h := size * 0.5
+	var rim := 0.09
+	var iron := Color(0.17, 0.18, 0.19)
+	var kerb := Color(0.46, 0.45, 0.43)
+	var soil := Color(0.19, 0.14, 0.10)
+	# Recessed dark soil bed inside the tree pit.
+	b.box(Vector3(-h + rim, 0.0, -h + rim), Vector3(h - rim, 0.010, h - rim), soil)
+	# Low flush granite kerb surround (4 edge strips).
+	b.box(Vector3(-h, 0.0, -h), Vector3(h, 0.028, -h + rim), kerb)
+	b.box(Vector3(-h, 0.0, h - rim), Vector3(h, 0.028, h), kerb)
+	b.box(Vector3(-h, 0.0, -h + rim), Vector3(-h + rim, 0.028, h - rim), kerb)
+	b.box(Vector3(h - rim, 0.0, -h + rim), Vector3(h, 0.028, h - rim), kerb)
+	# Cast-iron inner collar around the trunk opening.
+	var c := minf(0.28, h * 0.42)
+	var ct := 0.045
+	b.box(Vector3(-c, 0.010, -c), Vector3(c, 0.026, -c + ct), iron)
+	b.box(Vector3(-c, 0.010, c - ct), Vector3(c, 0.026, c), iron)
+	b.box(Vector3(-c, 0.010, -c + ct), Vector3(-c + ct, 0.026, c - ct), iron)
+	b.box(Vector3(c - ct, 0.010, -c + ct), Vector3(c, 0.026, c - ct), iron)
+	# Slotted cast-iron grate bars spanning from trunk collar to kerb rim.
+	var span := h - rim - c
+	if span > 0.08:
+		for sg: float in [-1.0, 1.0]:
+			for t: float in [-0.55, -0.22, 0.22, 0.55]:
+				var off := t * (h - rim - 0.04)
+				b.box(Vector3(off - 0.018, 0.010, sg * c), Vector3(off + 0.018, 0.024, sg * (h - rim)), iron)
+				b.box(Vector3(sg * c, 0.010, off - 0.018), Vector3(sg * (h - rim), 0.024, off + 0.018), iron)
+	return b.arrays()
 
 
 static func build(kind: String) -> Array:
@@ -60,6 +93,8 @@ static func build(kind: String) -> Array:
 			b.box(Vector3(0.1, 0.0, -0.25), Vector3(0.26, 0.006, -0.12), Color(0.85, 0.82, 0.7))   # flattened cup
 			b.box(Vector3(0.22, 0.0, 0.18), Vector3(0.34, 0.035, 0.24), Color(0.7, 0.15, 0.12))   # can on its side
 			b.box(Vector3(-0.05, 0.0, -0.05), Vector3(0.05, 0.004, 0.06), Color(0.4, 0.55, 0.75))  # wrapper
+		"tree_grate":
+			return tree_grate_box(1.5)
 		_:
 			if kind.begins_with("banner_"):
 				var pal: Array = BANNERS.get(kind.trim_prefix("banner_"), BANNERS["shops"])

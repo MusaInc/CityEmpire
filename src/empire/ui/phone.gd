@@ -36,6 +36,7 @@ static var recents: Array = [] # [{title, sub, section, page, args, icon}]
 var ui: EmpireUI
 var game: EmpireGame
 var compact := false
+var _shell_built := false
 var _page_host: Control        # where the page goes
 var _page: Control
 var _sheet_layer: Control
@@ -46,6 +47,20 @@ var _built_size := Vector2.ZERO
 var _was_hud := false
 var _was_touch := false
 var _restore_hud := true
+var _side_scroll: ScrollContainer = null
+var _side_btns := {}           # section key -> Button
+var _side_cash_l: Label = null
+var _side_recents_host: VBoxContainer = null
+var _saved_side_scroll := 0
+var _tab_btns := {}            # tab key -> {btn, icon, label}
+
+
+static func clear_caches() -> void:
+	section = "home"
+	stacks.clear()
+	scroll_mem.clear()
+	state.clear()
+	recents.clear()
 
 
 static func st(sec: String) -> Dictionary:
@@ -113,19 +128,33 @@ func _on_resize() -> void:
 		_build.call_deferred()
 
 
+func _want_compact(vs: Vector2) -> bool:
+	var aspect := vs.x / maxf(vs.y, 1.0)
+	var is_tablet := aspect <= 1.55 and vs.x >= 900.0
+	return not is_tablet and vs.x < 1200.0
+
+
 # ---------------------------------------------------------------- shell
 func _build() -> void:
+	if _side_scroll != null and is_instance_valid(_side_scroll):
+		_saved_side_scroll = _side_scroll.scroll_vertical
 	for c in get_children():
 		c.queue_free()
 	_sheet = null
+	_page = null
+	_side_scroll = null
+	_side_btns.clear()
+	_side_cash_l = null
+	_side_recents_host = null
+	_tab_btns.clear()
 	var vs := get_viewport_rect().size
 	_built_size = vs
-	compact = vs.x < 1100.0
+	compact = _want_compact(vs)
 	Glass.set_dark(Glass.want_dark(game.empire.minute if game and game.empire else -1.0))
 	theme = EmpireStyle.theme()
 	var safe := _safe_insets(vs)
-	# The city behind, blurred and tinted: the app's backdrop.
-	var back := Glass.surface(0.0, 0.0, Glass.BG, false)
+	# The city behind, blurred and tinted: the app's one true backdrop blur pass.
+	var back := Glass.surface(0.0, 0.0, Glass.BG, false, false)
 	back.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	back.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(back)
@@ -140,36 +169,57 @@ func _build() -> void:
 		add_child(_page_host)
 		_tab_bar(vs, safe)
 	else:
-		var sw := 296.0
-		var side := Glass.surface(30.0, 0.0)
+		var sw := 256.0 if vs.x < 1100.0 else 296.0
+		var side := Glass.surface(30.0, 0.0, Color(0, 0, 0, 0), true, true)
 		side.position = Vector2(16 + safe.x, 16 + safe.y)
 		side.size = Vector2(sw, vs.y - 32 - safe.y - safe.w)
 		side.custom_minimum_size = side.size
 		add_child(side)
 		side.add_child(_sidebar())
 		_page_host = Control.new()
-		_page_host.position = Vector2(16 + safe.x + sw + 26, top)
+		_page_host.position = Vector2(16 + safe.x + sw + 24, top)
 		_page_host.size = Vector2(vs.x - _page_host.position.x - 24 - safe.z, vs.y - top - 12 - safe.w)
 		add_child(_page_host)
 	_sheet_layer = Control.new()
 	_sheet_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_sheet_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_sheet_layer)
+	_shell_built = true
+	if _side_scroll != null and _saved_side_scroll > 0:
+		_side_scroll.set_deferred("scroll_vertical", _saved_side_scroll)
 	_show_page(false)
 
 
 ## Safe-area insets in canvas px (left, top, right, bottom): notch,
-## Dynamic Island, home indicator.
+## Dynamic Island, home indicator (window_get_size basis with screen fallback,
+## matching EmpireUI._safe_insets).
 func _safe_insets(vs: Vector2) -> Vector4:
+	if is_instance_valid(ui):
+		var a := ui._safe_insets(vs)
+		return Vector4(float(a[0]), float(a[1]), float(a[2]), float(a[3]))
 	var sr := DisplayServer.get_display_safe_area()
-	var ss := Vector2(DisplayServer.screen_get_size())
-	if ss.x <= 0.0 or ss.y <= 0.0 or sr.size.x <= 0 or sr.size.y <= 0 or not OS.get_name() in ["iOS", "Android"]:
+	var win := Vector2(DisplayServer.window_get_size())
+	if sr.size.x <= 0 or sr.size.y <= 0 or win.x <= 0.0 or win.y <= 0.0:
 		return Vector4.ZERO
-	if (vs.x > vs.y) != (ss.x > ss.y):
-		ss = Vector2(ss.y, ss.x)
-	var kx := vs.x / ss.x
-	var ky := vs.y / ss.y
-	return Vector4(maxf(sr.position.x * kx, 0.0), maxf(sr.position.y * ky, 0.0), maxf((ss.x - sr.end.x) * kx, 0.0), maxf((ss.y - sr.end.y) * ky, 0.0))
+	var scr := Vector2(DisplayServer.screen_get_size())
+	var mobile := OS.get_name() in ["iOS", "Android"]
+	if not mobile:
+		var mode := DisplayServer.window_get_mode()
+		var fullscreen := mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+		if not fullscreen and (scr.x <= 0.0 or absf(scr.x - win.x) > 2.0 or absf(scr.y - win.y) > 2.0):
+			return Vector4.ZERO
+	if scr.x > 0.0 and scr.y > 0.0 and (win.x > win.y) != (scr.x > scr.y):
+		scr = Vector2(scr.y, scr.x)
+	var basis := Vector2.ZERO
+	if float(sr.end.x) <= win.x + 2.0 and float(sr.end.y) <= win.y + 2.0 and float(sr.size.x) >= win.x * 0.5 and float(sr.size.y) >= win.y * 0.5:
+		basis = win
+	elif scr.x > 0.0 and scr.y > 0.0 and float(sr.end.x) <= scr.x + 2.0 and float(sr.end.y) <= scr.y + 2.0 and float(sr.size.x) >= scr.x * 0.5 and float(sr.size.y) >= scr.y * 0.5:
+		basis = scr
+	else:
+		return Vector4.ZERO
+	var kx := vs.x / basis.x
+	var ky := vs.y / basis.y
+	return Vector4(maxf(sr.position.x * kx, 0.0), maxf(sr.position.y * ky, 0.0), maxf((basis.x - sr.end.x) * kx, 0.0), maxf((basis.y - sr.end.y) * ky, 0.0))
 
 
 func _sidebar() -> Control:
@@ -183,28 +233,53 @@ func _sidebar() -> Control:
 	wv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var nm := String(e.brand.get("name", ""))
 	wv.add_child(Glass.line(nm if nm != "" else "Your empire", "headline"))
-	wv.add_child(Glass.line(EmpireData.money(e.personal_cash + maxf(e.company_cash, 0.0)), "subhead", Glass.LABEL2))
+	_side_cash_l = Glass.line(EmpireData.money(e.personal_cash + maxf(e.company_cash, 0.0)), "subhead", Glass.LABEL2)
+	wv.add_child(_side_cash_l)
 	who.add_child(wv)
 	v.add_child(Glass.margin(who, 6, 0, 0, 12))
 	var sc := ScrollContainer.new()
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_side_scroll = sc
 	var list := Glass.vbox(2)
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sc.add_child(list)
 	v.add_child(sc)
 	for s in SECTIONS:
-		list.add_child(_side_item(String(s[0])))
-	if not recents.is_empty():
-		list.add_child(Glass.gap(14))
-		list.add_child(Glass.margin(Glass.text("Recents", "footnote", Glass.LABEL2, "semibold"), 12, 0, 0, 4))
-		for r in recents.slice(0, 4):
-			var rd: Dictionary = r
-			list.add_child(_recent_item(rd))
+		var key := String(s[0])
+		var sb := _side_item(key)
+		_side_btns[key] = sb
+		list.add_child(sb)
+	_side_recents_host = Glass.vbox(2)
+	_side_recents_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_child(_side_recents_host)
+	_rebuild_recents()
 	v.add_child(Glass.gap(8))
 	var back := Glass.button("Back to the city", func(): ui.close_panel(true), "gray", "regular", null, "back")
 	v.add_child(back)
 	return m
+
+
+func _rebuild_recents() -> void:
+	if _side_recents_host == null or not is_instance_valid(_side_recents_host):
+		return
+	for c in _side_recents_host.get_children():
+		c.queue_free()
+	if recents.is_empty():
+		return
+	_side_recents_host.add_child(Glass.gap(14))
+	_side_recents_host.add_child(Glass.margin(Glass.text("Recents", "footnote", Glass.LABEL2, "semibold"), 12, 0, 0, 4))
+	for r in recents.slice(0, 4):
+		var rd: Dictionary = r
+		_side_recents_host.add_child(_recent_item(rd))
+
+
+func _style_side_item(b: Button, on: bool) -> void:
+	var n := Glass.box(Glass.FILL2 if on else Color(0, 0, 0, 0), 14, 0)
+	n.content_margin_left = 58
+	for s in ["normal", "focus", "hover"]:
+		b.add_theme_stylebox_override(s, n)
+	b.add_theme_font_override("font", Glass.font("semibold" if on else "medium"))
 
 
 func _side_item(key: String) -> Button:
@@ -212,16 +287,12 @@ func _side_item(key: String) -> Button:
 	var b := Button.new()
 	b.focus_mode = Control.FOCUS_NONE
 	b.custom_minimum_size = Vector2(0, 50)
-	var n := Glass.box(Glass.FILL2 if on else Color(0, 0, 0, 0), 14, 0)
-	n.content_margin_left = 58
+	_style_side_item(b, on)
 	var p := Glass.box(Glass.FILL, 14, 0)
 	p.content_margin_left = 58
-	for s in ["normal", "focus", "hover"]:
-		b.add_theme_stylebox_override(s, n)
 	b.add_theme_stylebox_override("pressed", p)
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.text = title_of(key)
-	b.add_theme_font_override("font", Glass.font("semibold" if on else "medium"))
 	b.add_theme_font_size_override("font_size", 21)
 	for s in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 		b.add_theme_color_override(s, Glass.LABEL)
@@ -259,7 +330,7 @@ func _recent_item(r: Dictionary) -> Button:
 
 
 func _tab_bar(vs: Vector2, safe: Vector4) -> void:
-	var bar := Glass.surface(-1.0, 6.0)
+	var bar := Glass.surface(-1.0, 6.0, Color(0, 0, 0, 0), true, true)
 	var w := minf(vs.x - 40.0, 640.0)
 	var h := 84.0
 	bar.position = Vector2((vs.x - w) * 0.5, vs.y - h - 16 - maxf(safe.w - 8.0, 0.0))
@@ -291,6 +362,39 @@ func _tab_bar(vs: Vector2, safe: Vector4) -> void:
 		b.add_child(cv)
 		Glass.feedback(b, func(): go(key))
 		row.add_child(b)
+		_tab_btns[key] = {"btn": b, "icon": ic, "label": lb}
+
+
+## Updates sidebar / tab bar highlights, spendable cash and recents in-place
+## without tearing down the shell or losing sidebar scroll position.
+func _sync_nav() -> void:
+	if _side_cash_l != null and is_instance_valid(_side_cash_l) and game and game.empire:
+		var e := game.empire
+		_side_cash_l.text = EmpireData.money(e.personal_cash + maxf(e.company_cash, 0.0))
+	for key in _side_btns:
+		var b: Button = _side_btns[key]
+		if is_instance_valid(b):
+			_style_side_item(b, String(key) == section)
+	var cur := section if section in TABS else "more"
+	for key in _tab_btns:
+		var entry: Dictionary = _tab_btns[key]
+		var b: Button = entry["btn"]
+		var ic: Glass.Symbol = entry["icon"]
+		var lb: Label = entry["label"]
+		if not is_instance_valid(b):
+			continue
+		var on := String(key) == cur
+		var n := Glass.box(Glass.FILL2 if on else Color(0, 0, 0, 0), 36, 0)
+		for s in ["normal", "focus", "hover", "pressed"]:
+			b.add_theme_stylebox_override(s, n)
+		var col := Glass.ACCENT_TEXT if on else Glass.LABEL
+		ic.color = col
+		if ic._old != null and is_instance_valid(ic._old):
+			ic._old.set("color", col)
+			ic._old.queue_redraw()
+		ic.queue_redraw()
+		lb.add_theme_color_override("font_color", col)
+		lb.add_theme_font_override("font", Glass.font("semibold" if on else "medium"))
 
 
 # ---------------------------------------------------------------- pages
@@ -306,6 +410,15 @@ func _page_key(sec := "") -> String:
 	return "%s|%s|%s" % [s, top["page"], JSON.stringify(top["args"])]
 
 
+func _needs_shell_rebuild() -> bool:
+	if not _shell_built:
+		return true
+	var want_d := Glass.want_dark(game.empire.minute if game and game.empire else -1.0)
+	if want_d != Glass.dark:
+		return true
+	return _want_compact(get_viewport_rect().size) != compact
+
+
 ## Switch section (its own stack and scroll come back with it); the same
 ## section again = refresh in place (scroll kept).
 func go(sec: String, focus := {}) -> void:
@@ -315,6 +428,7 @@ func go(sec: String, focus := {}) -> void:
 		if (_stack(sec) as Array).size() > 1:
 			save_scroll()
 			stacks[sec] = [_stack(sec)[0]]
+			_sync_nav()
 			_show_page(true)
 		else:
 			refresh()
@@ -323,8 +437,10 @@ func go(sec: String, focus := {}) -> void:
 	section = sec
 	if not focus.is_empty():
 		st(sec)["focus"] = focus
-	if compact or true:
-		_build()   # (sidebar/tab highlight follow; pages restore their scroll)
+	if _needs_shell_rebuild():
+		_build()   # (_build already calls _show_page(false))
+		return
+	_sync_nav()
 	_show_page(true)
 
 
@@ -334,6 +450,7 @@ func push(page: String, args: Dictionary, title: String, sub := "", icon := "") 
 	save_scroll()
 	_stack(section).append({"page": page, "args": args, "title": title})
 	_remember(title, sub, section, page, args, icon)
+	_rebuild_recents()
 	_show_page(true)
 
 
@@ -346,11 +463,16 @@ func back() -> void:
 
 
 func open_recent(r: Dictionary) -> void:
+	dismiss_sheet(false)
 	save_scroll()
 	section = String(r["section"])
 	var s := _stack(section)
 	stacks[section] = [s[0], {"page": r["page"], "args": r["args"], "title": r["title"]}] if String(r["page"]) != "root" else [s[0]]
-	_build()
+	if _needs_shell_rebuild():
+		_build()
+		return
+	_sync_nav()
+	_show_page(true)
 
 
 func _remember(title: String, sub: String, sec: String, page: String, args: Dictionary, icon: String) -> void:
@@ -365,6 +487,7 @@ func _remember(title: String, sub: String, sec: String, page: String, args: Dict
 ## Rebuild the current page in place, every list where it was.
 func refresh() -> void:
 	save_scroll()
+	_sync_nav()
 	_show_page(false)
 
 
@@ -400,18 +523,20 @@ func _show_page(animate: bool) -> void:
 	if compact:
 		page.add_child(Glass.gap(96 + _safe_insets(get_viewport_rect().size).w))   # (clear of the tab bar)
 	PhonePages.build(self, section, String(top["page"]), top["args"], body)
-	# Lists come back where they were (laid out first: hidden until then).
+	# Single crisp transition (0.16s cubic ease-out, subtle 12px slide) with zero blank frames.
+	if animate:
+		page.modulate.a = 0.35
+		page.position.x = 12.0
+		var tw := page.create_tween().set_parallel()
+		tw.tween_property(page, "modulate:a", 1.0, 0.16).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw.tween_property(page, "position:x", 0.0, 0.16).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	var key := _page_key()
 	var saved: Array = scroll_mem.get(key, [])
 	if saved.any(func(x): return int(x[0]) != 0 or int(x[1]) != 0):
-		page.modulate.a = 0.0   # (hidden for the two frames layout takes: no jump)
-	elif animate:
-		page.modulate.a = 0.55
-	_restore.call_deferred(page, key, animate)
+		_restore_scroll.call_deferred(page, key)
 
 
-func _restore(page: Control, key: String, animate: bool) -> void:
-	await get_tree().process_frame
+func _restore_scroll(page: Control, key: String) -> void:
 	await get_tree().process_frame
 	if not is_instance_valid(page):
 		return
@@ -420,13 +545,6 @@ func _restore(page: Control, key: String, animate: bool) -> void:
 	for i in mini(saved.size(), scs.size()):
 		scs[i].scroll_vertical = int(saved[i][0])
 		scs[i].scroll_horizontal = int(saved[i][1])
-	if animate:
-		page.position.x += 24.0
-		var tw := page.create_tween().set_parallel()
-		tw.tween_property(page, "modulate:a", 1.0, 0.18)
-		tw.tween_property(page, "position:x", page.position.x - 24.0, 0.32).set_trans(Tween.TRANS_SPRING).set_ease(Tween.EASE_OUT)
-	else:
-		page.modulate.a = 1.0
 
 
 func _scrolls(n: Node) -> Array:

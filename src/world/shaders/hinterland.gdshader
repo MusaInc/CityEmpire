@@ -74,7 +74,30 @@ void fragment() {
 	// Aerial perspective on top of the scene fog: distant ranges lose
 	// contrast and go blue-grey toward the horizon colour.
 	float haze = (1.0 - exp(-dist / 9000.0)) * 0.4 * (1.0 - night);
+	vec3 emit = sky_horizon * haze * 0.55;
+	// Subtle distant foothill town & coastal settlement light clusters at night
+	// along low gentle slopes so the bay horseshoe feels alive after dark.
+	if (night > 0.15 && y > 3.5 && y < 225.0 && slope < 0.38) {
+		float elev_band = smoothstep(3.5, 16.0, y) * (1.0 - smoothstep(130.0, 225.0, y));
+		float gentle = 1.0 - smoothstep(0.16, 0.38, slope);
+		float cluster = smoothstep(0.56, 0.80, vnoise(p * 0.0019 + 11.4));
+		if (cluster > 0.01) {
+			vec2 cell = p / 24.0;
+			vec2 id = floor(cell);
+			vec2 f = fract(cell) - 0.5;
+			float rnd = h21(id + 37.0);
+			vec2 jitter = (vec2(h21(id + 5.1), h21(id + 13.7)) - 0.5) * 0.55;
+			float pin = 1.0 - smoothstep(0.08, 0.28, length(f - jitter));
+			float lit = step(0.58, rnd) * pin;
+			vec3 lcol = mix(vec3(1.0, 0.72, 0.38), vec3(0.86, 0.92, 1.0), step(0.86, fract(rnd * 17.3)));
+			float night_k = smoothstep(0.15, 0.65, night);
+			float far_fade = exp(-dist / 12000.0);
+			// Soft ambient town-glow wash under each settlement + discrete pinpricks.
+			emit += (vec3(0.95, 0.66, 0.34) * 0.045 + lcol * lit * (0.45 + 0.75 * fract(rnd * 9.1)))
+				* cluster * elev_band * gentle * night_k * far_fade;
+		}
+	}
 	ALBEDO = c * (1.0 - haze);
-	EMISSION = sky_horizon * haze * 0.55;
+	EMISSION = emit;
 	ROUGHNESS = mix(0.95, 0.6, snowy);
 }

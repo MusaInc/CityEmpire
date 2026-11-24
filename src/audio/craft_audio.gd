@@ -1,38 +1,141 @@
 class_name CraftAudio
 extends AudioStreamPlayer3D
-## Synthesised engine sound for a Craft (no samples, no memory to speak of):
-##   heli   a rotor beat (filtered noise chopped at the blade-pass rate) over
-##          a turbine whine, both rising with the rotor's spin-up;
-##   plane  propeller: a buzz of harmonics at the prop rate; jet: a broad
-##          roar (noise) under a whine, both with the throttle;
-##   boat   an outboard's low burble plus water hiss rising with speed.
-## Only the craft you're in (or within 120 m) makes sound; the generator is
-## filled a buffer at a time in _process (22.05 kHz mono).
+## Pre-baked seamless engine loops for a Craft (synthesized once per craft kind
+## into AudioStreamWAV in memory and modulated by pitch_scale + volume_db per
+## frame — zero per-sample GDScript loops during gameplay):
+##   heli        rotor beat (filtered noise chopped at blade-pass rate) + turbine whine;
+##   plane_prop  warm multi-harmonic propeller buzz + wash;
+##   plane_jet   broad turbine roar + subtle whine;
+##   boat        throaty outboard burble + secondary speed-driven water spray hiss.
+## Only the craft you're in (or within 120 m) makes sound; unattended boats stay silent.
 
-const RATE := 22050.0
+const RATE := 22050
+const LOOP_SECS := 1.5
+
+static var _baked_loops := {}   # profile key -> AudioStreamWAV
 
 var craft: Craft
-var _pb: AudioStreamGeneratorPlayback
-var _ph := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
-var _lp := 0.0
-var _lp2 := 0.0
-var _rng := RandomNumberGenerator.new()
+var _profile := "heli"
 var _gain := 0.0
 var _last_level := 0.0
+var _hiss_player: AudioStreamPlayer3D
+var _hiss_gain := 0.0
+
+
+static func _encode_loop(raw: PackedFloat32Array, xfade_samples: int) -> AudioStreamWAV:
+	var n := raw.size()
+	var xf := mini(xfade_samples, n / 4)
+	if xf > 0:
+		for i in xf:
+			var w := float(i) / float(xf)
+			raw[i] = lerpf(raw[n - xf + i], raw[i], w)
+	var loop_len := n - xf
+	var data := PackedByteArray()
+	data.resize(loop_len * 2)
+	for i in loop_len:
+		var v := clampi(int(raw[i] * 32767.0), -32768, 32767)
+		data[i * 2] = v & 0xFF
+		data[i * 2 + 1] = (v >> 8) & 0xFF
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = RATE
+	wav.stereo = false
+	wav.data = data
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = loop_len
+	return wav
+
+
+static func _baked_loop(profile: String) -> AudioStreamWAV:
+	if _baked_loops.has(profile):
+		return _baked_loops[profile] as AudioStreamWAV
+	var xf := 1100
+	var loop_len := int(RATE * LOOP_SECS)
+	var total := loop_len + xf
+	var raw := PackedFloat32Array()
+	raw.resize(total)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(["craft_audio", profile])
+	var lp := 0.0
+	var lp2 := 0.0
+	var ph0 := 0.0
+	var ph1 := 0.0
+	var ph2 := 0.0
+	match profile:
+		"heli":
+			# Exact integer blade-pass cycles over LOOP_SECS (14 Hz -> 21 cycles in 1.5 s).
+			var blade := 14.0
+			var whine := 1400.0
+			for i in total:
+				ph0 = fmod(ph0 + blade / float(RATE), 1.0)
+				ph1 = fmod(ph1 + whine / float(RATE), 1.0)
+				var chop := pow(1.0 - ph0, 5.5)
+				var noise := rng.randf_range(-1.0, 1.0)
+				lp = lerpf(lp, noise, 0.085)
+				raw[i] = clampf((lp * (0.35 + 1.75 * chop) + sin(ph1 * TAU) * 0.045) * 0.58, -0.95, 0.95)
+		"plane_jet":
+			var whine := 2600.0
+			for i in total:
+				var noise := rng.randf_range(-1.0, 1.0)
+				lp = lerpf(lp, noise, 0.24)
+				lp2 = lerpf(lp2, lp, 0.09)
+				ph1 = fmod(ph1 + whine / float(RATE), 1.0)
+				raw[i] = clampf(((lp * 0.45 + lp2 * 0.45) + sin(ph1 * TAU) * 0.055) * 0.58, -0.95, 0.95)
+		"plane_prop":
+			# Exact integer cycles (66 Hz -> 99 cycles in 1.5 s).
+			var f0 := 66.0
+			for i in total:
+				ph0 = fmod(ph0 + f0 / float(RATE), 1.0)
+				var saw := ph0 * 2.0 - 1.0
+				lp = lerpf(lp, saw, 0.28)
+				var noise := rng.randf_range(-1.0, 1.0)
+				lp2 = lerpf(lp2, noise, 0.05)
+				raw[i] = clampf((lp * 0.56 + sin(ph0 * TAU * 2.0) * 0.24 + lp2 * 0.25) * 0.55, -0.95, 0.95)
+		"boat_hiss":
+			for i in total:
+				var noise := rng.randf_range(-1.0, 1.0)
+				lp = lerpf(lp, noise, 0.34)
+				raw[i] = clampf(lp * 0.42, -0.95, 0.95)
+		_:
+			# Boat outboard burble: 48 Hz fundamental + 4 Hz lope (exact cycles in 1.5 s).
+			var f0 := 48.0
+			var lope := 4.0
+			for i in total:
+				ph0 = fmod(ph0 + f0 / float(RATE), 1.0)
+				ph2 = fmod(ph2 + lope / float(RATE), 1.0)
+				var burble := (ph0 * 2.0 - 1.0) * (0.62 + 0.38 * sin(ph2 * TAU))
+				lp = lerpf(lp, burble, 0.20)
+				raw[i] = clampf(lp * 0.58, -0.95, 0.95)
+	var wav := _encode_loop(raw, xf)
+	_baked_loops[profile] = wav
+	return wav
 
 
 func setup(c: Craft) -> void:
 	craft = c
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	var gen := AudioStreamGenerator.new()
-	gen.mix_rate = RATE
-	gen.buffer_length = 0.15
-	stream = gen
-	bus = "SFX"
+	if craft.kind == "heli":
+		_profile = "heli"
+	elif craft.kind == "plane":
+		_profile = "plane_jet" if bool(craft.spec.get("jet", false)) else "plane_prop"
+	else:
+		_profile = "boat"
+	stream = _baked_loop(_profile)
+	bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
 	unit_size = 18.0
 	max_distance = 260.0
 	attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
-	_rng.seed = 7
+	volume_db = -80.0
+	if _profile == "boat":
+		_hiss_player = AudioStreamPlayer3D.new()
+		_hiss_player.stream = _baked_loop("boat_hiss")
+		_hiss_player.bus = bus
+		_hiss_player.unit_size = unit_size
+		_hiss_player.max_distance = max_distance
+		_hiss_player.attenuation_model = attenuation_model
+		_hiss_player.volume_db = -80.0
+		add_child(_hiss_player)
 
 
 func _process(dt: float) -> void:
@@ -44,36 +147,48 @@ func _process(dt: float) -> void:
 	var want := not get_tree().paused and near and level >= 0.02
 	if want:
 		_last_level = level
-	var prev_gain := _gain
-	_gain = move_toward(_gain, 1.0 if want else 0.0, maxf(dt, 0.001) * 10.0)
+	_gain = move_toward(_gain, 1.0 if want else 0.0, maxf(dt, 0.001) * 8.0)
 	if not want and _gain <= 0.0005:
 		if playing:
 			stop()
-			_pb = null
+		if _hiss_player and _hiss_player.playing:
+			_hiss_player.stop()
+		_hiss_gain = 0.0
 		return
-	if not playing:
-		play()
-		_pb = get_stream_playback()
-	if _pb == null:
-		return
-	var n := _pb.get_frames_available()
-	if n <= 0:
-		return
-	var buf := PackedVector2Array()
-	buf.resize(n)
 	var eff_level := level if want else _last_level
-	match craft.kind:
+	var target_pitch := 1.0
+	var target_lin := eff_level * _gain
+	match _profile:
 		"heli":
-			_heli(buf, eff_level)
-		"plane":
-			_plane(buf, eff_level)
+			target_pitch = lerpf(0.38, 1.18, clampf(eff_level, 0.0, 1.0))
+			target_lin *= 0.85
+		"plane_jet":
+			target_pitch = lerpf(0.75, 1.32, clampf(eff_level, 0.0, 1.0))
+			target_lin *= 0.82
+		"plane_prop":
+			target_pitch = lerpf(0.55, 1.55, clampf(eff_level, 0.0, 1.0))
+			target_lin *= 0.80
 		_:
-			_boat(buf, eff_level)
-	if prev_gain < 0.9995 or _gain < 0.9995:
-		var inv := 1.0 / float(maxi(n - 1, 1))
-		for i in n:
-			buf[i] *= lerpf(prev_gain, _gain, float(i) * inv)
-	_pb.push_buffer(buf)
+			target_pitch = lerpf(0.62, 1.65, clampf(eff_level, 0.0, 1.0))
+			target_lin *= 0.78
+	if not playing:
+		volume_db = -80.0
+		pitch_scale = target_pitch
+		play()
+	pitch_scale = lerpf(pitch_scale, target_pitch, 1.0 - exp(-10.0 * dt))
+	volume_db = linear_to_db(maxf(target_lin, 0.0001))
+	if _hiss_player != null:
+		var hiss := clampf(absf(craft.forward_speed) / 18.0, 0.0, 1.0) if want else 0.0
+		_hiss_gain = move_toward(_hiss_gain, hiss, maxf(dt, 0.001) * 5.0)
+		if _hiss_gain <= 0.002:
+			if _hiss_player.playing:
+				_hiss_player.stop()
+		else:
+			if not _hiss_player.playing:
+				_hiss_player.volume_db = -80.0
+				_hiss_player.play()
+			_hiss_player.pitch_scale = lerpf(0.85, 1.35, _hiss_gain)
+			_hiss_player.volume_db = linear_to_db(maxf(_hiss_gain * 0.45 * _gain, 0.0001))
 
 
 func _player_aboard() -> bool:
@@ -93,49 +208,3 @@ func _level() -> float:
 	if bool(craft.input.get("active", false)) or absf(craft.forward_speed) > 0.3:
 		return clampf(0.25 + absf(craft.forward_speed) / maxf(float(craft.spec.get("vmax", 15.0)), 1.0), 0.0, 1.0)
 	return 0.12 if _player_aboard() else 0.0
-
-
-func _heli(buf: PackedVector2Array, level: float) -> void:
-	var blade := 4.0 + 13.0 * level              # blade passes a second
-	var whine := 900.0 + 900.0 * level
-	for i in buf.size():
-		_ph[0] = fmod(_ph[0] + blade / RATE, 1.0)
-		_ph[1] = fmod(_ph[1] + whine / RATE, 1.0)
-		var chop: float = pow(1.0 - _ph[0], 6.0)       # sharp attack, quick decay: the "whop"
-		var noise := _rng.randf_range(-1.0, 1.0)
-		_lp = lerpf(_lp, noise, 0.08)            # low-passed noise
-		var s := _lp * (0.35 + 1.8 * chop) * level + sin(_ph[1] * TAU) * 0.05 * level
-		buf[i] = Vector2(s, s) * 0.6
-
-
-func _plane(buf: PackedVector2Array, level: float) -> void:
-	var jet: bool = craft.spec.get("jet", false)
-	var f0 := (35.0 + 70.0 * level) if not jet else (2200.0 + 1400.0 * level)
-	for i in buf.size():
-		var noise := _rng.randf_range(-1.0, 1.0)
-		var s := 0.0
-		if jet:
-			_lp = lerpf(_lp, noise, 0.25)
-			_ph[1] = fmod(_ph[1] + f0 / RATE, 1.0)
-			s = _lp * 0.7 * level + sin(_ph[1] * TAU) * 0.06 * level
-		else:
-			_ph[0] = fmod(_ph[0] + f0 / RATE, 1.0)
-			var saw: float = _ph[0] * 2.0 - 1.0
-			_lp = lerpf(_lp, saw, 0.3)
-			_lp2 = lerpf(_lp2, noise, 0.05)
-			s = (_lp * 0.6 + sin(_ph[0] * TAU * 2.0) * 0.25) * level + _lp2 * 0.25 * level
-		buf[i] = Vector2(s, s) * 0.55
-
-
-func _boat(buf: PackedVector2Array, level: float) -> void:
-	var f0 := 28.0 + 55.0 * level
-	var hiss := clampf(absf(craft.forward_speed) / 18.0, 0.0, 1.0)
-	for i in buf.size():
-		_ph[0] = fmod(_ph[0] + f0 / RATE, 1.0)
-		_ph[2] = fmod(_ph[2] + (f0 * 0.5 + 3.0) / RATE, 1.0)
-		var burble: float = (_ph[0] * 2.0 - 1.0) * (0.6 + 0.4 * sin(_ph[2] * TAU))
-		_lp = lerpf(_lp, burble, 0.2)
-		var noise := _rng.randf_range(-1.0, 1.0)
-		_lp2 = lerpf(_lp2, noise, 0.35)
-		var s := _lp * 0.55 * level + _lp2 * 0.3 * hiss
-		buf[i] = Vector2(s, s) * 0.6

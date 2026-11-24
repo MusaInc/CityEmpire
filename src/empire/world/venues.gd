@@ -131,7 +131,8 @@ func _load(id: String, xf: Transform3D) -> void:
 		if nm == "Venue" and n is MeshInstance3D:
 			_collide(root, n as MeshInstance3D)
 		elif nm.begins_with("Door_"):
-			R["doors"].append([n, (n as Node3D).position, -1.0 if nm.ends_with("L") else 1.0])
+			var door_col := _add_door_collision(n as Node3D)
+			R["doors"].append([n, (n as Node3D).position, -1.0 if nm.ends_with("L") else 1.0, door_col])
 		elif nm == "Turntable":
 			R["turntable"] = n
 		elif not (n is MeshInstance3D):
@@ -407,6 +408,31 @@ func _collide(root: Node3D, mi: MeshInstance3D) -> void:
 	body.add_child(cs)
 
 
+## Adds a solid collider to a sliding door leaf so closed doors feel physical;
+## disabled smoothly once the leaves slide clear.
+func _add_door_collision(door_node: Node3D) -> CollisionShape3D:
+	var body := StaticBody3D.new()
+	body.name = "DoorCollision"
+	body.collision_layer = CityWorld.HUMAN_LAYER | 1
+	body.collision_mask = 0
+	door_node.add_child(body)
+	var aabb := AABB(Vector3(-0.7, 0.0, -0.08), Vector3(1.4, 2.6, 0.16))
+	if door_node is MeshInstance3D and (door_node as MeshInstance3D).mesh != null:
+		aabb = (door_node as MeshInstance3D).mesh.get_aabb()
+	else:
+		for c in door_node.get_children():
+			if c is MeshInstance3D and (c as MeshInstance3D).mesh != null:
+				aabb = (c as MeshInstance3D).mesh.get_aabb()
+				break
+	var box := BoxShape3D.new()
+	box.size = Vector3(maxf(aabb.size.x, 0.16), maxf(aabb.size.y, 2.0), maxf(aabb.size.z, 0.16))
+	var cs := CollisionShape3D.new()
+	cs.shape = box
+	cs.position = aabb.get_center()
+	body.add_child(cs)
+	return cs
+
+
 func _lights(root: Node3D, id: String) -> void:
 	var d: Dictionary = DEFS[id]
 	var W := float(d["w"])
@@ -498,6 +524,8 @@ func _animate(R: Dictionary, dt: float, hero: Vector3) -> void:
 		var base: Vector3 = dd[1]
 		var leaf := absf(base.x - ((R["doors"][0][1] as Vector3).x + (R["doors"][-1][1] as Vector3).x) * 0.5) * 2.0
 		n.position = base + Vector3(float(dd[2]) * leaf * 0.95 * e, 0.0, 0.0)
+		if dd.size() > 3 and dd[3] is CollisionShape3D and is_instance_valid(dd[3]):
+			(dd[3] as CollisionShape3D).disabled = e > 0.55
 	var tt: Node3D = R["turntable"]
 	if tt:
 		tt.rotate_y(dt * 0.18)

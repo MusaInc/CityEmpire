@@ -16,15 +16,46 @@ const RANGE := 70.0            # m from you
 const LIST_EVERY := 0.25
 const HALF := Vector3(1.0, 0.75, 2.3)
 
+static var _shapes := {}       # body name -> [BoxShape3D, float center_y]
+
 var game: EmpireGame
 var _bodies: Array = []        # AnimatableBody3D
+var _body_shapes: Array[CollisionShape3D] = []
 var _near: Array = []          # [[source, id]]: source 0 = Commercial, 1 = Skyport, 2 = Westbank
 var _list_t := 0.0
+var _island_cache: IslandTraffic
+var _island_check_t := 0.0
+
+
+static func _shape_for(body_name: String) -> Array:
+	if _shapes.has(body_name):
+		return _shapes[body_name] as Array
+	var d: Dictionary = BodyDims.DIMS.get(body_name, {})
+	var sh := BoxShape3D.new()
+	var cy := HALF.y + 0.15
+	if not d.is_empty():
+		var w := maxf(float(d["W"]) * 0.96, 1.6)
+		var h := maxf(float(d["roof"]) - float(d["ride"]), 1.2)
+		var l := maxf(float(d["L"]) * 0.98, 3.8)
+		sh.size = Vector3(w, h, l)
+		cy = float(d["ride"]) + h * 0.5
+	else:
+		sh.size = HALF * 2.0
+	var entry := [sh, cy]
+	_shapes[body_name] = entry
+	return entry
+
+
+static func _kind_body(kind_idx: int) -> String:
+	if kind_idx >= 0 and kind_idx < CityWorld.CAR_KINDS.size():
+		return String(CityWorld.CAR_KINDS[kind_idx][2])
+	return ""
 
 
 func setup(g: EmpireGame) -> void:
 	game = g
 	process_physics_priority = -5
+	var def_shape := _shape_for("")
 	for i in POOL:
 		var b := AnimatableBody3D.new()
 		b.name = "TrafficBody%d" % i
@@ -32,16 +63,15 @@ func setup(g: EmpireGame) -> void:
 		b.collision_layer = Car.BODY_LAYER
 		b.collision_mask = 0
 		var cs := CollisionShape3D.new()
-		var sh := BoxShape3D.new()
-		sh.size = HALF * 2.0
-		cs.shape = sh
-		cs.position = Vector3(0, HALF.y + 0.15, 0)
+		cs.shape = def_shape[0]
+		cs.position = Vector3(0, float(def_shape[1]), 0)
 		b.add_child(cs)
 		b.process_mode = Node.PROCESS_MODE_DISABLED
 		add_child(b)
 		b.top_level = true
 		b.global_position = Vector3(0, -500, 0)
 		_bodies.append(b)
+		_body_shapes.append(cs)
 
 
 ## City traffic cars that currently have a body: [[id, Transform3D, Traffic source]] (Wrecks).
@@ -92,15 +122,22 @@ func _here() -> Vector3:
 	return vn.global_position if vn else game.player.global_position
 
 
-func _island() -> IslandTraffic:
-	return get_tree().get_first_node_in_group("island_traffic") as IslandTraffic
+func _island(dt: float) -> IslandTraffic:
+	if _island_cache != null and is_instance_valid(_island_cache):
+		return _island_cache
+	_island_cache = null
+	_island_check_t -= dt
+	if _island_check_t <= 0.0 and is_inside_tree():
+		_island_cache = get_tree().get_first_node_in_group("island_traffic") as IslandTraffic
+		_island_check_t = 1.0 if _island_cache == null else 0.0
+	return _island_cache
 
 
 func _physics_process(dt: float) -> void:
 	if game == null or game.world == null:
 		return
 	var here := _here()
-	var it := _island()
+	var it := _island(dt)
 	if it:
 		var vn := game.vehicle_node()
 		it.blocker = here if (vn != null or not game.player.indoors) else Vector3(INF, 0, INF)
@@ -108,23 +145,30 @@ func _physics_process(dt: float) -> void:
 	if _list_t <= 0.0:
 		_list_t = LIST_EVERY
 		var cand: Array = []
+		var r2 := RANGE * RANGE
 		for source in [0, 2]:
 			var tr := _traffic(source)
 			if tr == null:
 				continue
-			for id in tr.car_count():
-				if tr.knocked.has(id):
-					continue
-				var d := tr.car_position(id).distance_squared_to(here)
-				if d < RANGE * RANGE:
-					cand.append([d, source, id])
+			if not tr.l_cars.is_empty():
+				for id in tr.cars_near(here, RANGE):
+					var d := tr.car_position(id).distance_squared_to(here)
+					if d < r2:
+						cand.append([d, source, id])
+			else:
+				for id in tr.car_count():
+					if tr.knocked.has(id) or tr.is_dormant(id):
+						continue
+					var d := tr.car_position(id).distance_squared_to(here)
+					if d < r2:
+						cand.append([d, source, id])
 		if it:
 			for c in it.cars:
 				if float(c["wait"]) > 0.0:
 					continue
 				var p: Vector3 = it.car_xf(c).origin
 				var d2 := p.distance_squared_to(here)
-				if d2 < RANGE * RANGE:
+				if d2 < r2:
 					cand.append([d2, 1, c])
 		cand.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
 		_near = cand.slice(0, POOL).map(func(x): return [x[1], x[2]])
@@ -148,14 +192,25 @@ func _physics_process(dt: float) -> void:
 			continue
 		var src: Array = _near[i]
 		var xf := Transform3D()
+		var body_name := ""
 		if int(src[0]) in [0, 2]:
 			var tr := _traffic(int(src[0]))
 			if tr == null:
 				continue
-			xf = traffic_xf(tr, int(src[1]))
+			var cid := int(src[1])
+			xf = traffic_xf(tr, cid)
+			if cid >= 0 and cid < tr.c_kind.size():
+				body_name = _kind_body(tr.c_kind[cid])
 		else:
 			if it == null:
 				continue
-			xf = it.car_xf(src[1])
+			var ic: Dictionary = src[1]
+			xf = it.car_xf(ic)
+			body_name = _kind_body(int(ic.get("kind", -1)))
+		var sh_entry := _shape_for(body_name)
+		var cs := _body_shapes[i]
+		if cs.shape != sh_entry[0]:
+			cs.shape = sh_entry[0]
+			cs.position.y = float(sh_entry[1])
 		b.process_mode = Node.PROCESS_MODE_INHERIT
 		b.global_transform = xf

@@ -133,12 +133,12 @@ var water_t := 0.0
 
 
 func setup(p_spec: Dictionary, p_role := "player") -> void:
-	spec = p_spec
+	spec = p_spec.duplicate()
 	role = p_role
 	immortal = role == "player"
 	_reset_parts()
 	process_physics_priority = 10  # after every driver has set the controls
-	mass = spec["mass"]
+	mass = float(spec["mass"]) * float(spec.get("mass_scale", 1.0))
 	collision_layer = BODY_LAYER
 	collision_mask = BODY_MASK
 	contact_monitor = true
@@ -372,7 +372,7 @@ func _physics_process(dt: float) -> void:
 	# Constant time from centre to full lock at any speed (~0.17 s, quicker
 	# on the sharper cars): fast enough to feel direct, slow enough that a
 	# flick at 150 km/h can't spike the yaw rate.
-	var steer_rate := max_steer_angle() / 0.09 * float(spec.get("steer_rate", 200.0)) / 200.0
+	var steer_rate := max_steer_angle() / 0.09 * float(spec.get("steer_rate", 200.0)) / 200.0 * float(spec.get("turn_rate", 1.0))
 	# Unwinding (back to centre or across to counter-steer) is quicker than
 	# winding on: catching a slide should never feel laggy.
 	if absf(target_steer) < absf(steer_angle) or signf(target_steer) != signf(steer_angle):
@@ -406,7 +406,7 @@ func _physics_process(dt: float) -> void:
 	var curve := clampf(1.0 - pow(sp_t, 3.0), 0.0, 1.0)
 	if forward_speed < 0.0 and drive > 0.0:
 		curve = 1.0
-	var engine_f: float = spec["engine"] * mass * drive * curve * power_scale
+	var engine_f: float = spec["engine"] * float(spec.get("engine_gain", 1.0)) * mass * drive * curve * power_scale
 	if kickdown and drive > 0.9 and not reversing:
 		# A lower gear: strongest in the middle of the rev range, fading
 		# toward top speed (a kickdown can't add speed the car doesn't have).
@@ -427,11 +427,16 @@ func _physics_process(dt: float) -> void:
 	_update_gears(sp_t, thr, dt)
 
 	# --- wheels ---
-	var k: float = spec["spring"] * mass
-	var c: float = spec["damper"] * mass
+	var susp_stiff: float = maxf(float(spec.get("susp_stiff", 1.0)), 0.35)
+	var k: float = spec["spring"] * mass * susp_stiff
+	var c: float = spec["damper"] * mass * sqrt(susp_stiff)
 	var rest: float = spec["susp_len"]
 	var wr: float = spec["wheel_r"]
 	var mu: float = spec["grip"] * (1.0 - 0.25 * (1.0 - health)) * (1.0 - 0.28 * puncture)
+	var brake_scale: float = float(spec.get("brake_force", 1.0))
+	var rear_slip_k: float = float(spec.get("drift_slip", 1.0))
+	var roll_gain: float = float(spec.get("roll_gain", 1.0))
+	var turn_rate_k: float = float(spec.get("turn_rate", 1.0))
 	if grip_loss > 0.0:
 		mu *= 0.45
 		grip_loss -= dt
@@ -495,7 +500,7 @@ func _physics_process(dt: float) -> void:
 		var pv := vel + angular_velocity.cross(at)
 		var v_long := pv.dot(wfwd)
 		var v_lat := pv.dot(wside)
-		var mu_w: float = mu * (spec["grip_front"] if front else spec["grip_rear"])
+		var mu_w: float = mu * (spec["grip_front"] if front else spec["grip_rear"] * rear_slip_k)
 		var slide_mu: float = mu_w * spec.get("slide", 0.82)
 		if hb:
 			slide_mu = mu_w * spec.get("hb_grip", 0.42)
@@ -517,7 +522,7 @@ func _physics_process(dt: float) -> void:
 		var f_long := drive_force
 		var b_in := maxf(brk, auto_brk)
 		if b_in > 0.0 and not reversing:
-			var bf: float = spec["brake"] * mass * b_in * (0.64 if front else 0.36)
+			var bf: float = spec["brake"] * brake_scale * mass * b_in * (0.64 if front else 0.36)
 			f_long -= signf(v_long) * minf(bf, absf(v_long) * mass * 0.25 / dt)
 		if hb:
 			f_long -= signf(v_long) * minf(mass * 3.5 * 0.5, absf(v_long) * mass * 0.25 / dt)
@@ -560,7 +565,7 @@ func _physics_process(dt: float) -> void:
 	wheels_on_ground = ground
 
 	# Anti-roll bars (front and rear axle pairs).
-	var arb: float = spec.get("anti_roll", 0.6) * k
+	var arb: float = spec.get("anti_roll", 0.6) * k / clampf(roll_gain, 0.55, 1.55)
 	for axle in [[0, 1], [2, 3]]:
 		var dl := _comp[axle[0]] - _comp[axle[1]]
 		if _hit[axle[0]] or _hit[axle[1]]:
@@ -574,7 +579,7 @@ func _physics_process(dt: float) -> void:
 	# Aerodynamics: drag + downforce.
 	apply_central_force(-vel * speed * spec.get("drag", 0.0009) * mass)
 	if ground > 0:
-		apply_central_force(-up * speed * speed * spec.get("downforce", 0.012) * mass * 0.1)
+		apply_central_force(-up * speed * speed * spec.get("downforce", 0.012) * float(spec.get("downforce_gain", 1.0)) * mass * 0.1)
 
 	# --- arcade assists ---
 	# Drift state with hysteresis: in above 11°, out below 6°.
@@ -618,7 +623,7 @@ func _physics_process(dt: float) -> void:
 				assist = maxf(assist, float(spec.get("stability", 0.9)))
 			elif absf(str_in) > 0.2:
 				# Turning in: the assist brings the nose round quickly.
-				assist = maxf(assist, float(spec.get("turn_assist", 0.7)))
+				assist = maxf(assist, float(spec.get("turn_assist", 0.7)) * clampf(turn_rate_k, 0.85, 1.3))
 			# Path follow: the direction of travel swings round with the nose
 			# instead of the car sliding wide (arcade grip). Stronger while
 			# steering; capped so a crash or a ramp still behaves.
@@ -699,14 +704,15 @@ func _physics_process(dt: float) -> void:
 	# Subtle weight-transfer pitch (brake dive / launch squat) and cornering
 	# roll, scaled by body height and critically damped for CarVisual.
 	var height_k := clampf(float((spec["size"] as Vector3).y) / 1.5, 0.72, 1.25)
+	var pitch_k := lerpf(1.0, roll_gain, 0.55)
 	var target_pitch := 0.0
 	var target_roll := 0.0
 	if ground >= 2 and not in_water:
 		var long_g := clampf((forward_speed - _prev_fwd_speed) / maxf(dt, 0.001) / GRAVITY, -1.4, 1.4)
 		var dive_scale := 0.030 if long_g < 0.0 else 0.020
-		target_pitch = clampf(long_g * dive_scale * height_k, -0.042, 0.032)
+		target_pitch = clampf(long_g * dive_scale * height_k * pitch_k, -0.052, 0.042)
 		var lat_g := clampf(-forward_speed * yaw_rate / GRAVITY, -1.6, 1.6)
-		target_roll = clampf(lat_g * 0.028 * height_k, -0.050, 0.050)
+		target_roll = clampf(lat_g * 0.028 * height_k * roll_gain, -0.072, 0.072)
 	var flex_k := 1.0 - exp(-9.0 * dt)
 	body_pitch = lerpf(body_pitch, target_pitch, flex_k)
 	body_roll = lerpf(body_roll, target_roll, flex_k)

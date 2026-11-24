@@ -43,7 +43,7 @@ var invert_y := false
 var aim_mode := "assist"
 var music_volume := 0.6
 var sfx_volume := 1.0
-var look := "clean"  # Alternate filters are available for developer captures.
+var look := "cinematic"  # "cinematic" (MSAA-safe grade), "clean", or alternate capture looks.
 var appearance := "auto"   # the phone's look: "auto" (light by day, dark at night), "light", "dark"
 ## Sky: "cycle" (day → night → day, ~16 min) or a fixed "day" / "sunset" / "night".
 var time_of_day := "cycle"
@@ -59,6 +59,7 @@ func _ready() -> void:
 		fps_60 = cfg.get_value("gfx", "fps_60", fps_60)
 		show_perf = cfg.get_value("gfx", "show_perf", show_perf)
 		driving_lens = clampf(float(cfg.get_value("gfx", "driving_lens", driving_lens)), 0.0, 1.0)
+		look = String(cfg.get_value("gfx", "look", look))
 		appearance = cfg.get_value("gfx", "appearance", appearance)
 		time_of_day = cfg.get_value("gfx", "time_of_day", time_of_day)
 		weather = cfg.get_value("gfx", "weather", weather)
@@ -109,10 +110,10 @@ func apply() -> void:
 		else:
 			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		# Stylised looks read the depth buffer, which MSAA leaves unresolved on
-		# the Mobile/Compatibility renderers: swap MSAA for FXAA (it smooths the
-		# ink lines too).
-		var stylised := look != "clean" and RenderingServer.get_current_rendering_method() != "gl_compatibility"
-		vp.msaa_3d = Viewport.MSAA_DISABLED if stylised else p["msaa"]
+		# the Mobile/Compatibility renderers: swap MSAA for FXAA. "clean" and
+		# "cinematic" (look_cinematic.gdshader) do not read depth, so MSAA stays on.
+		var needs_depth := look not in ["clean", "cinematic"] and RenderingServer.get_current_rendering_method() != "gl_compatibility"
+		vp.msaa_3d = Viewport.MSAA_DISABLED if needs_depth else p["msaa"]
 		if RenderingServer.get_current_rendering_method() != "gl_compatibility":  # no FXAA there
 			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if vp.msaa_3d == Viewport.MSAA_DISABLED else Viewport.SCREEN_SPACE_AA_DISABLED
 	changed.emit()
@@ -124,6 +125,7 @@ func save() -> void:
 	cfg.set_value("gfx", "fps_60", fps_60)
 	cfg.set_value("gfx", "show_perf", show_perf)
 	cfg.set_value("gfx", "driving_lens", driving_lens)
+	cfg.set_value("gfx", "look", look)
 	cfg.set_value("gfx", "appearance", appearance)
 	cfg.set_value("gfx", "time_of_day", time_of_day)
 	cfg.set_value("gfx", "weather", weather)

@@ -20,12 +20,27 @@ static var cat := "all"
 static var _places: Array = []
 static var _places_t := -1000000
 static var _places_n := -1
+static var _places_empire_id := 0
+
+
+static func reset_cache() -> void:
+	_places.clear()
+	_places_t = -1000000
+	_places_n = -1
+	_places_empire_id = 0
+
+
+static func clear_caches() -> void:
+	reset_cache()
+	cat = "all"
 
 
 static func places(g: EmpireGame) -> Array:
 	var e := g.empire
-	if Time.get_ticks_msec() - _places_t < 20000 and _places_n == e.firms.size() + e.businesses.size() * 1000:
+	var eid := e.get_instance_id()
+	if eid == _places_empire_id and Time.get_ticks_msec() - _places_t < 20000 and _places_n == e.firms.size() + e.businesses.size() * 1000:
 		return _places
+	_places_empire_id = eid
 	_places_t = Time.get_ticks_msec()
 	_places_n = e.firms.size() + e.businesses.size() * 1000
 	var out: Array = []
@@ -106,18 +121,15 @@ static func places(g: EmpireGame) -> Array:
 static func discover(g: EmpireGame) -> void:
 	var here := g.vehicle_node().global_position if g.vehicle_node() else g.player.global_position
 	var seen: Dictionary = g.empire.flags.get("seen", {})
-	var n := 0
 	for p in places(g):
 		if seen.has(p["key"]):
 			continue
 		var pp: Vector3 = p["pos"]
-		if Vector2(pp.x - here.x, pp.z - here.z).length() < SEE:
-			seen[p["key"]] = g.empire.day
-			n += 1
-			if not p.get("vacant", false) and p["cat"] in ["fashion", "vehicles", "landmark", "food"]:
-				g.ui.toast("Discovered: %s" % p["name"], "info")
-	if n > 0:
-		g.empire.flags["seen"] = seen
+		if absf(pp.y - here.y) > 25.0 or Vector2(pp.x - here.x, pp.z - here.z).length_squared() >= SEE * SEE:
+			continue
+		var reward := g.empire.record_discovery(String(p["key"]), String(p["name"]), not p.get("vacant", false))
+		if not reward["milestone"] and not p.get("vacant", false) and p["cat"] in ["fashion", "vehicles", "landmark", "food"]:
+			g.ui.toast("Discovered: %s" % p["name"], "info")
 
 
 static func tab(ui: EmpireUI, v: VBoxContainer) -> void:
@@ -163,54 +175,61 @@ static func tab(ui: EmpireUI, v: VBoxContainer) -> void:
 
 static func _row(ui: EmpireUI, p: Dictionary, here: Vector3, known: bool, routed: bool) -> Control:
 	var g := ui.game
-	var colr := Color.WHITE
+	var colr := Glass.BLUE
 	for c in CATS:
 		if c[0] == p["cat"]:
 			colr = c[2]
 	var pan := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(colr, 0.12) if routed else Color(1, 1, 1, 0.04)
-	sb.set_corner_radius_all(12)
-	sb.border_color = Color(colr, 0.9)
-	sb.border_width_left = 4
-	sb.content_margin_left = 14
-	sb.content_margin_right = 10
-	sb.content_margin_top = 6
-	sb.content_margin_bottom = 6
+	var sb := Glass.box(Color(colr, 0.14) if routed else Glass.CARD, 18, 0, Color(colr, 0.45) if routed else Glass.SEP)
+	sb.content_margin_left = 12
+	sb.content_margin_right = 14
+	sb.content_margin_top = 10
+	sb.content_margin_bottom = 10
 	pan.add_theme_stylebox_override("panel", sb)
-	var h := S.hbox(12)
+	var h := Glass.hbox(12)
 	pan.add_child(h)
-	var tv := S.vbox(0)
+	var pp: Vector3 = p["pos"]
+	var pid := String((p.get("ref", {}) as Dictionary).get("id", ""))
+	if pid != "":
+		var thumb := PhotoBook.frame(pid, "front", Vector2(96, 66), pp, 12)
+		thumb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(thumb)
+	var tv := Glass.vbox(2)
+	tv.alignment = BoxContainer.ALIGNMENT_CENTER
 	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var nh := S.hbox(8)
-	var nm := S.label(String(p["name"]), 18, S.PAPER, "bold")
-	nm.clip_text = true
-	nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	nm.custom_minimum_size.x = 200
+	var nh := Glass.hbox(8)
+	var nm := Glass.line(String(p["name"]), "headline")
+	nm.custom_minimum_size.x = 140
 	nh.add_child(nm)
 	if not known and not p.get("vacant", false) and p["cat"] != "yours":
-		nh.add_child(S.chip("NEW", S.AMBER))
+		nh.add_child(Glass.badge("NEW", Glass.ACCENT_TEXT))
 	if routed:
-		nh.add_child(S.chip("ROUTE SET", colr))
+		nh.add_child(Glass.badge("ROUTE SET", colr))
 	tv.add_child(nh)
-	var pp: Vector3 = p["pos"]
 	var d := Vector2(pp.x - here.x, pp.z - here.z).length()
-	tv.add_child(S.label("%s  ·  %s  ·  %s" % [p["what"], ui._dist_text(d), _place_area(g, pp)], 14, S.MUTED))
+	tv.add_child(Glass.line("%s  ·  %s  ·  %s" % [p["what"], ui._dist_text(d), _place_area(g, pp)], "footnote", Glass.LABEL2))
 	h.add_child(tv)
 	if p.has("unit") and not p.get("rival", false):
-		h.add_child(S.button("Details", func():
+		var db := Glass.button("Details", func():
 			if p.get("firm", false):
 				ui.open_firm(p["unit"], true)
 			else:
-				ui.open_property(p["unit"], true), false, 110))
+				ui.open_property(p["unit"], true), "gray", "small")
+		db.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(db)
 	elif p.has("biz"):
-		h.add_child(S.button("Manage", func(): ui.open_manage(p["biz"]), false, 110))
-	h.add_child(S.button("Map", func(): ui.open_phone("map", p["ref"] if String(p["ref"].get("kind", "")) == "unit" else {}), false, 80))
-	h.add_child(S.button("Go · GPS", func():
+		var mb := Glass.button("Manage", func(): ui.open_manage(p["biz"]), "gray", "small")
+		mb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		h.add_child(mb)
+	var mapb := Glass.button("Map", func(): ui.open_phone("map", p["ref"] if String(p["ref"].get("kind", "")) == "unit" else {}), "gray", "small")
+	mapb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(mapb)
+	var gob := Glass.button("GPS", func():
 		g.set_gps(pp, String(p["name"]), p["ref"])
 		ui.close_panel(true)
-		ui.toast("Route set: %s" % p["name"], "info"), true, 130))
+		ui.toast("Route set: %s" % p["name"], "info"), "filled", "small", Glass.BLUE, "gps")
+	gob.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(gob)
 	return pan
 
 

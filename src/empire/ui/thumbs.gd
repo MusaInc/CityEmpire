@@ -9,11 +9,26 @@ extends Node
 ## No live 3D in the dashboard: images only, made on demand, one at a time.
 
 const VW := Vector2i(640, 368)   # (big enough for the Garage and Marketplace hero shots)
+const CACHE_MAX := 24
 
 static var _cache := {}       # model -> ImageTexture
+static var _order: Array = [] # LRU keys, oldest first
 var _queue: Array = []        # [model, TextureRect]
 var _busy := false
 var game: EmpireGame
+
+
+static func clear_caches() -> void:
+	_cache.clear()
+	_order.clear()
+
+
+static func _remember(model: String, tex: Texture2D) -> void:
+	_cache[model] = tex
+	_order.erase(model)
+	_order.append(model)
+	while _order.size() > CACHE_MAX:
+		_cache.erase(_order.pop_front())
 
 
 func _ready() -> void:
@@ -26,9 +41,11 @@ func vehicle(model: String, size := Vector2(260, 150)) -> TextureRect:
 	var tr := TextureRect.new()
 	tr.custom_minimum_size = size
 	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if _cache.has(model):
+		_order.erase(model)
+		_order.append(model)
 		tr.texture = _cache[model]
 	else:
 		_queue.append([model, tr])
@@ -46,10 +63,11 @@ func _render_next() -> void:
 	var job: Array = _queue.pop_front()
 	var model := String(job[0])
 	if not _cache.has(model):
-		_cache[model] = await _render(model)
+		_remember(model, await _render(model))
+	var tex: Texture2D = _cache.get(model)
 	for j in [job] + _queue.filter(func(q): return q[0] == model):
 		if is_instance_valid(j[1]):
-			(j[1] as TextureRect).texture = _cache[model]
+			(j[1] as TextureRect).texture = tex
 	_queue = _queue.filter(func(q): return q[0] != model)
 	_render_next.call_deferred()
 
@@ -58,26 +76,33 @@ func _render(model: String) -> Texture2D:
 	var vp := SubViewport.new()
 	vp.size = VW
 	vp.own_world_3d = true
-	vp.transparent_bg = false   # (the Mobile renderer writes no 3D alpha: use the card colour)
+	vp.transparent_bg = true
+	vp.msaa_3d = Viewport.MSAA_2X
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS   # (freed after three frames)
 	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.13, 0.17, 0.21)
+	env.background_mode = Environment.BG_CLEAR_COLOR
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.75, 0.8, 0.9)
-	env.ambient_light_energy = 0.8
+	env.ambient_light_color = Color(0.86, 0.89, 0.95)
+	env.ambient_light_energy = 0.85
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	var we := WorldEnvironment.new()
 	we.environment = env
 	vp.add_child(we)
 	var sun := DirectionalLight3D.new()
-	sun.rotation = Vector3(-0.8, 0.6, 0.0)
-	sun.light_energy = 1.4
+	sun.rotation = Vector3(-0.78, 0.58, 0.0)
+	sun.light_energy = 1.45
+	sun.light_color = Color(1.0, 0.98, 0.95)
 	vp.add_child(sun)
+	var rim := DirectionalLight3D.new()
+	rim.rotation = Vector3(-0.42, -2.4, 0.0)
+	rim.light_energy = 0.62
+	rim.light_color = Color(0.82, 0.90, 1.0)
+	vp.add_child(rim)
 	var cls := SkyportPlay.vclass(model)
 	var holder := Node3D.new()
 	vp.add_child(holder)
 	var length := 4.6
+	var width := 2.0
 	if cls == "car":
 		var c := Car.new()
 		c.setup(game._car_spec(model), "display")
@@ -86,11 +111,40 @@ func _render(model: String) -> Texture2D:
 		var vis := CarVisual.new()
 		c.add_child(vis)
 		vis.setup(c)
-		length = float((c.spec["size"] as Vector3).z)
+		var csz := c.spec["size"] as Vector3
+		length = float(csz.z)
+		width = float(csz.x)
 	else:
 		var spec := SkyportPlay.craft_spec(model)
 		holder.add_child(CraftModels.build(cls, model, spec))
-		length = maxf((spec["size"] as Vector3).z, (spec["size"] as Vector3).x)
+		var ssz := spec["size"] as Vector3
+		length = maxf(float(ssz.z), float(ssz.x))
+		width = maxf(float(ssz.x), float(ssz.z) * 0.55)
+	# Subtle studio contact shadow disc so the vehicle grounds cleanly on both Light and Dark cards.
+	var shadow := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(width * 1.45, length * 1.28)
+	qm.orientation = PlaneMesh.FACE_Y
+	shadow.mesh = qm
+	var sgrad := Gradient.new()
+	sgrad.set_color(0, Color(0.0, 0.0, 0.0, 0.34))
+	sgrad.add_point(0.55, Color(0.0, 0.0, 0.0, 0.16))
+	sgrad.set_color(sgrad.get_point_count() - 1, Color(0.0, 0.0, 0.0, 0.0))
+	var stex := GradientTexture2D.new()
+	stex.gradient = sgrad
+	stex.fill = GradientTexture2D.FILL_RADIAL
+	stex.fill_from = Vector2(0.5, 0.5)
+	stex.fill_to = Vector2(1.0, 0.5)
+	stex.width = 64
+	stex.height = 64
+	var smat := StandardMaterial3D.new()
+	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	smat.albedo_texture = stex
+	smat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	shadow.material_override = smat
+	shadow.position = Vector3(0.0, 0.02, 0.0)
+	holder.add_child(shadow)
 	var cam := Camera3D.new()
 	cam.fov = 32.0
 	var d := length * 1.45 + 1.2

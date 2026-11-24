@@ -95,6 +95,8 @@ func _ready() -> void:
 
 
 var _safe_root: Control
+var _title_center: Control
+var _title_studio: Control
 
 
 ## Insets the HUD by the display's safe area (none on desktop in a window).
@@ -104,13 +106,18 @@ func _apply_safe_area() -> void:
 	var inset := _safe_insets(_safe_root.size)
 	# Cap the bottom inset so controls/prompts clear the iPhone home indicator
 	# cleanly without wasting vertical space on iPad.
-	inset[3] = minf(float(inset[3]), 28.0)
-	# (Only the HUD: panels and the title are centred, with full-screen dims
-	# that must still reach the edges; floating labels track 3-D points.)
+	var hud_bottom := minf(float(inset[3]), 28.0)
 	hud.offset_left = inset[0]
 	hud.offset_top = inset[1]
 	hud.offset_right = -inset[2]
-	hud.offset_bottom = -inset[3]
+	hud.offset_bottom = -hud_bottom
+	if _title_center != null and is_instance_valid(_title_center):
+		_title_center.offset_left = 80.0 + float(inset[0])
+		_title_center.offset_right = 600.0 + float(inset[0])
+		_title_center.offset_top = float(inset[1])
+		_title_center.offset_bottom = -float(inset[3])
+	if _title_studio != null and is_instance_valid(_title_studio):
+		_anchor(_title_studio, 0.0, 1.0, Vector2(80.0 + float(inset[0]), -52.0 - float(inset[3])), Vector2(200, 26))
 
 
 # ------------------------------------------------------------------ HUD
@@ -323,12 +330,18 @@ func _hud_panel(pos: Vector2, size: Vector2, accent := Color(0, 0, 0, 0)) -> Pan
 	return p
 
 
+var _hud_cache := {}
+
+
 func show_hud() -> void:
 	minimap.game = game
 	thumbs.game = game
 	_title_root.visible = false
 	for c in _title_root.get_children():
 		c.queue_free()
+	_title_center = null
+	_title_studio = null
+	_hud_cache.clear()
 	hud.visible = true
 	touch.visible = DisplayServer.is_touchscreen_available() or game.args.has("touch")
 	update_hud()
@@ -338,97 +351,163 @@ func update_hud() -> void:
 	if game == null or game.empire == null or not hud.visible:
 		return
 	var e := game.empire
-	_money.text = EmpireData.money(e.personal_cash)
-	_clock.text = "%s %s" % [e.weekday(), e.clock_text()]
+	var money_txt := EmpireData.money(e.personal_cash)
+	if _hud_cache.get("money") != money_txt:
+		_hud_cache["money"] = money_txt
+		_money.text = money_txt
+	var clock_txt := "%s %s" % [e.weekday(), e.clock_text()]
+	if _hud_cache.get("clock") != clock_txt:
+		_hud_cache["clock"] = clock_txt
+		_clock.text = clock_txt
 	var wname := String(CityLife.weather_def(e.weather).get("name", ""))
 	var hr := e.hour()
 	if (hr < 6.0 or hr >= 20.0) and wname in ["Sunny", "Heatwave"]:
 		wname = "Clear night" if wname == "Sunny" else "Warm night"
-	_weather_l.text = wname
-	_speed.text = "×%d" % int(game.time_scale) if game.time_scale > 1.0 and game.floor == null and not game.in_vehicle() else ""
-	_speed.visible = _speed.text != ""
+	if _hud_cache.get("weather") != wname:
+		_hud_cache["weather"] = wname
+		_weather_l.text = wname
+	var speed_txt := "×%d" % int(game.time_scale) if game.time_scale > 1.0 and game.floor == null and not game.in_vehicle() else ""
+	if _hud_cache.get("speed") != speed_txt:
+		_hud_cache["speed"] = speed_txt
+		_speed.text = speed_txt
+		_speed.visible = speed_txt != ""
 	var ob := game.objective()
-	_obj.text = String(ob[0])
-	_obj_panel.visible = _obj.text != ""
+	var obj_txt := String(ob[0])
+	if _hud_cache.get("obj") != obj_txt:
+		_hud_cache["obj"] = obj_txt
+		_obj.text = obj_txt
+		_obj_panel.visible = obj_txt != ""
 	# The route: the next turn (big) and what's left (small) under the
 	# minimap, purple as on both maps. One place for distances.
 	var gps: Gps = game.gps
-	if gps.active():
+	var turn_vis := gps.active()
+	var gps_txt := ""
+	if turn_vis:
 		var to := gps.label if gps.label != "" else "destination"
+		var td := ""
+		var ts := ""
+		var tdir := 0
 		if gps.message != "":
-			_turn_dist.text = "No route"
-			_turn_sub.text = gps.message
-			(_turn_icon as _TurnIcon).dir = 2
+			td = "No route"
+			ts = gps.message
+			tdir = 2
 		elif gps.turn.x != 0.0 and gps.turn.y < 600.0:
 			var tm := maxi(int(roundf(gps.turn.y / 10.0) * 10.0), 10)
-			_turn_dist.text = "%d m" % tm
-			_turn_sub.text = "%s · %s to go" % ["Turn left" if gps.turn.x < 0.0 else "Turn right", gps.distance_text()]
-			(_turn_icon as _TurnIcon).dir = -1 if gps.turn.x < 0.0 else 1
+			td = "%d m" % tm
+			ts = "%s · %s to go" % ["Turn left" if gps.turn.x < 0.0 else "Turn right", gps.distance_text()]
+			tdir = -1 if gps.turn.x < 0.0 else 1
 		else:
-			_turn_dist.text = gps.distance_text()
-			_turn_sub.text = "Ahead to " + to
-			(_turn_icon as _TurnIcon).dir = 0
-		_turn_icon.queue_redraw()
-		_turn.visible = true
-		_gps.text = ""
+			td = gps.distance_text()
+			ts = "Ahead to " + to
+			tdir = 0
+		if _hud_cache.get("turn_dist") != td:
+			_hud_cache["turn_dist"] = td
+			_turn_dist.text = td
+		if _hud_cache.get("turn_sub") != ts:
+			_hud_cache["turn_sub"] = ts
+			_turn_sub.text = ts
+		if _hud_cache.get("turn_dir") != tdir:
+			_hud_cache["turn_dir"] = tdir
+			(_turn_icon as _TurnIcon).dir = tdir
+			_turn_icon.queue_redraw()
 	else:
-		_turn.visible = false
-		_gps.text = "Tap for what to do" if (ob.size() > 3 and String(ob[3]) != "") else ""
-	_gps.visible = _gps.text != ""
-	_gps.add_theme_color_override("font_color", S.MUTED)
+		gps_txt = "Tap for what to do" if (ob.size() > 3 and String(ob[3]) != "") else ""
+	if _hud_cache.get("turn_vis") != turn_vis:
+		_hud_cache["turn_vis"] = turn_vis
+		_turn.visible = turn_vis
+	if _hud_cache.get("gps") != gps_txt:
+		_hud_cache["gps"] = gps_txt
+		_gps.text = gps_txt
+		_gps.visible = gps_txt != ""
+		_gps.add_theme_color_override("font_color", S.MUTED)
 	# Prompt.
 	var pr := game.spot_prompt()
+	var pr_txt := String(pr[0])
+	var pr_ok := bool(pr[1])
 	# In a car the exit is the action button (touch) or E (shown small):
 	# no banner over the road.
-	_prompt.visible = String(pr[0]) != "" and _panel == null and not (game.in_vehicle() and (touch.visible or not pr[1]))
-	_prompt_l.text = String(pr[0])
-	_prompt_l.add_theme_color_override("font_color", S.PAPER if pr[1] else Color(S.PAPER, 0.5))
-	_prompt_key.visible = pr[1] and not touch.visible
-	_prompt.offset_left = -_prompt.size.x * 0.5
-	_prompt.offset_right = _prompt.size.x * 0.5
-	touch.action_text = String(pr[0]) if pr[1] else ""
+	var pr_vis := pr_txt != "" and _panel == null and not (game.in_vehicle() and (touch.visible or not pr_ok))
+	var pr_key_vis := pr_ok and not touch.visible
+	var pr_changed := false
+	if _hud_cache.get("pr_vis") != pr_vis:
+		_hud_cache["pr_vis"] = pr_vis
+		_prompt.visible = pr_vis
+		pr_changed = true
+	if _hud_cache.get("pr_txt") != pr_txt:
+		_hud_cache["pr_txt"] = pr_txt
+		_prompt_l.text = pr_txt
+		pr_changed = true
+	if _hud_cache.get("pr_ok") != pr_ok:
+		_hud_cache["pr_ok"] = pr_ok
+		_prompt_l.add_theme_color_override("font_color", S.PAPER if pr_ok else Color(S.PAPER, 0.5))
+	if _hud_cache.get("pr_key_vis") != pr_key_vis:
+		_hud_cache["pr_key_vis"] = pr_key_vis
+		_prompt_key.visible = pr_key_vis
+		pr_changed = true
+	var pr_w := _prompt.size.x
+	if pr_changed or _hud_cache.get("pr_w") != pr_w:
+		_hud_cache["pr_w"] = pr_w
+		_prompt.offset_left = -pr_w * 0.5
+		_prompt.offset_right = pr_w * 0.5
+	var act_txt := pr_txt if pr_ok else ""
+	if touch.action_text != act_txt:
+		touch.action_text = act_txt
 	# Carrying.
 	var c := e.carried
-	if c.is_empty():
-		_carry.text = ""
-	else:
+	var carry_txt := ""
+	if not c.is_empty():
 		var names: Array = []
 		for pid in c.units:
 			names.append("%s ×%d" % [EmpireData.product(pid)["name"], c.qty(pid)])
-		_carry.text = "CARRYING %d/%d  ·  %s" % [c.cases_used(), c.case_capacity, ", ".join(names)]
+		carry_txt = "CARRYING %d/%d  ·  %s" % [c.cases_used(), c.case_capacity, ", ".join(names)]
+	if _hud_cache.get("carry") != carry_txt:
+		_hud_cache["carry"] = carry_txt
+		_carry.text = carry_txt
 	# Shop strip.
 	var b := game.current_business()
-	if b:
+	var strip_vis := b != null
+	var strip_txt := ""
+	if strip_vis:
 		var cap := 0
 		for s in b.slots:
 			cap += int(s["cap"])
 		var fill := float(b.shelf_units()) / maxf(cap, 1)
 		var trading := b.open and b.within_hours(e.hour())
-		_strip.text = "%s · %s\n★ %d  ·  shelves %d%%  ·  queue %d  ·  today %s" % [b.name.to_upper(),
+		strip_txt = "%s · %s\n★ %d  ·  shelves %d%%  ·  queue %d  ·  today %s" % [b.name.to_upper(),
 			"OPEN" if trading else "CLOSED", int(b.reputation), int(fill * 100.0),
 			game.floor.queue_length() if game.floor else 0, EmpireData.money(float(b.today["revenue"]))]
-		_strip_panel.visible = true
-	else:
-		_strip.text = ""
-		_strip_panel.visible = false
+	if _hud_cache.get("strip_txt") != strip_txt:
+		_hud_cache["strip_txt"] = strip_txt
+		_strip.text = strip_txt
+	if _hud_cache.get("strip_vis") != strip_vis:
+		_hud_cache["strip_vis"] = strip_vis
+		_strip_panel.visible = strip_vis
 	var cr = game.vehicle_node()
+	var drive_vis := false
+	var drive_txt := ""
 	if cr is Craft:
-		_drive.text = (cr as Craft).hud_text()
-		_drive_panel.visible = true
+		drive_txt = (cr as Craft).hud_text()
+		drive_vis = true
 	elif game.driving != "":
 		var car: Car = game.cars[game.driving]
 		var v := e.vehicle(game.driving)
 		var cargo := v["cargo"] as Stock
-		_drive.text = "%d mph" % int(absf(car.forward_speed) * 2.237)
+		drive_txt = "%d mph" % int(absf(car.forward_speed) * 2.237)
 		if cargo.cases_used() > 0:
-			_drive.text += "  ·  %d/%d cases" % [cargo.cases_used(), cargo.case_capacity]
-		_drive_panel.visible = true
-	else:
-		_drive.text = ""
-		_drive_panel.visible = false
+			drive_txt += "  ·  %d/%d cases" % [cargo.cases_used(), cargo.case_capacity]
+		drive_vis = true
+	if _hud_cache.get("drive_txt") != drive_txt:
+		_hud_cache["drive_txt"] = drive_txt
+		_drive.text = drive_txt
+	if _hud_cache.get("drive_vis") != drive_vis:
+		_hud_cache["drive_vis"] = drive_vis
+		_drive_panel.visible = drive_vis
 	# Inside a shop the minimap shows nothing useful: it shrinks away while
 	# you're on your shop floor (the route still shows under it when set).
-	minimap.visible = game.floor == null or gps.active()
+	var mm_vis := game.floor == null or turn_vis
+	if _hud_cache.get("mm_vis") != mm_vis:
+		_hud_cache["mm_vis"] = mm_vis
+		minimap.visible = mm_vis
 	_update_floats()
 
 
@@ -487,6 +566,8 @@ func float_text(text: String, world_p: Vector3, col: Color) -> void:
 
 
 func _update_floats() -> void:
+	if _float_items.is_empty():
+		return
 	var cam := get_viewport().get_camera_3d()
 	for f in _float_items.duplicate():
 		f["t"] = float(f["t"]) + get_process_delta_time()
@@ -677,11 +758,15 @@ func show_title(has_save: bool) -> void:
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_title_root.add_child(shade)
 
+	var ins := _safe_insets()
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
-	center.offset_left = 80.0
-	center.offset_right = 600.0
+	center.offset_left = 80.0 + float(ins[0])
+	center.offset_right = 600.0 + float(ins[0])
+	center.offset_top = float(ins[1])
+	center.offset_bottom = -float(ins[3])
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_title_center = center
 	_title_root.add_child(center)
 	var stack := S.vbox(16)
 	stack.custom_minimum_size.x = 520.0
@@ -715,7 +800,8 @@ func show_title(has_save: bool) -> void:
 	options.add_child(S.button("Settings", _settings_panel, false, 118 if has_save else 246))
 	actions.add_child(options)
 	var studio := S.label("Musa Studios", 15, Color("c0c5c5"))
-	_anchor(studio, 0.0, 1.0, Vector2(80, -52), Vector2(200, 26))
+	_anchor(studio, 0.0, 1.0, Vector2(80.0 + float(ins[0]), -52.0 - float(ins[3])), Vector2(200, 26))
+	_title_studio = studio
 	_title_root.add_child(studio)
 
 
@@ -980,14 +1066,22 @@ func open_public_checkout(room: ShopInterior) -> void:
 	for pid: String in products:
 		var item := EmpireData.product(pid)
 		var cost := room.biz.price(pid)
-		var button := S.button("BUY · %s" % EmpireData.money(cost, true), func():
-			var err := e.buy_retail(String(room.unit["name"]), pid, cost)
-			if not err.is_empty():
-				toast(err, "warn")
-				return
+		var consume := String(item.get("cat", "")) in Empire.CONSUMABLE_CATEGORIES
+		var action := "ENJOY" if consume else "BUY"
+		var button := S.button("%s · %s" % [action, EmpireData.money(cost, true)], func():
+			if consume:
+				var purchase := e.consume_public_item(pid, cost, String(room.unit["name"]))
+				if not purchase["ok"]:
+					toast(String(purchase["error"]), "warn")
+					return
+			else:
+				var err := e.buy_retail(String(room.unit["name"]), pid, cost)
+				if not err.is_empty():
+					toast(err, "warn")
+					return
+				toast("Bought %s" % item["name"], "good")
 			Sfx.play("cash", -5.0)
-			toast("Bought %s" % item["name"], "good")
-			open_public_checkout(room), true, 173)
+			game.save_game(), true, 173)
 		list.add_child(_row([_fixed(String(item["name"]), 450, 17), button]))
 	v.add_child(_scroll(list, 400))
 	if room.unit.get("flagship", false):
@@ -1025,7 +1119,7 @@ func open_property(u: Dictionary, remote := false) -> void:
 			continue
 		types.add_child(S.button("%s %s" % [td.get("icon", ""), td.get("name", tid)], func():
 			_rent_type = tid
-			open_property(u), tid == _rent_type, 0))
+			open_property(u, remote), tid == _rent_type, 0))
 	v.add_child(S.label("OPEN AS", 13, S.AMBER, "black"))
 	v.add_child(types)
 	var td2 := EmpireData.business_type(_rent_type)
@@ -1267,36 +1361,49 @@ func _m_overview(v: VBoxContainer, b: Business) -> void:
 
 
 func _manage_hours(b: Business) -> void:
-	var v := _open("Opening hours", 600, 350)
-	var row := S.hbox(12)
-	var start := SpinBox.new()
-	var finish := SpinBox.new()
+	var v := _open("Opening hours", 640, 380)
 	var hours := b.hours()
-	for spec in [[start, "Open", 0, 23, hours.x], [finish, "Close", 1, 24, hours.y]]:
-		var field: SpinBox = spec[0]
-		field.min_value = spec[2]
-		field.max_value = spec[3]
-		field.value = spec[4]
-		field.suffix = ":00"
-		field.custom_minimum_size = Vector2(112, 48)
-		row.add_child(S.label(spec[1], 18, S.MUTED))
-		row.add_child(field)
-	v.add_child(row)
+	var vals := [int(hours.x), int(hours.y)]
+	var labels: Array[Label] = []
 	var estimate := Glass.para("", "callout")
-	v.add_child(estimate)
 	var apply := S.button("Save hours", func():
-		if b.set_hours(int(start.value), int(finish.value)):
+		if b.set_hours(vals[0], vals[1]):
 			game._refresh_signs(b.premises["id"])
 			game.save_game()
 			open_manage(b, "overview"), true)
-	var update := func(_value: float) -> void:
-		var length := finish.value - start.value
-		apply.disabled = length <= 0.0
-		estimate.text = "Estimated wages per day · %s" % EmpireData.money(length * b.wages_per_hour(), true) \
-			if length > 0.0 else "Closing time must be after opening time."
-	start.value_changed.connect(update)
-	finish.value_changed.connect(update)
-	update.call(0.0)
+	var sync_hours := func() -> void:
+		labels[0].text = "%02d:00" % vals[0]
+		labels[1].text = "%02d:00" % vals[1]
+		var length: int = vals[1] - vals[0]
+		apply.disabled = length <= 0
+		estimate.text = "%d hours open · estimated wages %s/day" % [length, EmpireData.money(float(length) * b.wages_per_hour(), true)] \
+			if length > 0 else "Closing time must be after opening time."
+	var row := Glass.hbox(16)
+	for i in 2:
+		var idx := i
+		var lo := 0 if idx == 0 else 1
+		var hi := 23 if idx == 0 else 24
+		var card := Glass.card(18, 10)
+		(card[0] as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var cv: VBoxContainer = card[1]
+		cv.add_child(Glass.text("OPEN" if idx == 0 else "CLOSE", "caption", Glass.LABEL2, "semibold"))
+		var step := Glass.hbox(10)
+		var val_l := Glass.text("%02d:00" % vals[idx], "title2", Glass.LABEL)
+		val_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		val_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		labels.append(val_l)
+		step.add_child(Glass.button("−", func():
+			vals[idx] = clampi(vals[idx] - 1, lo, hi)
+			sync_hours.call(), "gray", "regular"))
+		step.add_child(val_l)
+		step.add_child(Glass.button("+", func():
+			vals[idx] = clampi(vals[idx] + 1, lo, hi)
+			sync_hours.call(), "gray", "regular"))
+		cv.add_child(step)
+		row.add_child(card[0])
+	v.add_child(row)
+	v.add_child(estimate)
+	sync_hours.call()
 	var actions := S.hbox(12)
 	actions.add_child(S.button("Use standard hours", func():
 		b.reset_hours()
@@ -1901,8 +2008,8 @@ func legacy_tab(tab: String, v: VBoxContainer, focus := {}) -> void:
 				game.sleep_until(7.0), false, 200))
 			v.add_child(h3)
 			v.add_child(S.button("Settings", func(): _settings_panel(), false, 200))
-			# TestFlight builds only (pre-1.0): money to try things out with.
-			if String(ProjectSettings.get_setting("application/config/version", "1")).begins_with("0."):
+			# Debug builds only: never exposed in release / TestFlight builds.
+			if OS.is_debug_build():
 				v.add_child(S.button("Beta tester · add £1,000,000", func():
 					e.personal_cash += 1000000.0
 					e._book("personal", 1000000.0, "other", "Tester money")
@@ -1912,6 +2019,11 @@ func legacy_tab(tab: String, v: VBoxContainer, focus := {}) -> void:
 			v.add_child(S.button("Save & quit to title", func():
 				game.save_game()
 				close_panel(true)
+				EmpireMap.clear_caches()
+				ExploreUI.clear_caches()
+				Phone.clear_caches()
+				Thumbs.clear_caches()
+				Glass.clear_caches()
 				get_tree().reload_current_scene(), false, 280))
 			# Attribution the character's source assets ask for (art/hero/CREDITS.md).
 			v.add_child(S.label("CREDITS", 14, S.AMBER, "black"))
@@ -2232,9 +2344,19 @@ func open_style(first := false) -> void:
 		game.rig.set_facing(game.rig._facing)
 	_style_pose(true)
 	_style_frame()
-	var catcher := Control.new()  # (the left side stays clear: the hero is there)
+	var catcher := Control.new()  # (the left side stays clear: drag anywhere there to orbit the hero)
 	catcher.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	catcher.mouse_filter = Control.MOUSE_FILTER_STOP
+	catcher.gui_input.connect(func(ev: InputEvent):
+		var dx := 0.0
+		if ev is InputEventScreenDrag:
+			dx = (ev as InputEventScreenDrag).relative.x
+		elif ev is InputEventMouseMotion and ((ev as InputEventMouseMotion).button_mask & MOUSE_BUTTON_MASK_LEFT):
+			dx = (ev as InputEventMouseMotion).relative.x
+		if not is_zero_approx(dx):
+			_style_orbit += dx * 0.012
+			_style_frame()
+			catcher.accept_event())
 	_panel_root.add_child(catcher)
 	# Fit the visible area (iPad 4:3, wide phones, safe area), hero on the left.
 	var vp := _panel_root.get_viewport_rect().size
@@ -2276,6 +2398,7 @@ func open_style(first := false) -> void:
 			tabs.add_child(Glass.button(tb[1], func():
 				_style_tab = tb[0]
 				_style_portrait = false
+				_style_scroll_y = 0
 				open_style(false), "filled" if _style_tab == tb[0] else "gray", "small"))
 		v.add_child(tabs)
 	var body := S.vbox(10)
@@ -2318,7 +2441,15 @@ func open_style(first := false) -> void:
 			body.add_child(S.button("Save what I'm wearing", func():
 				Wardrobe.save_outfit(e.flags, HeroLook.current(e.flags))
 				open_style(false), false, 300))
-	v.add_child(_scroll(body, 62.0 if first else 110.0))
+	var sc := _scroll(body, 62.0 if first else 110.0)
+	_style_sc = sc
+	v.add_child(sc)
+	if _style_scroll_y > 0:
+		var want_y := _style_scroll_y
+		sc.set_deferred("scroll_vertical", want_y)
+		get_tree().process_frame.connect(func():
+			if is_instance_valid(sc):
+				sc.scroll_vertical = want_y, CONNECT_ONE_SHOT)
 	_style_preview_controls(vp, W, ins)
 	var foot := HFlowContainer.new()
 	foot.add_theme_constant_override("h_separation", 8)
@@ -2330,6 +2461,8 @@ func open_style(first := false) -> void:
 		for it in unpaid:
 			tot += Wardrobe.price(String(it))
 		foot.add_child(S.button("Buy look · %s" % EmpireData.money(float(tot)), func():
+			if _style_sc != null and is_instance_valid(_style_sc):
+				_style_scroll_y = _style_sc.scroll_vertical
 			var err := Wardrobe.buy(e, unpaid, shop)
 			if err != "":
 				toast(err, "bad")
@@ -2348,6 +2481,8 @@ var _style_store_name := ""
 var _style_entry := {}
 var _style_inner := 540.0  # usable width inside the Style panel
 var _style_zoom_button: Button
+var _style_sc: ScrollContainer = null
+var _style_scroll_y := 0
 
 
 ## Safe-area insets (left, top, right, bottom) in canvas px; zero in a desktop window.
@@ -2480,6 +2615,8 @@ func open_store(store: String, display_name := "") -> void:
 
 
 func _style_set(changes: Dictionary) -> void:
+	if _style_sc != null and is_instance_valid(_style_sc):
+		_style_scroll_y = _style_sc.scroll_vertical
 	var e := game.empire
 	HeroLook.change(e.flags, changes)
 	game.apply_hero_look()
@@ -2560,23 +2697,23 @@ func _style_frame() -> void:
 func _close_style() -> void:
 	var first := _style_first
 	_style_first = false
+	_style_scroll_y = 0
+	_style_sc = null
 	var e := game.empire
+	const ALL_SLOTS := ["top", "trousers", "footwear", "shoes", "head", "eyewear", "accessory"]
 	if first:
 		e.flags["styled"] = true
 		_style_tab = "looks"
 		# (Your starting outfit is yours.)
 		var lk := HeroLook.current(e.flags)
 		var o := Wardrobe.owned(e.flags)
-		for k in ["top", "shoes", "head", "eyewear"]:
-			if not String(lk[k]) in o:
-				o.append(String(lk[k]))
+		for k in ALL_SLOTS:
+			var it := String(lk.get(k, ""))
+			if it != "" and not it in o:
+				o.append(it)
 	elif style_shop != "" and not Wardrobe.unpaid(e.flags, HeroLook.current(e.flags)).is_empty():
-		# Left the store without paying: back into what you came in wearing.
-		var back := HeroLook.current(e.flags)
-		for k in ["top", "shoes", "head", "eyewear"]:
-			if not Wardrobe.owns(e.flags, String(back[k]), String(back["body"])):
-				back[k] = _style_entry.get(k, HeroLook.DEFAULT[k])
-		e.flags["look"] = back
+		# Left the store without paying: revert ALL 7 slots back to what you came in wearing.
+		Wardrobe.revert_unpaid(e, HeroLook.current(e.flags), _style_entry)
 		game.apply_hero_look()
 	style_shop = ""
 	_style_store_name = ""
@@ -2641,11 +2778,19 @@ static func _short(x: float) -> String:
 
 
 func _finance_history_panel() -> void:
-	var v := _open("Financial history", 720, 440)
+	var v := _open("Financial history", 760, 460)
+	var seg_host := Glass.vbox(0)
+	v.add_child(seg_host)
 	var chart_area := S.vbox(10)
-	var choices := [["Net worth", "net_worth"], ["Profit", "profit"], ["Cash flow", "cash_flow"],
-		["Assets", "assets"], ["Debt", "debt"]]
-	var refresh := func(key: String) -> void:
+	v.add_child(chart_area)
+	var choices := [["net_worth", "Net worth"], ["profit", "Profit"], ["cash_flow", "Cash flow"],
+		["assets", "Assets"], ["debt", "Debt"]]
+	var refresh_ref: Array = [null]
+	refresh_ref[0] = func(key: String) -> void:
+		for ch in seg_host.get_children():
+			seg_host.remove_child(ch)
+			ch.queue_free()
+		seg_host.add_child(Glass.segmented(choices, key, func(k): refresh_ref[0].call(k)))
 		for child in chart_area.get_children():
 			chart_area.remove_child(child)
 			child.queue_free()
@@ -2657,20 +2802,13 @@ func _finance_history_panel() -> void:
 		chart_area.add_child(Glass.text(EmpireData.money(last, true), "title2"))
 		chart_area.add_child(Glass.para("Latest close · %d daily %s" % [values.size(), "record" if values.size() == 1 else "records"], "footnote"))
 		if values.size() >= 2:
-			var chart := PhonePages.Chart.new(values, Vector2(0, 120))
+			var chart := PhonePages.Chart.new(values, Vector2(0, 140))
 			if key == "debt":
 				chart.col = Glass.RED if last > float(values[0]) else Glass.GREEN
 			chart_area.add_child(chart)
 		if key == "cash_flow":
 			chart_area.add_child(Glass.para("Change in savings and company cash combined. Includes stock purchases, investments and borrowing.", "footnote"))
-	var picker := OptionButton.new()
-	picker.custom_minimum_size.y = 48
-	for choice in choices:
-		picker.add_item(choice[0])
-	picker.item_selected.connect(func(i: int): refresh.call(choices[i][1]))
-	v.add_child(picker)
-	v.add_child(chart_area)
-	refresh.call("net_worth")
+	refresh_ref[0].call("net_worth")
 
 
 func _touch_settings_panel() -> void:
@@ -2695,7 +2833,7 @@ func _touch_settings_panel() -> void:
 
 
 func _settings_panel() -> void:
-	var v := _open("Settings", 680, 580)
+	var v := _open("Settings", 680, 620)
 	var q := S.hbox(10)
 	q.add_child(S.label("Graphics", 18, S.MUTED))
 	for i in 3:
@@ -2705,6 +2843,14 @@ func _settings_panel() -> void:
 			Settings.save()
 			_settings_panel(), Settings.quality == i))
 	v.add_child(q)
+	var lk_row := S.hbox(10)
+	lk_row.add_child(S.label("Visual look", 18, S.MUTED))
+	lk_row.add_child(Glass.segmented([["cinematic", "Cinematic"], ["clean", "Clean"]], "cinematic" if Settings.look == "cinematic" else "clean", func(k):
+		Settings.look = k
+		Settings.apply()
+		Settings.save()
+		_settings_panel()))
+	v.add_child(lk_row)
 	var lens_row := S.hbox(10)
 	lens_row.add_child(S.label("Driving lens", 18, S.MUTED))
 	for choice in [["Off", 0.0], ["Subtle", 0.55], ["Stronger", 1.0]]:
@@ -3253,19 +3399,29 @@ func _portfolio_tab(v: VBoxContainer) -> void:
 
 func _biz_card(b: Business) -> PanelContainer:
 	var e := game.empire
-	var cv := _card()
+	var cv := Glass.card(18, 12)
 	var c: VBoxContainer = cv[1]
 	var st := b.status(e.hour())
-	var top := S.hbox(12)
-	var nm := S.label(b.name, 21, S.PAPER, "black")
+	var uid := String(b.premises.get("id", ""))
+	var u: Dictionary = game.unit_by_id.get(uid, {})
+	var door := Premises.door_point(u) if not u.is_empty() else Vector3.INF
+	var top_row := Glass.hbox(14)
+	var thumb := PhotoBook.frame(uid, "front", Vector2(144, 92), door, 14)
+	thumb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top_row.add_child(thumb)
+	var top_col := Glass.vbox(6)
+	top_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var top := Glass.hbox(10)
+	var nm := Glass.line(b.name, "title3")
 	top.add_child(nm)
-	top.add_child(S.label("%s · %s" % [String(b.type_def().get("name", "Shop")), String(b.district().get("name", ""))], 15, S.MUTED))
-	top.add_child(S.spacer())
 	var issues := biz_issues(b)
 	if issues.any(func(i): return i[1] in ["bad", "warn"]):
 		top.add_child(Widgets.Icon.new("alert", S.AMBER, 22))
-	top.add_child(S.chip(String(st[1]), tones()[st[2]]))
-	c.add_child(top)
+	top.add_child(Glass.badge(String(st[1]), tones()[st[2]]))
+	top_col.add_child(top)
+	top_col.add_child(Glass.line("%s · %s" % [String(b.type_def().get("name", "Shop")), String(b.district().get("name", ""))], "footnote", Glass.LABEL2))
+	top_row.add_child(top_col)
+	c.add_child(top_row)
 	var ld := b.last_day()
 	var prof := float(ld.get("profit", 0.0))
 	var roles: Array = []
@@ -3294,7 +3450,6 @@ func _biz_card(b: Business) -> PanelContainer:
 		acts.add_child(S.button(t[0], func(): open_manage(b, t[1]), false, 110))
 	acts.add_child(S.spacer())
 	acts.add_child(S.button("GPS", func():
-		var u: Dictionary = game.unit_by_id.get(b.premises["id"], {})
 		if not u.is_empty():
 			game.set_gps(Premises.door_point(u), b.name, {"kind": "unit", "id": String(u["id"])})
 			open_phone("map", {"kind": "unit", "id": String(u["id"])}), false, 90))

@@ -28,19 +28,30 @@ const TOPS := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.1
 
 var game: EmpireGame
 var density := 1.0
-var _loops: Array = []        # {pts, cum, len, dir, rect}
+var _loops: Array = []        # {pts, cum, len, dir, rect, crossings, city_crossing, kind}
 var _grid := {}               # Vector2i(100 m cell) -> [loop index]
 var _people: Array = []       # see _spawn
 var _mmis: Array = []         # MultiMeshInstance3D per body
 var _blobs: MultiMeshInstance3D   # contact shadows (one draw for everyone)
 var _doors: Array = []        # [Vector3 door, Vector3 outward, unit id]
+var _door_grid := {}          # Vector2i(100 m cell) -> [door entry]
 var _rng := RandomNumberGenerator.new()
 var _acc := 0.0
 var _first := true
 var _ground: Callable
 var _island_traffic: IslandTraffic
+var _island_check_t := 0.0
 var _vehicles: Array = []          # [[Vector2 pos, Vector2 vel, float radius]]
 var _crossing_entries := {}        # sidewalk loop idx -> [{cross_loop, entry_s, pos}]
+var _crossing_counts := {}         # cross loop idx -> active count (rebuilt once per frame)
+var _eff_density := 1.0
+var _speed_scale := 1.0
+var _browse_scale := 1.0
+var _cur_hour := 12.0
+var _cur_weather := "sunny"
+var _target_count := 0
+var _last_pop_focus := Vector3.INF
+var _last_pop_density := -1.0
 
 
 func setup(p_game: EmpireGame) -> void:
@@ -52,13 +63,14 @@ func setup(p_game: EmpireGame) -> void:
 		layouts.append(game.layout.mainland)
 	for L: CityLayout in layouts:
 		for blk in L.blocks:
-			if blk["kind"] not in ["block", "plaza", "park"]:
+			var bkind := String(blk["kind"])
+			if bkind not in ["block", "plaza", "park"]:
 				continue
 			for li in LANES.size():
 				var ring := Geometry2D.offset_polygon(blk["poly"], -float(LANES[li]))
 				if ring.is_empty() or (ring[0] as PackedVector2Array).size() < 3:
 					continue
-				_add_loop(ring[0], 1 if li == 0 else -1)
+				_add_loop(ring[0], 1 if li == 0 else -1, [], {}, bkind)
 	for city: CityWorld in [game.world, game.world.mainland]:
 		if city != null and city.traffic != null:
 			_add_city_crossings(city.traffic)
@@ -94,9 +106,17 @@ func setup(p_game: EmpireGame) -> void:
 			if _loop_on_carriageway(ring, all_roads, rd):
 				continue
 			_add_loop(ring, 1, [rp.size() - 1, ring.size() - 1])
+	_doors.clear()
+	_door_grid.clear()
 	for u in game.units:
 		if u["kind"] == "shop":
-			_doors.append([Premises.door_point(u), Premises.outward(u), u["id"]])
+			var dp: Vector3 = Premises.door_point(u)
+			var entry := [dp, Premises.outward(u), u["id"]]
+			_doors.append(entry)
+			var dk := Vector2i(floori(dp.x / 100.0), floori(dp.z / 100.0))
+			if not _door_grid.has(dk):
+				_door_grid[dk] = []
+			(_door_grid[dk] as Array).append(entry)
 	var scene: PackedScene = load(MODEL)
 	if scene == null:
 		return
@@ -220,7 +240,7 @@ static func _loop_on_carriageway(ring: PackedVector2Array, roads: Array, own: Ar
 	return false
 
 
-func _add_loop(pts: PackedVector2Array, dir: int, crossings := [], city_crossing := {}) -> void:
+func _add_loop(pts: PackedVector2Array, dir: int, crossings := [], city_crossing := {}, kind := "block") -> void:
 	var cum := PackedFloat32Array([0.0])
 	for i in pts.size():
 		cum.append(cum[i] + pts[i].distance_to(pts[(i + 1) % pts.size()]))
@@ -231,13 +251,108 @@ func _add_loop(pts: PackedVector2Array, dir: int, crossings := [], city_crossing
 	for p in pts:
 		r = r.expand(p)
 	var idx := _loops.size()
-	_loops.append({"pts": pts, "cum": cum, "len": length, "dir": dir, "rect": r, "crossings": crossings, "city_crossing": city_crossing})
+	_loops.append({"pts": pts, "cum": cum, "len": length, "dir": dir, "rect": r, "crossings": crossings,
+		"city_crossing": city_crossing, "kind": kind})
 	for cx in range(floori(r.position.x / 100.0), floori(r.end.x / 100.0) + 1):
 		for cz in range(floori(r.position.y / 100.0), floori(r.end.y / 100.0) + 1):
 			var k := Vector2i(cx, cz)
 			if not _grid.has(k):
 				_grid[k] = []
 			_grid[k].append(idx)
+
+
+func _doors_near(q: Vector2) -> Array:
+	var x0 := floori((q.x - 2.5) / 100.0)
+	var x1 := floori((q.x + 2.5) / 100.0)
+	var z0 := floori((q.y - 2.5) / 100.0)
+	var z1 := floori((q.y + 2.5) / 100.0)
+	if x0 == x1 and z0 == z1:
+		return _door_grid.get(Vector2i(x0, z0), [])
+	var out: Array = []
+	for cx in range(x0, x1 + 1):
+		for cz in range(z0, z1 + 1):
+			var cell: Array = _door_grid.get(Vector2i(cx, cz), [])
+			if not cell.is_empty():
+				out.append_array(cell)
+	return out
+
+
+func _district_at(p: Vector3) -> String:
+	if game == null or game.layout == null:
+		return ""
+	if p.x < CityLayout.RIVER_EDGE and game.layout.mainland != null:
+		return game.layout.mainland.district(p.x, p.z)
+	return game.layout.district(p.x, p.z)
+
+
+func _update_activity(focus: Vector3) -> void:
+	var h := 12.0
+	var weather := "sunny"
+	if game != null and game.empire != null:
+		h = game.empire.hour()
+		weather = String(game.empire.weather)
+	elif game != null and game.atmosphere != null:
+		h = game.atmosphere.hour
+		weather = String(game.atmosphere.weather)
+	_cur_hour = h
+	_cur_weather = weather
+
+	var settings := get_node_or_null("/root/Settings")
+	var traffic_preset := float(settings.preset().get("traffic", 1.0)) if settings else 1.0
+
+	var tod_density := 1.0
+	var tod_speed := 1.0
+	if h >= 7.5 and h <= 9.5:
+		tod_density = 1.28
+		tod_speed = 1.10
+	elif h >= 12.0 and h <= 14.0:
+		tod_density = 1.22
+		tod_speed = 1.05
+	elif h >= 17.0 and h <= 19.5:
+		tod_density = 1.32
+		tod_speed = 1.09
+	elif h >= 23.0 or h < 5.5:
+		var dist_name := _district_at(focus)
+		var nightlife := dist_name in ["cbd", "waterfront", "midtown"]
+		tod_density = 0.44 if nightlife else 0.28
+		tod_speed = 0.94
+	elif h >= 5.5 and h < 7.5:
+		var t := (h - 5.5) / 2.0
+		tod_density = lerpf(0.32, 1.28, t)
+		tod_speed = lerpf(0.96, 1.10, t)
+	elif h > 9.5 and h < 10.5:
+		var t := (h - 9.5)
+		tod_density = lerpf(1.28, 1.0, t)
+		tod_speed = lerpf(1.10, 1.0, t)
+	elif h > 19.5 and h < 23.0:
+		var t := (h - 19.5) / 3.5
+		var dist_name := _district_at(focus)
+		var night_base := 0.44 if dist_name in ["cbd", "waterfront", "midtown"] else 0.28
+		tod_density = lerpf(1.32, night_base, t)
+		tod_speed = lerpf(1.09, 0.94, t)
+
+	var w_density := 1.0
+	var w_speed := 1.0
+	var w_browse := 1.0
+	match weather:
+		"rain":
+			w_density = 0.65
+			w_speed = 1.20
+			w_browse = 1.45
+		"storm":
+			w_density = 0.40
+			w_speed = 1.28
+			w_browse = 1.75
+		"foggy", "fog":
+			w_density = 0.85
+			w_speed = 0.97
+		"heatwave", "haze":
+			w_density = 1.08
+			w_speed = 0.94
+
+	_eff_density = clampf(density * traffic_preset * tod_density * w_density, 0.08, 2.0)
+	_speed_scale = tod_speed * w_speed
+	_browse_scale = w_browse
 
 
 ## Point and direction at arc length s round loop l.
@@ -289,25 +404,49 @@ func _unseen(p: Vector3, far: float) -> bool:
 func _spawn(li: int, s: float) -> void:
 	var l: Dictionary = _loops[li]
 	var is_city_cross := not (l["city_crossing"] as Dictionary).is_empty()
-	var spd := _rng.randf_range(1.05, 1.5)
+	var lkind := String(l.get("kind", "block"))
+	var profile := "default"
+	var spd := _rng.randf_range(1.08, 1.44)
+	if not is_city_cross:
+		var wet_bad := _cur_weather in ["rain", "storm"]
+		var r := _rng.randf()
+		var jog_p := (0.16 if lkind == "park" else (0.09 if _cur_hour >= 5.5 and _cur_hour <= 9.5 else 0.02))
+		if wet_bad:
+			jog_p *= 0.15
+		var rush := (_cur_hour >= 7.5 and _cur_hour <= 9.5) or (_cur_hour >= 17.0 and _cur_hour <= 19.5)
+		var comm_p := 0.45 if rush else 0.22
+		if r < jog_p:
+			profile = "jogger"
+			spd = _rng.randf_range(2.25, 2.75)
+		elif r < jog_p + comm_p:
+			profile = "commuter"
+			spd = _rng.randf_range(1.38, 1.66)
+		elif r < jog_p + comm_p + (0.34 if lkind in ["park", "plaza"] else 0.20):
+			profile = "stroller"
+			spd = _rng.randf_range(0.88, 1.15)
 	_people.append({"loop": li, "s": s, "dir": 1 if is_city_cross else int(l["dir"]) * (1 if _rng.randf() < 0.85 else -1),
-		"speed": spd, "vel_cur": spd, "body": _rng.randi() % maxi(_mmis.size(), 1), "seed": _rng.randf(),
+		"speed": spd, "vel_cur": spd * _speed_scale, "profile": profile, "body": _rng.randi() % maxi(_mmis.size(), 1), "seed": _rng.randf(),
 		"top": TOPS[_rng.randi() % TOPS.size()], "scale": _rng.randf_range(0.93, 1.06), "lane": _rng.randf_range(-0.35, 0.35),
 		"stride": _rng.randf() * 3.0, "look": 0.0, "glance": 0.0, "glance_t": _rng.randf_range(0.7, 2.4),
 		"state": "walk", "t": 0.0, "goal": Vector3.ZERO, "pos": Vector3.ZERO, "yaw": 0.0, "walk": 1.0,
-		"browsed": false, "dodge": 0.0, "avoid": Vector2.ZERO, "pace": 1.0, "crossed": false, "cross_cd": 0.0, "waiting": false})
+		"browsed": false, "dodge": 0.0, "avoid": Vector2.ZERO, "pace": 1.0, "crossed": false, "cross_cd": 0.0,
+		"pause_cd": _rng.randf_range(9.0, 26.0), "waiting": false})
 
 
 func _populate(focus: Vector3) -> void:
+	if not _first and _target_count > 0 and _people.size() >= _target_count - 1 \
+			and focus.distance_squared_to(_last_pop_focus) < 16.0 * 16.0 \
+			and absf(_eff_density - _last_pop_density) < 0.08:
+		return
 	var want: Array = []   # [loop, s] slots in range
+	var step := SPACING / maxf(_eff_density, 0.05)
 	for li in _loops_near(focus, NEAR):
 		var l: Dictionary = _loops[li]
-		var step := SPACING / maxf(density, 0.05)
 		var city: Dictionary = l["city_crossing"]
 		if not city.is_empty():
 			var site: Dictionary = city["site"]
 			var kerb: Vector3 = site["a"]
-			if focus.distance_squared_to(kerb) < 58.0 * 58.0 and not _people.any(func(pr): return pr["loop"] == li):
+			if focus.distance_squared_to(kerb) < 58.0 * 58.0 and int(_crossing_counts.get(li, 0)) == 0:
 				want.append([li, float(l["cum"][2])])
 			continue
 		var s := fposmod(float(li) * 7.3, step)
@@ -316,13 +455,16 @@ func _populate(focus: Vector3) -> void:
 			if (sp[0] as Vector2).distance_to(Vector2(focus.x, focus.z)) < NEAR:
 				want.append([li, s])
 			s += step
+	_target_count = want.size()
+	_last_pop_focus = focus
+	_last_pop_density = _eff_density
 	var missing := want.size() - _people.size()
 	if missing <= 0 or want.is_empty():
 		return
 	for i in mini(missing, 30 if _first else 4):
 		var w: Array = want[_rng.randi() % want.size()]
 		var city_route: bool = not _loops[w[0]]["city_crossing"].is_empty()
-		if city_route and _people.any(func(pr): return pr["loop"] == w[0]):
+		if city_route and int(_crossing_counts.get(w[0], 0)) > 0:
 			continue
 		var jitter := 1.0 if city_route else 4.0
 		var s2: float = float(w[1]) + _rng.randf_range(-jitter, jitter)
@@ -339,21 +481,33 @@ func _populate(focus: Vector3) -> void:
 				break
 		if clear:
 			_spawn(int(w[0]), s2)
+			if city_route:
+				_crossing_counts[w[0]] = int(_crossing_counts.get(w[0], 0)) + 1
 
 
 func _process(dt: float) -> void:
 	if game == null or _mmis.is_empty() or game.state != "play" or get_tree().paused:
 		return
 	var focus := _focus()
+	_crossing_counts.clear()
+	for pr in _people:
+		var li := int(pr["loop"])
+		if not (_loops[li]["city_crossing"] as Dictionary).is_empty():
+			_crossing_counts[li] = int(_crossing_counts.get(li, 0)) + 1
 	_acc += dt
 	if _acc > 0.4 or _first:
 		_acc = 0.0
+		_update_activity(focus)
 		_populate(focus)
 		_first = false
 	var me := game.player.global_position
 	var cam := get_viewport().get_camera_3d()
 	var eye := cam.global_position if cam else me
-	_island_traffic = get_tree().get_first_node_in_group("island_traffic") as IslandTraffic
+	if _island_traffic == null or not is_instance_valid(_island_traffic):
+		_island_check_t -= dt
+		if _island_check_t <= 0.0:
+			_island_traffic = get_tree().get_first_node_in_group("island_traffic") as IslandTraffic
+			_island_check_t = 1.0 if _island_traffic == null else 0.0
 	_collect_vehicles(focus)
 	_queue_up()
 	var keep: Array = []
@@ -362,14 +516,20 @@ func _process(dt: float) -> void:
 	for city: CityWorld in [game.world, game.world.mainland]:
 		if city != null and city.traffic != null:
 			city.traffic.pedestrian_obstacles.clear()
+	var fx := focus.x
+	var fz := focus.z
+	var over_budget := _target_count > 0 and _people.size() > _target_count + 4
+	var keep_r := KEEP * 0.72 if over_budget else KEEP
 	for pr in _people:
-		_step(pr, dt, me, eye)
+		var p0: Vector3 = pr["pos"]
+		var d2_focus := (p0.x - fx) * (p0.x - fx) + (p0.z - fz) * (p0.z - fz) if p0 != Vector3.ZERO else 0.0
+		_step(pr, dt, me, eye, d2_focus)
 		var p: Vector3 = pr["pos"]
 		if pr["state"] == "gone":
 			continue
 		# Out of range: they leave only off camera (or once they're specks).
-		var dd := Vector2(p.x, p.z).distance_to(Vector2(focus.x, focus.z))
-		if dd > DROP or dd > KEEP and _unseen(p, 70.0):
+		var dd := Vector2(p.x - fx, p.z - fz).length()
+		if dd > DROP or dd > keep_r and _unseen(p, 70.0):
 			continue
 		keep.append(pr)
 		if pr.get("crossing", false):
@@ -387,7 +547,7 @@ func _process(dt: float) -> void:
 					var points := ceili(a.distance_to(b) / 3.2)
 					for i in range(1, points):
 						traffic.pedestrian_obstacles.append(a.lerp(b, float(i) / points))
-	if _island_traffic != null:
+	if _island_traffic != null and is_instance_valid(_island_traffic):
 		_island_traffic.crossing_people = crossing_people
 	_people = keep
 	_draw_people()
@@ -543,17 +703,21 @@ func _transfer_to_sidewalk(pr: Dictionary, conn: Dictionary, cur_pos: Vector2) -
 	pr["avoid"] = residual.limit_length(1.1) if residual.length() < 1.5 else Vector2.ZERO
 
 
-func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
+func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0) -> void:
 	var l: Dictionary = _loops[pr["loop"]]
 	var state: String = pr["state"]
 	var had_pos := (pr["pos"] as Vector3) != Vector3.ZERO
 	var prev_xz := Vector2((pr["pos"] as Vector3).x, (pr["pos"] as Vector3).z)
 	var p: Vector3
 	var fwd := Vector2.ZERO
-	var base_speed := maxf(float(pr["speed"]), 0.4)
+	var profile := String(pr.get("profile", "default"))
+	var spd_mult := 1.0 if profile == "jogger" else _speed_scale
+	var base_speed := maxf(float(pr["speed"]) * spd_mult, 0.4)
 	var vel_cur := float(pr["vel_cur"])
 	var avoid: Vector2 = pr["avoid"]
+	var far := had_pos and d2_focus > 48.0 * 48.0
 	pr["cross_cd"] = maxf(float(pr["cross_cd"]) - dt, 0.0)
+	pr["pause_cd"] = maxf(float(pr.get("pause_cd", 0.0)) - dt, 0.0)
 	pr["waiting"] = false
 	var hazard_look := Vector2.INF
 
@@ -571,15 +735,18 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 				if probe_sp[2] in crossings and not _crossing_clear(l, int(probe_sp[2])):
 					target_v = 0.0
 					pr["waiting"] = true
-			# Check nearby vehicles on or encroaching on the pavement.
-			var check_pos := prev_xz if had_pos else (cur_sp[0] as Vector2)
-			var haz := _vehicle_hazard(check_pos)
-			var veh_pause: bool = haz[0]
-			var veh_escape: Vector2 = haz[1]
-			hazard_look = haz[2]
-			if veh_pause and not in_crossing:
-				target_v = 0.0
-				pr["waiting"] = true
+			# Check nearby vehicles on or encroaching on the pavement (throttled past 48 m).
+			var veh_pause := false
+			var veh_escape := Vector2.ZERO
+			if not far and not _vehicles.is_empty():
+				var check_pos := prev_xz if had_pos else (cur_sp[0] as Vector2)
+				var haz := _vehicle_hazard(check_pos)
+				veh_pause = haz[0]
+				veh_escape = haz[1]
+				hazard_look = haz[2]
+				if veh_pause and not in_crossing:
+					target_v = 0.0
+					pr["waiting"] = true
 			var accel_rate := 3.4 if target_v < vel_cur else 2.2
 			vel_cur = move_toward(vel_cur, target_v, dt * accel_rate)
 			var distance := vel_cur * dt
@@ -607,8 +774,10 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 				var seg_idx := int(sp[2])
 				var connects: Array = city_c.get("connects", [])
 				if connects.size() == 2 and (seg_idx == 2 or seg_idx == 5):
+					var old_cli := int(pr["loop"])
 					var dest_conn: Dictionary = connects[1] if seg_idx == 2 else connects[0]
 					_transfer_to_sidewalk(pr, dest_conn, base + side * float(pr["dodge"]) + avoid)
+					_crossing_counts[old_cli] = maxi(int(_crossing_counts.get(old_cli, 1)) - 1, 0)
 					l = _loops[pr["loop"]]
 					sp = _sample(l, float(pr["s"]))
 					d = (sp[1] as Vector2) * float(pr["dir"])
@@ -616,17 +785,14 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 					base = (sp[0] as Vector2) + side * float(pr["lane"])
 					avoid = pr["avoid"]
 			# Sidewalk walkers may occasionally turn onto a crossing when passing its entry tail.
-			elif city_c.is_empty() and float(pr["cross_cd"]) <= 0.0 and not now_crossing:
+			elif city_c.is_empty() and float(pr["cross_cd"]) <= 0.0 and not now_crossing and not far:
 				var entries: Array = _crossing_entries.get(int(pr["loop"]), [])
 				for ent: Dictionary in entries:
 					var epos: Vector2 = ent["pos"]
 					if (sp[0] as Vector2).distance_to(epos) < 1.35:
 						pr["cross_cd"] = _rng.randf_range(12.0, 22.0)
 						var cli := int(ent["cross_loop"])
-						var on_cross := 0
-						for other in _people:
-							if int(other["loop"]) == cli:
-								on_cross += 1
+						var on_cross := int(_crossing_counts.get(cli, 0))
 						if on_cross < 2 and _rng.randf() < 0.30:
 							var old_p := base + side * float(pr["dodge"]) + avoid
 							pr["loop"] = cli
@@ -635,6 +801,7 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 							pr["crossed"] = false
 							pr["crossing"] = false
 							pr["dodge"] = 0.0
+							_crossing_counts[cli] = on_cross + 1
 							l = _loops[cli]
 							sp = _sample(l, float(pr["s"]))
 							d = (sp[1] as Vector2) * float(pr["dir"])
@@ -642,20 +809,21 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 							base = (sp[0] as Vector2) + side * float(pr["lane"])
 							avoid = (old_p - base).limit_length(1.1)
 						break
-			var dodge := 0.0 if now_crossing else _dodge_for(base, d, side, me, eye, float(pr["dodge"]))
+			var dodge := 0.0 if (now_crossing or far) else _dodge_for(base, d, side, me, eye, float(pr["dodge"]))
 			pr["dodge"] = move_toward(float(pr["dodge"]), dodge, dt * 1.1)
 			# Smooth steered avoidance around very close hero or approaching vehicles (no sideways shove-sliding).
 			var want_avoid := veh_escape
-			var candidate := base + side * float(pr["dodge"]) + avoid
-			var rel_hero := Vector2(me.x - candidate.x, me.z - candidate.y)
-			var hdist := rel_hero.length()
-			if not now_crossing and hdist < 1.05 and hdist > 0.001:
-				var away_h := -rel_hero / hdist
-				var tang := Vector2(-away_h.y, away_h.x)
-				if tang.dot(d) < 0.0:
-					tang = -tang
-				var steer_away := (away_h * 0.72 + tang * 0.68).normalized()
-				want_avoid += steer_away * clampf((1.05 - hdist) / 1.05, 0.25, 1.0) * 0.85
+			if not far:
+				var candidate := base + side * float(pr["dodge"]) + avoid
+				var rel_hero := Vector2(me.x - candidate.x, me.z - candidate.y)
+				var hdist := rel_hero.length()
+				if not now_crossing and hdist < 1.05 and hdist > 0.001:
+					var away_h := -rel_hero / hdist
+					var tang := Vector2(-away_h.y, away_h.x)
+					if tang.dot(d) < 0.0:
+						tang = -tang
+					var steer_away := (away_h * 0.72 + tang * 0.68).normalized()
+					want_avoid += steer_away * clampf((1.05 - hdist) / 1.05, 0.25, 1.0) * 0.85
 			want_avoid = want_avoid.limit_length(1.35)
 			var avoid_rate := 1.45 if want_avoid.length_squared() > avoid.length_squared() else 0.95
 			avoid = avoid.move_toward(want_avoid, dt * avoid_rate)
@@ -663,37 +831,71 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 			var q: Vector2 = base + side * float(pr["dodge"]) + avoid
 			p = Vector3(q.x, 0.0, q.y)
 			fwd = d
-			# A shop door at hand: look in the window, or go in.
-			if not pr["browsed"] and not now_crossing and not bool(pr["waiting"]):
-				for dr in _doors:
-					var dp: Vector3 = dr[0]
-					if Vector2(dp.x, dp.z).distance_to(q) < 2.2 and game.empire.business_at(String(dr[2])) == null:
-						pr["browsed"] = true
-						var roll := _rng.randf()
-						var occupied := CityLife.is_taken(game.empire, String(dr[2]))
-						if roll < 0.22 and occupied:
-							pr["state"] = "enter"
-							pr["goal"] = dp - (dr[1] as Vector3) * 3.5
-						elif roll < 0.4:
-							pr["state"] = "browse"
-							pr["t"] = _rng.randf_range(2.0, 5.0)
-							pr["goal"] = dp
-						break
-		"browse":
+			# Secondary sidewalk interactions (shop doors + phone/rest pauses) only within 48 m.
+			if not far and not now_crossing and not bool(pr["waiting"]) and profile != "jogger":
+				var entered_shop := false
+				if not pr["browsed"]:
+					for dr in _doors_near(q):
+						var dp: Vector3 = dr[0]
+						if Vector2(dp.x, dp.z).distance_to(q) < 2.2:
+							pr["browsed"] = true
+							var roll := _rng.randf()
+							var uid := String(dr[2])
+							var biz: Business = game.empire.business_at(uid) if game.empire != null else null
+							if biz != null:
+								var is_open := biz.open and biz.within_hours(_cur_hour)
+								if is_open and roll < 0.28:
+									pr["state"] = "enter"
+									pr["goal"] = dp - (dr[1] as Vector3) * 3.5
+									entered_shop = true
+								elif roll < (0.50 if is_open else 0.22):
+									pr["state"] = "browse"
+									pr["t"] = _rng.randf_range(2.2, 5.2) * _browse_scale
+									pr["goal"] = dp
+									entered_shop = true
+							else:
+								var occupied := CityLife.is_taken(game.empire, uid) if game.empire != null else false
+								if roll < 0.22 and occupied:
+									pr["state"] = "enter"
+									pr["goal"] = dp - (dr[1] as Vector3) * 3.5
+									entered_shop = true
+								elif roll < 0.42:
+									pr["state"] = "browse"
+									pr["t"] = _rng.randf_range(2.0, 5.0) * _browse_scale
+									pr["goal"] = dp
+									entered_shop = true
+							break
+				# Natural phone-checking or resting pauses on sidewalks / plazas / parks.
+				if not entered_shop and float(pr["pause_cd"]) <= 0.0 and _cur_weather != "storm" and city_c.is_empty():
+					var lkind := String(l.get("kind", "block"))
+					var pause_chance := 0.22 if lkind in ["plaza", "park"] else (0.14 if profile == "stroller" else 0.07)
+					if _cur_weather == "rain":
+						pause_chance *= 0.35
+					pr["pause_cd"] = _rng.randf_range(18.0, 38.0)
+					if _rng.randf() < pause_chance:
+						pr["state"] = "pause"
+						pr["t"] = _rng.randf_range(4.0, 8.2) if lkind in ["plaza", "park"] else _rng.randf_range(2.2, 5.0)
+						var face_v := d.rotated(_rng.randf_range(-0.65, 0.65))
+						pr["goal"] = Vector3(q.x + face_v.x * 2.0, 0.0, q.y + face_v.y * 2.0)
+		"browse", "pause":
 			vel_cur = move_toward(vel_cur, 0.0, dt * 3.6)
 			var bp := prev_xz
-			var haz := _vehicle_hazard(bp)
-			var want_avoid: Vector2 = haz[1]
-			hazard_look = haz[2]
-			var rel_b := Vector2(me.x - bp.x, me.z - bp.y)
-			var bdist := rel_b.length()
-			if bdist < 0.95 and bdist > 0.001:
-				want_avoid += (-rel_b / bdist) * clampf((0.95 - bdist) / 0.95, 0.25, 1.0) * 0.65
+			var want_avoid := Vector2.ZERO
+			if not far:
+				if not _vehicles.is_empty():
+					var haz := _vehicle_hazard(bp)
+					want_avoid = haz[1]
+					hazard_look = haz[2]
+				var rel_b := Vector2(me.x - bp.x, me.z - bp.y)
+				var bdist := rel_b.length()
+				if bdist < 0.95 and bdist > 0.001:
+					want_avoid += (-rel_b / bdist) * clampf((0.95 - bdist) / 0.95, 0.25, 1.0) * 0.65
 			var step_b := want_avoid.limit_length(1.2) * dt * 1.1
 			bp += step_b
 			p = Vector3(bp.x, 0.0, bp.y)
 			var g: Vector3 = pr["goal"]
-			fwd = Vector2(g.x - p.x, g.z - p.z).normalized()
+			var to_g := Vector2(g.x - p.x, g.z - p.z)
+			fwd = to_g.normalized() if to_g.length_squared() > 0.001 else Vector2.ZERO
 			pr["t"] = float(pr["t"]) - dt
 			if float(pr["t"]) <= 0.0:
 				pr["state"] = "walk"
@@ -720,11 +922,11 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 		if dlen < 2.0:
 			actual_dist = dlen
 			actual_speed = dlen / maxf(dt, 0.001)
-			if actual_speed > 0.22 and state != "browse":
+			if actual_speed > 0.22 and state != "browse" and state != "pause":
 				var move_dir := move_delta / dlen
 				var blend := clampf((actual_speed - 0.22) / 0.65, 0.0, 0.85)
 				fwd = fwd.lerp(move_dir, blend).normalized() if fwd != Vector2.ZERO else move_dir
-	var target_walk := clampf(actual_speed / base_speed, 0.0, 1.0) if had_pos else (1.0 if state == "walk" else 0.0)
+	var target_walk := clampf(actual_speed / maxf(base_speed, 0.4), 0.0, 1.0) if had_pos else (1.0 if state == "walk" else 0.0)
 	var walk_rate := 7.0 if target_walk < float(pr["walk"]) else 5.0
 	pr["walk"] = lerpf(float(pr["walk"]), target_walk, 1.0 - exp(-walk_rate * dt))
 	if pr["walk"] < 0.01 and target_walk <= 0.0:
@@ -735,33 +937,37 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3) -> void:
 		pr["stride"] = float(pr["stride"]) + actual_dist / eff_walk
 
 	# Natural head glances: check traffic at crossings, scan shop windows, watch approaching cars or hero.
-	pr["glance_t"] = float(pr["glance_t"]) - dt
-	if float(pr["glance_t"]) <= 0.0:
-		if bool(pr["waiting"]):
-			# Alternate looking left/right along the road for traffic.
-			var cur_g := float(pr["glance"])
-			var sgn := -1.0 if cur_g >= 0.0 else 1.0
-			pr["glance"] = sgn * _rng.randf_range(0.50, 0.78)
-			pr["glance_t"] = _rng.randf_range(1.1, 2.0)
-		elif state == "browse":
-			pr["glance"] = _rng.randf_range(-0.42, 0.42)
-			pr["glance_t"] = _rng.randf_range(1.4, 2.8)
-		else:
-			pr["glance"] = _rng.randf_range(-0.26, 0.26) if _rng.randf() < 0.45 else 0.0
-			pr["glance_t"] = _rng.randf_range(2.2, 4.5)
-	var look := float(pr["glance"])
-	var rel := Vector2(me.x - p.x, me.z - p.z)
-	var dist := rel.length()
-	if hazard_look != Vector2.INF and fwd != Vector2.ZERO:
-		var hrel := hazard_look - Vector2(p.x, p.z)
-		if hrel.length_squared() > 0.04:
-			look = -clampf(fwd.angle_to(hrel), -0.95, 0.95)
-	elif dist < 6.0 and fwd != Vector2.ZERO:
-		var ang := fwd.angle_to(rel)
-		if absf(ang) < 1.6:
-			var hero_look := -clampf(ang, -0.9, 0.9) * (1.0 - dist / 6.0)
-			look = lerpf(look, hero_look, clampf(1.0 - dist / 6.0, 0.0, 1.0))
-	pr["look"] = lerpf(float(pr["look"]), look, 1.0 - exp(-4.5 * dt))
+	if not far:
+		pr["glance_t"] = float(pr["glance_t"]) - dt
+		if float(pr["glance_t"]) <= 0.0:
+			if bool(pr["waiting"]):
+				# Alternate looking left/right along the road for traffic.
+				var cur_g := float(pr["glance"])
+				var sgn := -1.0 if cur_g >= 0.0 else 1.0
+				pr["glance"] = sgn * _rng.randf_range(0.50, 0.78)
+				pr["glance_t"] = _rng.randf_range(1.1, 2.0)
+			elif state == "browse":
+				pr["glance"] = _rng.randf_range(-0.42, 0.42)
+				pr["glance_t"] = _rng.randf_range(1.4, 2.8)
+			elif state == "pause":
+				pr["glance"] = _rng.randf_range(-0.34, 0.34)
+				pr["glance_t"] = _rng.randf_range(1.2, 2.5)
+			else:
+				pr["glance"] = _rng.randf_range(-0.26, 0.26) if _rng.randf() < 0.45 else 0.0
+				pr["glance_t"] = _rng.randf_range(2.2, 4.5)
+		var look := float(pr["glance"])
+		var rel := Vector2(me.x - p.x, me.z - p.z)
+		var dist := rel.length()
+		if hazard_look != Vector2.INF and fwd != Vector2.ZERO:
+			var hrel := hazard_look - Vector2(p.x, p.z)
+			if hrel.length_squared() > 0.04:
+				look = -clampf(fwd.angle_to(hrel), -0.95, 0.95)
+		elif dist < 6.0 and fwd != Vector2.ZERO:
+			var ang := fwd.angle_to(rel)
+			if absf(ang) < 1.6:
+				var hero_look := -clampf(ang, -0.9, 0.9) * (1.0 - dist / 6.0)
+				look = lerpf(look, hero_look, clampf(1.0 - dist / 6.0, 0.0, 1.0))
+		pr["look"] = lerpf(float(pr["look"]), look, 1.0 - exp(-4.5 * dt))
 	p.y = float(_ground.call(p.x, p.z))
 	pr["pos"] = p
 	if fwd != Vector2.ZERO:

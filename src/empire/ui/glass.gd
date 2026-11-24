@@ -195,8 +195,12 @@ static func line(s: String, style := "body", col = null, weight := "") -> Label:
 
 
 # ---------------------------------------------------------------- glass
+static func clear_caches() -> void:
+	_materials.clear()
+
+
 static func material(tint: Color, blur := 3.2) -> ShaderMaterial:
-	var key := "%s_%.1f" % [tint.to_html(), blur]
+	var key := "%s:%s_%.1f" % ["D" if dark else "L", tint.to_html(), blur]
 	if _materials.has(key):
 		return _materials[key]
 	var m := ShaderMaterial.new()
@@ -211,19 +215,29 @@ static func material(tint: Color, blur := 3.2) -> ShaderMaterial:
 
 ## A floating glass surface (a PanelContainer: put content in it). Shadow,
 ## the blurred-backdrop body and a hairline rim are its own internal
-## children; `radius` < 0 = a capsule.
+## children; `radius` < 0 = a capsule. `frosted_fast = true` uses a crisp
+## translucent StyleBoxFlat without a full-screen `hint_screen_texture` pass.
 class Surface extends PanelContainer:
 	var radius := 28.0
 	var tint := Color(0, 0, 0, 0)
 	var shadow := true
+	var frosted_fast := false
 	var _body: Panel
 	var _rim: Panel
 	var _shadow: Panel
+	var _shadow_sb: StyleBoxFlat
+	var _body_sb: StyleBoxFlat
+	var _rim_sb: StyleBoxFlat
+	var _styled_r := -1
+	var _styled_dark := false
+	var _styled_fast := false
+	var _styled_tint := Color(-1, -1, -1, -1)
 
-	func _init(p_radius := 28.0, pad := 0.0, p_tint := Color(0, 0, 0, 0), p_shadow := true) -> void:
+	func _init(p_radius := 28.0, pad := 0.0, p_tint := Color(0, 0, 0, 0), p_shadow := true, p_fast := false) -> void:
 		radius = p_radius
 		tint = p_tint
 		shadow = p_shadow
+		frosted_fast = p_fast
 		var e := StyleBoxEmpty.new()
 		for s in ["left", "right", "top", "bottom"]:
 			e.set("content_margin_" + s, pad)
@@ -231,8 +245,24 @@ class Surface extends PanelContainer:
 		mouse_filter = Control.MOUSE_FILTER_STOP
 		if shadow:
 			_shadow = _layer()
+			_shadow_sb = StyleBoxFlat.new()
+			_shadow_sb.bg_color = Color(0, 0, 0, 0)
+			_shadow_sb.shadow_size = 22
+			_shadow_sb.shadow_offset = Vector2(0, 8)
+			_shadow_sb.anti_aliasing = true
+			_shadow.add_theme_stylebox_override("panel", _shadow_sb)
 		_body = _layer()
+		_body_sb = StyleBoxFlat.new()
+		_body_sb.anti_aliasing = true
+		_body_sb.corner_detail = 10
+		_body.add_theme_stylebox_override("panel", _body_sb)
 		_rim = _layer()
+		_rim_sb = StyleBoxFlat.new()
+		_rim_sb.bg_color = Color(0, 0, 0, 0)
+		_rim_sb.set_border_width_all(1)
+		_rim_sb.anti_aliasing = true
+		_rim_sb.corner_detail = 10
+		_rim.add_theme_stylebox_override("panel", _rim_sb)
 		_restyle()
 		resized.connect(_restyle)
 
@@ -249,34 +279,31 @@ class Surface extends PanelContainer:
 	func _restyle() -> void:
 		var r := _r()
 		var t: Color = tint if tint.a > 0.0 else Glass.TINT
-		if _shadow:
-			var ss := StyleBoxFlat.new()
-			ss.bg_color = Color(0, 0, 0, 0)
-			ss.set_corner_radius_all(r)
-			ss.shadow_color = Color(0, 0, 0, 0.28 if Glass.dark else 0.14)
-			ss.shadow_size = 22
-			ss.shadow_offset = Vector2(0, 8)
-			ss.anti_aliasing = true
-			_shadow.add_theme_stylebox_override("panel", ss)
-		var bs := StyleBoxFlat.new()
-		bs.bg_color = Color.WHITE
-		bs.set_corner_radius_all(r)
-		bs.anti_aliasing = true
-		bs.corner_detail = 10
-		_body.add_theme_stylebox_override("panel", bs)
-		_body.material = Glass.material(t)
-		var rs := StyleBoxFlat.new()
-		rs.bg_color = Color(0, 0, 0, 0)
-		rs.set_corner_radius_all(r)
-		rs.border_color = Glass.RIM
-		rs.set_border_width_all(1)
-		rs.anti_aliasing = true
-		rs.corner_detail = 10
-		_rim.add_theme_stylebox_override("panel", rs)
+		if r == _styled_r and _styled_dark == Glass.dark and _styled_fast == frosted_fast and _styled_tint == t:
+			return
+		_styled_r = r
+		_styled_dark = Glass.dark
+		_styled_fast = frosted_fast
+		_styled_tint = t
+		if _shadow and _shadow_sb:
+			_shadow_sb.set_corner_radius_all(r)
+			_shadow_sb.shadow_color = Color(0, 0, 0, 0.28 if Glass.dark else 0.14)
+		_body_sb.set_corner_radius_all(r)
+		if frosted_fast:
+			_body.material = null
+			if tint.a > 0.0:
+				_body_sb.bg_color = Color(t.r, t.g, t.b, clampf(t.a + 0.24, 0.80, 0.94))
+			else:
+				_body_sb.bg_color = Color(0.11, 0.11, 0.13, 0.86) if Glass.dark else Color(0.97, 0.97, 0.99, 0.92)
+		else:
+			_body_sb.bg_color = Color.WHITE
+			_body.material = Glass.material(t)
+		_rim_sb.set_corner_radius_all(r)
+		_rim_sb.border_color = Glass.RIM
 
 
-static func surface(radius := 28.0, pad := 0.0, tint := Color(0, 0, 0, 0), shadow := true) -> Surface:
-	return Surface.new(radius, pad, tint, shadow)
+static func surface(radius := 28.0, pad := 0.0, tint := Color(0, 0, 0, 0), shadow := true, frosted_fast := false) -> Surface:
+	return Surface.new(radius, pad, tint, shadow, frosted_fast)
 
 
 # ---------------------------------------------------------------- cards
@@ -455,12 +482,47 @@ static func icon_button(icon: String, cb: Callable, glass := false, px := 52.0, 
 	feedback(b, cb)
 	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	if glass:
-		var s := surface(-1.0, 0.0)
+		var s := surface(-1.0, 0.0, Color(0, 0, 0, 0), true, true)
 		s.custom_minimum_size = Vector2(px, px)
 		s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		s.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		s.add_child(b)
 		return s
+	return b
+
+
+## Tap-to-confirm button: first tap arms in place for 3 seconds (green for
+## purchases, red for destructive/sell actions); second tap fires `cb`.
+static func confirm_button(label: String, confirm: String, cb: Callable, sz := "large", col = null, kind := "filled") -> Button:
+	var armed := [false]
+	var destructive: bool = col != null and col == RED
+	var padx: float = {"large": 28.0, "regular": 22.0, "small": 16.0}.get(sz, 22.0)
+	var b := button(label, func(): pass, kind, sz, col)
+	var orig_box := b.get_theme_stylebox("normal")
+	var orig_fg := b.get_theme_color("font_color")
+	b.pressed.connect(func():
+		if Time.get_ticks_msec() < EmpireStyle.tap_block_until:
+			return
+		if armed[0]:
+			armed[0] = false
+			cb.call()
+			return
+		armed[0] = true
+		b.text = confirm
+		var arm_col: Color = RED if destructive else GREEN
+		var gs := _btn_box(arm_col, int(maxf(b.size.y, b.custom_minimum_size.y) * 0.5), padx)
+		for s in ["normal", "focus", "hover"]:
+			b.add_theme_stylebox_override(s, gs)
+		for s in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+			b.add_theme_color_override(s, Color.WHITE)
+		b.get_tree().create_timer(3.0, true, false, true).timeout.connect(func():
+			if is_instance_valid(b) and armed[0]:
+				armed[0] = false
+				b.text = label
+				for s in ["normal", "focus", "hover"]:
+					b.add_theme_stylebox_override(s, orig_box)
+				for s in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+					b.add_theme_color_override(s, orig_fg)))
 	return b
 
 

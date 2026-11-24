@@ -290,10 +290,16 @@ func _ready() -> void:
 			return c.global_position if c else player.global_position
 		var skym: ShaderMaterial = atmosphere.sky_mat if "sky_mat" in atmosphere else null
 		clouds.set_process(true)
+		var cloud_t := [0.0]
 		_cloud_sync = func():
-			if is_instance_valid(clouds) and skym:
-				clouds.cover = float(skym.get_shader_parameter("cloud_cover"))
-				clouds.dark = float(skym.get_shader_parameter("cloud_dark"))
+			if get_tree().paused or not is_instance_valid(clouds) or skym == null:
+				return
+			cloud_t[0] -= get_process_delta_time()
+			if cloud_t[0] > 0.0:
+				return
+			cloud_t[0] = 0.25
+			clouds.cover = float(skym.get_shader_parameter("cloud_cover"))
+			clouds.dark = float(skym.get_shader_parameter("cloud_dark"))
 		get_tree().process_frame.connect(_cloud_sync)
 	# City reflections in glass, paint and wet streets (off on Low).
 	# (The probe is replaced by fake reflections in the shaders: kept for
@@ -778,6 +784,7 @@ func _reset_vehicle_state() -> void:
 
 func new_game() -> void:
 	_reset_vehicle_state()
+	ExploreUI.reset_cache()
 	empire = Empire.new()
 	empire.market = _market()
 	var start := starter_unit()
@@ -1081,11 +1088,16 @@ func _surface_sound_at(p: Vector3) -> String:
 func _process(dt: float) -> void:
 	if empire == null:
 		return
+	var sim_dt := minf(dt, 0.1)
 	if state == "play" and not get_tree().paused:
 		var k := time_scale if driving == "" and floor == null else 1.0
 		var t0 := Time.get_ticks_usec()
-		empire.advance(dt * minutes_per_second * k)
+		empire.advance(sim_dt * minutes_per_second * k)
 		_perf_sim += Time.get_ticks_usec() - t0
+		player.walk_speed_scale = float(empire.active_buff().get("walk_speed", 1.0))
+	if rig:
+		var phone_up: bool = ui != null and ui.phone != null and is_instance_valid(ui.phone) and ui.phone.visible
+		rig.using_phone = phone_up and driving == "" and (skyport_play == null or skyport_play.piloting == "")
 	atmosphere.hour = empire.hour() if state != "title" else TITLE_HOUR
 	_stream_t -= dt
 	if _stream_t <= 0.0:
@@ -1188,6 +1200,9 @@ func _unhandled_input(e: InputEvent) -> void:
 		ui.open_phone("map")
 	elif e.is_action_pressed("speed_up"):
 		toggle_fast()
+	elif driving != "" and e is InputEventKey and (e as InputEventKey).pressed and not (e as InputEventKey).echo and (e as InputEventKey).keycode == KEY_H:
+		if car_audio:
+			car_audio.play_horn()
 
 
 func toggle_fast() -> void:
@@ -1199,16 +1214,32 @@ func toggle_fast() -> void:
 func _stream_interiors() -> void:
 	var dc: Node3D = cars.get(driving) if driving != "" else null
 	var focus := dc.global_position if dc and is_instance_valid(dc) else player.global_position
+	var to_build: Array = []
 	for u in units:
 		if u.has("street_use"):
 			continue
 		var d := Vector2(focus.x, focus.z).distance_to(Vector2(float(u["pos"][0]), float(u["pos"][2])))
 		var id: String = u["id"]
 		if d < STREAM_IN and not interiors.has(id):
-			_build_interior(u)
+			to_build.append([d, u])
 		elif d > STREAM_OUT and interiors.has(id) and floor_unit != id:
 			interiors[id].queue_free()
 			interiors.erase(id)
+	if not to_build.is_empty():
+		to_build.sort_custom(func(a, b): return a[0] < b[0])
+		var budget := 4 if state != "play" else 2
+		for i in mini(budget, to_build.size()):
+			_build_interior(to_build[i][1])
+	# Cull active interior point/spot lights when player is outdoors beyond 36 m.
+	for id: String in interiors:
+		var si: ShopInterior = interiors[id]
+		if not is_instance_valid(si) or not si.has_method("set_exterior_lights_active"):
+			continue
+		var u: Dictionary = unit_by_id.get(id, {})
+		if u.is_empty():
+			continue
+		var d2 := Vector2(focus.x, focus.z).distance_to(Vector2(float(u["pos"][0]), float(u["pos"][2])))
+		si.call("set_exterior_lights_active", id == floor_unit or d2 < 36.0)
 
 	_stream_street_rooms(focus, FRONT_IN, 3)
 
@@ -1695,9 +1726,9 @@ func spot_prompt() -> Array:
 		var cr: Craft = skyport_play.crafts.get(skyport_play.piloting)
 		return ["GET OUT", cr != null and cr.can_exit()]
 	if driving != "":
-		# (Only offered once the car is slow enough to leave.)
+		# (Only offered once the car is slow enough to leave — matches exit_vehicle threshold.)
 		var dc: Car = cars.get(driving)
-		var slow := dc == null or Vector2(dc.linear_velocity.x, dc.linear_velocity.z).length() <= 4.0
+		var slow := dc == null or Vector2(dc.linear_velocity.x, dc.linear_velocity.z).length() <= 1.15
 		return ["GET OUT", slow]
 	if spot.is_empty():
 		return ["", false]
@@ -1752,6 +1783,8 @@ func spot_prompt() -> Array:
 				return ["", false]
 			return ["CLEAN FLOOR (%d%%)" % int(b.cleanliness * 100.0), true]
 		"street_reception":
+			if String(si.unit.get("street_use", "")) == "fitness":
+				return ["WORK OUT · %s (£15)" % String(si.unit["name"]).to_upper(), empire.personal_cash >= 15.0]
 			return ["RECEPTION · " + String(si.unit["name"]).to_upper(), true]
 		"retail_checkout":
 			return ["BROWSE · " + String(si.unit.get("name", "CHECKOUT")).to_upper(), true]
@@ -1799,6 +1832,10 @@ func spot_prompt() -> Array:
 			return ["LIFT DOWN TO THE STREET", true]
 		"home_bed":
 			return ["SLEEP TILL 07:00", true]
+		"home_wardrobe":
+			return ["WARDROBE · CHANGE OUTFIT", true]
+		"home_trophies":
+			return ["EMPIRE GALLERY · CITY500", true]
 		"car_door":
 			var v := empire.vehicle(spot["vehicle"])
 			return ["DRIVE %s" % String(EmpireData.vehicle_model(v["model"])["name"]).to_upper(), true]
@@ -1875,6 +1912,8 @@ func act() -> void:
 				ui.open_price(b, b.slots[i]["product"])
 		"till":
 			if floor and floor.player_serve(spot["till"]):
+				if rig:
+					rig.trigger_interact()
 				Sfx.play("click", -4.0)
 		"pile":
 			if not empire.carried.is_empty():
@@ -1912,7 +1951,14 @@ func act() -> void:
 			si.refresh_goods()
 		"street_reception":
 			var use := String(si.unit["street_use"])
-			if use == "furniture":
+			if use == "fitness":
+				var workout := empire.fitness_session(String(si.unit["name"]), 15.0)
+				if workout["ok"]:
+					Sfx.play("pickup", -5.0, 1.15)
+					save_game()
+				else:
+					ui.toast(String(workout["error"]), "warn")
+			elif use == "furniture":
 				ui.open_property(si.unit)
 			else:
 				ui.open_phone({"bank": "finances", "garage": "garage", "warehouse": "businesses"}.get(use, "property"))
@@ -1961,6 +2007,10 @@ func act() -> void:
 		"home_bed":
 			sleep_until(7.0)
 			save_game()
+		"home_wardrobe":
+			ui.open_style(false)
+		"home_trophies":
+			ui.open_phone("city500")
 		"car_door":
 			enter_vehicle(spot["vehicle"], true)
 		"car_boot":
@@ -2152,6 +2202,9 @@ func _car_spec(model: String) -> Dictionary:
 	s["top_speed"] = float(m.get("top_speed", s["top_speed"]))
 	s["paint"] = Color.from_string(String(m.get("paint", "#cccccc")), Color.WHITE)
 	s["nitro"] = 0.0
+	for k in ["grip", "brake_force", "turn_rate", "susp_stiff", "roll_gain", "mass_scale", "engine", "engine_gain", "drift_slip", "downforce_gain"]:
+		if m.has(k):
+			s[k] = m[k]
 	return s
 
 
@@ -2365,6 +2418,8 @@ func restore_vehicle_view() -> void:
 func _update_driver_pose(car: Car) -> void:
 	player.global_position = car.visual.body.to_global(car.visual.driver_seat)
 	rig.vehicle_facing = -car.global_basis.z
+	rig.vehicle_basis = car.visual.body.global_basis
+	rig.vehicle_wheel_offset = VehicleAccess.geometry(car).get("wheel", Vector3(0.0, 0.02, -0.44))
 	rig.vehicle_steer = car.steer
 
 
@@ -2373,6 +2428,7 @@ func _track_driving(dt: float) -> void:
 	if c == null:
 		return
 	var p := c.global_position
+	RenderingServer.global_shader_parameter_set(&"player_pos", p)
 	_km_acc += p.distance_to(_last_car_pos) / 1000.0
 	_last_car_pos = p
 	if _km_acc > 0.05:
@@ -2935,10 +2991,11 @@ func _home_spots(p: Vector3, best: Dictionary, best_d: float) -> Array:
 				best = {"kind": "home_down", "home": home["id"], "world": up}
 				best_d = d2
 			for sp in HomeInteriors.spots.get(String(h["id"]), []):
-				if sp["kind"] == "bed":
+				var sk := String(sp["kind"])
+				if sk in ["bed", "wardrobe", "trophies"]:
 					var d3 := p.distance_to(sp["pos"] + Vector3.UP * 0.95)
 					if d3 < 1.8 and d3 < best_d:
-						best = {"kind": "home_bed", "home": home["id"], "world": sp["pos"]}
+						best = {"kind": "home_" + sk, "home": home["id"], "world": sp["pos"]}
 						best_d = d3
 	return [best, best_d]
 
@@ -3051,6 +3108,10 @@ func save_game() -> void:
 					d["player"] = [side.x, side.y, side.z, yaw]
 			else:
 				var side := c2.global_transform * Vector3(-c2.spec["size"].x * 0.5 - 0.9, 0.9, 0.0)
+				if safe:
+					var sf := safe.find(side, HERO_BOX, {"kind": "foot", "max_r": 12.0, "exclude": [c2.get_rid()]})
+					if sf["ok"]:
+						side = (sf["pos"] as Vector3) + Vector3.UP * 0.9
 				d["player"] = [side.x, side.y, side.z, yaw]
 		else:
 			d["driving"] = ""
@@ -3120,6 +3181,7 @@ func load_game() -> bool:
 	if SafeSave.last_source == "backup" and ui:
 		ui.toast.call_deferred("Your last save was damaged – loaded the one before it.", "bad")
 	_reset_vehicle_state()
+	ExploreUI.reset_cache()
 	empire = Empire.from_dict(d["empire"])
 	empire.market = _market()
 	if not empire.flags.has("start_unit"):
@@ -3154,9 +3216,12 @@ func _exit_tree() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		if state == "play":
 			save_game()
+	if what in [NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_APPLICATION_RESUMED,
+			NOTIFICATION_APPLICATION_FOCUS_OUT] and ui and ui.touch:
+		ui.touch.reset_contacts()
 
 
 # ------------------------------------------------------- captures/tests

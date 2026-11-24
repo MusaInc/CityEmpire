@@ -1192,9 +1192,17 @@ func scenario_xs() -> void:
 	print("--- XS: Skyport Island in the world")
 	var P: Dictionary = game.skyport.plan_data
 	# Streaming: away from the island its detail isn't loaded; on it, it is.
-	game.ui.close_panel(true)   # (earlier days left a day report open: panels pause the world)
+	game.ui.close_panel(true)
+	if game.driving != "":
+		var car: Car = game.cars[game.driving]
+		car.linear_velocity = Vector3.ZERO
+		car.angular_velocity = Vector3.ZERO
+		game.exit_vehicle()
 	check(game.driving == "" and game.skyport_play.piloting == "", "on foot before checking distance-based streaming")
-	game._teleport(Vector3(500, game.layout.ground_y(500, -400) + 1.0, -400), 0.0)   # (the city's north side: well away)
+	var north := Vector3(940.0, 0.0, -420.0)
+	north.y = game.layout.ground_y(north.x, north.z) + 1.0
+	check(SkyportIsland.distance_to(north) > SkyportIsland.NEAR_FREE, "the test point is beyond the unload radius")
+	game._teleport(north, 0.0)
 	await until(func(): return game.skyport.near_root == null, 40.0)
 	if game.skyport.near_root != null:
 		print("    paused=%s driving=%s piloting=%s viewer=%s d=%.0f" % [get_tree().paused, game.driving, game.skyport_play.piloting,

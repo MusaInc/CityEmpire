@@ -39,6 +39,8 @@ const STORES := {
 }
 ## The boutique you're in (its name on receipts and the store screen).
 static var boutique_name := "Boutique"
+## All wearable clothing/accessory slots checked on store checkout or exit.
+const SLOTS := ["top", "trousers", "footwear", "shoes", "head", "eyewear", "accessory"]
 ## Style options everyone can wear, including in stores.
 const FREE := ["head_bare", "face_none", "top_bomber", "top_fashion_ribcrop", "relaxeddenim", "streettrainers", "day", "none"]
 
@@ -68,11 +70,29 @@ static func price(item: String) -> int:
 ## What the look costs in items you don't own yet.
 static func unpaid(flags: Dictionary, look: Dictionary) -> Array:
 	var out: Array = []
-	for k in ["top", "trousers", "footwear", "shoes", "head", "eyewear", "accessory"]:
+	for k in SLOTS:
 		var it := String(look.get(k, ""))
 		if it != "" and not owns(flags, it, String(look.get("body", "a"))):
 			out.append(it)
 	return out
+
+
+## Reverts every unpaid slot in `look` back to `saved_look` (or HeroLook.DEFAULT)
+## and saves the clean look back onto `empire.flags["look"]`.
+static func revert_unpaid(empire: Empire, look: Dictionary, saved_look: Dictionary) -> Dictionary:
+	var back := look.duplicate(true)
+	var body := String(back.get("body", saved_look.get("body", "a")))
+	for k in SLOTS:
+		var it := String(back.get(k, ""))
+		if it != "" and not owns(empire.flags, it, body):
+			if saved_look.has(k):
+				back[k] = saved_look[k]
+			elif HeroLook.DEFAULT.has(k):
+				back[k] = HeroLook.DEFAULT[k]
+			else:
+				back.erase(k)
+	empire.flags["look"] = back
+	return back
 
 
 static func buy(e: Empire, items: Array, store: String) -> String:

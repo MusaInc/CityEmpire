@@ -107,7 +107,7 @@ func _process(dt: float) -> void:
 
 # ------------------------------------------------------------ customers
 func _spawn_customer() -> void:
-	var shopper := DemandModel.make_shopper(biz, _rng, CityLife.mix_k(empire))
+	var shopper := DemandModel.make_shopper(biz, _rng, CityLife.mix_k(empire), CityLife.price_sensitivity_k(empire, biz))
 	biz.today["customers"] = int(biz.today["customers"]) + 1
 	var p := ShopPerson.new(int(shopper["seed"]))
 	p.position = room.door_out + Vector3(_rng.randf_range(-0.5, 0.5), 0.0, _rng.randf_range(0.0, 0.4))
@@ -353,7 +353,7 @@ func scanning_at(t: int) -> bool:
 
 func _start_scan(t: int, c: Dictionary, by_player: bool) -> void:
 	var items := (c["basket"] as Stock).total_units()
-	var speed := 1.0
+	var speed := float(empire.active_buff().get("service_speed", 1.0)) if by_player else 1.0
 	if not by_player:
 		for k in staff_people:
 			if staff_people[k]["role"] == "cashier" and int(staff_people[k]["till"]) == t:

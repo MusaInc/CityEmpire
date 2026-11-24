@@ -9,7 +9,17 @@
    "price": 0,
    "top_speed": 34.0,
    "paint": "#3b5470",
-   "class": "car"
+   "class": "car",
+   "grip": 1.4,
+   "brake_force": 1.0,
+   "turn_rate": 1.0,
+   "susp_stiff": 1.0,
+   "roll_gain": 1.0,
+   "mass_scale": 1.0,
+   "engine_gain": 1.0,
+   "drift_slip": 1.0,
+   "downforce_gain": 1.0,
+   "engine_sound": "i4"
   },
   "van": {
    "name": "Courier Van",
@@ -19,7 +29,17 @@
    "price": 6500,
    "top_speed": 30.0,
    "paint": "#e9e6df",
-   "class": "car"
+   "class": "car",
+   "grip": 1.28,
+   "brake_force": 0.84,
+   "turn_rate": 0.86,
+   "susp_stiff": 0.82,
+   "roll_gain": 1.38,
+   "mass_scale": 1.08,
+   "engine_gain": 1.05,
+   "drift_slip": 0.96,
+   "downforce_gain": 0.8,
+   "engine_sound": "diesel"
   },
   "box": {
    "name": "Box Truck",
@@ -29,7 +49,17 @@
    "price": 19000,
    "top_speed": 26.0,
    "paint": "#e9e6df",
-   "class": "car"
+   "class": "car",
+   "grip": 1.22,
+   "brake_force": 0.76,
+   "turn_rate": 0.78,
+   "susp_stiff": 0.88,
+   "roll_gain": 1.48,
+   "mass_scale": 1.15,
+   "engine_gain": 1.06,
+   "drift_slip": 0.95,
+   "downforce_gain": 0.7,
+   "engine_sound": "diesel"
   },
   "saloon": {
    "name": "Marlin Saloon",
@@ -39,7 +69,17 @@
    "price": 9500,
    "top_speed": 44.0,
    "paint": "#1a3a7a",
-   "class": "car"
+   "class": "car",
+   "grip": 1.44,
+   "brake_force": 1.04,
+   "turn_rate": 1.05,
+   "susp_stiff": 1.04,
+   "roll_gain": 0.94,
+   "mass_scale": 1.0,
+   "engine_gain": 1.04,
+   "drift_slip": 0.98,
+   "downforce_gain": 1.05,
+   "engine_sound": "v6"
   },
   "scout": {
    "name": "Scout RS",
@@ -49,7 +89,17 @@
    "price": 24000,
    "top_speed": 46.0,
    "paint": "#e8a33a",
-   "class": "car"
+   "class": "car",
+   "grip": 1.48,
+   "brake_force": 1.08,
+   "turn_rate": 1.14,
+   "susp_stiff": 0.92,
+   "roll_gain": 1.04,
+   "mass_scale": 0.96,
+   "engine_gain": 1.1,
+   "drift_slip": 0.9,
+   "downforce_gain": 1.1,
+   "engine_sound": "f6"
   },
   "brute": {
    "name": "Brute V8",
@@ -59,7 +109,17 @@
    "price": 42000,
    "top_speed": 52.0,
    "paint": "#1d1d22",
-   "class": "car"
+   "class": "car",
+   "grip": 1.38,
+   "brake_force": 1.02,
+   "turn_rate": 1.02,
+   "susp_stiff": 1.08,
+   "roll_gain": 1.02,
+   "mass_scale": 1.04,
+   "engine_gain": 1.16,
+   "drift_slip": 0.88,
+   "downforce_gain": 1.05,
+   "engine_sound": "v8"
   },
   "vanta": {
    "name": "Vanta GT",
@@ -69,7 +129,17 @@
    "price": 78000,
    "top_speed": 58.0,
    "paint": "#c4202a",
-   "class": "car"
+   "class": "car",
+   "grip": 1.62,
+   "brake_force": 1.24,
+   "turn_rate": 1.26,
+   "susp_stiff": 1.26,
+   "roll_gain": 0.66,
+   "mass_scale": 0.95,
+   "engine_gain": 1.14,
+   "drift_slip": 1.02,
+   "downforce_gain": 1.45,
+   "engine_sound": "f6"
   },
   "goliath": {
    "name": "Goliath Pickup",
@@ -79,7 +149,17 @@
    "price": 36000,
    "top_speed": 42.0,
    "paint": "#3a4a3a",
-   "class": "car"
+   "class": "car",
+   "grip": 1.35,
+   "brake_force": 0.9,
+   "turn_rate": 0.86,
+   "susp_stiff": 0.86,
+   "roll_gain": 1.24,
+   "mass_scale": 1.06,
+   "engine_gain": 1.08,
+   "drift_slip": 0.96,
+   "downforce_gain": 0.85,
+   "engine_sound": "v8"
   },
   "warden": {
    "name": "Warden 4x4",
@@ -89,7 +169,17 @@
    "price": 65000,
    "top_speed": 44.0,
    "paint": "#2b2d33",
-   "class": "car"
+   "class": "car",
+   "grip": 1.38,
+   "brake_force": 0.95,
+   "turn_rate": 0.9,
+   "susp_stiff": 0.9,
+   "roll_gain": 1.14,
+   "mass_scale": 1.08,
+   "engine_gain": 1.1,
+   "drift_slip": 0.98,
+   "downforce_gain": 0.9,
+   "engine_sound": "v8"
   },
   "halcyon": {
    "name": "Halcyon Supercar",
@@ -99,7 +189,17 @@
    "price": 185000,
    "top_speed": 64.0,
    "paint": "#e6e8ea",
-   "class": "car"
+   "class": "car",
+   "grip": 1.72,
+   "brake_force": 1.34,
+   "turn_rate": 1.32,
+   "susp_stiff": 1.36,
+   "roll_gain": 0.54,
+   "mass_scale": 0.94,
+   "engine_gain": 1.22,
+   "drift_slip": 1.06,
+   "downforce_gain": 1.85,
+   "engine_sound": "v10"
   },
   "stiletto": {
    "name": "Stiletto Hypercar",
@@ -109,7 +209,17 @@
    "price": 420000,
    "top_speed": 72.0,
    "paint": "#f2c12e",
-   "class": "car"
+   "class": "car",
+   "grip": 1.8,
+   "brake_force": 1.44,
+   "turn_rate": 1.4,
+   "susp_stiff": 1.46,
+   "roll_gain": 0.45,
+   "mass_scale": 0.9,
+   "engine_gain": 1.28,
+   "drift_slip": 1.08,
+   "downforce_gain": 2.35,
+   "engine_sound": "v10"
   },
   "wren": {
    "name": "Wren H1",
@@ -301,7 +411,17 @@
    "price": 4200,
    "top_speed": 32.0,
    "paint": "#5d7a8c",
-   "desc": "Six years old, one careful owner"
+   "desc": "Six years old, one careful owner",
+   "grip": 1.36,
+   "brake_force": 0.92,
+   "turn_rate": 0.95,
+   "susp_stiff": 0.92,
+   "roll_gain": 1.08,
+   "mass_scale": 1.0,
+   "engine_gain": 0.94,
+   "drift_slip": 0.98,
+   "downforce_gain": 0.95,
+   "engine_sound": "i4"
   }
  },
  "service_cost": 80,

@@ -89,6 +89,7 @@ var input_enabled := true
 ## and steps up kerbs exactly as in CitySwing.
 var swing_enabled := true
 var everyday := false
+var walk_speed_scale := 1.0
 ## Measured horizontal ground travel relative to the support surface.
 var foot_velocity := Vector3.ZERO
 var _step_support := 0.0
@@ -386,6 +387,7 @@ func _physics_process(dt: float) -> void:
 	_move_smooth = _move_smooth.lerp(move, 1.0 - exp(-dt / response))
 	controls.move = _move_smooth
 	controls.everyday = everyday
+	controls.walk_speed_scale = walk_speed_scale
 	# Human steering turns the travel; bots/courses keep the raw model (a
 	# review script can opt in with `human_steer` to move like a player).
 	controls.turn_assist = bot == null or bot.get("human_steer") == true

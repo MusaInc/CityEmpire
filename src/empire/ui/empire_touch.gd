@@ -69,11 +69,15 @@ func _ready() -> void:
 func _safe() -> Rect2:
 	var vp := get_viewport_rect()
 	var r := ui.hud.get_global_rect() if (ui != null and ui.hud != null) else vp
-	var sa := DisplayServer.get_display_safe_area()
-	var win := DisplayServer.window_get_size()
-	if sa.size.x > 0 and win.x > 0 and DisplayServer.screen_get_size() == win:
-		var ky := vp.size.y / float(win.y)
-		var bottom_inset := float(win.y - sa.end.y) * ky
+	var bottom_inset := 0.0
+	if ui != null:
+		bottom_inset = float(ui._safe_insets(vp.size)[3])
+	else:
+		var sa := DisplayServer.get_display_safe_area()
+		var win := DisplayServer.window_get_size()
+		if sa.size.x > 0 and win.x > 0 and DisplayServer.screen_get_size() == win:
+			bottom_inset = float(win.y - sa.end.y) * (vp.size.y / float(win.y))
+	if bottom_inset > 0.0:
 		var max_end_y := vp.end.y - bottom_inset
 		if r.end.y > max_end_y:
 			r.size.y = maxf(0.0, max_end_y - r.position.y)
@@ -217,6 +221,21 @@ func _input(event: InputEvent) -> void:
 		elif d.index == _look_id:
 			ui.game.camera.add_touch_look(d.position - _look_last, w)
 			_look_last = d.position
+
+
+func reset_contacts() -> void:
+	if _held.values().has("jump"):
+		Input.action_release("jump")
+	_held.clear()
+	_stick_id = -1
+	_stick_v = Vector2.ZERO
+	_pad_id = -1
+	_look_id = -1
+	_apply_stick()
+	_apply_pad()
+	if ui.game and ui.game.drive_input:
+		ui.game.drive_input.touch_handbrake = false
+	queue_redraw()
 
 
 func _press(k: String, on: bool) -> void:

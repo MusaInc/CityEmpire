@@ -40,6 +40,17 @@ func stand_at(p: Vector3) -> void:
 	game._update_spot()
 
 
+func board_car(vid: String) -> bool:
+	game.act()
+	for frame in 300:
+		if game.driving == vid:
+			return true
+		if not game.vehicle_access.active():
+			return false
+		await get_tree().physics_frame
+	return false
+
+
 func spot_of(kind: String, si: ShopInterior, extra := {}) -> Dictionary:
 	for s in si.world_spots():
 		if s["kind"] != kind:
@@ -73,8 +84,11 @@ func _run() -> void:
 	var cxf := car.global_transform
 	await stand_at(cxf * Vector3(-car.spec["size"].x * 0.5 - 0.6, 0.0, -0.3))
 	check(game.spot.get("kind") == "car_door", "DRIVE prompt at the driver's door (%s)" % game.spot.get("kind"))
-	game.act()
-	check(game.driving == vid, "in the car")
+	var boarded := await board_car(vid)
+	check(boarded, "in the car after the boarding animation")
+	if not boarded:
+		get_tree().quit(fails)
+		return
 	var p0 := car.global_position
 	Input.action_press("accelerate")
 	await wait(2.5)
@@ -127,22 +141,46 @@ func _run() -> void:
 	var units_total := e.total_units()
 	# 5 — drive back (teleport), unload, carry in, shelve.
 	await stand_at(car.global_transform * Vector3(-car.spec["size"].x * 0.5 - 0.6, 0.0, -0.3))
-	game.act()
-	var sd := Premises.door_point(start)
-	var so := Premises.outward(start)
-	var sa := Premises.along_dir(start)
-	car.place(Transform3D(Basis(Vector3.UP, atan2(-sa.x, -sa.z)), game._kerb_point(sd + so * 6.5) + Vector3.UP * 0.2))
+	boarded = await board_car(vid)
+	check(boarded, "boarded again at the wholesaler")
+	if not boarded:
+		get_tree().quit(fails)
+		return
+	car.place(cxf)
+	game.world.build_all_near(car.global_position, 120.0)
 	await frames(90)
 	game.exit_vehicle()
+	check(game.driving == "", "got out at the shop")
+	if game.driving != "":
+		get_tree().quit(fails)
+		return
 	var ssi: ShopInterior = game.interiors[start["id"]]
 	var shelved := 0
 	# Parked out front: the boot unloads into the stockroom in one go.
-	await stand_at(car.global_transform * Vector3(0.0, 0.0, car.spec["size"].z * 0.5 + 0.8))
+	var found_boot := false
+	for rear_offset: float in [0.65, 1.0, 1.3]:
+		for lateral: float in [0.0, -0.6, 0.6, -1.0, 1.0]:
+			var boot := car.global_transform * Vector3(lateral, 0, car.spec["size"].z * 0.5 + rear_offset)
+			var supported := game.vehicle_access._support(boot, car)
+			if supported == Vector3.INF:
+				continue
+			await stand_at(supported - Vector3.UP * VehicleAccess.STAND_HEIGHT)
+			if game.spot.get("kind") == "car_boot":
+				found_boot = true
+				break
+		if found_boot:
+			break
+	if not found_boot:
+		print("AUTOPLAY boot diagnostic: parked=", car.global_position, " shop=", Premises.door_point(start),
+			" player=", game.player.global_position, " stunned=", game.player.stunned, " driving=", game.driving)
 	check(String(game.spot_prompt()[0]).begins_with("UNLOAD %d CASES INTO" % int(plan["count"])), "boot offers to unload into the shop (%s)" % game.spot_prompt()[0])
 	game.act()
 	check(b.backroom.cases_used() + b.floor_pile.cases_used() == int(plan["count"]), "unloaded into the stockroom (%d cases)" % b.backroom.cases_used())
 	# One case by hand from the stockroom to a shelf…
 	await stand_at(ssi.to_world(ssi.rack_pos))
+	if b.backroom.units.is_empty():
+		get_tree().quit(fails)
+		return
 	var pid0: String = b.backroom.units.keys()[0]
 	game.take_case(b, pid0)
 	var si0 := b.slot_for(pid0)

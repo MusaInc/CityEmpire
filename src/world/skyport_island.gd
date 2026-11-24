@@ -272,6 +272,8 @@ var _check_t := 0.0
 var ground_mat: ShaderMaterial  # shared island ground/road/bridge ShaderMaterial
 var _lamp_heads := PackedVector3Array()
 var _lamp_heads_built := false
+var _road_lamps: Array[Transform3D] = []
+var _road_lamps_built := false
 ## Point the streaming measures from (the game sets it; else the camera).
 var viewer: Callable
 
@@ -1637,11 +1639,13 @@ func _start_near() -> void:
 		func(): SkyportAirport.build_car_park(near_root, body, self),
 		func(): SkyportAirport.build_apron_kit(plan_data, near_root, self),
 		func(): SkyportAirport.build_circus(plan_data, near_root, self, _circus_arms()),
-		func(): _near(_build_industry), func(): _near(_build_trees), func(): _near(_build_beach_life),
+		func(): _near(_build_industry), func(): _near(_build_trees), func(): _near(_build_streetlights),
+		func(): _near(_build_beach_life),
 		func(): _near(_build_quayside.bind(body)),
 		func():
 			var at := AirTraffic.new()
 			at.name = "AirTraffic"
+			at.world = world_ref
 			near_root.add_child(at)
 			at.setup(plan_data),
 		func():
@@ -1739,16 +1743,19 @@ func _ground_mat() -> ShaderMaterial:
 	return ground_mat
 
 
-## World-space streetlamp lantern positions along Skyport's main roads and
-## bridge approaches so LampLights illuminates Skyport at night just like the
-## Commercial Island and Westbank.
-func lamp_heads() -> PackedVector3Array:
-	if _lamp_heads_built:
-		return _lamp_heads
-	_lamp_heads_built = true
+## Island-local streetlamp pole transforms along Skyport's main roads so
+## physical streetlight.glb poles and LampLights SpotLight3D heads agree.
+## Skips bridge decks (already built in _build_one_bridge), quay edges (already
+## lit by _build_quayside), intersections, rail piers and buildings.
+func _road_lamp_xforms() -> Array[Transform3D]:
+	if _road_lamps_built:
+		return _road_lamps
+	_road_lamps_built = true
+	_road_lamps = []
 	if plan_data.is_empty():
-		return _lamp_heads
-	var out := PackedVector3Array()
+		return _road_lamps
+	var o := outline()
+	var placed: Array[Vector2] = []
 	for r in plan_data.get("roads", []):
 		var rname := String(r[0])
 		if rname in ["Airside Service Road", "Parking Access", "Fuel Farm Road"]:
@@ -1766,10 +1773,82 @@ func lamp_heads() -> PackedVector3Array:
 			dv.y = 0.0
 			if dv.length_squared() > 0.0001:
 				var nv := Vector3(-dv.z, 0.0, dv.x).normalized()
-				var q := pa + nv * (hw + 0.8) * side_toggle + Vector3.UP * 6.8
-				out.append(w(q))
+				var outward := nv * side_toggle
+				var pole := pa + outward * (hw + 1.15)
+				pole.y = LAND_Y
+				var q := Vector2(pole.x, pole.z)
+				var ok := Geometry2D.is_point_in_polygon(q, o) \
+					and road_clearance(plan_data, q) >= 0.75 \
+					and _shore_dist(q) >= 2.2 \
+					and rail_clearance(plan_data, q) >= 2.0
+				if ok:
+					for prev: Vector2 in placed:
+						if prev.distance_squared_to(q) < 144.0:
+							ok = false
+							break
+				if ok:
+					for bd: Dictionary in plan_data.get("buildings", []):
+						var t0: Array = bd["tiers"][0]
+						if Rect2(t0[0], t0[1], float(t0[2]) - float(t0[0]), float(t0[3]) - float(t0[1])).grow(0.6).has_point(q):
+							ok = false
+							break
+				if ok:
+					# streetlight.glb's lantern arm extends along -Z (CityWorld.LAMP_HEAD).
+					# Point -Z inward toward the road centreline.
+					var basis := Basis.looking_at(-outward, Vector3.UP)
+					_road_lamps.append(Transform3D(basis, pole))
+					placed.append(q)
 				side_toggle = -side_toggle
 			s += step
+	return _road_lamps
+
+
+## Physical streetlight.glb pole MultiMesh along Skyport's main roads (visual
+## only, zero road collisions) so night SpotLights never float over bare kerbs.
+func _build_streetlights() -> void:
+	var xfs := _road_lamp_xforms()
+	if xfs.is_empty():
+		return
+	var lamp_mesh: Mesh = null
+	if world_ref and world_ref.get("prop_meshes") is Dictionary:
+		lamp_mesh = (world_ref.get("prop_meshes") as Dictionary).get("streetlight")
+	if lamp_mesh == null:
+		var path := "res://assets/models/streetlight.glb"
+		if ResourceLoader.exists(path):
+			var inst := (load(path) as PackedScene).instantiate()
+			var mis := inst.find_children("*", "MeshInstance3D", true, false)
+			if not mis.is_empty():
+				lamp_mesh = (mis[0] as MeshInstance3D).mesh
+			inst.free()
+	if lamp_mesh == null:
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = lamp_mesh
+	mm.instance_count = xfs.size()
+	for i in xfs.size():
+		mm.set_instance_transform(i, xfs[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "Streetlights"
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.visibility_range_end = 280.0
+	mmi.visibility_range_end_margin = 20.0
+	_target.add_child(mmi)
+
+
+## World-space streetlamp lantern positions along Skyport's main roads and
+## bridge approaches so LampLights illuminates Skyport at night just like the
+## Commercial Island and Westbank.
+func lamp_heads() -> PackedVector3Array:
+	if _lamp_heads_built:
+		return _lamp_heads
+	_lamp_heads_built = true
+	if plan_data.is_empty():
+		return _lamp_heads
+	var out := PackedVector3Array()
+	for xf: Transform3D in _road_lamp_xforms():
+		out.append(w(xf * CityWorld.LAMP_HEAD))
 	for B: Dictionary in plan_data.get("bridges", []):
 		var bpts: PackedVector3Array = B["pts"]
 		var btot := _length(bpts)

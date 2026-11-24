@@ -35,6 +35,7 @@ global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
 global uniform float rain;
 global uniform float night;
+#include "res://src/world/shaders/fake_reflect.gdshaderinc"
 
 varying vec3 v_world;
 
@@ -210,6 +211,32 @@ void fragment() {
 	vec3 r = reflect(-view_w, nw);
 	r.y = abs(r.y);
 	vec3 sky = mix(sky_horizon, sky_top, pow(clamp(r.y, 0.0, 1.0), 0.6));
+	// Urban skyline & harbor night-light reflections near the strait, both
+	// city islands and Skyport's harbours; open ocean stays clean sky.
+	float d_city = length((p0 - vec2(80.0, -40.0)) * vec2(0.82, 1.0));
+	float d_sky = length((p0 - vec2(-220.0, 1280.0)) * vec2(1.08, 0.76));
+	float urban_w = max(1.0 - smoothstep(640.0, 1620.0, d_city),
+		(1.0 - smoothstep(420.0, 1140.0, d_sky)) * 0.85);
+	urban_w *= 1.0 - smoothstep(1400.0, 3200.0, dist);
+	vec3 refl = sky;
+	if (urban_w > 0.01) {
+		vec3 r_city = normalize(vec3(r.x, r.y * 0.58 - 0.012, r.z));
+		vec3 cr = city_reflection(r_city, vec3(v_world.x, v_world.y * 0.5, v_world.z),
+			sky_top, sky_horizon, sun_dir, night);
+		if (night > 0.05) {
+			// Vertical shimmering light columns from waterfront lamps & windows
+			// dancing across the wave facets along the strait and harbours.
+			float az_w = atan(r.z, r.x) * 26.0 + dot(p0, vec2(0.019, 0.013));
+			float col_id = floor(az_w);
+			float col_h = fr_h(col_id + 17.3);
+			float col_core = 1.0 - smoothstep(0.08, 0.42, abs(fract(az_w) - 0.5));
+			float ripple_glint = smoothstep(0.02, 0.24, abs(nw.x) + abs(nw.z));
+			float band_y = (1.0 - smoothstep(0.0, 0.34, r.y)) * smoothstep(0.46, 0.96, col_h);
+			vec3 lcol = mix(vec3(1.0, 0.72, 0.38), vec3(0.76, 0.88, 1.0), step(0.74, fr_h(col_id + 5.7)));
+			cr += lcol * col_core * band_y * (0.35 + 1.15 * ripple_glint) * night * 0.85;
+		}
+		refl = mix(sky, cr, urban_w * mix(0.60, 0.92, night) * (1.0 - 0.52 * blow));
+	}
 
 	// Body: crests the light shines through go turquoise, troughs deep.
 	float crest = clamp(w.x / (1.1 * (1.0 + 0.8 * blow)), 0.0, 1.0);
@@ -309,7 +336,7 @@ void fragment() {
 	ALPHA = 1.0 - see * shallow_visibility;
 
 	ALBEDO = mix(body * (1.0 - fres), vec3(0.9), foam);
-	EMISSION = (sky * fres * (1.0 - foam) * mix(1.0, 0.6, night) + sun_col * glint * day) * (1.0 - foam * 0.7);
+	EMISSION = (refl * fres * (1.0 - foam) * mix(1.0, 0.72, night) + sun_col * glint * day) * (1.0 - foam * 0.7);
 	// (Caustics dance on the real floor too: a faint dapple in the surface.)
 	EMISSION += vec3(0.9, 1.0, 0.95) * caus * day * see * exp(-depth * 0.45) * 0.06 * (1.0 - blow);
 	ROUGHNESS = mix(0.06, 0.6, foam) + 0.08 * blow;
