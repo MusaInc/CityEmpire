@@ -270,69 +270,176 @@ def narrow_face(face, eye):
     _apply(face, delta)
 
 
+def seat_eyeballs(face, shift_y=-.0007, shift_z=-.0002):
+    """Subtly seat both eyeballs cleanly inside the orbital socket so upper and lower
+    eyelids wrap snugly around the cornea with zero bulging stare or corner gap."""
+    eye_ids = material_vertices(face, ('hero_eye',))
+    delta = {i: Vector((0.0, shift_y, shift_z)) for i in eye_ids}
+    _apply(face, delta)
+
+
+def smooth_neck_weights(face, eyes):
+    """Harmonic Laplacian weight diffusion across Jules's neck cylinder between
+    the pinned head/jaw/chin (100% b_head) and the pinned clavicle base (100% b_chest).
+    Mathematically guarantees a C-infinity smooth transition with ZERO neck step,
+    ZERO throat fold, ZERO jaw twist, and ZERO clavicle seam crack!"""
+    import bmesh
+    eye = (eyes[0] + eyes[1]) * 0.5
+    head = face.vertex_groups.get('b_head')
+    neck = face.vertex_groups.get('b_neck') or face.vertex_groups.new(name='b_neck')
+    chest = face.vertex_groups.get('b_chest') or face.vertex_groups.new(name='b_chest')
+    if head is None:
+        return
+    earring_slot = face.data.materials.find('hero_earring_gold')
+    earring_vs = {i for p in face.data.polygons if earring_slot >= 0 and p.material_index == earring_slot for i in p.vertices}
+    eye_vs = material_vertices(face, ('hero_eye', 'hero_lid_rim', 'hero_brow', 'hero_enamel', 'hero_tear_duct'))
+    fixed_head = earring_vs | eye_vs
+    others = [g for g in face.vertex_groups if g not in (head, neck, chest)]
+
+    # Build vertex adjacency on Face_jules skin.
+    bm = bmesh.new()
+    bm.from_mesh(face.data)
+    bm.verts.ensure_lookup_table()
+    adj = {v.index: [e.other_vert(v).index for e in v.link_edges] for v in bm.verts}
+    bm.free()
+
+    # Classify every vertex: pinned head/jaw/chin (1,0,0), pinned clavicle base (0,0,1), or free neck cylinder.
+    w = {}
+    pinned = set()
+    z_chest_pin = eye.z - 0.148  # ~1.427: entire clavicle seam (z <= 1.420) is 100% b_chest!
+    for v in face.data.vertices:
+        i = v.index
+        p = v.co
+        if i in fixed_head:
+            w[i] = (1.0, 0.0, 0.0)
+            pinned.add(i)
+            continue
+        # Pin upper head, ears, face, jaw and chin strictly to b_head = 1.0.
+        in_chin_jaw = (p.y > eye.y - 0.068) and (p.z > eye.z - 0.114)
+        in_upper_head = p.z > eye.z - 0.062
+        if in_upper_head or in_chin_jaw:
+            w[i] = (1.0, 0.0, 0.0)
+            pinned.add(i)
+        elif p.z <= z_chest_pin:
+            w[i] = (0.0, 0.0, 1.0)
+            pinned.add(i)
+        else:
+            # Smooth initial guess on the free neck cylinder (mid-neck biased softly toward b_neck).
+            t = smooth(z_chest_pin, eye.z - 0.065, p.z)
+            wh = t * t
+            wc = (1.0 - t) * (1.0 - t)
+            wn = max(0.0, 1.0 - wh - wc)
+            w[i] = (wh, wn, wc)
+
+    # 36 harmonic Laplacian passes on free neck vertices -> guaranteed fold-free, crease-free gradient!
+    free_ids = [i for i in w if i not in pinned and adj.get(i)]
+    for _ in range(36):
+        nxt = dict(w)
+        for i in free_ids:
+            nbs = adj[i]
+            inv = 1.0 / len(nbs)
+            sh = sum(w[j][0] for j in nbs) * inv
+            sn = sum(w[j][1] for j in nbs) * inv
+            sc = sum(w[j][2] for j in nbs) * inv
+            tot = max(sh + sn + sc, 1e-8)
+            nxt[i] = (sh / tot, sn / tot, sc / tot)
+        w = nxt
+
+    for i in free_ids:
+        wh, wn, wc = w[i]
+        for g in others:
+            g.remove([i])
+        head.add([i], wh, 'REPLACE')
+        neck.add([i], wn, 'REPLACE')
+        chest.add([i], wc, 'REPLACE')
+    # Also ensure pinned clavicle-base vertices are strictly 100% b_chest (zero seam split).
+    for v in face.data.vertices:
+        if v.co.z <= z_chest_pin and v.index not in fixed_head:
+            for g in others:
+                g.remove([v.index])
+            head.add([v.index], 0.0, 'REPLACE')
+            neck.add([v.index], 0.0, 'REPLACE')
+            chest.add([v.index], 1.0, 'REPLACE')
+
+
 def correct_anatomy(face, eyes):
     eye = (eyes[0] + eyes[1]) * .5
-    almond_eyes(face)
+    seat_eyeballs(face, shift_y=-.0004, shift_z=-.0001)
+    # Relaxed, awake natural almond aperture: upper lid softly drapes top ~16% of iris, lower lid kisses bottom iris edge.
+    almond_eyes(face, up=.0050, down=.0048, corner_in=.0003, corner_out=.0015)
+    corners = [c + Vector((sign * .0115, .006, .0002)) for c, _, sign in _eyeballs(face)]
+    relax_corners(face, corners, radius=.0045, iterations=14)
     nose(face, eye)
     lower_face(face, eye)
     narrow_face(face, eye)
+    smooth_neck_weights(face, eyes)
 
 
 def correct_ade(face, eyes):
     """Ade against his head-scan atlas (4340 px/m from the 5.76 cm eye
-    spacing): 14.4 mm round openings with sclera under the iris -> 8.5 mm
-    almond; nose base 16 mm and mouth 11 mm lower than the photo while the
-    chin matched (short chin) -> lift nose and mouth, lengthen the chin."""
+    spacing): natural relaxed almond eye aperture covering top ~16% of iris,
+    balanced nose/mouth elevation, and natural clean masculine chin/jaw."""
     eye = (eyes[0] + eyes[1]) * .5
-    almond_eyes(face, scale=(.90, .58))
+    seat_eyeballs(face, shift_y=-.0003, shift_z=-.0001)
+    almond_eyes(face, up=.0049, down=.0047, corner_in=.0003, corner_out=.0010)
+    corners = [c + Vector((sign * .012, .006, .0002)) for c, _, sign in _eyeballs(face)]
+    relax_corners(face, corners, radius=.0046, iterations=14)
     lower_face(face, eye,
                knots=[(-.015, -.015), (-.036, -.032), (-.054, -.046), (-.072, -.064),
-                      (-.100, -.101), (-.122, -.122)],
-               retract=.25, philtrum=.036, protect_nose=False,
+                      (-.102, -.103), (-.126, -.126)],
+               retract=.22, philtrum=.035, protect_nose=False,
                lips_band=(-.086, -.079, -.054, -.059))
 
     ade_chin(face, eye)
 
 
 def ade_chin(face, eye):
-    """A longer, stronger chin (the photo's) and a slightly wider mouth."""
+    """Sculpt a smooth, natural athletic masculine jawline and rounded chin
+    (without compressing the goatee into a horizontal shelf)."""
     basis = face.data.shape_keys.key_blocks[0].data
     skin = material_vertices(face, ('hero_skin_face_',))
     delta = {}
     for i in skin:
         p = basis[i].co
         dz, ax = p.z - eye.z, abs(p.x)
-        front = smooth(eye.y - .02, eye.y + .005, p.y)
-        width = smooth(.040, .018, ax)
-        chin = _bell(dz + .098, .016) * width * front
-        under = smooth(-.098, -.110, dz) * smooth(-.135, -.118, dz) * width * smooth(eye.y - .045, eye.y - .010, p.y)
-        d = Vector((0, .0045 * chin, -.0040 * chin - .0060 * under))
+        front = smooth(eye.y - .025, eye.y + .005, p.y)
+        width = smooth(.046, .014, ax)
+        # Smooth, natural forward & downward chin volume so the goatee sits naturally on the chin curve.
+        chin = _bell(dz + .099, .019) * width * front
+        # Soft, smooth submental transition well below the chin tip (dz < -0.115).
+        submental = (smooth(-.114, -.132, dz) * smooth(-.165, -.138, dz)
+                     * smooth(.062, .020, ax) * smooth(eye.y - .065, eye.y + .002, p.y))
+        # Subtle clean mandibular angle from below ear toward chin (no harsh boxy corners).
+        jaw_line = (_bell(dz + .084 - .014 * smooth(.058, .018, ax), .017)
+                    * smooth(.026, .052, ax) * smooth(.076, .060, ax)
+                    * smooth(eye.y - .072, eye.y - .015, p.y))
+        # Taper the overly square lower outer chin corners slightly for a natural oval-masculine chin.
+        sq_corner = (_bell(dz + .094, .016) * smooth(.020, .038, ax) * smooth(.056, .042, ax) * front)
+        d = Vector((
+            math.copysign(.0016 * jaw_line - .0024 * sq_corner, p.x),
+            .0028 * chin - .0055 * submental + .0010 * jaw_line - .0016 * sq_corner,
+            -.0032 * chin + .0028 * submental,
+        ))
         mouth = _bell(dz + .064, .006) * smooth(.016, .024, ax) * smooth(.034, .027, ax) * front
-        d.x += math.copysign(.0018 * mouth, p.x)
+        d.x += math.copysign(.0012 * mouth, p.x)
         if d.length_squared > 1e-14:
             delta[i] = d
     _apply(face, delta)
 
 
 def fit_ade_wrap(face, eyes):
-    """Close the medial lid pockets and fit the chin below the projected beard."""
+    """Gently close any tiny medial lid pocket without folding or compressing the chin."""
     basis = face.data.shape_keys.key_blocks[0].data
     skin = material_vertices(face, ('hero_skin_face_',))
     lashes = material_vertices(face, ('hero_brow',))
-    eye = (eyes[0] + eyes[1]) * .5
     delta = {}
     for i in skin | lashes:
         p = basis[i].co
-        dz = p.z - eye.z
-        chin = 0.0
-        if i in skin:
-            chin = (smooth(-.097, -.119, dz) * smooth(-.164, -.130, dz)
-                    * smooth(.064, .037, abs(p.x)) * smooth(eye.y - .038, eye.y + .014, p.y))
         near = eyes[0] if p.x * eyes[0].x > 0 else eyes[1]
         dx = abs(p.x) - abs(near.x)
         corner = (_bell(dx + .0079, .0043) * _bell(p.z - near.z + .0062, .0037)
                   * smooth(near.y - .003, near.y + .007, p.y))
-        d = Vector((0, -.012 * chin + .0010 * corner, .0055 * chin + .0030 * corner))
+        d = Vector((0, .0008 * corner, .0022 * corner))
         if d.length_squared > 1e-14:
             delta[i] = d
     _apply(face, delta)

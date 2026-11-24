@@ -27,7 +27,7 @@ const HEEL := 0.066
 const SETTLE_DIST := 0.15
 const SETTLE_TIME := 0.3
 const START_SPEED := 0.35   # m/s: below this (both feet down) the body stands
-const STAND_W := 0.1       # standing feet: half the stance width (m)
+const STAND_W := 0.088      # standing feet: half the stance width (m)
 
 
 class Foot:
@@ -251,7 +251,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 	# Walking lands well ahead (heel strike); running lands closer under the
 	# hips and pushes off further behind – no reaching, braking overstride.
 	var ahead := cover * lerpf(0.43 if everyday else reach_f / cover_max, 0.245 if everyday else 0.36, run)
-	var width := lerpf(0.083, 0.072, run) if everyday else lerpf(0.095, 0.035, run)
+	var width := lerpf(0.068, 0.056, run) if everyday else lerpf(0.095, 0.035, run)
 
 	for sd in ["l", "r"]:
 		var f: Foot = feet[sd]

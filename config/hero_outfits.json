@@ -43,18 +43,6 @@
         "pants_col": "#252933",
         "shoes": "shoes_classic"
       }
-    },
-    {
-      "id": "ade_formal",
-      "name": "Formal",
-      "look": {
-        "top": "top_blazer",
-        "trousers": "chinos",
-        "footwear": "derbies",
-        "top_col": "#262e3f",
-        "pants_col": "#262e3f",
-        "shoes": "shoes_blackout"
-      }
     }
   ],
   "b": [

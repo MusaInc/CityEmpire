@@ -28,24 +28,30 @@ def pores(points, frequency):
 
 
 def ocular_atlas(size=512):
+    """High-realism ocular atlas: luminous radial iris stroma (tinted cleanly by the game shader),
+    warm collarette depth, crisp dark limbal border, deep black pupil, and natural warm sclera."""
     y, x = (np.mgrid[0:size, 0:size] + .5) / size * 2 - 1
     r, a = np.hypot(x, y), np.arctan2(y, x)
     iris = r / .49
-    fibres = .095 * np.sin(47*a + 11*r + 1.6*np.sin(9*a) * iris)
-    fibres += .057 * np.sin(103*a - 21*r + .55*np.sin(21*a))
-    fibres += .038 * np.sin(159*a + 11*r)
-    crypt = np.maximum(0, np.sin(31*a + 8*r))*np.exp(-((iris-.57)/.121)**2)
-    ring = np.clip((iris-.78)/.22, 0, 1)**1.45
-    dye = np.clip(.66 + fibres - .185*crypt - .37*ring + .065*np.exp(-((iris-.53)/.17)**2), .17, .87)
-    corner = np.clip((r-.45)*1.65, 0, 1)
-    veins = np.maximum(0, np.sin(15*a + 7*r + 1.1*np.sin(a*8+r*22)))**56
-    white = np.stack((.69-.19*corner, .66-.23*corner-.027*veins*corner,
-                      .60-.23*corner-.036*veins*corner), axis=-1)
-    pigment = dye[..., None]*np.array([1.0, .93, .80])
-    coverage = np.clip((.497-r)/.023, 0, 1)[..., None]
-    colour = white * (1-coverage) + pigment * coverage
-    pupil = np.clip((.181-r)/.016, 0, 1)[..., None]
-    return (colour*(1-pupil) + np.array([.012,.010,.009])*pupil).astype(np.float32)
+    # Multi-frequency organic radial iris fibres & crypts with bright inner collarette depth.
+    fibres = .135 * np.sin(53 * a + 9 * r + 1.8 * np.sin(11 * a) * iris)
+    fibres += .078 * np.sin(113 * a - 17 * r + .65 * np.sin(23 * a))
+    fibres += .045 * np.sin(179 * a + 13 * r)
+    crypt = np.maximum(0, np.sin(29 * a + 7 * r)) * np.exp(-((iris - .56) / .135)**2)
+    collarette = np.exp(-((iris - .43) / .13)**2)
+    limbal = np.clip((iris - .76) / .24, 0, 1)**1.35
+    dye = np.clip(.84 + fibres - .19 * crypt - .56 * limbal + .18 * collarette, .20, 1.0)
+    # Natural warm off-white sclera with soft corner shading & subtle capillaries.
+    corner = np.clip((r - .44) * 1.65, 0, 1)
+    veins = np.maximum(0, np.sin(15 * a + 7 * r + 1.1 * np.sin(a * 8 + r * 22)))**50
+    white = np.stack((.84 - .18 * corner, .81 - .21 * corner - .026 * veins * corner,
+                      .77 - .22 * corner - .034 * veins * corner), axis=-1)
+    # Neutral-warm luminous iris pigment so shader tint produces rich brown/hazel/blue instead of black.
+    pigment = dye[..., None] * np.array([1.0, .96, .89]) + collarette[..., None] * np.array([.11, .075, .025])
+    coverage = np.clip((.498 - r) / .022, 0, 1)[..., None]
+    colour = white * (1 - coverage) + np.clip(pigment, 0, 1) * coverage
+    pupil = np.clip((.174 - r) / .015, 0, 1)[..., None]
+    return (colour * (1 - pupil) + np.array([.008, .007, .008]) * pupil).astype(np.float32)
 
 
 def bake_portrait_hd(face, identity, output):
@@ -72,11 +78,12 @@ def bake_portrait_hd(face, identity, output):
     pore = pores(points, 1660)
     second = pores(points + .0178, 2640)
     lip = np.exp(-(x/.024)**4 - ((z-eye_height+.064)/.010)**2) * front
-    regional = .018 * np.sin(x*184 + z*148) * np.sin(y*111 - z*127)
-    variation = regional - (.011 + .014*cheeks)*pore - .009*second
+    # Subtle, ultra-clean natural skin micro-variation (keep fine pore relief in normal map without dirtying albedo!).
+    regional = .005 * np.sin(x*184 + z*148) * np.sin(y*111 - z*127)
+    variation = regional - (.004 + .005*cheeks)*pore - .003*second
     albedo = resample(colour.image, size)
     albedo[used] *= 1 + variation[:, None]
-    albedo[used] *= 1 + (.025 * cheeks + .021 * lip)[:, None] * np.array([.35, -.75, -1.0])
+    albedo[used] *= 1 + (.016 * cheeks + .018 * lip)[:, None] * np.array([.35, -.75, -1.0])
     colour.image = packed_image(output / f'face_{identity}_albedo.png', _dilate(albedo, used, 9))
     del albedo
 

@@ -165,12 +165,14 @@ def tied_freedom(point, eye, style):
 
 
 def fade_progress(point, eye, style):
-    # The fade follows the higher temple and the lower crown-to-nape arc.
-    temple = smooth(eye.y - .111, eye.y - .024, point.y)
+    # Smooth, believable barber fade along temples and occipital nape for all short cuts.
+    temple = smooth(eye.y - .115, eye.y - .022, point.y)
     level = point.z - eye.z
     if style == 'fade':
-        return smooth(-.051 + .017 * temple, .062 + .007 * temple, level)
-    return smooth(-.044 + .014 * temple, .039 + .010 * temple, level)
+        return smooth(-.048 + .018 * temple, .060 + .008 * temple, level) ** 1.15
+    if style == 'buzz':
+        return smooth(-.056 + .014 * temple, .016 + .010 * temple, level)
+    return smooth(-.046 + .014 * temple, .042 + .010 * temple, level) ** 1.10
 
 
 def strand_opacity(point, eye, style):

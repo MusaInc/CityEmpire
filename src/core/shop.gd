@@ -38,26 +38,26 @@ const OTHER_ITEMS := [
 	# Faces (character.glb Face_<face> / Hair_<face>): skin, hair and eye
 	# colours are tints. All free: who you are isn't for sale.
 	{"id": "hero_kai", "slot": "hero", "name": "Kai", "face": "kai", "style": "buzz", "skin": Color(0.6, 0.42, 0.3),
-		"hair": Color(0.06, 0.045, 0.035), "eyes": Color(0.28, 0.17, 0.08), "price": 0},
+		"hair": Color(0.09, 0.068, 0.054), "eyes": Color(0.46, 0.28, 0.14), "price": 0},
 	{"id": "hero_ade", "slot": "hero", "name": "Ade", "face": "ade", "style": "crop", "skin": Color(0.72, 0.44, 0.3),
-		"hair": Color(0.075, 0.06, 0.052), "eyes": Color(1, 1, 1), "price": 0},
+		"hair": Color(0.11, 0.082, 0.066), "eyes": Color(0.45, 0.27, 0.13), "price": 0},
 	{"id": "hero_ren", "slot": "hero", "name": "Ren", "face": "ren", "style": "crop", "skin": Color(0.84, 0.66, 0.52),
-		"hair": Color(0.04, 0.035, 0.035), "eyes": Color(0.2, 0.12, 0.06), "price": 0},
+		"hair": Color(0.075, 0.062, 0.056), "eyes": Color(0.38, 0.23, 0.12), "price": 0},
 	{"id": "hero_theo", "slot": "hero", "name": "Theo", "face": "theo", "style": "buzz", "skin": Color(0.9, 0.72, 0.62),
-		"hair": Color(0.36, 0.22, 0.12), "eyes": Color(0.26, 0.42, 0.55), "price": 0},
+		"hair": Color(0.38, 0.24, 0.14), "eyes": Color(0.34, 0.54, 0.70), "price": 0},
 	{"id": "hero_malik", "slot": "hero", "name": "Malik", "face": "malik", "style": "crop", "skin": Color(0.46, 0.3, 0.2),
-		"hair": Color(0.05, 0.04, 0.03), "eyes": Color(0.22, 0.13, 0.06), "price": 0},
+		"hair": Color(0.085, 0.065, 0.052), "eyes": Color(0.40, 0.24, 0.12), "price": 0},
 	# Body type B's faces (character_b.glb).
 	{"id": "hero_rio", "slot": "hero", "name": "Rio", "face": "rio", "style": "curls", "body": "b", "skin": Color(0.36, 0.22, 0.15),
-		"hair": Color(0.07, 0.055, 0.045), "eyes": Color(0.17, 0.1, 0.05), "price": 0},
+		"hair": Color(0.10, 0.075, 0.060), "eyes": Color(0.36, 0.22, 0.11), "price": 0},
 	{"id": "hero_sam", "slot": "hero", "name": "Sam", "face": "sam", "style": "pixie", "body": "b", "skin": Color(0.9, 0.74, 0.64),
-		"hair": Color(0.42, 0.27, 0.15), "eyes": Color(0.3, 0.42, 0.5), "price": 0},
+		"hair": Color(0.44, 0.29, 0.17), "eyes": Color(0.38, 0.54, 0.66), "price": 0},
 	{"id": "hero_noa", "slot": "hero", "name": "Noa", "face": "noa", "style": "ponytail", "body": "b", "skin": Color(0.86, 0.68, 0.54),
-		"hair": Color(0.05, 0.04, 0.04), "eyes": Color(0.2, 0.12, 0.06), "price": 0},
+		"hair": Color(0.085, 0.068, 0.060), "eyes": Color(0.38, 0.23, 0.12), "price": 0},
 	{"id": "hero_remy", "slot": "hero", "name": "Remy", "face": "remy", "style": "pixie", "body": "b", "skin": Color(0.5, 0.33, 0.22),
-		"hair": Color(0.08, 0.06, 0.045), "eyes": Color(0.22, 0.13, 0.06), "price": 0},
+		"hair": Color(0.11, 0.082, 0.062), "eyes": Color(0.42, 0.25, 0.12), "price": 0},
 	{"id": "hero_jules", "slot": "hero", "name": "Jules", "face": "jules", "style": "bun", "body": "b", "skin": Color(0.8, 0.5, 0.355),
-		"hair": Color(0.112, 0.073, 0.055), "eyes": Color(0.42, 0.27, 0.14), "price": 0},
+		"hair": Color(0.175, 0.118, 0.086), "eyes": Color(0.54, 0.34, 0.17), "price": 0},
 	# Hair (character.glb Hair_<style>_<face>: every cut is fitted to every
 	# face's own scalp). Natural = the face's own cut; the colour stays the
 	# face's. Hidden under the beanie, the balaclava and the courier hood.

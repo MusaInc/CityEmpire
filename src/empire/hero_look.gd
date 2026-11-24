@@ -5,7 +5,7 @@ extends RefCounted
 const CHARACTERS := [["a", "Ade"], ["b", "Jules"]]
 const IDENTITIES := {"a": "hero_ade", "b": "hero_jules"}
 const TOPS := [["top_tee", "T-Shirt"], ["top_polo", "Polo"], ["top_shirt", "Shirt"], ["top_jumper", "Jumper"],
-	["top_hoodie", "Hoodie"], ["top_blazer", "Blazer & Tie"], ["top_long", "Base Layer"], ["top_bomber", "Bomber Jacket"]]
+	["top_hoodie", "Hoodie"], ["top_long", "Base Layer"], ["top_bomber", "Bomber Jacket"]]
 const LOWER_CUTS := [["auto", "Match top"], ["cargo", "Cargo"], ["chinos", "Chinos"],
 	["jeans", "Jeans"], ["joggers", "Joggers"], ["shorts", "Shorts"]]
 const FASHION_TOPS := [["top_fashion_ribcrop", "Cropped Rib Cardigan"], ["top_fashion_zipcrop", "Cropped Zip Hoodie"],
@@ -83,6 +83,8 @@ static func top_for(body: String, id: String) -> String:
 		if id in ["top_fashion_pullover", "top_fashion_bodysuit", "top_fashion_crop"]:
 			return "top_fashion_crossbra"
 		return "top_fashion_ribcrop"
+	if body != "b" and id == "top_blazer":
+		return "top_shirt"
 	if body != "b" and id.begins_with("top_fashion_"):
 		return DEFAULT["top"]
 	return id

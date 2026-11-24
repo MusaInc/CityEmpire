@@ -132,7 +132,9 @@ def _mesh_landmarks(face, shell, eyes):
                 front[k] = p
     jaw = [front[k] for k in sorted(front, reverse=True)]
     pog = max(jaw, key=lambda p: p.y)
-    chin = next((p for p in jaw if p.z < pog.z and p.y < pog.y - .012), jaw[-1])
+    # Place chin landmark at the true bottom of the chin (not mid-chin) so Ade's goatee maps naturally without squashing.
+    chin_drop = .018 if face.name == 'Face_ade' else .012
+    chin = next((p for p in jaw if p.z < pog.z - .008 and p.y < pog.y - chin_drop), jaw[-1])
     # Mouth: the deepest midline notch between the lips (below the nose).
     band = [p for p in mid if eye_z - .085 < p.z < sub.z - .015]
     centre = [p for p in band if abs(p.x) < .0012] or band
@@ -244,7 +246,12 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     size = colour_node.image.size[0]
 
     if shell is not None and identity == 'jules':
-        trim_scalp_rim(shell, face, eyes)
+        # Keep smooth continuous scalp boundary (NEVER delete jagged sawtooth rim triangles!).
+        from mathutils.bvhtree import BVHTree
+        from hero_polish import smooth_side_hairline
+        skin_bvh = BVHTree.FromPolygons([v.co for v in face.data.vertices],
+                                        [tuple(p.vertices) for p in face.data.polygons if p.material_index == slot])
+        smooth_side_hairline(shell, skin_bvh, (eyes[0] + eyes[1]) * .5, iterations=48, min_abs_x=0)
     model, eye_z, landmarks = projection or fit_projection(face, shell, eyes, image_landmarks)
 
     photo = _source(source_path)
@@ -258,14 +265,19 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     background = lum < .03
     brows = sum(((xx - bx) / (150. * sc)) ** 2 + ((yy - by) / (45. * sc)) ** 2 < 1
                 for k, (bx, by) in image_landmarks.items() if k.startswith('brow'))
-    hair = ((lum < HAIR_LUM.get(identity, .17)) & ((yy < ey0 - 122 * sc)
-            | (((xx < 260 * sc) | (xx > W - 260 * sc)) & (yy < ey0 + 48 * sc))) & ~brows.astype(bool))
+    # For Jules, mask out the dark hair sweep & shadow sitting above the ears/temples so ZERO dark blotch bakes onto temple skin.
+    temple_hair = (((xx < 360 * sc) | (xx > W - 360 * sc)) & (yy < ey0 + 52 * sc)) if identity == 'jules' \
+        else (((xx < 260 * sc) | (xx > W - 260 * sc)) & (yy < ey0 + 48 * sc))
+    upper_temple = (((xx < 415 * sc) | (xx > W - 415 * sc)) & (yy < ey0 - 25 * sc)) if identity == 'jules' else np.zeros_like(temple_hair)
+    hair_thresh = .24 if identity == 'jules' else HAIR_LUM.get(identity, .085)
+    hair = (((lum < hair_thresh) & ((yy < ey0 - 120 * sc) | temple_hair))
+            | ((lum < .33) & upper_temple)) & ~brows.astype(bool)
     openings = sum(((xx - ex) / (104. * sc)) ** 2 + ((yy - ey - 2 * sc) / (37. * sc)) ** 2 < 1
                    for k, (ex, ey) in image_landmarks.items() if k.startswith('eye')).astype(bool)
     near_eyes = sum(((xx - ex) / (135. * sc)) ** 2 + ((yy - ey - 6 * sc) / (62. * sc)) ** 2 < 1
                     for k, (ex, ey) in image_landmarks.items() if k.startswith('eye')).astype(bool)
     skinlike = ~(background | hair)
-    fringe = hair & (_blur(skinlike.astype(np.float32), 9.0 * sc) > .06) & (yy < ey0 - 62 * sc)
+    fringe = hair & (_blur(skinlike.astype(np.float32), 7.5 * sc) > .10) & (yy < ey0 - 74 * sc) & (np.abs(xx - cx) < 280 * sc)
     keep = ~(background | (hair & ~fringe) | openings | (near_eyes & (lum < .30)))
     keep = _blur(keep.astype(np.float32), 1.5) > .98
     filled = _fill(photo, keep)
@@ -288,7 +300,61 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     flum = filled @ np.array([.2126, .7152, .0722])
     neutral = skin_mean / (skin_mean @ np.array([.2126, .7152, .0722])) * flum[..., None]
     filled = filled + (neutral - filled) * (.6 * socket)[..., None]
-    detail = (lum - _blur(lum, 2.2)).astype(np.float32)
+
+    # Clean, feature-preserving photographic skin delighting without excessive smoothing:
+    # preserve eyebrows, lips, nostrils, natural pores, freckles, and Ade's crisp stubble/beard!
+    mx, my = image_landmarks['mouth']
+    sx, sy = image_landmarks['subnasale']
+    lips_m = (((xx - mx) / (145. * sc)) ** 2 + ((yy - my) / (68. * sc)) ** 2) < 1
+    if identity == 'jules':
+        # Remove the bright pale specular/teeth strip inside Jules's lip seam from the source photo
+        # so closed resting lips show a natural soft rosy-brown lip crease instead of a white line!
+        lip_slit = (((xx - mx) / (122. * sc)) ** 2 + ((yy - my + 2. * sc) / (20. * sc)) ** 2) < 1
+        lip_body = lips_m & ~lip_slit & (flum < 0.44)
+        if np.any(lip_body):
+            lip_tone = np.median(filled[lip_body], axis=0) * np.array([0.82, 0.78, 0.78], dtype=np.float32)
+            bright_slit = _blur((lip_slit & (flum > 0.40)).astype(np.float32), 2.5 * sc)
+            bright_slit = np.clip(bright_slit * 1.45, 0.0, 1.0)[..., None]
+            filled = filled * (1.0 - bright_slit) + lip_tone * bright_slit
+            flum = filled @ np.array([.2126, .7152, .0722])
+    nostril_m = (((xx - sx) / (90. * sc)) ** 2 + ((yy - sy + 14 * sc) / (46. * sc)) ** 2) < 1
+    beard_m = np.zeros_like(lips_m)
+    beard_hair_relief = np.zeros((H, W), dtype=np.float32)
+    if identity == 'ade':
+        # Preserve Ade's entire natural mustache, soul patch, goatee and cheek/jaw stubble 100% razor sharp!
+        beard_m = (yy > my - 72 * sc) & (yy < my + 260 * sc) & (np.abs(xx - mx) < 340 * sc)
+        # Enhance crisp individual facial-hair & stubble follicle definition via targeted micro-unsharp contrast
+        # (replaces blurry smudges with crisp individual hair definition!).
+        fine_hair = (flum - _blur(flum, 1.35 * sc))
+        med_hair = (flum - _blur(flum, 3.0 * sc))
+        moustache_zone = np.exp(-((xx - mx) / (125 * sc)) ** 2 - ((yy - (my - 36 * sc)) / (36 * sc)) ** 2)
+        goatee_zone = np.exp(-((xx - mx) / (148 * sc)) ** 2 - ((yy - (my + 128 * sc)) / (95 * sc)) ** 2)
+        stubble_zone = np.clip((yy - (ey0 + 115 * sc)) / (85 * sc), 0.0, 1.0) * np.exp(-((np.abs(xx - mx) - 195 * sc) / (135 * sc)) ** 2)
+        hair_zone = np.clip(moustache_zone + goatee_zone + 0.70 * stubble_zone, 0.0, 1.0)
+        # Crisp follicle sharpening in albedo (strictly on facial-hair zone, never noisy on cheeks).
+        sharp_delta = np.clip((fine_hair * 0.65 + med_hair * 0.25) * hair_zone, -0.14, 0.14)[..., None]
+        filled = np.clip(filled + sharp_delta, 0.0, 1.0)
+        # Directional hair-strand relief for normal map: individual dark hairs stand subtly proud of skin!
+        dark_hair = np.clip((skin_lum * 0.88 - flum) / max(skin_lum * 0.65, 0.05), 0.0, 1.0) * hair_zone
+        strand_pattern = (0.55 * np.sin(xx * (1.85 / sc) + np.sin(yy * (0.25 / sc)) * 1.4)
+                          + 0.45 * np.sin(xx * (3.40 / sc) - yy * (0.45 / sc)))
+        beard_hair_relief = (dark_hair * (0.65 + 0.55 * strand_pattern) - fine_hair * 2.4 * hair_zone).astype(np.float32)
+    # Preserve delicate upper-eyelid crease depth so eyes retain natural 3D orbital definition.
+    lid_crease = sum(((xx - ex) / (112. * sc)) ** 2 + ((yy - ey + 28 * sc) / (20. * sc)) ** 2 < 1
+                     for k, (ex, ey) in image_landmarks.items() if k.startswith('eye')).astype(bool)
+    ear_m = (xx < 235 * sc) | (xx > W - 235 * sc)
+    preserve = _blur((brows.astype(bool) | lips_m | nostril_m | beard_m | lid_crease | ear_m | openings | ~keep).astype(np.float32), 11.0 * sc)
+    clean_skin = np.clip(1.0 - preserve, 0.0, 1.0)
+    # 1. Gentle photo-lighting delighting on broad uneven forehead/cheek shadows without smudging pores.
+    broad_lum = _blur(flum, 28.0 * sc)
+    delight = np.clip((skin_lum * 0.99) / np.maximum(broad_lum, 1e-3), 0.91, 1.13)
+    delit = filled * (1.0 + (delight - 1.0) * 0.34 * clean_skin)[..., None]
+    # 2. Light frequency-separated cleanup keeping 82% of natural photographic pore & freckle micro-detail.
+    smooth_col = _blur(delit, 9.0 * sc)
+    micro_tex = delit - _blur(delit, 2.0 * sc)
+    cleaned = smooth_col + micro_tex * 0.85
+    filled = np.clip(delit * (1.0 - 0.22 * clean_skin[..., None]) + cleaned * (0.22 * clean_skin[..., None]), 0.0, 1.0)
+    detail = (lum - _blur(lum, 2.0)).astype(np.float32)
 
     pos, normals, used = raster_uv(face, size, material_index=slot)
     P = pos[used]
@@ -308,17 +374,28 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     colour = sample(filled)
     angle = np.abs(np.arctan2(P[:, 0], P[:, 1] - CY))
     outside = np.clip(np.maximum(np.maximum(-uv[:, 0], uv[:, 0] - W), np.maximum(-uv[:, 1], uv[:, 1] - H)) / 40, 0, 1)
-    outside = np.maximum(outside, np.clip((angle - 1.65) / .25, 0, 1))
-    colour = colour * (1 - outside[:, None]) + skin_mean * outside[:, None]
+    # Smoothly transition behind the ears into matching side-neck skin so ZERO ear-edge arc ever appears.
+    ear_cut = 1.38 if identity == 'ade' else 1.54
+    ear_blend = np.clip((angle - ear_cut) / (.42 if identity == 'ade' else .30), 0, 1)
+    ear_blend = ear_blend * ear_blend * (3 - 2 * ear_blend)
+    outside = np.maximum(outside, ear_blend)
+    side_skin = skin_mean
+    if identity == 'ade':
+        edge_mask = (angle > 1.24) & (angle < 1.44) & (P[:, 2] > eye_z - 0.08) & (P[:, 2] < eye_z + 0.04) & inside
+        if np.any(edge_mask):
+            side_skin = np.median(colour[edge_mask], axis=0) * 0.72 + skin_mean * 0.28
+    colour = colour * (1 - outside[:, None]) + side_skin * outside[:, None]
     covered = sample(keep.astype(np.float32)) * inside
     weight = np.ones(len(P))
     zmin = P[:, 2].min()
     if identity == 'ade':
         front = np.clip((P[:, 1] - .085) / .052, 0, 1)
-        neck = np.clip((P[:, 2] - (1.578 - .056 * front)) / (.077 - .013 * front), 0, 1)
+        neck = np.clip((P[:, 2] - (1.575 - .052 * front)) / (.075 - .012 * front), 0, 1)
         weight *= neck * neck * (3 - 2 * neck)
     else:
-        weight *= np.clip((P[:, 2] - zmin - .004) / .03, 0, 1)
+        # Smooth 4.8cm feather down the lower neck/clavicle into EXACT hero_skin_body tone (zero chest seam!).
+        neck = np.clip((P[:, 2] - zmin - .008) / .048, 0, 1)
+        weight *= neck * neck * (3 - 2 * neck)
 
     tint_lin = srgb_to_linear(np.array(tint[:3], dtype=np.float64))
     albedo_lin = srgb_to_linear(colour) / tint_lin
@@ -328,17 +405,21 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
 
     old = pixels(colour_node.image)[..., :3].copy()
     base = old[used]
-    # Match the old map's tone at the seam so the neck joins the body.
-    seam = weight < .5
-    if seam.any() and identity != 'ade':
-        gain = (albedo[seam].mean(0) + 1e-4) / (base[seam].mean(0) + 1e-4)
-        base = np.clip(base * gain, 0, 1)
+    # Match the lower neck boundary EXACTLY to hero_skin_body's measured median RGB [0.953, 0.949, 0.941]
+    # so there is ZERO tone jump where Face_jules meets Fashion_Torso_Skin / Fashion_Crop_Skin.
+    if identity == 'jules':
+        base = np.broadcast_to(np.array([0.953, 0.949, 0.941], dtype=np.float32), base.shape).copy()
     old[used] = base * (1 - weight[:, None]) + albedo * weight[:, None]
     colour_node.image = packed_image(output / f'face_{identity}_albedo.png', _dilate(old, used, 10))
 
-    # Pore, freckle and lip-line relief from the photo as a detail normal.
+    # Pore, freckle, lip-line and Ade's individual beard/moustache/stubble relief as a crisp detail normal.
     height = np.zeros(used.shape, np.float32)
-    height[used] = -sample(detail) * .0016 * weight * (.4 + .6 * covered)
+    skin_relief = -sample(detail) * .00105 * weight * (.4 + .6 * covered)
+    if identity == 'ade':
+        beard_relief = sample(beard_hair_relief) * .00042 * weight * (.35 + .65 * covered)
+        height[used] = skin_relief + beard_relief
+    else:
+        height[used] = skin_relief
     # Start flat: the old map was baked for the previous face shape and
     # printed its planes (bright cheek patches) onto the new one.
     normal_map = np.ones((size, size, 3), np.float32) * np.array([0, 0, 1], np.float32)
@@ -346,12 +427,13 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
         valid = used & np.roll(used, 1, axis) & np.roll(used, -1, axis)
         lengths = np.linalg.norm(np.roll(pos, -1, axis) - np.roll(pos, 1, axis), axis=-1)
         relief = np.roll(height, -1, axis) - np.roll(height, 1, axis)
+        lim = .36 if identity == 'ade' else .24
         normal_map[..., channel][valid] = (normal_map[..., channel][valid]
-                                          - np.clip(relief[valid] / np.maximum(lengths[valid], .00024), -.35, .35))
+                                          - np.clip(relief[valid] / np.maximum(lengths[valid], .00024), -lim, lim))
     normal_map /= np.maximum(np.linalg.norm(normal_map, axis=-1, keepdims=True), 1e-6)
     normal_image.image = packed_image(output / f'face_{identity}_normal.png',
                                       _dilate(normal_map * .5 + .5, used, 7), normal=True)
-    normal_node.inputs['Strength'].default_value = 1.0
+    normal_node.inputs['Strength'].default_value = 0.82 if identity == 'ade' else 0.76
     return landmarks
 
 

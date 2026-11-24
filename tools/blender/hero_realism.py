@@ -52,18 +52,91 @@ def face_planes(face, identity, eyes):
             if identity == 'jules':
                 side = abs(x)
                 cheek_front = smooth(eye.y-.061, eye.y+.001, y)
-                crest = math.exp(-((side-.052)/.021)**2 - ((dz+.033)/.024)**2)
-                hollow = math.exp(-((side-.046)/.024)**2 - ((dz+.054)/.019)**2)
-                point.y += cheek_front * (-.0072*crest + .0055*hollow)
-                point.x -= math.copysign(.0030*cheek_front*crest, x)
-                point.x *= 1 - .034 * jaw
-                point.y += .0011 * front * math.exp(-(x/.025)**4 - ((z-eye_z+.066)/.008)**2)
+                # Correct the protruding lateral cheekbone spike cleanly inward and smooth lower-cheek transition.
+                crest = math.exp(-((side-.043)/.019)**2 - ((dz+.027)/.020)**2)
+                hollow = math.exp(-((side-.045)/.024)**2 - ((dz+.054)/.020)**2)
+                point.y += cheek_front * (-.0088*crest + .0046*hollow)
+                point.x -= math.copysign(.0036*cheek_front*crest, x)
+                point.x *= 1 - .032 * jaw
+                point.y += .0008 * front * math.exp(-(x/.025)**4 - ((z-eye_z+.066)/.008)**2)
             else:
-                point.y -= .0023 * front * cheek
-            point.y += .0004 * front * cheek * math.sin(x*39)
+                point.y -= .0015 * front * cheek
     basis = face.data.shape_keys.key_blocks[0]
     for vertex, point in zip(face.data.vertices, basis.data):
         vertex.co = point.co
+    face.data.update()
+
+
+def smooth_jules_cheeks(face, eyes):
+    """Smooth Jules's lateral cheekbones and upper-cheek-to-jaw transition without
+    distorting chin, mouth or eye landmarks, preserving all expression shape keys."""
+    eye = (eyes[0] + eyes[1]) * 0.5
+    keys = face.data.shape_keys.key_blocks
+    basis = keys[0].data
+    skin = material_vertices(face, ('hero_skin_face_',))
+    pts = {i: basis[i].co.copy() for i in skin}
+    bm = bmesh.new()
+    bm.from_mesh(face.data)
+    bm.verts.ensure_lookup_table()
+    ring = {}
+    for i in pts:
+        v = bm.verts[i]
+        if not v.is_boundary:
+            ring[i] = [e.other_vert(v).index for e in v.link_edges if e.other_vert(v).index in pts]
+    bm.free()
+
+    cur = dict(pts)
+    weights = {}
+    for i, p in pts.items():
+        dz = p.z - eye.z
+        ax = abs(p.x)
+        near_eye = min((p - e).length for e in eyes)
+        # Focus on lateral cheekbone, mid-cheek AND soft smoothing of the bottom chin bar!
+        outer_cheek = math.exp(-((ax - 0.044) / 0.020) ** 2 - ((dz + 0.032) / 0.024) ** 2)
+        lower_chin = math.exp(-(p.x / 0.038) ** 4 - ((dz + 0.095) / 0.015) ** 2) * 0.65
+        mouth_guard = 1.0 - math.exp(-(p.x / 0.030) ** 4 - ((dz + 0.064) / 0.016) ** 4)
+        front = smooth(eye.y - 0.070, eye.y - 0.015, p.y)
+        w = max(outer_cheek * smooth(0.018, 0.030, near_eye), lower_chin) * mouth_guard * front
+        weights[i] = min(1.0, w)
+
+    for step in range(28):
+        k = 0.50 if step % 2 == 0 else -0.47
+        nxt = dict(cur)
+        for i, nb in ring.items():
+            w = weights.get(i, 0.0)
+            if w < 0.02 or len(nb) < 3:
+                continue
+            avg = sum((cur[j] for j in nb), Vector()) / len(nb)
+            nxt[i] = cur[i] + (avg - cur[i]) * k * w
+        cur = nxt
+
+    delta = {}
+    for i, p in pts.items():
+        d = cur[i] - p
+        dz = p.z - eye.z
+        ax = abs(p.x)
+        front = smooth(eye.y - 0.068, eye.y - 0.018, p.y)
+        # Gentle additional smoothing of the exact malar peak so 3/4 silhouette is soft and natural.
+        peak = math.exp(-((ax - 0.042) / 0.015) ** 2 - ((dz + 0.026) / 0.016) ** 2) * front
+        d.y -= 0.0022 * peak
+        d.x -= math.copysign(0.0012 * peak, p.x)
+        # Smooth feminine oval chin/jawline without flattening or pinching an under-chin bar.
+        low_chin = smooth(-0.072, -0.096, dz) * smooth(-0.126, -0.104, dz) * smooth(0.014, 0.044, ax) * front
+        d.x -= p.x * 0.055 * low_chin
+        d.y -= 0.0012 * low_chin
+        chin_tip = math.exp(-(p.x / 0.018) ** 2 - ((dz + 0.098) / 0.012) ** 2) * front
+        d.z -= 0.0014 * chin_tip
+        under_chin = smooth(-0.102, -0.122, dz) * smooth(-0.145, -0.124, dz) * smooth(0.052, 0.014, ax) * smooth(eye.y - 0.050, eye.y + 0.004, p.y)
+        d.y -= 0.0045 * under_chin
+        d.z += 0.0026 * under_chin
+        if d.length_squared > 1e-13:
+            delta[i] = d
+
+    for key in keys:
+        for i, d in delta.items():
+            key.data[i].co += d
+    for i in delta:
+        face.data.vertices[i].co = keys[0].data[i].co
     face.data.update()
 
 
@@ -88,8 +161,64 @@ def visible_lid(skin, eyeball, x, centre, upper):
     return lid
 
 
+def _add_tear_duct(bm, eye, sign, skin, eyeball, slot, weights, head, shapes):
+    """Build a sculpted moist pinkish inner-canthus caruncle tucked snugly where
+    upper and lower lids meet the medial sclera (eliminates angular hollow gaps)."""
+    # Probe the medial edge of the visible eye opening.
+    inner_x = None
+    for step in range(4, 24):
+        x = eye.x - sign * (0.0075 + step * 0.00045)
+        u_pt = visible_lid(skin, eyeball, x, eye, True)
+        l_pt = visible_lid(skin, eyeball, x, eye, False)
+        if u_pt is not None and l_pt is not None:
+            inner_x = x
+        elif inner_x is not None:
+            break
+    if inner_x is None:
+        inner_x = eye.x - sign * 0.0112
+    # Anchor cleanly inside the medial corner pocket, resting softly against the sclera.
+    c_x = inner_x + sign * 0.0004
+    c_z = eye.z - 0.0005
+    g_hit = eyeball.ray_cast(Vector((c_x, eye.y + 0.075, c_z)), Vector((0, -1, 0)), 0.14)[0]
+    s_hit = skin.ray_cast(Vector((c_x, eye.y + 0.075, c_z)), Vector((0, -1, 0)), 0.14)[0]
+    base_y = g_hit.y if g_hit is not None else (s_hit.y if s_hit is not None else eye.y + 0.011)
+    centre = Vector((c_x, base_y + 0.00055, c_z))
+    rx, ry, rz = 0.0020, 0.0012, 0.0015
+    rings = []
+    for i in range(5):
+        phi = math.pi * (i + 0.5) / 5.0
+        row = []
+        for j in range(10):
+            th = math.tau * j / 10.0
+            # Slightly almond-tapered tear-duct mound facing outward (+Y).
+            pt = centre + Vector((rx * math.sin(phi) * math.cos(th),
+                                  ry * math.sin(phi) * math.sin(th),
+                                  rz * math.cos(phi)))
+            v = bm.verts.new(pt)
+            v[weights][head] = 1.0
+            for layer in shapes:
+                v[layer] = pt
+            row.append(v)
+        rings.append(row)
+    new_f = []
+    for i in range(4):
+        for j in range(10):
+            jn = (j + 1) % 10
+            f = bm.faces.new((rings[i][j], rings[i][jn], rings[i + 1][jn], rings[i + 1][j]))
+            f.material_index = slot
+            f.smooth = True
+            new_f.append(f)
+    for cap in (rings[0][::-1], rings[-1]):
+        f = bm.faces.new(cap)
+        f.material_index = slot
+        f.smooth = True
+        new_f.append(f)
+    bmesh.ops.recalc_face_normals(bm, faces=new_f)
+
+
 def lashes(face, eyes, identity):
-    """Replace detached lid rolls with tapered lashes rooted in the actual eyelid."""
+    """Build smooth eyelid waterline margins, sculpted inner-canthus tear ducts,
+    and soft non-aliasing curved eyelashes rooted cleanly into the upper eyelid."""
     skin_slot = next(i for i, m in enumerate(face.data.materials) if m.name.startswith('hero_skin_face_'))
     eye_slot = face.data.materials.find('hero_eye')
     brow_slot = face.data.materials.find('hero_brow')
@@ -97,6 +226,18 @@ def lashes(face, eyes, identity):
     skin, eyeball = surface(face, skin_slot), surface(face, eye_slot)
     blink = face.data.shape_keys.key_blocks['Blink']
     shut = surface(face, skin_slot, [v.co for v in blink.data])
+
+    # Dedicated moist pinkish tear-duct caruncle material.
+    caruncle_mat = bpy.data.materials.get('hero_tear_duct') or bpy.data.materials.new('hero_tear_duct')
+    caruncle_mat.use_nodes = True
+    c_bsdf = caruncle_mat.node_tree.nodes['Principled BSDF']
+    c_bsdf.inputs['Base Color'].default_value = (0.54, 0.28, 0.25, 1.0) if identity == 'jules' else (0.42, 0.22, 0.19, 1.0)
+    c_bsdf.inputs['Roughness'].default_value = 0.18
+    caruncle_slot = face.data.materials.find('hero_tear_duct')
+    if caruncle_slot < 0:
+        caruncle_slot = len(face.data.materials)
+        face.data.materials.append(caruncle_mat)
+
     bm = bmesh.new()
     bm.from_mesh(face.data)
     rim = {v for f in bm.faces if f.material_index == rim_slot for v in f.verts}
@@ -106,41 +247,82 @@ def lashes(face, eyes, identity):
     weights = bm.verts.layers.deform.verify()
     head = face.vertex_groups['b_head'].index
     rng = random.Random(516)
+    jules = identity == 'jules'
+    lash_faces = []
+
     for eye in eyes:
         sign = 1 if eye.x > 0 else -1
-        for upper, count in ((True, 42), (False, 18)):
-            for n in range(count):
-                across = (n+.5 + rng.uniform(-.32, .32))/count
-                x = eye.x + sign * ((across-.5)*.026)
-                root = visible_lid(skin, eyeball, x, eye, upper)
-                if root is None:
-                    continue
-                arc = math.sin(across * math.pi)**.7
-                direction = 1 if upper else -1
-                length = (.0050 if identity == 'jules' else .0035) * arc
-                length *= rng.uniform(.60, 1.23) * (1 if upper else .46)
-                width = rng.uniform(.000054, .000098)
-                seam_z = eye.z - .0021 + sign * (x-eye.x)*.12
-                shut_root = shut.ray_cast(Vector((x, eye.y + .075, seam_z)), Vector((0,-1,0)), .14)[0]
-                shift = (shut_root - root) if shut_root is not None else Vector()
-                rows = []
-                for row in range(4):
-                    t = row/3
-                    tip = root + Vector((sign*length*(across-.28)*t*.68,
-                                         .00007 + length*(.79*t-.22*t*t),
-                                         direction*length*(.22*t+.68*t*t)))
-                    vertices = [bm.verts.new(tip + Vector((side*width*(1-.93*t), 0, 0))) for side in (-1, 1)]
-                    for v in vertices:
-                        v[weights][head] = 1
-                        for layer in shapes:
-                            v[layer] = v.co
-                        v[closed] = v.co + shift + Vector((0, 0, -.63*length*t if upper else .12*length*t))
-                    rows.append(vertices)
-                for a, b in zip(rows, rows[1:]):
-                    order = (a[0], b[0], b[1], a[1])
-                    poly = bm.faces.new(order if upper else order[::-1])
-                    poly.material_index = brow_slot
-                    poly.smooth = True
+        # 0. Sculpted inner-canthus tear duct (caruncle) sealing the medial corner naturally.
+        _add_tear_duct(bm, eye, sign, skin, eyeball, caruncle_slot, weights, head, shapes)
+
+        # 1. Continuous soft dark upper lash-line ribbon (grounds the upper lid cleanly, zero dotted aliasing!).
+        band_steps = 24
+        band_rows = []
+        for s in range(band_steps + 1):
+            across = 0.06 + 0.88 * (s / band_steps)
+            x = eye.x + sign * ((across - 0.5) * 0.0246)
+            root = visible_lid(skin, eyeball, x, eye, True)
+            if root is None:
+                continue
+            arc = math.sin((s / band_steps) * math.pi) ** 0.55
+            seam_z = eye.z - 0.0018 + sign * (x - eye.x) * 0.12
+            shut_root = shut.ray_cast(Vector((x, eye.y + 0.075, seam_z)), Vector((0, -1, 0)), 0.14)[0]
+            shift = (shut_root - root) if shut_root is not None else Vector()
+            ext = (0.0021 if jules else 0.00110) * (0.45 + 0.55 * arc) * (0.80 + 0.34 * across)
+            p_in = root + Vector((0.0, -0.0008, -0.00020))
+            p_mid = root + Vector((sign * ext * 0.14 * across, ext * 0.48, -0.00005 + ext * (0.16 if jules else 0.05)))
+            p_out = root + Vector((sign * ext * 0.28 * across, ext * 0.88, ext * (0.38 if jules else 0.14)))
+            v0, v1, v2 = bm.verts.new(p_in), bm.verts.new(p_mid), bm.verts.new(p_out)
+            for v, tip_k in ((v0, 0.0), (v1, 0.45), (v2, 1.0)):
+                v[weights][head] = 1
+                for layer in shapes:
+                    v[layer] = v.co
+                v[closed] = v.co + shift + Vector((0, 0, -0.65 * ext * tip_k))
+            band_rows.append((v0, v1, v2))
+        for a, b in zip(band_rows, band_rows[1:]):
+            for k in range(2):
+                quad = (a[k], b[k], b[k + 1], a[k + 1]) if sign > 0 else (a[k], a[k + 1], b[k + 1], b[k])
+                poly = bm.faces.new(quad)
+                poly.material_index = brow_slot
+                poly.smooth = True
+                lash_faces.append(poly)
+
+        # 2. Delicate, gracefully swept overlapping lash fans for Jules (fine feather-tip curl, zero chunky dashes!).
+        cluster_count = 36 if jules else 0
+        for n in range(cluster_count):
+            across = 0.08 + 0.86 * (n + 0.5) / cluster_count
+            x = eye.x + sign * ((across - 0.5) * 0.0242)
+            root = visible_lid(skin, eyeball, x, eye, True)
+            if root is None:
+                continue
+            arc = math.sin(((n + 0.5) / cluster_count) * math.pi) ** 0.52
+            wing = 0.72 + 0.52 * smooth(0.35, 0.92, across)
+            length = 0.0033 * arc * wing * rng.uniform(0.90, 1.10)
+            width = 0.00046 * rng.uniform(0.90, 1.10)
+            seam_z = eye.z - 0.0018 + sign * (x - eye.x) * 0.12
+            shut_root = shut.ray_cast(Vector((x, eye.y + 0.075, seam_z)), Vector((0, -1, 0)), 0.14)[0]
+            shift = (shut_root - root) if shut_root is not None else Vector()
+            rows = []
+            for row in range(4):
+                t = row / 3
+                tip = root + Vector((sign * length * (0.12 + 0.74 * across) * t,
+                                     -0.00035 + length * (0.86 * t - 0.16 * t * t),
+                                     -0.00025 + length * (0.08 * t + 0.44 * t * t)))
+                w_cur = width * (1.0 - 0.88 * t)
+                vertices = [bm.verts.new(tip + Vector((side * w_cur, 0, 0))) for side in (-1, 1)]
+                for v in vertices:
+                    v[weights][head] = 1
+                    for layer in shapes:
+                        v[layer] = v.co
+                    v[closed] = v.co + shift + Vector((0, 0, -0.68 * length * t))
+                rows.append(vertices)
+            for a, b in zip(rows, rows[1:]):
+                poly = bm.faces.new((a[0], b[0], b[1], a[1]))
+                poly.material_index = brow_slot
+                poly.smooth = True
+                lash_faces.append(poly)
+    if lash_faces:
+        bmesh.ops.recalc_face_normals(bm, faces=lash_faces)
     dental_arch(face, bm, skin, eyes, identity)
     bm.to_mesh(face.data)
     bm.free()
@@ -171,8 +353,9 @@ def dental_arch(face, bm, skin, eyes, identity):
             hit = skin.ray_cast(Vector((x, eye.y+.105, z)), Vector((0,-1,0)), .19)[0]
             if hit is None:
                 continue
-            centre = Vector((x, hit.y-.0068, z+.0038))
-            height = .0048 - .00042*tooth
+            # Seat upper dental arch deeply inside the oral cavity so teeth NEVER show a white line between closed lips.
+            centre = Vector((x, hit.y-.0135, z+.0046))
+            height = .0040 - .00036*tooth
             rows = []
             for level in (-1, -.70, .75, 1):
                 row = []
@@ -217,17 +400,19 @@ def finish_complexion(face, identity, eyes, output):
     cloud = np.sin(x*291+y*163+z*152) * np.sin(z*263-x*135+y*73)
     phase = np.sin(np.floor(x*1430)*38.741 + np.floor(z*1430)*83.861)
     grain = np.mod(phase*18917.13, 1)
-    pigment = (.013*cloud - .018*grain)*front
+    # Ultra-clean, healthy natural complexion (eliminate muddy blotches & noisy dark speckles!).
+    pigment = (.004 * cloud - .005 * grain) * front
     freckles = np.zeros_like(x)
     rng = random.Random(973 if identity == 'jules' else 613)
-    for _ in range(38 if identity == 'jules' else 17):
-        cx, cz = rng.gauss(0,.030), rng.gauss(-.035,.008)
-        r = rng.uniform(.00024, .00084)
-        strength = rng.uniform(.018,.10)
-        freckles += strength*np.exp(-((x-cx)/r)**2 - ((level-cz)/(r*.76))**2)
-    pigment -= np.minimum(.17, freckles) * front
-    warm = (.039*cheek + .015*temple) if identity == 'jules' else (.041*cheek + .012*temple)
-    shadow = (.13*chin*(grain**9+.30)) if identity == 'ade' else .025*chin
+    for _ in range(16 if identity == 'jules' else 5):
+        cx, cz = rng.gauss(0, .028), rng.gauss(-.034, .007)
+        r = rng.uniform(.00022, .00062)
+        strength = rng.uniform(.010, .042)
+        freckles += strength * np.exp(-((x - cx) / r)**2 - ((level - cz) / (r * .76))**2)
+    pigment -= np.minimum(.065, freckles) * front
+    warm = (.022 * cheek + .008 * temple) if identity == 'jules' else (.018 * cheek + .005 * temple)
+    # No fake procedural chin/beard shadow (the photographic face texture already carries Ade's natural goatee!).
+    shadow = 0.0
     colour = pixels(node.image)[..., :3].copy()
     colour[valid] *= (1 + pigment - shadow)[:, None]
     colour[valid] *= 1 + warm[:, None] * np.array([.23, -.41, -.86])
@@ -241,9 +426,29 @@ def finish_complexion(face, identity, eyes, output):
     size = orm.shape[0]
     positions, normals, valid = raster_uv(face, size, material_index=slot)
     x, y, z = positions[valid].T
-    nose = np.exp(-(x/.016)**2 - ((z-eye_z+.029)/.020)**2)
-    rms = .024 * np.sin(x*2912+y*927) * np.sin(z*2123-x*1763)
-    orm[valid, 1] = np.clip(.63 - .105*nose*np.maximum(0,normals[valid,1]) + rms, .48, .72)
+    nose = np.exp(-(x / .017)**2 - ((z - eye_z + .026) / .024)**2)
+    forehead = np.exp(-(x / .038)**2 - ((z - eye_z - .034) / .022)**2)
+    cheek_hl = np.exp(-((np.abs(x) - .038) / .022)**2 - ((z - eye_z + .024) / .016)**2)
+    lips_hl = np.exp(-(x / .024)**4 - ((z - eye_z + .064) / .009)**2)
+    brow_zone = np.exp(-((np.abs(x) - .028) / .018)**2 - ((z - eye_z - .017) / .0065)**2)
+    beard_rough = 0.0
+    if identity == 'ade':
+        # Matte facial hair roughness on moustache, goatee & jaw stubble so hair never has waxy skin gloss!
+        stache = np.exp(-(x / .022)**2 - ((z - eye_z + .055) / .0065)**2)
+        goatee = np.exp(-(x / .026)**2 - ((z - eye_z + .092) / .018)**2)
+        stubble = np.exp(-((np.abs(x) - .044) / .026)**2 - ((z - eye_z + .074) / .026)**2) * 0.45
+        beard_rough = np.clip(stache + goatee + stubble, 0.0, 1.0)
+    rms = .018 * np.sin(x * 2912 + y * 927) * np.sin(z * 2123 - x * 1763)
+    f_fac = np.maximum(0, normals[valid, 1])
+    # Realistic human skin roughness: subtle natural T-zone & moist lips, satin-matte cheeks & jaw, matte brows/beard.
+    base_rough = .61 - (.10 * nose + .05 * forehead + .035 * cheek_hl + .14 * lips_hl) * f_fac + .16 * brow_zone + .19 * beard_rough + rms
+    orm[valid, 1] = np.clip(base_rough, .42, .84)
+    if identity == 'jules':
+        # Seamless clavicle match: blend lower-neck ORM AO -> 1.0 and roughness -> 0.56 (exact hero_skin_body values!).
+        zmin_j = z.min()
+        clav_blend = 1.0 - smooth_array(zmin_j + 0.008, zmin_j + 0.056, z)
+        orm[valid, 0] = orm[valid, 0] * (1.0 - clav_blend) + 1.0 * clav_blend
+        orm[valid, 1] = orm[valid, 1] * (1.0 - clav_blend) + 0.56 * clav_blend
     orm_node.image = packed_image(output / f'hero_skin_face_{identity}_orm.png', _dilate(orm, valid, 5), True)
 
 
@@ -527,6 +732,7 @@ def finish_realism(rig, meshes, identity, output):
         shape_lips(face, eyes)
         from jules_anatomy import correct_anatomy
         correct_anatomy(face, eyes)
+        smooth_jules_cheeks(face, eyes)
         from portrait_project import drop_geometry_brows
         drop_geometry_brows(face)   # the photographic texture carries the brows
     else:
@@ -554,15 +760,16 @@ def finish_realism(rig, meshes, identity, output):
         anatomy = bpy.data.objects.get('Build B anatomy study')
         fit_jules_shoulders(rig, [*meshes, anatomy] if anatomy is not None else meshes, output)
     else:
-        from portrait_project import ADE_IMAGE, fit_projection, photo_iris, project_portrait
+        from portrait_project import ADE_IMAGE, fit_projection, project_portrait
         from ade_hair import build_ade_hair
+        from aaa_hair import rebuild_ade_hair_realism
         from jules_anatomy import fit_ade_wrap
         sources = Path(__file__).resolve().parents[2] / 'art/hero/sources'
         projection = fit_projection(face, shell, eyes, ADE_IMAGE)
         print('PORTRAIT LANDMARKS', project_portrait(face, shell, identity, eyes, sources / 'ade-face-unwrap.jpeg',
                                                      (.72, .44, .30), output, ADE_IMAGE, projection))
-        photo_iris(face, sources / 'ade-face-atlas.jpeg', (1519, 86), 39, output)
         build_ade_hair(face, shell, models['Groom_crop_ade'], eyes, sources / 'ade-face-atlas.jpeg',
                        sources / 'ade-face-unwrap.jpeg', output, projection)
+        rebuild_ade_hair_realism(face, shell, models['Groom_crop_ade'], eyes, output)
         fit_ade_wrap(face, eyes)
     face['worldstate_realism'] = 1

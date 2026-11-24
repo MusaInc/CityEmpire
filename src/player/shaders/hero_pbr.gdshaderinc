@@ -9,6 +9,7 @@ uniform sampler2D normal_map : hint_normal, filter_linear_mipmap_anisotropic;
 uniform sampler2D ao_map : filter_linear_mipmap, hint_default_white;
 uniform sampler2D roughness_map : filter_linear_mipmap, hint_default_white;
 uniform float roughness = 0.8;
+uniform float metallic = 0.0;
 uniform float hair_fibres = 0.0;
 uniform float surface_definition = 0.0;
 #ifdef HAIR_SCALP
@@ -53,25 +54,49 @@ void fragment() {
     vec3 outfit_tint = has_sole ? mix(tint, sole_tint, mask) : tint;
     vec4 sample_color = texture(albedo_map, UV);
 #ifdef EYE
-    float radius = length(UV * 2.0 - 1.0);
-    float iris = 1.0 - smoothstep(0.474, 0.505, radius);
-    outfit_tint = mix(vec3(1.0), tint, iris);
-#endif
+    // Subtle corneal refraction parallax: recesses the iris plane behind the curved wet cornea.
+    vec2 eye_uv_raw = UV * 2.0 - 1.0;
+    float r_raw = length(eye_uv_raw);
+    float cornea_mask = 1.0 - smoothstep(0.42, 0.52, r_raw);
+    vec2 view_ts = vec2(dot(VIEW, TANGENT), -dot(VIEW, BINORMAL));
+    vec2 eye_uv = eye_uv_raw - view_ts * (0.048 * cornea_mask);
+    float radius = length(eye_uv);
+    float iris = 1.0 - smoothstep(0.450, 0.495, radius);
+    // Deep, lifelike iris: soft dark limbal ring, warm lower-iris refraction caustic, deep jet-black pupil.
+    float limbal = smoothstep(0.32, 0.475, radius) * iris;
+    float pupil = 1.0 - smoothstep(0.178, 0.215, radius);
+    float corner_ao = mix(1.0, 0.68, smoothstep(0.54, 0.94, r_raw));
+    float caustic = smoothstep(-0.02, 0.38, eye_uv.y) * smoothstep(0.20, 0.33, radius) * (1.0 - smoothstep(0.35, 0.47, radius)) * iris;
+    vec2 sample_uv = clamp(eye_uv * 0.5 + 0.5, vec2(0.002), vec2(0.998));
+    vec3 iris_tex = texture(albedo_map, sample_uv).rgb;
+    vec3 iris_base = iris_tex * base_color.rgb * tint * 1.32;
+    iris_base *= mix(1.0, 1.08 - 0.54 * limbal, iris * (1.0 - pupil));
+    iris_base += tint * vec3(0.42, 0.24, 0.09) * caustic * (1.0 - pupil);
+    vec3 sclera_base = sample_color.rgb * base_color.rgb * vec3(0.99, 0.96, 0.935);
+    vec3 eye_albedo = mix(sclera_base, iris_base, iris);
+    // Deep recessed jet-black pupil.
+    eye_albedo = mix(eye_albedo, vec3(0.003, 0.003, 0.004), pupil);
+    // Natural upper-eyelid cast shadow grounding the eyeball inside the socket without dimming the iris.
+    float lid_ao = mix(0.46, 1.0, smoothstep(0.16, 0.54, UV.y));
+    ALBEDO = eye_albedo * lid_ao * corner_ao;
+#else
     ALBEDO = sample_color.rgb * base_color.rgb * outfit_tint;
+#endif
 #ifdef HAIR_SCALP
 #ifdef HAIR_FADE
-    // Blend the short roots over the real scalp. The opaque crown writes
-    // depth in the prepass, while the thin fade uses one blended surface.
-    float coverage = clamp((mask - 0.018) / 0.925, 0.0, 1.0);
+    // Blend roots smoothly over the real scalp with soft organic hairline feathering.
+    float coverage = smoothstep(0.015, 0.76, mask);
     ALPHA = coverage;
-    ALBEDO = mix(ALBEDO, scalp_tint * vec3(0.94, 0.90, 0.86), (1.0 - coverage) * 0.20);
+    ALBEDO = mix(scalp_tint * vec3(0.96, 0.92, 0.88), ALBEDO, smoothstep(0.0, 0.56, coverage));
 #else
-    ALBEDO = mix(scalp_tint * vec3(0.94, 0.90, 0.86), ALBEDO, smoothstep(0.025, 0.57, mask));
+    ALBEDO = mix(scalp_tint * vec3(0.96, 0.92, 0.88), ALBEDO, smoothstep(0.03, 0.64, mask));
 #endif
 #endif
 #ifdef HAIR_CARDS
     ALPHA = sample_color.a * mask;
-    ALPHA_SCISSOR_THRESHOLD = mix(0.35, 0.26, surface_definition);
+    ALPHA_SCISSOR_THRESHOLD = mix(0.30, 0.24, surface_definition);
+    // Subtle natural root-to-tip dimensional warmth (never over-bright grey plastic strips!).
+    ALBEDO *= mix(vec3(0.82, 0.78, 0.74), vec3(1.10, 1.04, 0.98), smoothstep(0.08, 0.86, UV.y));
 #else
     if (!FRONT_FACING) {
         ALBEDO *= inside_shade;  // the inside of the cloth, in its own shadow
@@ -79,25 +104,63 @@ void fragment() {
 #endif
     float surface_roughness = has_roughness_map ? texture(roughness_map, UV).g : roughness;
     ROUGHNESS = mix(surface_roughness, max(0.3, surface_roughness - 0.18), wetness);
+    METALLIC = metallic;
     EMISSION = surface_emission;
 #if defined(SKIN)
-    // Diffuse wrap and a low skin-coloured bounce keep detail in shadow.
-    SPECULAR = mix(0.23, 0.27, surface_definition);
-    ALBEDO *= vec3(1.04, 1.0, 0.97);
-    EMISSION += ALBEDO * mix(mix(0.082, 0.029, surface_definition), 0.023, night);
+    // Realistic human skin: warm dermal subsurface scatter, soft peach-fuzz grazing lift, natural satin-matte response.
+    float skin_ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
+    float skin_fres = pow(max(1.0 - skin_ndv, 0.0001), 3.6);
+    SPECULAR = mix(0.24, 0.28, surface_definition);
+    ALBEDO = ALBEDO * vec3(1.01, 0.995, 0.98) + ALBEDO * vec3(0.052, 0.038, 0.030) * skin_fres;
+    BACKLIGHT = ALBEDO * vec3(0.40, 0.135, 0.060);
+    EMISSION += ALBEDO * mix(mix(0.020, 0.012, surface_definition), 0.010, night);
 #elif defined(EYE)
-    SPECULAR = mix(0.26, 0.46, iris);
+    // Wet dome cornea with crisp twin catchlights + subtle lower-meniscus moisture sheen.
+    SPECULAR = mix(0.36, 0.72, iris);
     RIM = 0.0;
-    ROUGHNESS = mix(0.40, 0.22, iris);
+    ROUGHNESS = mix(0.11, 0.032, iris);
+    CLEARCOAT = 0.75;
+    CLEARCOAT_ROUGHNESS = 0.025;
+    float catch_primary = exp(-dot(eye_uv_raw - vec2(-0.16, -0.14), eye_uv_raw - vec2(-0.16, -0.14)) / 0.0014);
+    float catch_soft = exp(-dot(eye_uv_raw - vec2(0.15, 0.15), eye_uv_raw - vec2(0.15, 0.15)) / 0.0042) * 0.20;
+    float catch_mask = smoothstep(0.18, 0.36, UV.y) * (1.0 - night * 0.55);
+    EMISSION += vec3(1.0, 0.98, 0.95) * (catch_primary * 0.72 + catch_soft * 0.22) * catch_mask;
 #elif defined(HAIR_CARDS)
-    SPECULAR = 0.22;
-    EMISSION += ALBEDO * 0.035;
-    ANISOTROPY = 0.55;
+    float hair_ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
+    float hair_fres = pow(max(1.0 - hair_ndv, 0.0001), 3.2);
+    SPECULAR = mix(0.12, 0.19, hair_fibres);
+    ROUGHNESS = mix(0.68, clamp(mix(0.60, 0.50, UV.y), 0.48, 0.66), hair_fibres);
+    // Warm subtle backlit strand glow (no flat plastic glare on top of crown!).
+    BACKLIGHT = ALBEDO * vec3(0.28, 0.20, 0.14);
+    EMISSION += ALBEDO * (0.014 + 0.024 * hair_fres) * (1.0 - night * 0.5);
+    ANISOTROPY = max(0.32, hair_fibres * 0.55);
     ANISOTROPY_FLOW = vec2(0.0, 1.0);
 #elif defined(HAIR_SCALP)
-    SPECULAR = 0.23;
+    float scalp_ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
+    float scalp_fres = pow(max(1.0 - scalp_ndv, 0.0001), 3.4);
+    SPECULAR = 0.12;
+    ROUGHNESS = max(ROUGHNESS, 0.62);
+    BACKLIGHT = ALBEDO * vec3(0.20, 0.14, 0.10);
+    EMISSION += ALBEDO * (0.012 + 0.020 * scalp_fres) * (1.0 - night * 0.5);
 #else
-    SPECULAR = 0.32;
+    // Realistic woven cloth micro-velvet sheen or silk satin lustre.
+    float ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
+    float cloth_sheen = pow(max(1.0 - ndv, 0.0001), 3.8) * (1.0 - wetness * 0.55) * (1.0 - metallic);
+    float is_silk = (1.0 - smoothstep(0.46, 0.60, surface_roughness)) * (1.0 - metallic);
+    ALBEDO += vec3(0.032) * cloth_sheen + ALBEDO * 0.08 * cloth_sheen * is_silk;
+    SPECULAR = mix(mix(0.20, 0.38, is_silk), 0.72, metallic);
+    if (is_silk > 0.05) {
+        ANISOTROPY = 0.25 * is_silk;
+        ANISOTROPY_FLOW = vec2(0.0, 1.0);
+    }
+    if (metallic > 0.15) {
+        vec3 refl_w = normalize((INV_VIEW_MATRIX * vec4(reflect(-VIEW, NORMAL), 0.0)).xyz);
+        float sky_band = smoothstep(-0.35, 0.65, refl_w.y);
+        float metal_fres = pow(max(1.0 - ndv, 0.0001), 2.2);
+        vec3 env_grad = mix(vec3(0.38, 0.30, 0.22), vec3(1.10, 1.04, 0.96), sky_band);
+        EMISSION += ALBEDO * env_grad * (0.28 + 0.36 * metal_fres) * metallic * (1.0 - night * 0.45);
+        METALLIC = metallic * 0.70;
+    }
 #endif
 #ifndef EYE
     RIM = rim_strength * (1.0 + night);
