@@ -321,8 +321,12 @@ func _car_fx(c: Car, dt: float) -> void:
 			_skid_last.erase(id * 4 + i)
 			continue
 		var p := c.wheel_contact_point(i)
-		if slip > 0.35 and sp > 4.0:
-			if _rng.randf() < slip * dt * 30.0:
+		# (Ordinary cornering slips 0.2–0.4: no smoke or marks. Smoke thickens
+		# with the square of the slip beyond that and with road speed;
+		# rubber marks only from a real slide.)
+		var hard := clampf((slip - 0.42) / 0.5, 0.0, 1.0)
+		if hard > 0.0 and sp > 4.0:
+			if _rng.randf() < hard * hard * dt * 42.0 * clampf(sp / 12.0, 0.4, 1.3):
 				# Distinguish wet-road spray mist from dry-road rubber tyre smoke.
 				var wet := clampf(CarVisual.visible_wetness, 0.0, 1.0)
 				var v := -c.linear_velocity * lerpf(0.1, 0.22, wet) + Vector3(_rng.randf_range(-1.4, 1.4), _rng.randf_range(0.3, 1.0), _rng.randf_range(-1.4, 1.4))
@@ -331,7 +335,10 @@ func _car_fx(c: Car, dt: float) -> void:
 				var wet_col := Color(0.58, 0.66, 0.73, 0.18 * slip)
 				smoke.emit(p + Vector3.UP * lerpf(0.25, 0.14, wet), v, _rng.randf_range(lerpf(1.0, 0.35, wet), lerpf(1.7, 0.65, wet)),
 					lerpf(0.6, 0.24, wet), lerpf(2.4 + slip * 1.2, 0.95 + slip * 0.5, wet), dry_col.lerp(wet_col, wet))
-			_skid(id * 4 + i, p, c.linear_velocity, slip)
+			if slip > 0.55:
+				_skid(id * 4 + i, p, c.linear_velocity, slip)
+			else:
+				_skid_last.erase(id * 4 + i)
 		else:
 			_skid_last.erase(id * 4 + i)
 		if c.puncture > 0.0 and sp > 6.0 and _rng.randf() < dt * 25.0:

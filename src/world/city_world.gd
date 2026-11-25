@@ -147,6 +147,12 @@ var _glow_on := false
 ## Lamp head (the LED panel) in the streetlight model's frame (ws_street.py).
 const LAMP_HEAD := Vector3(0.0, 6.85, -1.45)
 var _furn_src := {}             # kind -> [verts, normals, colors, indices] (material colours baked in)
+## Card foliage (foliage_kit.glb, build_foliage_cards.py): kind -> [verts,
+## normals, colors, uvs, indices]; hedge_cluster / grass_tuft items draw from
+## it (one alpha-tested mesh a chunk) instead of the solid furniture shapes.
+var _fol_src := {}
+var foliage_mat: ShaderMaterial
+const FOLIAGE_BUSHES := ["bush_round", "bush_low", "box_ball", "shrub_tall", "flower_bed", "bush_round", "bush_low"]
 var _furniture_by_chunk := {}   # Vector2i -> Array of [kind, Transform3D]
 var _parked_cache := {}  # immutable layouts, shared by collision and streamed visuals
 var _walk_paths: Array = []  # [from, to] pavement segments (directional)
@@ -912,6 +918,7 @@ func _load_props() -> void:
 	# Procedural street clutter and district banners (StreetClutter).
 	for k in StreetClutter.kinds():
 		_furn_src[k] = StreetClutter.build(k)
+	_load_foliage()
 	if ResourceLoader.exists("res://src/world/shaders/furniture.gdshader"):
 		var fsh := ShaderMaterial.new()
 		fsh.shader = load("res://src/world/shaders/furniture.gdshader")
@@ -1406,6 +1413,87 @@ func _place_furniture() -> Dictionary:
 
 
 ## Merged furniture arrays for one chunk (worker-thread safe: reads only).
+## The chunk's card foliage: visible a little past the furniture (bushes
+## are big enough to pop otherwise), no shadow beyond the near cascade.
+func _add_foliage(root: Node3D, mesh: Mesh) -> void:
+	if mesh == null or foliage_mat == null:
+		return
+	var fo := MeshInstance3D.new()
+	fo.name = "Foliage"
+	fo.mesh = mesh
+	fo.material_override = foliage_mat
+	fo.visibility_range_end = FURNITURE_RANGE + 60.0
+	fo.visibility_range_end_margin = 30.0
+	root.add_child(fo)
+
+
+func _load_foliage() -> void:
+	var path := "res://assets/models/foliage_kit.glb"
+	if not ResourceLoader.exists(path):
+		return
+	var inst := (load(path) as PackedScene).instantiate()
+	for mi in inst.find_children("*", "MeshInstance3D", true, false):
+		var m := (mi as MeshInstance3D).mesh
+		if m == null:
+			continue
+		var a := m.surface_get_arrays(0)
+		var idx: PackedInt32Array = a[Mesh.ARRAY_INDEX] if a[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+		_fol_src[String(mi.name)] = [a[Mesh.ARRAY_VERTEX], a[Mesh.ARRAY_NORMAL], a[Mesh.ARRAY_COLOR], a[Mesh.ARRAY_TEX_UV], idx]
+	inst.free()
+	foliage_mat = ShaderMaterial.new()
+	foliage_mat.shader = load("res://src/world/shaders/foliage.gdshader")
+	foliage_mat.set_shader_parameter("atlas", load("res://assets/world/foliage_atlas.png"))
+
+
+## The foliage source for a furniture item (hedge_cluster: a bush picked by
+## position, so neighbours differ), or [] for ordinary furniture.
+func _foliage_for(kind: String, at: Vector3) -> Array:
+	if _fol_src.is_empty():
+		return []
+	if kind == "grass_tuft":
+		return _fol_src.get("grass_tuft", [])
+	if kind == "hedge_cluster":
+		var h := absi(hash(Vector2i(roundi(at.x * 3.0), roundi(at.z * 3.0))))
+		return _fol_src.get(FOLIAGE_BUSHES[h % FOLIAGE_BUSHES.size()], [])
+	return []
+
+
+## A chunk's foliage as one mesh (arrays: built on the chunk thread).
+func _foliage_arrays(key: Vector2i):
+	var items: Array = chunk_furniture(key)
+	if items.is_empty() or _fol_src.is_empty():
+		return null
+	var v := PackedVector3Array()
+	var nrm := PackedVector3Array()
+	var col := PackedColorArray()
+	var uv := PackedVector2Array()
+	var idx := PackedInt32Array()
+	for it in items:
+		var xf: Transform3D = it[1]
+		var src := _foliage_for(String(it[0]), xf.origin)
+		if src.is_empty():
+			continue
+		var base := v.size()
+		for p in src[0]:
+			v.append(xf * p)
+		for q in src[1]:
+			nrm.append((xf.basis * q).normalized())
+		col.append_array(src[2])
+		uv.append_array(src[3])
+		for i in src[4]:
+			idx.append(base + i)
+	if v.is_empty():
+		return null
+	var a := []
+	a.resize(Mesh.ARRAY_MAX)
+	a[Mesh.ARRAY_VERTEX] = v
+	a[Mesh.ARRAY_NORMAL] = nrm
+	a[Mesh.ARRAY_COLOR] = col
+	a[Mesh.ARRAY_TEX_UV] = uv
+	a[Mesh.ARRAY_INDEX] = idx
+	return a
+
+
 func _furniture_arrays(key: Vector2i):
 	var items: Array = chunk_furniture(key)
 	if items.is_empty() or _furn_src.is_empty():
@@ -1416,8 +1504,8 @@ func _furniture_arrays(key: Vector2i):
 	var idx := PackedInt32Array()
 	for it in items:
 		var src: Array = _furn_src.get(it[0], [])
-		if src.is_empty():
-			continue
+		if src.is_empty() or (not _fol_src.is_empty() and String(it[0]) in ["grass_tuft", "hedge_cluster"]):
+			continue   # (card foliage: _foliage_arrays)
 		var xf: Transform3D = it[1]
 		var base := v.size()
 		for p in src[0]:
@@ -1504,8 +1592,9 @@ func _build_collision() -> void:
 	_add_faces(street, og)
 	# River wall along the promenade (the parapet drawn by add_ground).
 	if not layout.is_mainland:
-		_add_box(street, AABB(Vector3(CityLayout.RIVER_EDGE, -4.0, layout.island.position.y),
-			Vector3(0.6, 5.1, layout.island.size.y)))
+		# (Open where the headland parks join it: BuildingMesher.strait_quay_spans.)
+		for span: Vector2 in BuildingMesher.strait_quay_spans(layout.island.position.y, layout.island.end.y):
+			_add_box(street, AABB(Vector3(CityLayout.RIVER_EDGE, -4.0, span.x), Vector3(0.6, 5.1, span.y - span.x)))
 	add_child(street)
 	var water_floor := StaticBody3D.new()
 	water_floor.name = "WaterFloor"
@@ -1692,6 +1781,7 @@ func refresh_props(key: Vector2i) -> void:
 		fi.visibility_range_end = FURNITURE_RANGE
 		fi.visibility_range_end_margin = 20.0
 		root.add_child(fi)
+	_add_foliage(root, _mesh_from(_foliage_arrays(key)))
 
 
 ## Rebuilds a loaded chunk's parked cars (one was driven off as a wreck).
@@ -1913,6 +2003,8 @@ func _build_structures() -> void:
 			root.add_child(mi)
 		add_child(root)
 		link_lods(root.get_node_or_null("Detail"), root.get_node_or_null("Low"))
+		if s.has("kit_meshes"):
+			InfraKit.place(root, s["kit_meshes"], 1400.0)   # (Blender piers: InfraKit)
 
 
 ## One visibility decision for a pair: separate AABB centres/margins can
@@ -2128,6 +2220,7 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 		"features": null if feats.is_empty() else feats.arrays(),
 		"ground": _ground_cache.get(key),
 		"furniture": furn,
+		"foliage": _foliage_arrays(key),
 		"pools": _pool_arrays(key),
 		"walkers": _walker_buffers(key),
 	}
@@ -2336,6 +2429,7 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 		fi.visibility_range_end = FURNITURE_RANGE
 		fi.visibility_range_end_margin = 20.0
 		root.add_child(fi)
+	_add_foliage(root, _mesh_from(res.get("foliage")))
 	Prof.begin("chunk_props")
 	_add_props(root, key, res.get("pools"))
 	Prof.end("chunk_props")
@@ -2472,6 +2566,9 @@ func _add_props(root: Node3D, key: Vector2i, pools: Variant = null) -> void:
 			trees.name = "Props_" + kind
 			root.add_child(trees)
 			TreeKit.instance_batch(trees, kind.trim_prefix("tree_"), list, 320.0)
+			if TreeImpostors.ready():
+				# (Past the real trees' range: the crossed-card stand-ins.)
+				TreeImpostors.place(trees, {kind.trim_prefix("tree_"): list}, 300.0, 2600.0)
 			continue
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D

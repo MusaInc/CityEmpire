@@ -2177,10 +2177,14 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 	# The strait's quay wall (west promenade edge).
 	var I := layout.island
 	if chunk_rect.position.x <= CityLayout.RIVER_EDGE and chunk_rect.end.x > CityLayout.RIVER_EDGE:
-		var z0 := maxf(chunk_rect.position.y, I.position.y)
-		var z1 := minf(chunk_rect.end.y, I.end.y)
-		if z1 > z0:
-			var x := CityLayout.RIVER_EDGE
+		var x := CityLayout.RIVER_EDGE
+		# (Broken where a landform joins the quay – Strait Point, Lighthouse
+		# Point – and at the railing openings: the plinth and railing used to
+		# run straight across every park's entrance, a raised blue-grey strip
+		# and a fence between the promenade and the grass.)
+		for span: Vector2 in strait_quay_spans(maxf(chunk_rect.position.y, I.position.y), minf(chunk_rect.end.y, I.end.y)):
+			var z0 := span.x
+			var z1 := span.y
 			quad(Vector3(x, 0.0, z0), Vector3(x, 0.0, z1), Vector3(x, -4.0, z1), Vector3(x, -4.0, z0), Vector3.LEFT,
 				Vector2(z0, 0), Vector2(z1, 0), Vector2(z1, -4), Vector2(z0, -4), Color(0.45, 0.4, 0.34), KIND_WALL, 5, 0.3)
 			solid(x, z0, x + 0.6, z1, 0.0, RAIL_PLINTH, Color(0.36, 0.38, 0.39))
@@ -2190,6 +2194,29 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 			while pz < z1:
 				_iron_post(Vector3(x + 0.3, RAIL_PLINTH, pz), RAIL_H - RAIL_PLINTH - 0.03, Vector3.LEFT)
 				pz += 2.0
+			_iron_post(Vector3(x + 0.3, RAIL_PLINTH, z1 - 0.05), RAIL_H - RAIL_PLINTH - 0.03, Vector3.LEFT)
+
+
+## The strait quay's walled stretches between z0 and z1 (RIVER_EDGE): the
+## whole run less every opening (landform joins and rail gaps) crossing it.
+static func strait_quay_spans(z0: float, z1: float) -> Array:
+	var spans: Array = []
+	if z1 <= z0:
+		return spans
+	var cuts: Array = []
+	var x := CityLayout.RIVER_EDGE
+	for g: Rect2 in rail_gaps:
+		if g.position.x <= x + 0.6 and g.end.x >= x - 0.5 and g.end.y > z0 and g.position.y < z1:
+			cuts.append(Vector2(g.position.y, g.end.y))
+	cuts.sort_custom(func(a, b): return a.x < b.x)
+	var z := z0
+	for c: Vector2 in cuts:
+		if c.x > z + 0.05:
+			spans.append(Vector2(z, minf(c.x, z1)))
+		z = maxf(z, c.y)
+	if z < z1 - 0.05:
+		spans.append(Vector2(z, z1))
+	return spans
 
 
 ## The far ground (FarCity): the same surfaces as add_ground – asphalt over

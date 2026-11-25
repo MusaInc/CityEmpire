@@ -94,8 +94,29 @@ def pieces(face, hair, cut):
                        "Skin_Arms_" + cut.capitalize()}
     if cut == "shirt":
         names.add("Courier_Waistband")
-    return [o for o in bpy.context.scene.objects if o.type == "MESH"
-            and (o.name in names or o.name.startswith("Topx_" + cut.capitalize() + "_"))]
+    # (The realism pass left body B with one face – Face_jules – and her
+    # hair styles: a variant naming a face or hair that is gone fell back to
+    # nothing, and three of the eight walkers had no head. Fall back to the
+    # face and hair the model has.)
+    meshes = {o.name for o in bpy.context.scene.objects if o.type == "MESH"}
+    if "Face_" + face not in meshes:
+        alt = sorted(n for n in meshes if n.startswith("Face_"))
+        names.discard("Face_" + face)
+        names.add(alt[0])
+        face = alt[0][5:]
+        print("CROWD fallback face", face)
+    hn = "Hair_%s_%s" % (hair, face)
+    if hn not in meshes:
+        names.discard("Hair_%s_%s" % (hair, face))
+        alts = sorted(n for n in meshes if n.startswith("Hair_") and n.endswith("_" + face))
+        if alts:
+            pick = alts[sum(map(ord, hair)) % len(alts)]
+            names.add(pick)
+            print("CROWD fallback hair", hn, "->", pick)
+    out = [o for o in bpy.context.scene.objects if o.type == "MESH"
+           and (o.name in names or o.name.startswith("Topx_" + cut.capitalize() + "_"))]
+    assert any(o.name.startswith("Face_") for o in out), "no face for %s/%s" % (face, cut)
+    return out
 
 
 def build(arm, v, face, hair, cut):

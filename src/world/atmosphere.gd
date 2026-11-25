@@ -34,14 +34,17 @@ const WEATHERS := ["clear", "bright", "haze", "cloudy", "rain", "storm", "fog"]
 ## punch (harder light: deeper shade, richer colour, more bloom on sunlit
 ## glass), mist (a low fog lying in the streets and over the water, 0..1).
 const WEATHER_PARAMS := {
-	"clear": {"cloud": 0.34, "rain": 0.0, "fog": 0.0, "storm": 0.0, "dark": 0.0,
-		"sun": 1.06, "haze": 0.14, "warm": 0.08, "punch": 0.25, "mist": 0.0},
+	"clear": {"cloud": 0.30, "rain": 0.0, "fog": 0.0, "storm": 0.0, "dark": 0.0,
+		"sun": 1.08, "haze": 0.06, "warm": 0.08, "punch": 0.4, "mist": 0.0},
 	"bright": {"cloud": 0.12, "rain": 0.0, "fog": 0.0, "storm": 0.0, "dark": 0.0,
 		"sun": 1.24, "haze": 0.04, "warm": 0.18, "punch": 1.0, "mist": 0.0},
-	"haze": {"cloud": 0.22, "rain": 0.0, "fog": 0.08, "storm": 0.0, "dark": 0.0,
-		"sun": 1.12, "haze": 0.85, "warm": 1.0, "punch": 0.4, "mist": 0.0},
-	"cloudy": {"cloud": 0.72, "rain": 0.0, "fog": 0.08, "storm": 0.0, "dark": 0.28,
-		"sun": 1.0, "haze": 0.32, "warm": 0.0, "punch": 0.0, "mist": 0.0},
+	# (The Heatwave sky: a hot, cloudless, sunlit day – warm light, a deep
+	# sky overhead and only a thin warm shimmer on the horizon. It was a
+	# uniformly grey, foggy look.)
+	"haze": {"cloud": 0.05, "rain": 0.0, "fog": 0.0, "storm": 0.0, "dark": 0.0,
+		"sun": 1.3, "haze": 0.28, "warm": 1.0, "punch": 0.95, "mist": 0.0},
+	"cloudy": {"cloud": 0.74, "rain": 0.0, "fog": 0.04, "storm": 0.0, "dark": 0.32,
+		"sun": 1.0, "haze": 0.18, "warm": 0.0, "punch": 0.0, "mist": 0.0},
 	"rain": {"cloud": 0.90, "rain": 0.82, "fog": 0.20, "storm": 0.0, "dark": 0.82,
 		"sun": 1.0, "haze": 0.36, "warm": 0.0, "punch": 0.15, "mist": 0.22},
 	"storm": {"cloud": 1.0, "rain": 1.0, "fog": 0.28, "storm": 1.0, "dark": 1.0,
@@ -391,29 +394,32 @@ func _apply(dt: float, instant: bool) -> void:
 	env.ambient_light_energy = _rampf(el, [[-15.0, 0.30], [-4.0, 0.38], [2.0, 0.46], [20.0, 0.52]]) \
 		* (1.0 + 0.14 * overcast + 0.06 * hz * day_light) + fl * 2.0
 	var direct_daylight := day_light * (1.0 - overcast)
-	env.ambient_light_energy *= 1.0 - 0.30 * direct_daylight
-	env.ambient_light_sky_contribution = 0.56 + 0.24 * direct_daylight
+	env.ambient_light_energy *= 1.0 + 0.08 * direct_daylight
+	# (Shade was ~80 % blue sky light: streets in shadow read as dusk. Now
+	# mostly neutral-warm bounce off the pavements and walls, a third sky.)
+	env.ambient_light_sky_contribution = lerpf(0.56, 0.3, direct_daylight)
 	# The non-sky share: warm ground bounce by day, cool slate-blue at night.
-	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.36, 0.45, 0.66)], [2.0, Color(0.68, 0.58, 0.60)],
-		[15.0, Color(0.76, 0.75, 0.74)], [40.0, Color(0.75, 0.79, 0.86)]]).lerp(Color(0.66, 0.71, 0.79), overcast * 0.65)
+	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.36, 0.45, 0.66)], [2.0, Color(0.70, 0.60, 0.58)],
+		[15.0, Color(0.80, 0.77, 0.73)], [40.0, Color(0.82, 0.80, 0.77)]]).lerp(Color(0.70, 0.73, 0.78), overcast * 0.65)
 	env.tonemap_exposure = lerpf(1.02, 1.16, night) * lerpf(1.0, 1.08, overcast) * (1.0 + 0.03 * hz * day_light)
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
 	var hk := lerpf(1.0, 0.58, hz)
-	env.fog_depth_begin = lerpf(185.0, 26.0, fog) * lerpf(1.0, 0.65, hz) * (1.0 + 0.8 * alt * (1.0 - fog))
-	env.fog_depth_end = lerpf(1950.0, 620.0, fog) * hk * (1.0 + 0.45 * alt * (1.0 - fog))
-	env.fog_density = lerpf(lerpf(0.48, 0.74, hz), 0.90, fog) * (1.0 - 0.14 * alt * (1.0 - fog))
+	# (Fair weather: clear air – the distance was washed out from 185 m.)
+	env.fog_depth_begin = lerpf(320.0, 26.0, fog) * lerpf(1.0, 0.7, hz) * (1.0 + 0.8 * alt * (1.0 - fog))
+	env.fog_depth_end = lerpf(3400.0, 620.0, fog) * hk * (1.0 + 0.45 * alt * (1.0 - fog))
+	env.fog_density = lerpf(lerpf(0.34, 0.58, hz), 0.90, fog) * (1.0 - 0.14 * alt * (1.0 - fog))
 	env.fog_depth_curve = lerpf(1.45, 1.15, hz)
 	env.fog_light_color = fog_col
 	env.fog_light_energy = lerpf(1.0, 0.58, night)
 	env.fog_sun_scatter = (0.38 + 0.25 * hz) * day_light * (1.0 - overcast)
-	env.fog_aerial_perspective = lerpf(0.78, 0.58, hz)
+	env.fog_aerial_perspective = lerpf(0.55, 0.45, hz)
 	env.fog_height = MIST_TOP + 4.0 * mist
 	env.fog_height_density = MIST_DENSITY * mist
 	env.glow_intensity = lerpf(0.24 + 0.04 * punch + 0.04 * hz, 0.48, night)
 	env.glow_hdr_threshold = lerpf(1.38, 0.95, night)
-	env.adjustment_contrast = 1.065 + (0.025 * punch - 0.02 * hz) * day_light - 0.015 * fog
-	env.adjustment_saturation = 1.06 + (0.03 * punch - 0.025 * hz) * day_light - 0.025 * fog
+	env.adjustment_contrast = 1.09 + (0.03 * punch - 0.02 * hz) * day_light - 0.03 * fog - 0.02 * overcast
+	env.adjustment_saturation = 1.09 + (0.04 * punch - 0.02 * hz) * day_light - 0.05 * fog - 0.06 * overcast
 
 	# --- shared shader inputs.
 	var top_l := zen.srgb_to_linear()

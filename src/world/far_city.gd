@@ -43,6 +43,17 @@ func _gen(i: int) -> void:
 	var gm := BuildingMesher.new()
 	gm.add_far_ground(world.layout, rect)
 	var res := {"low": null if low.is_empty() else low.arrays(), "ground": null if gm.is_empty() else gm.arrays()}
+	# Its trees as impostor cards (the streamed chunk's real trees only
+	# exist while it's streamed).
+	var trees := {}
+	for p in world.chunk_props(key):
+		var kind: String = p[0]
+		if kind.begins_with("tree_"):
+			var sp := kind.trim_prefix("tree_")
+			if not trees.has(sp):
+				trees[sp] = []
+			(trees[sp] as Array).append(p[1])
+	res["trees"] = trees
 	_lock.lock()
 	_arrays[i] = res
 	_lock.unlock()
@@ -110,6 +121,9 @@ func _instantiate(all_now := false) -> void:
 			mi.material_override = part[1]
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			root.add_child(mi)
+		var trees: Dictionary = res.get("trees", {})
+		if not trees.is_empty() and TreeImpostors.ready():
+			TreeImpostors.place(root, trees, 0.0, 2600.0)
 		if root.get_child_count() == 0:
 			root.free()
 			continue

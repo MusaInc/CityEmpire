@@ -26,6 +26,8 @@ vec4 lane_px(sampler2D tex, int i) {
 	return texelFetch(tex, ivec2(i % TEX_W, i / TEX_W), 0);
 }
 
+#include "res://src/world/shaders/traffic_frame.gdshaderinc"
+
 void vertex() {
 	float base_f = MODEL_MATRIX[1][0] * 65536.0;
 	float s0 = MODEL_MATRIX[2][0] * 1024.0;
@@ -52,24 +54,8 @@ void vertex() {
 	if (has_lane && hd.x >= 2.0 && hd.x <= float(capacity - base)) {
 		float n = hd.x;
 		bool loop = hd.y > 0.5;
-		float f = s / STEP;
-		f = loop ? mod(f, n - 1.0) : clamp(f, 0.0, n - 1.001);
-		int i = int(floor(f));
-		float k = f - float(i);
-		int last = int(n + 0.5) - 1;
-		int im = loop ? (i == 0 ? last - 1 : i - 1) : max(i - 1, 0);
-		int i2 = loop ? (i + 2 > last ? i + 2 - last : i + 2) : min(i + 2, last);
-		vec3 p0 = lane_px(lane_tex, base + im).xyz;
-		vec3 p1 = lane_px(lane_tex, base + i).xyz;
-		vec3 p2 = lane_px(lane_tex, base + i + 1).xyz;
-		vec3 p3 = lane_px(lane_tex, base + i2).xyz;
-		vec3 pos = mix(p1, p2, k);
-		vec3 fw = mix(p2 - p0, p3 - p1, k);
-		fw = length(fw) > 1e-4 ? normalize(fw) : vec3(0.0, 0.0, -1.0);
-		vec3 zb = -fw;
-		vec3 xb = normalize(cross(vec3(0.0, 1.0, 0.0), zb));
-		vec3 yb = cross(zb, xb);
-		mat3 B = mat3(xb, yb, zb);
+		vec3 pos;
+		mat3 B = traffic_frame(lane_tex, base, n, loop, s, pos);
 		vec3 world = pos + B * VERTEX;
 		VERTEX = (VIEW_MATRIX * vec4(world, 1.0)).xyz;
 		NORMAL = normalize(mat3(VIEW_MATRIX) * (B * NORMAL));

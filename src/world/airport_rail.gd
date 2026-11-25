@@ -25,6 +25,7 @@ const DECK_HALF := RailNetwork.PAIR + RailNetwork.HALF   # 6.4 m: both tracks
 const R_ISLAND := 60.0
 const R_WATER := 150.0
 const PIER_EVERY := 30.0
+static var kit_list := {}   # (InfraKit transforms collected while building)
 ## World ends over the water off each city, island control points (local).
 const WEST_END := Vector2(-650.0, 548.0)
 const EAST_END := Vector2(560.0, 650.0)
@@ -162,7 +163,10 @@ static func build(target: Node3D, body: StaticBody3D, isl: SkyportIsland, layout
 		var db := b - Vector3.UP * RailNetwork.RAIL_H
 		# Deck slab and its box girder; parapets with a blue line stripe.
 		m.beam(da - ext + Vector3.DOWN * 0.7, db + ext + Vector3.DOWN * 0.7, DECK_HALF * 2.0, 1.4, CONCRETE)
-		m.beam(da - ext + Vector3.DOWN * 1.9, db + ext + Vector3.DOWN * 1.9, 6.0, 1.0, CONCRETE_DK)
+		if SkyportKit.ready():
+			InfraKit.girders(kit_list, da + Vector3.DOWN * 1.4, db + Vector3.DOWN * 1.4, DECK_HALF * 2.0 - 1.0, 1.1)
+		else:
+			m.beam(da - ext + Vector3.DOWN * 1.9, db + ext + Vector3.DOWN * 1.9, 6.0, 1.0, CONCRETE_DK)
 		SkyportIsland._box_beam(body, da - ext + Vector3.DOWN * 0.7, db + ext + Vector3.DOWN * 0.7, DECK_HALF * 2.0, 1.4)
 		for sg: float in [-1.0, 1.0]:
 			var o := side * sg * (DECK_HALF - 0.2)
@@ -202,6 +206,8 @@ static func build(target: Node3D, body: StaticBody3D, isl: SkyportIsland, layout
 	for st: Dictionary in P["rail_stations"]:
 		_station(m, body, line, st, layout, P)
 	isl._mesh_into(m, "AirportRail_%d" % chunk, target, 0.0, 3800.0)
+	InfraKit.place(target, kit_list, 2600.0)
+	kit_list = {}
 
 
 ## The end of the line: the viaduct runs into a glazed end house on piers
@@ -272,10 +278,13 @@ static func _pier(m: BuildingMesher, body: StaticBody3D, pts: PackedVector3Array
 	var ps := Vector3(-dir.z, 0.0, dir.x)
 	var top := p.y - RailNetwork.RAIL_H - 2.4
 	# One column on the centreline, a hammerhead under both tracks.
-	m.beam(Vector3(p.x, gy, p.z), Vector3(p.x, top, p.z), 2.0, 2.0, CONCRETE_DK)
-	m.beam(Vector3(p.x, top + 0.5, p.z) - ps * 5.4, Vector3(p.x, top + 0.5, p.z) + ps * 5.4, 1.8, 1.2, CONCRETE)
+	if SkyportKit.ready():
+		InfraKit.pier(kit_list, Vector3(p.x, maxf(gy, SkyportIsland.SEA_Y + 0.3), p.z), top - 0.1, dir, 2.1, 11.6, 2.0, 2.0)
+	else:
+		m.beam(Vector3(p.x, gy, p.z), Vector3(p.x, top, p.z), 2.0, 2.0, CONCRETE_DK)
+		m.beam(Vector3(p.x, top + 0.5, p.z) - ps * 5.4, Vector3(p.x, top + 0.5, p.z) + ps * 5.4, 1.8, 1.2, CONCRETE)
 	SkyportIsland._box_beam(body, Vector3(p.x, gy, p.z), Vector3(p.x, top, p.z), 2.0, 2.0)
-	if not on_island and gy < -1.0:
+	if not on_island and gy < -1.0 and not SkyportKit.ready():
 		# A cutwater footing at the waterline.
 		m.beam(Vector3(p.x, -3.0, p.z) - dir * 2.0, Vector3(p.x, -3.0, p.z) + dir * 2.0, 3.4, 3.2, CONCRETE_DK)
 

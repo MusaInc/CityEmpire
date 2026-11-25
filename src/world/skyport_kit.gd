@@ -32,7 +32,7 @@ static func _load() -> void:
 	_mesh_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_mesh_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_mesh_mat.roughness = 0.6
-	var glass := SkyportAirport.glass_material()
+	var glass := SkyportDistrict.terminal_glass()
 	var inst := (load(PATH) as PackedScene).instantiate()
 	for mi in inst.find_children("*", "MeshInstance3D", true, false):
 		var src := (mi as MeshInstance3D).mesh as ArrayMesh

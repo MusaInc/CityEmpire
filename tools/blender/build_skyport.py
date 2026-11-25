@@ -778,13 +778,104 @@ def edge_post():
     done("edge_post", [C(0.11, 0.9, (0, 0, 0), dark, 8), C(0.12, 0.12, (0, 0, 0.9), lamp_warm, 8)])
 
 
+# ========================================================= infrastructure
+# Normalised so one mesh serves every viaduct and bridge (Godot scales them):
+#   pier_column – 1 × 1 cross-section, 1 m tall, chamfered corners, a shadow
+#                groove up each face, a drip band near the top;
+#   pier_head  – a hammerhead: span 1 along X, depth 1, thickness 1, tapered
+#                underside, bearing plinths + bearings on top;
+#   pier_foot  – the pile cap the column stands on (chamfered top);
+#   deck_girders – the deck's underside, 1 m long (X), 1 m wide (Y), 1 m
+#                deep: four I-girders, the drainage run and its outlets.
+def _prism_xz(name, prof, depth, m):
+    """Extrude a side profile [(x, z), ...] (counter-clockwise) along Y."""
+    bm = bmesh.new()
+    front = [bm.verts.new((x, -depth / 2, z)) for x, z in prof]
+    back = [bm.verts.new((x, depth / 2, z)) for x, z in prof]
+    bm.faces.new(front[::-1])
+    bm.faces.new(back)
+    n = len(prof)
+    for i in range(n):
+        j = (i + 1) % n
+        bm.faces.new((front[i], front[j], back[j], back[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return kit.new_obj(name, bm, m)
+
+
+def _oct_col(r, c, h, z0, m):
+    """Chamfered rectangle prism: half-size r (x) × r (y), chamfer c."""
+    bm = bmesh.new()
+    pts = [(r - c, -r), (r, -r + c), (r, r - c), (r - c, r), (-r + c, r), (-r, r - c), (-r, -r + c), (-r + c, -r)]
+    lo = [bm.verts.new((x, y, z0)) for x, y in pts]
+    hi = [bm.verts.new((x, y, z0 + h)) for x, y in pts]
+    bm.faces.new(lo[::-1])
+    bm.faces.new(hi)
+    for i in range(8):
+        j = (i + 1) % 8
+        bm.faces.new((lo[i], lo[j], hi[j], hi[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return kit.new_obj("oct", bm, m)
+
+
+conc = M("concrete", srgb("b9b5ac"))
+conc_dk = M("concrete_dk", srgb("8f8b84"))
+bearing = M("bearing", srgb("3b3d40"), "gloss")
+
+
+def pier_column():
+    p = [_oct_col(0.5, 0.11, 1.0, 0.0, conc)]
+    for sx, sy in ((0.0, -0.501), (0.0, 0.501)):
+        p.append(B((0.05, 0.02, 1.0), (sx, sy, 0.5), conc_dk))
+    for sx, sy in ((-0.501, 0.0), (0.501, 0.0)):
+        p.append(B((0.02, 0.05, 1.0), (sx, sy, 0.5), conc_dk))
+    done("pier_column", p)
+
+
+def pier_head():
+    prof = [(-0.5, -0.32), (-0.2, -1.0), (0.2, -1.0), (0.5, -0.32), (0.5, 0.0), (-0.5, 0.0)]
+    p = [_prism_xz("head", prof, 1.0, conc)]
+    p.append(B((1.01, 1.01, 0.06), (0, 0, -0.03), conc_dk))   # (drip band)
+    for x in (-0.36, -0.12, 0.12, 0.36):
+        p.append(B((0.1, 0.5, 0.06), (x, 0, 0.03), conc_dk))
+        p.append(B((0.07, 0.36, 0.06), (x, 0, 0.09), bearing))
+    done("pier_head", p)
+
+
+def pier_foot():
+    p = [B((1.0, 1.0, 0.7), (0, 0, -0.35), conc_dk),
+         _prism_xz("foot_top", [(-0.5, 0.0), (0.5, 0.0), (0.4, 0.22), (-0.4, 0.22)], 1.0, conc_dk)]
+    done("pier_foot", p)
+
+
+def deck_girders():
+    p = []
+    for y in (-0.36, -0.12, 0.12, 0.36):
+        p.append(B((1.0, 0.025, 0.86), (0, y, -0.45), conc))        # web
+        p.append(B((1.0, 0.09, 0.12), (0, y, -0.9), conc))          # bottom flange
+    p.append(B((1.0, 0.82, 0.08), (0, 0, -0.04), conc_dk))           # soffit slab line
+    for y in (-0.47, 0.47):
+        p.append(B((1.0, 0.012, 0.012), (0, y, -0.3), M("pipe", srgb("4a4f55"), "gloss")))
+    done("deck_girders", p)
+
+
+def underpass_lamp():
+    """Soffit luminaire (fixed under decks over roads and paths)."""
+    done("underpass_lamp", [B((1.2, 0.4, 0.15), (0, 0, -0.075), grey), B((1.1, 0.32, 0.03), (0, 0, -0.16), lamp_white)])
+
+
+def clearance_sign():
+    """Headroom sign for a deck edge over a road (text by Label3D)."""
+    done("clearance_sign", [B((2.2, 0.1, 0.9), (0, 0, 0), white), B((2.0, 0.12, 0.7), (0, 0.0, 0), red),
+                            B((0.06, 0.06, 0.6), (-0.8, 0.0, 0.6), grey), B((0.06, 0.06, 0.6), (0.8, 0.0, 0.6), grey)])
+
+
 for f in (jet_bridge, gse_tug, gse_cart, gse_belt, gse_pushback, gse_fuel, gse_catering, gse_bus,
           gse_stairs, gse_gpu, gse_follow, runway_light, taxi_light, approach_bar, stand_sign, windsock,
           radar_mast, radar_head, fence, fence_gate, checkin_island, seat_row, shop_unit, cafe_unit,
           fids_board, security_lane, gate_desk, carousel, indoor_planter, trolley, trolley_bay,
           info_desk, entrance_pod, gantry_sign, taxi_shelter, fuel_canopy, fuel_kiosk, rental_canopy,
           rental_booth, barrier, bus_stop_airport, flag_pole, runway_light_g, runway_light_r, ceiling_lamp,
-          flood_head, edge_post):
+          flood_head, edge_post, pier_column, pier_head, pier_foot, deck_girders, underpass_lamp, clearance_sign):
     f()
 
 # Lay them out on a grid so the preview shows everything (Godot reads each

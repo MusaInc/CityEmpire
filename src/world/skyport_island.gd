@@ -2727,6 +2727,8 @@ func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
 	var m := BuildingMesher.new()
 	var white := Color(0.88, 0.88, 0.86)
 	var deck_c := Color(0.42, 0.43, 0.45)
+	var ik := {}   # (InfraKit: engineered piers and the girders under the deck)
+	var kit := SkyportKit.ready()
 	# Deck, railings and edge girders, segment by segment.
 	var n := maxi(24, int(L / 12.0))
 	for i in n:
@@ -2743,6 +2745,8 @@ func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
 			m.beam(a + o + Vector3.UP * 0.55, c + o + Vector3.UP * 0.55, 0.5, 1.1, white)
 			_box_beam(body, a + o + Vector3.UP * 0.55, c + o + Vector3.UP * 0.55, 0.5, 1.1)
 			m.beam(a + Vector3(0, -1.9, sg * 11.0) - ext, c + Vector3(0, -1.9, sg * 11.0) + ext, 1.2, 1.6, white)
+		if kit and a.y > LAND_Y + 1.0:
+			InfraKit.girders(ik, a + Vector3.DOWN * 1.6, c + Vector3.DOWN * 1.6, 20.5, 1.5)
 	# On over the quay at ground level (see LAND_RUN).
 	var e0 := Vector3(L - 0.3, LAND_Y - 0.8, 0.0)
 	var e1 := Vector3(L + LAND_RUN, LAND_Y - 0.8, 0.0)
@@ -2769,9 +2773,16 @@ func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
 			var dy := deck_y(B, sd)
 			if dy > 3.0:
 				for sg: float in [-1.0, 1.0]:
-					m.beam(Vector3(sd, -6.0, sg * 7.0), Vector3(sd, dy - 1.6, sg * 7.0), 1.8, 1.8, white)
+					if not kit:
+						m.beam(Vector3(sd, -6.0, sg * 7.0), Vector3(sd, dy - 1.6, sg * 7.0), 1.8, 1.8, white)
 					_box_beam(body, Vector3(sd, -6.0, sg * 7.0), Vector3(sd, dy - 1.6, sg * 7.0), 1.8, 1.8)
-				m.beam(Vector3(sd, dy - 2.4, -8.5), Vector3(sd, dy - 2.4, 8.5), 1.6, 1.6, white)
+				if kit:
+					# Twin chamfered columns on a cutwater footing at the
+					# waterline, a tapered hammerhead with bearings under the
+					# girders (was two square posts and a flat bar).
+					InfraKit.pier(ik, Vector3(sd, SEA_Y + 0.4, 0.0), dy - 3.1, Vector3(1, 0, 0), 2.2, 23.0, 2.0, 2.6, [-7.0, 7.0])
+				else:
+					m.beam(Vector3(sd, dy - 2.4, -8.5), Vector3(sd, dy - 2.4, 8.5), 1.6, 1.6, white)
 		sd += 32.0
 	if String(B.get("style", "fan")) == "truss":
 		_build_truss(B, m, body, mid)
@@ -2786,6 +2797,7 @@ func _build_one_bridge(B: Dictionary, root: Node3D) -> void:
 			m.beam(Vector3(lx, ly + 7.4, sg * 12.2), Vector3(lx, ly + 7.4, sg * 10.6), 0.2, 0.2, Color(0.25, 0.26, 0.28))
 		lx += 36.0
 	_landing_walls(B, fr.transform, body, m)
+	InfraKit.place(fr, ik, 3000.0)
 	var prev := _target
 	_target = fr
 	_mesh(m, "Bridge", 0.0, FAR_RANGE)

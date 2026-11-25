@@ -123,7 +123,7 @@ void fragment() {
 			vec4 r = ticker_rect[k];
 			float per = ticker_period[k];
 			// Strip px across this screen: its height is the strip's 96 px.
-			float px = UV.x * v_aspect * r.w * 2880.0 / 3072.0 + (TIME + v_phase * 50.0) * ticker_speed / 3072.0;
+			float px = UV.x * v_aspect * r.w * 3264.0 / 3072.0 + (TIME + v_phase * 50.0) * ticker_speed / 3072.0;
 			float x = mod(px, per);
 			col = texture(atlas, vec2(r.x + x, r.y + clamp(UV.y, 0.01, 0.99) * r.w)).rgb;
 		} else {
