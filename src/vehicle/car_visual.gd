@@ -202,6 +202,19 @@ static func shared_mat(name: String) -> Material:
 	return m
 
 
+## A body surface's finish: the shared look of `name` on the textured
+## car_surface shader with `model`'s Blender bake (VehicleTex), plus the
+## name's detail family if it has one. Glass, lenses and lamps keep their own.
+static func body_finish(name: String, model: String) -> Material:
+	var base := shared_mat(name)
+	var std := base as StandardMaterial3D
+	if std and std.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED and not std.emission_enabled \
+			and (VehicleTex.FINISH.has(name) or VehicleTex.bake(model) != null):
+		# (No family: the bake's AO and cavity only - mirrors, reflex, plates.)
+		return VehicleTex.surface(name, std, model)
+	return base
+
+
 ## Contact shadow: rounded-rectangle underbody ambient occlusion plus tight
 ## tyre-contact pads so every vehicle sits firmly grounded on the road.
 const CONTACT_SHADER := """
@@ -298,16 +311,29 @@ func set_showroom() -> void:
 		flares.hide()
 
 
-static func _wheel_finish(name: String, offroad: bool) -> Material:
+static func _wheel_finish(name: String, offroad: bool, model := "") -> Material:
 	if name not in ["tyre", "tyre_wall", "disc"]:
-		return shared_mat(name)
-	var key := name + ("_offroad" if offroad and name == "tyre" else "")
+		return body_finish(name, model) if model != "" else shared_mat(name)
+	var key := name + ("_offroad" if offroad and name == "tyre" else "") + "@" + model
 	if not _wheel_mats.has(key):
 		var finish := ShaderMaterial.new()
 		finish.shader = ROTOR_SHADER if name == "disc" else RUBBER_SHADER
-		if name != "disc":
+		# Baked tread/sidewall/rotor maps on the wheel's Blender unwrap.
+		var textured := VehicleTex.bake(model) != null and VehicleTex.tex("tread_n") != null
+		finish.set_shader_parameter("textured", textured)
+		if name == "disc":
+			finish.set_shader_parameter("rotor_n", VehicleTex.tex("rotor_n"))
+			finish.set_shader_parameter("rotor_m", VehicleTex.tex("rotor_m"))
+		else:
 			finish.set_shader_parameter("sidewall", name == "tyre_wall")
 			finish.set_shader_parameter("offroad", offroad and name == "tyre")
+			finish.set_shader_parameter("tread_n", VehicleTex.tex("tread_n"))
+			finish.set_shader_parameter("tread_m", VehicleTex.tex("tread_m"))
+			finish.set_shader_parameter("wall_n", VehicleTex.tex("sidewall_n"))
+			finish.set_shader_parameter("wall_m", VehicleTex.tex("sidewall_m"))
+			if textured:
+				finish.set_shader_parameter("bake_tex", VehicleTex.bake(model))
+				finish.set_shader_parameter("ao_strength", 1.0)
 		_wheel_mats[key] = finish
 	return _wheel_mats[key]
 
@@ -329,16 +355,32 @@ func setup(p_car: Car) -> void:
 	paint_mat = ShaderMaterial.new()
 	paint_mat.shader = PAINT_SHADER
 	paint_mat.set_shader_parameter("base_color", spec["paint"])
+	# Orange peel + the body's Blender bake (VehicleTex): the colour stays the
+	# uniform above, so resprays and liveries work as before.
+	var body_bake := VehicleTex.bake(String(spec["body"]))
+	paint_mat.set_shader_parameter("peel_n", VehicleTex.tex("paint_n"))
+	if body_bake:
+		paint_mat.set_shader_parameter("bake_tex", body_bake)
+		paint_mat.set_shader_parameter("ao_strength", 1.0)
 	if float(spec["size"].y) > 1.70:
 		paint_mat.set_shader_parameter("metallic", 0.19)
 		paint_mat.set_shader_parameter("roughness", 0.39)
 		paint_mat.set_shader_parameter("gloss", 0.64)
 		paint_mat.set_shader_parameter("flake", 0.3)
 		_road_film = 0.12 if car.role != "display" else 0.0
-	var paint2 := StandardMaterial3D.new()
-	paint2.albedo_color = spec.get("paint2", Color(0.9, 0.9, 0.9))
-	paint2.roughness = 0.35
-	paint2.metallic = 0.1
+	var paint2_base := StandardMaterial3D.new()
+	paint2_base.albedo_color = spec.get("paint2", Color(0.9, 0.9, 0.9))
+	paint2_base.roughness = 0.35
+	paint2_base.metallic = 0.1
+	paint2_base.clearcoat_enabled = true
+	paint2_base.clearcoat = 0.6
+	var paint2: Material = paint2_base
+	if body_bake:
+		# (Its own material: each car's second colour differs.)
+		paint2 = VehicleTex.make_surface("paint2", paint2_base, String(spec["body"]))
+		paint2.set_shader_parameter("detail_n", VehicleTex.tex("paint_n"))
+		paint2.set_shader_parameter("detail_scale", 8.3)
+		paint2.set_shader_parameter("normal_depth", 0.06)
 	head_mat = StandardMaterial3D.new()
 	head_mat.albedo_color = Color(0.95, 0.95, 0.9)
 	head_mat.emission_enabled = true
@@ -370,7 +412,7 @@ func setup(p_car: Car) -> void:
 						beacon_mat = ShaderMaterial.new()
 						beacon_mat.shader = BEACON_SHADER
 					m = beacon_mat
-				_: m = shared_mat(n)
+				_: m = body_finish(n, String(spec["body"]))
 			body.set_surface_override_material(i, m)
 	cabin_profile = VehicleAccess.geometry(car)
 	driver_seat = cabin_profile["seat"]
@@ -391,7 +433,7 @@ func setup(p_car: Car) -> void:
 		if wmesh:
 			for s in wmesh.get_surface_count():
 				var src := wmesh.surface_get_material(s)
-				wm.set_surface_override_material(s, _wheel_finish(src.resource_name if src else "tyre", wheel_style == "offroad"))
+				wm.set_surface_override_material(s, _wheel_finish(src.resource_name if src else "tyre", wheel_style == "offroad", "wheel_" + wheel_style))
 		# Left wheels face outward the other way.
 		if i % 2 == 0:
 			wm.rotation.y = PI
@@ -931,8 +973,12 @@ func detach(part: String, world_at: Vector3, normal: Vector3) -> void:
 		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 		var nrm = arr[Mesh.ARRAY_NORMAL]
 		var src_idx: PackedInt32Array = _rest_idx[s]
+		var uv0 = arr[Mesh.ARRAY_TEX_UV]
+		var uv1 = arr[Mesh.ARRAY_TEX_UV2]
 		var pv := PackedVector3Array()
 		var pn := PackedVector3Array()
+		var pu := PackedVector2Array()
+		var pu2 := PackedVector2Array()
 		for t in pm.size():
 			if pm[t] != pid:
 				continue
@@ -942,6 +988,11 @@ func detach(part: String, world_at: Vector3, normal: Vector3) -> void:
 				var qn: Vector3 = nrm[vi] if nrm != null else Vector3.UP
 				pv.append(q)
 				pn.append(qn)
+				# (UVs too: the loose panel keeps its paint texture and bake.)
+				if uv0 != null:
+					pu.append(uv0[vi])
+				if uv1 != null:
+					pu2.append(uv1[vi])
 				# The frame underneath: the same shape a few cm in, bare metal.
 				st_frame.set_normal(qn)
 				st_frame.add_vertex(q - qn * 0.045)
@@ -952,7 +1003,13 @@ func detach(part: String, world_at: Vector3, normal: Vector3) -> void:
 		a.resize(Mesh.ARRAY_MAX)
 		a[Mesh.ARRAY_VERTEX] = pv
 		a[Mesh.ARRAY_NORMAL] = pn
+		if pu.size() == pv.size():
+			a[Mesh.ARRAY_TEX_UV] = pu
+		if pu2.size() == pv.size():
+			a[Mesh.ARRAY_TEX_UV2] = pu2
 		piece.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+		if pu.size() == pv.size():
+			piece.regen_normal_maps()
 		piece_mats.append(body.get_surface_override_material(s))
 	_lost[part] = true
 	_rebuild()

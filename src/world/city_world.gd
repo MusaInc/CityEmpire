@@ -981,11 +981,11 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 					for si in wm.get_surface_count():
 						var smat := wm.surface_get_material(si)
 						var sn := String(smat.resource_name) if smat else ""
-						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si), 0, wxf)
+						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si, true), 0, wxf)
 			# The full model only: mid/far LODs carry no beam.
 			# (No road beam: an additive patch on the road at the bumper read as a
 			# light under the car at night, 2026-11-21.)
-			return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb())
+			return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), VehicleTex.bake(body))
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -1001,9 +1001,9 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 	for az in d["axles"]:
 		for side in [-1.0, 1.0]:
 			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
-			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(tyre, 0, xf)
-			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(hub, 0, xf)
-	return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb())   # (no road beam: the user asked for them gone, 2026-11-18)
+			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(_white_uv2(tyre), 0, xf)
+			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(_white_uv2(hub), 0, xf)
+	return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), VehicleTex.bake(body))   # (no road beam: the user asked for them gone, 2026-11-18)
 
 
 const BEAM_SHADER := preload("res://src/world/shaders/traffic_beam.gdshader")
@@ -1039,7 +1039,7 @@ static func _beam_grid(st: SurfaceTool, front_z: float, w: float) -> void:
 				st.add_vertex(q[0])
 
 
-func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front_z := 0.0, width := 0.0, body := AABB()) -> ArrayMesh:
+func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front_z := 0.0, width := 0.0, body := AABB(), bake: Texture2D = null) -> ArrayMesh:
 	var out := ArrayMesh.new()
 	if body.size.x > 0.5:
 		# Contact shadow: a soft ellipse a little wider/longer than the body.
@@ -1076,13 +1076,43 @@ func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front
 		sm.set_shader_parameter("finish", {"paint": 1, "paint2": 1, "glass": 2, "chrome": 3}.get(g, 0))
 		sm.set_shader_parameter("emission", look[2])
 		sm.set_shader_parameter("roughness", look[3])
+		if bake:
+			# The kind's Blender bake on UV2 (VehicleTex): AO in the shut lines,
+			# arches and grille; no sky in the recesses.
+			sm.set_shader_parameter("bake_tex", bake)
+			sm.set_shader_parameter("has_bake", true)
 		out.surface_set_material(out.get_surface_count() - 1, sm)
 	return out
 
 
-static func _surface_mesh(m: Mesh, i: int) -> ArrayMesh:
+static func _surface_mesh(m: Mesh, i: int, white_uv2 := false) -> ArrayMesh:
 	var a := ArrayMesh.new()
-	a.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, m.surface_get_arrays(i))
+	var arr := m.surface_get_arrays(i)
+	if white_uv2:
+		_fill_uv2(arr)
+	a.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	return a
+
+
+## Parts merged into a traffic body without a bake of their own (wheels,
+## far boxes) sample the white texel every vehicle bake keeps free.
+static func _fill_uv2(arr: Array) -> void:
+	var n := (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+	var uv2 := PackedVector2Array()
+	uv2.resize(n)
+	uv2.fill(VehicleTex.WHITE_UV2)
+	arr[Mesh.ARRAY_TEX_UV2] = uv2
+	if arr[Mesh.ARRAY_TEX_UV] == null:
+		var uv := PackedVector2Array()
+		uv.resize(n)
+		arr[Mesh.ARRAY_TEX_UV] = uv
+
+
+static func _white_uv2(prim: PrimitiveMesh) -> ArrayMesh:
+	var a := ArrayMesh.new()
+	var arr := prim.get_mesh_arrays()
+	_fill_uv2(arr)
+	a.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	return a
 
 
@@ -1142,6 +1172,7 @@ static func _car_far_mesh(full: Mesh) -> Mesh:
 		for j in v.size():
 			v[j] += part[1]
 		arr[Mesh.ARRAY_VERTEX] = v
+		_fill_uv2(arr)
 		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		out.surface_set_material(out.get_surface_count() - 1, part[2])
 	return out

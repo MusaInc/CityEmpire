@@ -175,6 +175,7 @@ func _container_ship(length: float) -> Node3D:
 		var model := _cargo_ship_scene.instantiate() as Node3D
 		model.name = "Hull"
 		model.scale = Vector3(scale_k, scale_k, scale_k)
+		VehicleTex.dress(model, "cargo_ship")
 		# Disable shadows on distant ocean vessels for mobile GPU efficiency.
 		for mi in model.find_children("*", "MeshInstance3D", true, false):
 			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

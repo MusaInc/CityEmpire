@@ -18,6 +18,14 @@ global uniform float night;
 #include "res://src/world/shaders/fake_reflect.gdshaderinc"
 
 uniform float flake = 1.0;       // metallic flake sparkle (0 = solid colour)
+// Textures (VehicleTex / tools/blender/ws_texture.py): the clear coat's
+// orange peel on UV (1 unit = 1 m; the tile spans 12 cm) and the body's
+// Blender bake on UV2 (R ambient occlusion, G convex edges, B cavity).
+uniform sampler2D peel_n : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform float peel_scale = 8.3;
+uniform float peel_depth = 0.07;
+uniform sampler2D bake_tex : hint_default_white, filter_linear_mipmap, repeat_disable;
+uniform float ao_strength = 0.0;
 
 varying float v_y;
 varying vec3 v_p;
@@ -36,15 +44,25 @@ float hash3(vec3 p) {
 void fragment() {
 	float distance_to_lens = length(VERTEX);
 	float rain_film = showroom ? 0.0 : wetness;
+	vec3 bk = texture(bake_tex, UV2).rgb;
+	float bake_ao = mix(1.0, bk.r, ao_strength);
+	float bake_cav = mix(1.0, bk.b, ao_strength);
+	float edge = bk.g * ao_strength;
 	float lower = 1.0 - smoothstep(0.29, 0.79, v_y);
 	float mottling = 0.52 + 0.12 * hash3(floor(v_p * 9.0));
 	float film_detail = mix(0.56, mottling, 1.0 - smoothstep(3.0, 11.0, distance_to_lens));
 	float grime = lower * road_film * film_detail;
 	float wear = clamp(dirt * 0.76 + grime, 0.0, 0.93);
 	vec3 base = mix(base_color, vec3(0.107, 0.087, 0.068), grime * 0.31);
+	// Road grime and damage gather in the shut lines and recesses first.
+	base = mix(base, vec3(0.09, 0.075, 0.06), (1.0 - bake_cav) * (0.25 + road_film * 1.5 + dirt) * 0.5);
 	base = mix(base, vec3(0.068, 0.058, 0.05), dirt * 0.39);
-	// Ground-bounce AO: subtle darkening along rocker panels and lower bumper.
-	float under_ao = mix(0.74, 1.0, smoothstep(0.06, 0.58, v_y));
+	// Stone chips / scrapes on the sharp edges once the car is knocked about.
+	float chip = smoothstep(0.45, 0.85, edge) * smoothstep(0.25, 0.8, dirt) * step(0.55, hash3(floor(v_p * 70.0)));
+	base = mix(base, vec3(0.42, 0.42, 0.40), chip * 0.85);
+	// Ground-bounce AO: subtle darkening along rocker panels and lower bumper
+	// (the bake carries the real occlusion; this is the fallback).
+	float under_ao = mix(mix(0.74, 0.9, ao_strength), 1.0, smoothstep(0.06, 0.58, v_y));
 
 	vec3 n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 v = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
@@ -56,7 +74,12 @@ void fragment() {
 	// Subtle metallic flop: deeper, richer pigment at grazing angles.
 	vec3 paint_col = mix(base, base * base * 1.15 + base * 0.18, fres * metallic * 0.45);
 	ALBEDO = paint_col * under_ao;
-	METALLIC = clamp(metallic * 1.12, 0.0, 0.92) * (1.0 - wear * 0.51);
+	float peel_near = 1.0 - smoothstep(2.5, 9.0, distance_to_lens);
+	NORMAL_MAP = texture(peel_n, UV * peel_scale).rgb;
+	NORMAL_MAP_DEPTH = peel_depth * peel_near * (1.0 - wear * 0.6);
+	AO = bake_ao;
+	AO_LIGHT_AFFECT = 0.4;
+	METALLIC = clamp(metallic * 1.12, 0.0, 0.92) * (1.0 - wear * 0.51) * (1.0 - chip * 0.6);
 	ROUGHNESS = clamp(roughness * 0.86 + wear * 0.32 - rain_film * 0.09, 0.10, 0.84);
 	SPECULAR = 0.58;
 	CLEARCOAT = clamp((gloss * 0.86 + rain_film * 0.18) * (1.0 - wear), 0.0, 1.0);
@@ -67,7 +90,9 @@ void fragment() {
 		// Clearcoat automotive environment reflection (sky, horizon & dark urban band).
 		vec3 env_refl = paint_reflection(r, world_at, sky_top, sky_horizon, sun_dir, night);
 		float coat_k = clamp((gloss + rain_film * 0.22) * (1.0 - wear), 0.0, 1.0);
-		float env_w = mix(0.05, 0.42, fres) * coat_k * mix(0.75, 1.0, under_ao);
+		// (Occluded panels - door shuts, wheel arches, under the bumper - see
+		// none of the sky.)
+		float env_w = mix(0.05, 0.42, fres) * coat_k * mix(0.75, 1.0, under_ao) * bake_ao * bake_ao;
 		// Flakes must resolve on screen to sparkle. Avoid stipple on a
 		// moving bonnet or at the van's large, shallow side angles.
 		vec3 cell = v_p * 195.0;
@@ -77,7 +102,7 @@ void fragment() {
 		float fine_sparkle = step(0.955, fhash) * pow(sd, 44.0) * 0.18;
 		float broad_shimmer = smoothstep(0.72, 0.99, fhash) * pow(sd, 15.0) * 0.055;
 		vec3 flake_col = mix(base, vec3(1.0), 0.68) * (fine_sparkle + broad_shimmer) * resolve * flake * metallic * (1.0 - wear);
-		vec3 sun_hi = (vec3(glint * coat_k) + flake_col) * (1.0 - night);
+		vec3 sun_hi = (vec3(glint * coat_k) + flake_col) * (1.0 - night) * bake_ao * (1.0 - chip);
 		EMISSION = env_refl * env_w * mix(1.0, 0.45, night) + sun_hi;
 	}
 }

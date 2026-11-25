@@ -1348,6 +1348,9 @@ func _show_stock_delivery(b: Business) -> void:
 		return
 	var bay := _delivery_bay(door_at)
 	var truck := world._load_mesh("car_van") if bay.origin != Vector3.INF else null
+	if truck and not truck.has_meta("dressed"):
+		VehicleTex.dress_mesh(truck, "car_van")   # (cached mesh: once)
+		truck.set_meta("dressed", true)
 	si.show_stock_delivery(bay, truck, _delivery_van_start(bay) if truck else Vector3.INF)
 
 

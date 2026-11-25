@@ -47,6 +47,9 @@ static func _from_glb(ps: PackedScene, model: String, spec: Dictionary) -> Node3
 	var paint: Color = spec.get("paint", Color(0.9, 0.9, 0.9))
 	var trim: Color = spec.get("trim", Color(0.15, 0.17, 0.2))
 	_recolour(root, paint, trim)
+	# Detail families (teak, cushions, metal) + the craft's Blender bake.
+	if VehicleTex.bake(model):
+		VehicleTex.dress(root, model)
 	for n in root.get_children():
 		if String(n.name).contains("Blur"):
 			(n as Node3D).visible = false

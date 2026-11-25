@@ -17,6 +17,9 @@ uniform vec3 tint : source_color = vec3(1.0);
 uniform bool use_instance_color = false;
 uniform float emission = 0.0;
 uniform float roughness = 0.4;
+// The kind's Blender bake on UV2 (VehicleTex: R ambient occlusion, B cavity).
+uniform sampler2D bake_tex : hint_default_white, filter_linear_mipmap, repeat_disable;
+uniform bool has_bake = false;
 // 0 plain, 1 paint (clearcoat), 2 glass (sky reflections), 3 chrome.
 uniform int finish = 0;
 uniform bool is_tail_lamp = false;
@@ -93,7 +96,10 @@ void vertex() {
 
 void fragment() {
 	vec3 c = use_instance_color ? COLOR.rgb : tint;
-	ALBEDO = c;
+	vec3 bk = has_bake ? texture(bake_tex, UV2).rgb : vec3(1.0);
+	ALBEDO = c * (0.7 + 0.3 * bk.b);
+	AO = bk.r;
+	AO_LIGHT_AFFECT = 0.4;
 	ROUGHNESS = mix(roughness, roughness * 0.5, wetness);
 	METALLIC = use_instance_color ? 0.35 : 0.0;
 	if (finish == 1) {
@@ -133,7 +139,7 @@ void fragment() {
 			float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), finish == 2 ? 3.0 : 4.0);
 			float k = finish == 1 ? mix(0.09, 0.36, fres) : (finish == 2 ? mix(0.11, 0.48, fres) : 0.65);
 			float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 220.0 : 300.0) * (finish == 1 ? 0.9 : 0.75);
-			EMISSION += (env * k + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night);
+			EMISSION += (env * k + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night) * bk.r;
 		} else {
 			// Far-LOD lightweight sky sheen (skips INV_VIEW_MATRIX & procedural skyline reflection).
 			float fres_far = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);

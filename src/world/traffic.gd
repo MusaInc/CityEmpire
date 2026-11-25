@@ -1333,6 +1333,9 @@ func _make_groups(meshes: Array, far_meshes: Array, mid_meshes: Array) -> void:
 					# paint, glass reflections and chrome – plain plastic.)
 					for p in ["tint", "use_instance_color", "emission", "roughness", "finish"]:
 						sm.set_shader_parameter(p, old.get_shader_parameter(p))
+					if not far and old.get_shader_parameter("has_bake"):
+						sm.set_shader_parameter("bake_tex", old.get_shader_parameter("bake_tex"))
+						sm.set_shader_parameter("has_bake", true)
 					if sm.shader == PATH_SHADER:
 						var tint_v = old.get_shader_parameter("tint")
 						var em_v := float(old.get_shader_parameter("emission"))

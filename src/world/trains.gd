@@ -31,8 +31,9 @@ var _clock := 0.0
 func setup(lines: Array, car_mesh: Mesh, cab_mesh: Mesh) -> void:
 	if car_mesh == null or cab_mesh == null:
 		return
-	_car_mesh = car_mesh.duplicate()
-	_cab_mesh = cab_mesh.duplicate()
+	# (Their Blender bakes too: VehicleTex; windows and lamps stay below.)
+	_car_mesh = VehicleTex.dress_mesh(car_mesh.duplicate(), "train_car", ["train_window", "lamp"])
+	_cab_mesh = VehicleTex.dress_mesh(cab_mesh.duplicate(), "train_cab", ["train_window", "lamp"])
 	# Shared window/lamp materials across both meshes (lit at night).
 	for m: Mesh in [_car_mesh, _cab_mesh]:
 		for i in m.get_surface_count():
