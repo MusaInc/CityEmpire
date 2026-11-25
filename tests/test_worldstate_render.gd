@@ -79,11 +79,14 @@ func test_planter_trees_survive_low_quality_and_refresh(t) -> void:
 	world.refresh_props(key)
 	var standing := world.chunk_props(key)
 	t.check(standing.size() == 1 and standing[0][1].origin == second, "only the unbroken tree remains in the layout")
-	var groups := root.get_children()
-	t.check(groups.size() == 1 and groups[0].get_child_count() == 2, "refresh replaces earlier foliage batches")
-	if groups.size() == 1 and groups[0].get_child_count() == 2:
-		for lod: MultiMeshInstance3D in groups[0].get_children():
-			t.check(lod.multimesh.instance_count == 1, "both LODs retain only the standing tree")
+	var groups := root.get_children().filter(func(c): return String(c.name).begins_with("Props_"))
+	t.check(root.get_children().filter(func(c): return c.name == "Foliage").size() <= 1, "refresh keeps one foliage batch")
+	# (Near + mid LODs, plus the far impostor band since 2026-11-25.)
+	t.check(groups.size() == 1 and groups[0].get_child_count() >= 2, "refresh replaces earlier foliage batches")
+	if groups.size() == 1:
+		for lod in groups[0].get_children():
+			if lod is MultiMeshInstance3D:
+				t.check((lod as MultiMeshInstance3D).multimesh.instance_count == 1, "every LOD retains only the standing tree")
 	root.free()
 	world.free()
 

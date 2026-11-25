@@ -871,16 +871,15 @@ def clearance_sign():
 
 def _clad(name, base_rgb, rib_rgb):
     """Profiled metal cladding bay: 6 m wide, 1 m tall (Godot scales it to
-    the wall), facing -Y: trapezoid ribs every 0.5 m, a darker shadow line
-    beside each rib."""
+    the wall), facing -Y: trapezoid ribs every 0.5 m. (The 4 cm dark
+    shadow line beside each rib went sub-pixel within ~40 m and shimmered
+    into moire rings: the ribs' own side faces shade them now.)"""
     mb = M(name + "_m", base_rgb)
     mr = M(name + "_r", rib_rgb)
-    mdk = M(name + "_d", tuple(c * 0.62 for c in base_rgb))
     p = [B((6.0, 0.06, 1.0), (0, 0.03, 0.5), mb)]
     for k in range(12):
         x = -2.75 + k * 0.5
         p.append(B((0.16, 0.08, 1.0), (x, -0.04, 0.5), mr))
-        p.append(B((0.04, 0.02, 1.0), (x + 0.1, -0.005, 0.5), mdk))
     done(name, p)
 
 

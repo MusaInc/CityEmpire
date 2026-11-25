@@ -60,8 +60,8 @@ const HANGARS := [
 	[1640, 192, 1712, 288, 20.0, Color(0.8, 0.81, 0.82), 0.21, true],
 	[1722, 184, 1808, 292, 25.0, Color(0.62, 0.68, 0.74), 0.33, false],
 	[1818, 204, 1870, 282, 15.0, Color(0.84, 0.8, 0.7), 0.47, true],
-	# (2026-11-25) The MRO hangar east of the cargo apron: wide-body bay.
-	[2470, 196, 2546, 288, 24.0, Color(0.88, 0.89, 0.9), 0.52, false],
+	# (2026-11-25) The MRO hangar east of the cargo apron: wide-body bay (kept west of the coast notch: its east third stood over the sea).
+	[2462, 200, 2498, 288, 24.0, Color(0.88, 0.89, 0.9), 0.52, false],
 ]
 const COL_PAVE := Color(0.56, 0.56, 0.55)
 const COL_GRASS := Color(0.33, 0.47, 0.26)
@@ -714,7 +714,7 @@ static func plan(layout: CityLayout) -> Dictionary:
 	areas.append([5, _rect(1560, 170, 1880, 385), COL_APRON])              # hangar apron
 	areas.append([5, _rect(1895, 242, 2330, 385), COL_APRON])              # terminal apron
 	areas.append([5, _rect(2335, 160, 2462, 385), COL_APRON])              # cargo apron
-	areas.append([5, _rect(2462, 288, 2548, 385), COL_APRON])              # MRO hangar apron
+	areas.append([5, _rect(2462, 288, 2512, 385), COL_APRON])              # MRO hangar apron (on land: the coast notches in at z 288)
 	var sdr := SkyportDistrict.RENTAL
 	areas.append([5, _rect(sdr.position.x, sdr.position.y, sdr.end.x, sdr.end.y), COL_APRON, "bays"])   # rental car centre
 	var sdf := SkyportDistrict.FUEL
@@ -853,7 +853,7 @@ func _circus_surface(st: SurfaceTool) -> void:
 			var b := poly[tri[i + 1]]
 			var c := poly[tri[i + 2]]
 			var vs := [a, b, c]
-			if (b - a).cross(c - a) > 0.0:
+			if (b - a).cross(c - a) < 0.0:
 				vs = [a, c, b]
 			for v: Vector2 in vs:
 				st.set_color(col)
@@ -863,7 +863,7 @@ func _circus_surface(st: SurfaceTool) -> void:
 				st.add_vertex(v3.call(v, lift))
 	var paint := func(a: Vector2, b: Vector2, c: Vector2, d: Vector2) -> void:
 		var vs := [a, b, c, a, c, d]
-		if (b - a).cross(c - a) > 0.0:
+		if (b - a).cross(c - a) < 0.0:
 			vs = [a, c, b, a, d, c]
 		for v: Vector2 in vs:
 			st.set_color(road)
@@ -3547,6 +3547,16 @@ func _build_trees() -> void:
 				paved = true   # (aprons, car parks, forecourts)
 				break
 		if paved:
+			continue
+		# (Out of the walk-in venues' halls: a verge tree stood inside the
+		# aviation showroom between the exhibits.)
+		var in_venue := false
+		for vid in plan_data.get("venues", {}):
+			var vr = plan_data["venues"][vid].get("rect")
+			if vr is Rect2 and (vr as Rect2).grow(4.0).has_point(q):
+				in_venue = true
+				break
+		if in_venue:
 			continue
 		xf.origin.y = LAND_Y + knoll_h(q.x, q.y)
 		kept.append(xf)

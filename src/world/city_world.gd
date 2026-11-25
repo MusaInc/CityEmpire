@@ -961,6 +961,14 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			tools[g] = st
 			looks[g] = group_look
 		return tools[g]
+	# Sealed fleet shells (ws_fleet.py: panes laid on the painted shell, no
+	# cabin) get opaque tinted glass: see-through glass showed the paint
+	# behind it as body-coloured windows. Bodies with a cabin keep clear glass.
+	var sealed := true
+	for i in src.get_surface_count():
+		var sm0 := src.surface_get_material(i)
+		if sm0 and String(sm0.resource_name) == "interior":
+			sealed = false
 	for i in src.get_surface_count():
 		var m := src.surface_get_material(i)
 		var n := String(m.resource_name) if m else ""
@@ -992,7 +1000,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			# The full model only: mid/far LODs carry no beam.
 			# (No road beam: an additive patch on the road at the bumper read as a
 			# light under the car at night, 2026-11-21.)
-			return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), VehicleTex.bake(body))
+			return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), VehicleTex.bake(body), sealed)
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -1010,7 +1018,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
 			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(_white_uv2(tyre), 0, xf)
 			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(_white_uv2(hub), 0, xf)
-	return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), VehicleTex.bake(body))   # (no road beam: the user asked for them gone, 2026-11-18)
+	return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), VehicleTex.bake(body), sealed)   # (no road beam: the user asked for them gone, 2026-11-18)
 
 
 const BEAM_SHADER := preload("res://src/world/shaders/traffic_beam.gdshader")
@@ -1046,7 +1054,7 @@ static func _beam_grid(st: SurfaceTool, front_z: float, w: float) -> void:
 				st.add_vertex(q[0])
 
 
-func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front_z := 0.0, width := 0.0, body := AABB(), bake: Texture2D = null) -> ArrayMesh:
+func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front_z := 0.0, width := 0.0, body := AABB(), bake: Texture2D = null, sealed := false) -> ArrayMesh:
 	var out := ArrayMesh.new()
 	if body.size.x > 0.5:
 		# Contact shadow: a soft ellipse a little wider/longer than the body.
@@ -1077,7 +1085,7 @@ func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front
 		var look: Array = looks[g]
 		(tools[g] as SurfaceTool).commit(out)
 		var sm := ShaderMaterial.new()
-		sm.shader = preload("res://src/world/shaders/traffic_glass.gdshader") if g == "glass" else shader
+		sm.shader = preload("res://src/world/shaders/traffic_glass.gdshader") if g == "glass" and not sealed else shader
 		sm.set_shader_parameter("tint", look[1])
 		sm.set_shader_parameter("use_instance_color", g == "paint")
 		sm.set_shader_parameter("finish", {"paint": 1, "paint2": 1, "glass": 2, "chrome": 3}.get(g, 0))
@@ -1786,7 +1794,7 @@ func refresh_props(key: Vector2i) -> void:
 	if root == null:
 		return
 	for ch in root.get_children():
-		if ch.name.begins_with("Props_") or ch.name == "Furniture" or ch.name == "LampHalos" or ch.name.begins_with("Signal"):
+		if ch.name.begins_with("Props_") or ch.name == "Furniture" or ch.name == "LampHalos" or ch.name == "Foliage" or ch.name.begins_with("Signal"):
 			root.remove_child(ch)
 			ch.queue_free()
 	_add_props(root, key, null)   # (the ground pools stay: only the halos are rebuilt)

@@ -1057,14 +1057,13 @@ def v_craft_sales(m, aviation):
     for model, x, y, width, length in exhibits:
         if aviation:
             # A round glass plinth with an LED ring, the aircraft on it; a
-            # light line nose to tail overhead; the model on a banner.
+            # light line nose to tail overhead.
             r = max(width, length) * 0.5 + 0.8
             parts += [
                 C(f"{model}_plinth", r, .22, (x, y, 0), m["floor_dark"], 48),
                 C(f"{model}_ring", r + .06, .04, (x, y, .03), m["led_cool"], 48),
                 C(f"{model}_cap", r - .3, .02, (x, y, .22), m["floor_light"], 48),
                 B(f"{model}_spot", (.12, length * .9, .05), (x, y, H - .55), m["led"]),
-                B(f"{model}_banner", (.05, 2.2, 3.6), (x + (r * .7 if x <= 0 else -r * .7), y + length * .35, H - 2.4), m["walnut"]),
             ]
         else:
             parts += [

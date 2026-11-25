@@ -684,13 +684,19 @@ static func _parked_extras(target: Node3D, isl: SkyportIsland) -> void:
 ## parapet, loading docks along a "docks" face; a hangar's front stays open
 ## for its doors (SkyportIsland._build_airport_dressing) with a header over.
 ## (Unless the kit is missing, in which case the city mesher draws them.)
+const CLAD_RANGE := 180.0
+
 static func build_clad(P: Dictionary, target: Node3D, isl: SkyportIsland) -> void:
 	var K := {}
 	var m := BuildingMesher.new()
+	var bi := -1
 	for b: Dictionary in P["buildings"]:
+		bi += 1
 		if not b.has("clad"):
 			continue
-		var kind: String = b["clad"]
+		# (Per building: a MultiMesh's visibility range is measured from its
+		# own centre, so each shed swaps to its flat shell on its own.)
+		var kind: String = String(b["clad"]) + "#" + str(bi)
 		var tiers: Array = b["tiers"]
 		for ti in tiers.size():
 			var t: Array = tiers[ti]
@@ -744,8 +750,17 @@ static func build_clad(P: Dictionary, target: Node3D, isl: SkyportIsland) -> voi
 					K["dock_door"] = []
 				(K["dock_door"] as Array).append(Transform3D(Basis(Vector3.UP, PI), Vector3(x, Y, dz)))
 				x += 7.5
-	for nm: String in K:
-		SkyportKit.place(target, nm, K[nm], 1400.0, true)
+	for key: String in K:
+		var nm := key.get_slice("#", 0)
+		if nm == "dock_door":
+			SkyportKit.place(target, nm, K[key], 1400.0, true)
+		else:
+			# Ribbed bays near only: past ~180 m the half-metre ribs fall under a
+			# pixel and shimmered into moire rings; the building's own flat
+			# shell (drawn underneath) carries the wall from there.
+			var mi := SkyportKit.place(target, nm, K[key], CLAD_RANGE, true)
+			if mi:
+				mi.visibility_range_end_margin = 20.0
 	isl._mesh_into(m, "CladTrim", target, 0.0, 1400.0)
 
 

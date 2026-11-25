@@ -26,5 +26,5 @@ for ln in open("tools/skyport/views_local.txt"):
 open(out, "w").write("\n".join(lines) + "\n")
 PY
 LP_NUM_THREADS=6 timeout 2400 xvfb-run -a -s "-screen 0 1280x720x24 -nolisten tcp" godot --rendering-method mobile --resolution 1280x720 \
-  res://scenes/main.tscn -- --play --new --hour=$h --weather=$w --nohud --tour="$out/tour.txt" --tour-wait=${WAIT:-7} --tour-nohero 2>&1 \
+  res://scenes/main.tscn -- --play --new --hour=$h --weather=$w --nohud --tour="$out/tour.txt" --tour-wait=${WAIT:-7} --tour-nohero ${EXTRA:-} 2>&1 \
   | grep -E --line-buffered "TOUR_|SCRIPT ERROR|ERROR" | grep -v Settings

@@ -226,7 +226,7 @@ void fragment() {
 		albedo = mix(albedo, yellow, centre * 0.95);
 		float tracks = band(abs(fract(abs(uv.x) / 3.5) - 0.5) * 3.5 - 0.9, 0.32, 0.3) * mix(0.6, 1.0, near);
 		albedo *= 1.0 - 0.16 * tracks;
-		rough -= 0.3 * tracks;
+		rough -= 0.11 * tracks;   // (as ground.gdshader: 0.3 turned shaded tracks into blue sky streaks)
 		sheen = tracks;
 		// Patch repairs, the odd oil stain and a darker gutter by the kerb.
 		vec2 pc = floor(p / vec2(4.0, 2.6) + 7.0);
@@ -385,6 +385,6 @@ void fragment() {
 	}
 	ALBEDO = albedo;
 	ROUGHNESS = clamp(rough, 0.12, 1.0);
-	SPECULAR = is_paved ? (0.30 + 0.18 * surface_wet + 0.32 * puddle + 0.15 * sheen) : 0.25;
+	SPECULAR = is_paved ? (0.25 + 0.18 * surface_wet + 0.32 * puddle + 0.09 * sheen) : 0.25;
 	EMISSION = emit;
 }
