@@ -58,6 +58,8 @@ static func build_terminal(isl: SkyportIsland, target: Node3D, body: StaticBody3
 	var g := SurfaceTool.new()
 	g.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var m := BuildingMesher.new()
+	var kit := SkyportKit.ready()   # (walk-in hall: floor-level glass, the district's pods, bridges, interior)
+	var base := 0.06 if kit else 0.7
 	for k in 4:
 		var p0: Vector2 = ring[k]
 		var p1: Vector2 = ring[(k + 1) % 4]
@@ -68,22 +70,23 @@ static func build_terminal(isl: SkyportIsland, target: Node3D, body: StaticBody3
 			var b2 := p0.lerp(p1, float(s2 + 1) / steps)
 			var ya := SkyportIsland.terminal_roof_y(a2.x, a2.y) - 0.3
 			var yb := SkyportIsland.terminal_roof_y(b2.x, b2.y) - 0.3
-			var A0 := Vector3(a2.x, Y + 0.7, a2.y)
-			var B0 := Vector3(b2.x, Y + 0.7, b2.y)
+			var A0 := Vector3(a2.x, Y + base, a2.y)
+			var B0 := Vector3(b2.x, Y + base, b2.y)
 			var A1 := Vector3(a2.x, ya, a2.y)
 			var B1 := Vector3(b2.x, yb, b2.y)
 			for v: Vector3 in [A0, A1, B1, A0, B1, B0, A0, B1, A1, A0, B0, B1]:
 				g.add_vertex(v)
 			# Mullion at each panel joint (proud of the glass), full height.
-			m.beam(Vector3(a2.x, Y + 0.7, a2.y), Vector3(a2.x, ya, a2.y), 0.42, 0.42, MULLION)
+			m.beam(Vector3(a2.x, Y + base, a2.y), Vector3(a2.x, ya, a2.y), 0.42, 0.42, MULLION)
 		# Transoms: the mezzanine line and the head of the doors.
 		for ty: float in [4.6, 9.8]:
 			m.beam(Vector3(p0.x, Y + ty, p0.y), Vector3(p1.x, Y + ty, p1.y), 0.36, 0.5, MULLION)
 	# Plinth (pale stone) all round.
-	m.solid(hall.position.x - 0.6, hall.position.y - 0.6, hall.end.x + 0.6, hall.end.y + 0.6, Y, Y + 0.7, STONE)
+	if not kit:
+		m.solid(hall.position.x - 0.6, hall.position.y - 0.6, hall.end.x + 0.6, hall.end.y + 0.6, Y, Y + 0.7, STONE)
 	# Entrance pods on the drop-off side: dark glazed vestibules with a lit
 	# fascia band, in pairs.
-	for x: float in [2010.0, 2056.0, 2142.0, 2188.0, 2234.0]:
+	for x: float in ([] if kit else [2010.0, 2056.0, 2142.0, 2188.0, 2234.0]):
 		m.solid(x - 3.0, hall.position.y - 3.2, x + 3.0, hall.position.y, Y, Y + 3.6, Color(0.16, 0.2, 0.24))
 		m.solid(x - 3.3, hall.position.y - 3.5, x + 3.3, hall.position.y, Y + 3.6, Y + 4.3, Color(0.92, 0.92, 0.9))
 	# Low rails and seats run between the terminal entrances, leaving a
@@ -99,14 +102,21 @@ static func build_terminal(isl: SkyportIsland, target: Node3D, body: StaticBody3
 	_terminal_sign(target, m, "ARRIVALS", Vector3(2234.0, Y + 4.15, 164.36), 5.75, 0.72, PI)
 	# Airside: the gate lounge floor shows as a dark band behind the glass at
 	# the jet bridges' level (the bridges plug into it).
-	m.solid(hall.position.x, hall.end.y - 0.4, hall.end.x, hall.end.y + 0.2, Y + 4.2, Y + 4.6, Color(0.5, 0.52, 0.55))
+	if not kit:
+		m.solid(hall.position.x, hall.end.y - 0.4, hall.end.x, hall.end.y + 0.2, Y + 4.2, Y + 4.6, Color(0.5, 0.52, 0.55))
 	var gl := MeshInstance3D.new()
 	gl.name = "TerminalGlazing"
 	g.generate_normals()
 	gl.mesh = g.commit()
-	gl.material_override = glass_material()
+	gl.material_override = SkyportDistrict.terminal_glass() if kit else glass_material()
 	gl.visibility_range_end = 2000.0
+	if kit:
+		gl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	target.add_child(gl)
+	if kit:
+		# (Mullions and transoms only: the district builds the jet bridges.)
+		isl._mesh_into(m, "Terminal", target, 0.0, 1800.0)
+		return
 	# Jet bridges: a fixed link out of the hall under the roof, the
 	# telescoping tunnel to a rotunda leg on wheels, and the cab at the
 	# aircraft's front door (parked noses sit at z ≈ 292).
@@ -169,6 +179,8 @@ static func build_parked(P: Dictionary, target: Node3D, isl: SkyportIsland) -> v
 		target.add_child(node)
 	# Ground equipment round the gate airliners: a belt loader, a catering
 	# truck lifted to the rear door, a fuel bowser under the wing.
+	if SkyportKit.ready():
+		return   # (SkyportDistrict.build_airside: the Blender turnaround)
 	var m := BuildingMesher.new()
 	for k: int in [0, 2]:
 		var p: Vector3 = (stands[k] as Array)[0]
@@ -647,7 +659,7 @@ static func build_apron_kit(P: Dictionary, target: Node3D, isl: SkyportIsland) -
 			hz += 1.6
 	# Staging rows behind the restraint line (z 255..261), between gates.
 	var yellow := Color(0.9, 0.7, 0.12)
-	for gi in STANDS_AT.size() - 1:
+	for gi in (0 if SkyportKit.ready() else STANDS_AT.size() - 1):
 		var gx: float = STANDS_AT[gi] + 18.0
 		var end_x: float = STANDS_AT[gi + 1] - 18.0
 		var cx := gx

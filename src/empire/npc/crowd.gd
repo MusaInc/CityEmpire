@@ -107,6 +107,12 @@ func setup(p_game: EmpireGame) -> void:
 			if _loop_on_carriageway(ring, all_roads, rd):
 				continue
 			_add_loop(ring, 1, [rp.size() - 1, ring.size() - 1])
+		# The terminal's halls, airside mall and gate lounges.
+		for lp: PackedVector2Array in game.skyport.wplan.get("walk_loops", []):
+			_add_loop(lp, 1, [], {}, "plaza")
+			var rev := lp.duplicate()
+			rev.reverse()
+			_add_loop(rev, -1, [], {}, "plaza")
 	_doors.clear()
 	_door_grid.clear()
 	for u in game.units:

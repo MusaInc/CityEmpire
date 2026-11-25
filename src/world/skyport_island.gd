@@ -60,6 +60,8 @@ const HANGARS := [
 	[1640, 192, 1712, 288, 20.0, Color(0.8, 0.81, 0.82), 0.21, true],
 	[1722, 184, 1808, 292, 25.0, Color(0.62, 0.68, 0.74), 0.33, false],
 	[1818, 204, 1870, 282, 15.0, Color(0.84, 0.8, 0.7), 0.47, true],
+	# (2026-11-25) The MRO hangar east of the cargo apron: wide-body bay.
+	[2470, 196, 2546, 288, 24.0, Color(0.88, 0.89, 0.9), 0.52, false],
 ]
 const COL_PAVE := Color(0.56, 0.56, 0.55)
 const COL_GRASS := Color(0.33, 0.47, 0.26)
@@ -232,6 +234,10 @@ static func world_plan(P: Dictionary) -> Dictionary:
 		strips.append([st[0], w(st[1]), w(st[2]), st[3]])
 	W["strips"] = strips
 	W["bridges"] = P["bridges"]
+	var loops: Array = []
+	for lp: PackedVector2Array in P.get("walk_loops", []):
+		loops.append(wpoly(lp))
+	W["walk_loops"] = loops
 	return W
 
 
@@ -708,6 +714,12 @@ static func plan(layout: CityLayout) -> Dictionary:
 	areas.append([5, _rect(1560, 170, 1880, 385), COL_APRON])              # hangar apron
 	areas.append([5, _rect(1895, 242, 2330, 385), COL_APRON])              # terminal apron
 	areas.append([5, _rect(2335, 160, 2462, 385), COL_APRON])              # cargo apron
+	areas.append([5, _rect(2462, 288, 2548, 385), COL_APRON])              # MRO hangar apron
+	var sdr := SkyportDistrict.RENTAL
+	areas.append([5, _rect(sdr.position.x, sdr.position.y, sdr.end.x, sdr.end.y), COL_APRON, "bays"])   # rental car centre
+	var sdf := SkyportDistrict.FUEL
+	areas.append([0, _rect(sdf.x - 22.0, -21.0, sdf.x + 22.0, sdf.y + 24.0), Color(0.6, 0.6, 0.58)])  # fuel station forecourt
+	areas.append([0, _rect(2186, 133, 2256, 143.5), Color(0.64, 0.61, 0.56)])                         # taxi rank
 	areas.append([5, _rect(1965, 58, 2255, 132), COL_APRON, "bays"])       # terminal car park (bays, parked cars)
 	areas.append([5, _rect(2140, -300, 2450, -196), COL_APRON])            # container yard
 	for f in [[1630, 8, 1725, 96], [1745, 8, 1875, 96], [2350, -80, 2448, -50]]:
@@ -752,6 +764,7 @@ static func plan(layout: CityLayout) -> Dictionary:
 	P["piers"] = piers
 	P["berths"] = berths
 	P["buildings"] = _buildings(P)
+	P["walk_loops"] = SkyportDistrict.walk_loops()
 	# Named places (games attach their own meaning).
 	P["sites"] = {
 		"dealer_budget": {"name": "Kestrel Motors", "door": Vector3(1678, LAND_Y, 4), "lot": Rect2(1630, 8, 95, 88), "face": Vector3(0, 0, -1)},
@@ -1422,13 +1435,22 @@ static func _buildings(P: Dictionary) -> Array:
 	# hangars, cargo terminal.
 	# (The terminal is a glazed hall under a curved roof: _build_terminal.)
 	var term := _b([[1962, 168, 2258, 236, LAND_Y, LAND_Y + TERMINAL_HALL]], S.GLASS, Color(0.6, 0.68, 0.74), 0.12)
-	term["mesh"] = false   # (a glazed hall: SkyportAirport.build_terminal; the record keeps collision and the map)
+	term["mesh"] = false   # (a glazed hall: SkyportAirport.build_terminal; the record keeps the map)
+	term["walkin"] = true  # (walk-in: SkyportDistrict builds its walls, doors and interior)
 	out.append(term)
 	# Skyport Grand: the airport hotel beside the terminal, a low setback block
 	# between the runway and the town.
 	var hotel := _b(_tower(1900, 170, 44, 52, 30, "setback"), S.GLASS, Color(0.55, 0.62, 0.66), 0.83)
 	hotel["district"] = "airport"
 	out.append(hotel)
+	# (2026-11-25) Two more airport hotels on the strip between the avenue
+	# and the car park road: a business hotel and a budget one.
+	var h2 := _b(_tower(2036, -17, 66, 44, 28, "setback"), S.MODERN, Color(0.83, 0.8, 0.74), 0.61)
+	h2["district"] = "airport"
+	out.append(h2)
+	var h3 := _b(_tower(2148, -15, 58, 40, 18, "slab"), S.GLASS, Color(0.5, 0.58, 0.64), 0.29)
+	h3["district"] = "airport"
+	out.append(h3)
 	# Control tower (drawn by SkyportAirport.build_tower; these boxes are its
 	# collision and map footprint): base block, shaft, cab.
 	var twr := _b([[2274, 190, 2308, 220, LAND_Y, LAND_Y + 8.1], [2287, 201, 2295, 209, LAND_Y + 8.1, LAND_Y + 54.4],
@@ -1632,6 +1654,14 @@ func _start_near() -> void:
 		func(): _near(_build_airport_dressing), func(): _near(_build_marina.bind(near_street)),
 		func(): _near(_build_terminal.bind(near_street)),
 		func(): SkyportAirport.build_terminal(self, near_root, body),
+		func(): if SkyportKit.ready(): SkyportDistrict.build_terminal_interior(near_root, body, self),
+		func(): if SkyportKit.ready(): SkyportDistrict.build_airside(plan_data, near_root, body, self),
+		func(): if SkyportKit.ready(): SkyportDistrict.build_landside(plan_data, near_root, body, self),
+		func():
+			var mv := SkyportDistrict.Movers.new()
+			mv.name = "Movers"
+			near_root.add_child(mv)
+			mv.setup(self),
 		func(): SkyportAirport.build_tower(near_root, self),
 		func(): SkyportAirport.build_parked(plan_data, near_root, self),
 		func(): SkyportAirport.build_masts(near_root, body, self),
@@ -2625,8 +2655,8 @@ func _build_detail(key: String) -> void:
 		if b.get("mesh", true):   # (the terminal and the tower are drawn by SkyportAirport)
 			near.add_building(b, true)
 			near.add_features(b)
-		if b.get("hollow", false):
-			continue   # (a walk-in venue: the game builds its room and collision)
+		if b.get("hollow", false) or b.get("walkin", false):
+			continue   # (a walk-in venue / the terminal: their own room and collision)
 		for bx in BuildingMesher.collision_boxes(b):
 			CityWorld._add_box(body, bx)
 	_mesh(near, "Detail_" + key, 0.0, 0.0)
@@ -2973,13 +3003,14 @@ func _build_airport_dressing() -> void:
 	var a: Vector3 = rw["from"]
 	var b: Vector3 = rw["to"]
 	var hw: float = float(rw["w"]) * 0.5 + 1.2
+	var kit := SkyportKit.ready()   # (lights, approach bars, GSE, windsock: SkyportDistrict)
 	var x := a.x
-	while x <= b.x:
+	while x <= b.x and not kit:
 		for sg: float in [-1.0, 1.0]:
 			m.solid(x - 0.25, a.z + sg * hw - 0.25, x + 0.25, a.z + sg * hw + 0.25, LAND_Y, LAND_Y + 0.45, Color(0.95, 0.92, 0.75))
 		x += 60.0
 	# Approach light bars out over the water at both ends.
-	for end: Array in [[a.x, -1.0], [b.x, 1.0]]:
+	for end: Array in ([] if kit else [[a.x, -1.0], [b.x, 1.0]]):
 		for k in 6:
 			var ax: float = float(end[0]) + float(end[1]) * (30.0 + k * 30.0)
 			# (A steel gantry on three piles, lamps along the top – the bar
@@ -2993,13 +3024,14 @@ func _build_airport_dressing() -> void:
 				var lz2 := -7.2 + li * 2.4
 				m.solid(ax - 0.3, a.z + lz2 - 0.3, ax + 0.3, a.z + lz2 + 0.3, LAND_Y + 0.45, LAND_Y + 0.75, Color(0.98, 0.95, 0.85))
 	# Ground service: tugs and baggage carts by the stands.
-	for s: Array in plan_data["stands"]:
+	for s: Array in ([] if kit else plan_data["stands"]):
 		var p: Vector3 = s[0]
 		m.solid(p.x - 20.0, p.z - 26.0, p.x - 16.0, p.z - 22.5, LAND_Y, LAND_Y + 1.6, Color(0.92, 0.75, 0.15))
 		m.solid(p.x + 16.0, p.z - 26.0, p.x + 22.0, p.z - 23.0, LAND_Y, LAND_Y + 1.2, Color(0.75, 0.76, 0.78))
 	# Windsock mast.
-	m.beam(Vector3(1500, LAND_Y, 430), Vector3(1500, LAND_Y + 8.0, 430), 0.2, 0.2, Color(0.9, 0.9, 0.9))
-	m.beam(Vector3(1500, LAND_Y + 7.6, 430), Vector3(1503.5, LAND_Y + 7.3, 430), 0.7, 0.7, Color(0.95, 0.45, 0.1))
+	if not kit:
+		m.beam(Vector3(1500, LAND_Y, 430), Vector3(1500, LAND_Y + 8.0, 430), 0.2, 0.2, Color(0.9, 0.9, 0.9))
+		m.beam(Vector3(1500, LAND_Y + 7.6, 430), Vector3(1503.5, LAND_Y + 7.3, 430), 0.7, 0.7, Color(0.95, 0.45, 0.1))
 	# The terminal roof's raking columns, landside and airside.
 	var tx := TERMINAL_ROOF.position.x + 12.0
 	while tx < TERMINAL_ROOF.end.x - 6.0:
