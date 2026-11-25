@@ -79,11 +79,11 @@ float quarter(vec2 p) {
 // buildings recently renovated whatever the area.
 float building_age(vec2 p, float seed) {
 	float q = quarter(p);
-	float a = q == 0.0 ? 0.1 : (q == 1.0 ? 0.35 : (q == 2.0 ? 0.3 : (q == 3.0 ? 0.85 : (q == 4.0 ? 0.6 : 0.65))));
+	float a = q == 0.0 ? 0.22 : (q == 1.0 ? 0.45 : (q == 2.0 ? 0.42 : (q == 3.0 ? 0.88 : (q == 4.0 ? 0.68 : 0.72))));
 	// Softer at the CBD's edge: older stock creeps in towards midtown.
 	a = mix(a, 0.35, q == 0.0 ? smoothstep(240.0, 330.0, distance(p, vec2(560.0, -170.0))) : 0.0);
 	a = clamp(a + (fract(seed * 17.31 + 0.13) - 0.5) * 0.45, 0.0, 1.0);
-	return fract(seed * 3.91 + 0.7) < 0.22 ? a * 0.3 : a;
+	return fract(seed * 3.91 + 0.7) < 0.18 ? a * 0.45 : a;
 }
 
 void vertex() {
@@ -1115,12 +1115,12 @@ void fragment() {
 		float patches = smoothstep(0.45, 0.9, vnoise_b(uv * 0.06 + seed * 11.0));
 		float splash = 1.0 - smoothstep(0.08, 0.62 + 0.70 * patches, uv.y);
 		float street_splash = splash * (0.48 + 0.52 * vnoise_b(uv * vec2(0.95, 2.7) + 13.7));
-		float damp = street_splash * detail * (0.11 + 0.24 * age) * float(v_kind != KIND_TRIM);
+		float damp = street_splash * detail * (0.15 + 0.3 * age) * float(v_kind != KIND_TRIM);
 		albedo = mix(albedo, albedo * vec3(0.55, 0.51, 0.44), damp);
 		rough = mix(rough, 0.78 + 0.09 * (1.0 - wetness), damp);
 		// (How much by the building's age: kept-up towers stay clean.)
-		albedo *= 1.0 - detail * ((0.05 + 0.17 * age) * streak + (0.03 + 0.12 * age) * patches
-			+ (0.03 + 0.075 * age) * street_splash * float(v_kind != KIND_TRIM));
+		albedo *= 1.0 - detail * ((0.07 + 0.25 * age) * streak + (0.045 + 0.17 * age) * patches
+			+ (0.05 + 0.11 * age) * street_splash * float(v_kind != KIND_TRIM));
 		// (Base courses always: their shops are above them.)
 		bool street_wall = v_kind == KIND_STONE || (v_kind == KIND_WALL && (real_street_floor || !(uv.y < 4.6 && style != 3.0 && fract(seed * 5.37 + 0.21) < 0.5)));
 		// Peeling render on old painted walls: patches showing the darker
@@ -1343,6 +1343,18 @@ void fragment() {
 				metal = max(metal, 0.25 * ks);
 			}
 		}
+	}
+	// Trodden and driven-on tops of kits and structures – plazas, quays,
+	// promenades, decks, platforms (wear pass 2026-11-25: plazas are kit
+	// slabs drawn here, not by the ground shader, and stayed spotless pale
+	// stone): broad grime patches and a dust tone at any distance, low
+	// frequency only. Glass, signs and lamps are left alone.
+	if (v_world_normal.y > 0.9 && (v_kind == KIND_WALL || v_kind == KIND_STONE || v_kind == KIND_TRIM || v_kind == KIND_BRIDGE_ROAD)) {
+		vec2 pw = v_wpos.xz;
+		float age_t = clamp(building_age(pw, 0.37) * 0.8 + 0.2, 0.0, 1.0);
+		float g1 = vnoise_b(pw * 0.06 + 41.0) * 0.55 + vnoise_b(pw * 0.21 + 5.0) * 0.3 + vnoise_b(pw * 0.7 + 9.0) * 0.15;
+		albedo *= 1.0 - (0.07 + 0.17 * age_t) * smoothstep(0.36, 0.84, g1);
+		albedo = mix(albedo, albedo * vec3(0.86, 0.82, 0.76), 0.2 + 0.25 * age_t);
 	}
 	ALBEDO = albedo * (1.0 - 0.16 * wetness);
 	float wet_rough = mix(rough, min(rough, 0.32), wetness * 0.75);

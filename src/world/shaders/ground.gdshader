@@ -104,12 +104,12 @@ void vertex() {
 // on Westbank; broad patches vary it (a resurfaced stretch, a neglected
 // corner) so whole quarters aren't uniform.
 float street_age(vec2 p) {
-	float a = 0.35;
-	if (p.x < 30.0) a = 0.65;
+	float a = 0.45;
+	if (p.x < 30.0) a = 0.7;
 	else if (p.x < 250.0 && p.y > -330.0 && p.y < 260.0) a = 0.3;
 	else if (p.y >= 260.0 && p.x < 560.0) a = 0.85;
 	else if (p.x > 780.0 || p.y < -540.0 || p.y > 520.0) a = 0.55;
-	else if (distance(p, vec2(560.0, -170.0)) < 330.0) a = mix(0.1, 0.35, smoothstep(240.0, 330.0, distance(p, vec2(560.0, -170.0))));
+	else if (distance(p, vec2(560.0, -170.0)) < 330.0) a = mix(0.22, 0.42, smoothstep(240.0, 330.0, distance(p, vec2(560.0, -170.0))));
 	return clamp(a + (vnoise(p / 70.0) - 0.5) * 0.5, 0.0, 1.0);
 }
 
@@ -592,6 +592,20 @@ void fragment() {
 		rough = mix(rough, 0.06, puddle);
 	} else if (!shore && flat_top && grass) {
 		albedo *= 1.0 - wetness * 0.11;
+	}
+	// Lived-in at every distance (wear pass 2026-11-25: most wear above
+	// fades with the detail range, so streets a block away went back to clean
+	// pale stone and flat grey): broad grime and tar patches by the street's
+	// age, a dust tone on the paving. Low frequency only – nothing shimmers.
+	if (!shore && flat_top && (asphalt || pave)) {
+		float wa = street_age(p);
+		float g1 = vnoise(p * 0.06 + 41.0) * 0.55 + vnoise(p * 0.21 + 5.0) * 0.3 + vnoise(p * 0.7 + 9.0) * 0.15;
+		albedo *= 1.0 - (0.08 + 0.2 * wa) * smoothstep(0.36, 0.84, g1);
+		if (pave) {
+			albedo = mix(albedo, albedo * vec3(0.87, 0.83, 0.77), 0.25 + 0.3 * wa);
+		} else {
+			albedo = mix(albedo, albedo * vec3(1.05, 1.02, 0.96) + vec3(0.01), (0.1 + 0.15 * wa) * smoothstep(0.55, 0.9, vnoise(p * 0.12 + 61.0)));
+		}
 	}
 	// Photographic detail (2026-11-21): real asphalt / paving up close.
 	if (pbr_on && !shore && flat_top && (asphalt || pave)) {
