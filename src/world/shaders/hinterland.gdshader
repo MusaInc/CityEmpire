@@ -33,19 +33,19 @@ void fragment() {
 	float n = fbm(p * 0.006);
 	float n2 = fbm(p * 0.03);
 	vec3 sand = vec3(0.68, 0.61, 0.47);
-	vec3 meadow = mix(vec3(0.28, 0.36, 0.18), vec3(0.39, 0.41, 0.23), n2);
-	vec3 forest = mix(vec3(0.11, 0.17, 0.10), vec3(0.16, 0.22, 0.12), n2);
-	vec3 rock = mix(vec3(0.35, 0.34, 0.33), vec3(0.47, 0.44, 0.40), n2);
+	vec3 meadow = mix(vec3(0.24, 0.34, 0.14), vec3(0.36, 0.42, 0.19), n2);
+	vec3 forest = mix(vec3(0.08, 0.14, 0.08), vec3(0.14, 0.21, 0.11), n2);
+	vec3 rock = mix(vec3(0.29, 0.28, 0.27), vec3(0.45, 0.41, 0.36), n2 * 0.7 + vnoise(p * 0.0025) * 0.3);
 	vec3 snow = vec3(0.90, 0.92, 0.96);
 	// Forest on the middle slopes, patchy; meadow lower and on flats.
-	float forest_k = smoothstep(0.35, 0.6, n + 0.25 * smoothstep(20.0, 200.0, y)) * (1.0 - smoothstep(380.0, 560.0, y + n * 120.0));
+	float forest_k = smoothstep(0.28, 0.52, n + 0.3 * smoothstep(20.0, 200.0, y)) * (1.0 - smoothstep(380.0, 560.0, y + n * 120.0));
 	vec3 c = mix(meadow, forest, forest_k);
 	c = mix(sand, c, smoothstep(1.5, 9.0, y + n2 * 4.0));
 	// Treeline ~520 m (ragged), then scree and bare rock in strata; steep
 	// faces are rock at any height.
 	float rocky = smoothstep(0.42, 0.62, slope + n * 0.15) + smoothstep(500.0, 760.0, y + n * 180.0 - slope * 120.0);
-	vec3 scree = mix(vec3(0.46, 0.44, 0.41), vec3(0.36, 0.34, 0.33), vnoise(p * 0.012));
-	rock = mix(rock, scree, (1.0 - smoothstep(0.15, 0.35, slope)) * 0.6);
+	vec3 scree = mix(vec3(0.42, 0.40, 0.37), vec3(0.31, 0.30, 0.29), vnoise(p * 0.012));
+	rock = mix(rock, scree, (1.0 - smoothstep(0.15, 0.35, slope)) * 0.45);
 	c = mix(c, rock, clamp(rocky, 0.0, 1.0));
 	// Snow only on the high massifs: lower on shaded (north-facing) slopes,
 	// lying in gullies and on gentle ledges, never on the steep faces – so
@@ -73,7 +73,7 @@ void fragment() {
 	NORMAL = normalize((VIEW_MATRIX * vec4(wn, 0.0)).xyz);
 	// Aerial perspective on top of the scene fog: distant ranges lose
 	// contrast and go blue-grey toward the horizon colour.
-	float haze = (1.0 - exp(-dist / 9000.0)) * 0.4 * (1.0 - night);
+	float haze = (1.0 - exp(-dist / 11000.0)) * 0.32 * (1.0 - night);
 	vec3 emit = sky_horizon * haze * 0.55;
 	// Subtle distant foothill town & coastal settlement light clusters at night
 	// along low gentle slopes so the bay horseshoe feels alive after dark.

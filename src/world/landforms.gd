@@ -533,24 +533,193 @@ func _row(f: Dictionary, o: PackedVector2Array, i: int, k: int) -> PackedVector3
 func _trees(f: Dictionary) -> void:
 	if f.get("paved", false):
 		return
+	# (2026-11-25) A designed park instead of a tree every 2,700 m² at random
+	# (the headlands read as bare golf greens): a gravel loop path inset from
+	# the shore, copses and lone specimen trees in the lawns either side of
+	# it, shrub and flower beds where the path bends, benches and lamps along
+	# it, tufts of long grass towards the shore.
 	var o: PackedVector2Array = f["poly"]
 	var bb: Rect2 = f["bbox"]
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(String(f["name"]))
 	var by_sp := {}
-	var n := int(bb.get_area() / 2700.0)
-	for i in n:
-		var q := Vector2(rng.randf_range(bb.position.x, bb.end.x), rng.randf_range(bb.position.y, bb.end.y))
-		if not Geometry2D.is_point_in_polygon(q, o) or _edge_dist(f, q) < 14.0 or _beach_dist(f, q) < 16.0 \
-				or absf(_edge_dist(f, q) - 16.0) < 4.0:
-			continue
+	var plant := {}   # FoliageKit name -> [Transform3D]
+	var add_tree := func(q: Vector2, s: float) -> void:
 		var p := Vector3(q.x, _height(f, q.x, q.y), q.y)
 		var sp := TreeKit.pick(p, true)
 		if not by_sp.has(sp):
 			by_sp[sp] = []
-		by_sp[sp].append(Transform3D(TreeKit.shape(p, rng.randf_range(0.8, 1.15)), p))
+		by_sp[sp].append(Transform3D(TreeKit.shape(p, s), p))
+	var add_plant := func(nm: String, q: Vector2, s: float) -> void:
+		if not plant.has(nm):
+			plant[nm] = []
+		var p := Vector3(q.x, _height(f, q.x, q.y) - 0.04, q.y)
+		(plant[nm] as Array).append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * s), p))
+	var land := func(q: Vector2, edge_min: float) -> bool:
+		return Geometry2D.is_point_in_polygon(q, o) and _edge_dist(f, q) > edge_min and _beach_dist(f, q) > edge_min + 2.0
+	# The path: the outline inset 18 m (smoothed), only on the landform.
+	var path: PackedVector2Array = PackedVector2Array()
+	var ins := Geometry2D.offset_polygon(o, -18.0)
+	if not ins.is_empty():
+		var ring: PackedVector2Array = ins[0]
+		var L := 0.0
+		for i in ring.size():
+			L += ring[i].distance_to(ring[(i + 1) % ring.size()])
+		var n := maxi(12, int(L / 4.0))
+		var acc := 0.0
+		var i := 0
+		for k in n:
+			var target := L * k / n
+			while i < ring.size() - 1 and acc + ring[i].distance_to(ring[i + 1]) < target:
+				acc += ring[i].distance_to(ring[i + 1])
+				i += 1
+			var a := ring[i]
+			var b := ring[(i + 1) % ring.size()]
+			var seg := maxf(a.distance_to(b), 0.01)
+			path.append(a.lerp(b, clampf((target - acc) / seg, 0.0, 1.0)))
+	if path.size() > 8:
+		_path_mesh(f, path)
+		var benches: Array = []
+		var lamps: Array = []
+		for k in range(0, path.size(), 7):
+			var a := path[k]
+			var b := path[(k + 1) % path.size()]
+			var d := (b - a).normalized()
+			var nrm := Vector2(-d.y, d.x)
+			if not Geometry2D.is_point_in_polygon(a + nrm * 3.0, o):
+				nrm = -nrm
+			# Alternate: a bench facing the path (its back to the lawn), a
+			# lamp, or a shrub bed.
+			var kind := k / 7 % 3
+			var q := a + nrm * 2.6
+			if kind == 0 and land.call(q, 4.0):
+				var p := Vector3(q.x, _height(f, q.x, q.y), q.y)
+				benches.append(Transform3D(Basis(Vector3.UP, atan2(-nrm.x, -nrm.y) + PI), p))
+				add_plant.call("bush_low", q + nrm * 1.8, rng.randf_range(0.8, 1.1))
+			elif kind == 1:
+				var lq := a - nrm * 2.2
+				if land.call(lq, 3.0):
+					lamps.append(Transform3D(Basis(Vector3.UP, atan2(nrm.x, nrm.y)), Vector3(lq.x, _height(f, lq.x, lq.y), lq.y)))
+			else:
+				for j in 3:
+					var bq := q + nrm * (1.0 + j * 0.9) + d * rng.randf_range(-1.6, 1.6)
+					if land.call(bq, 3.0):
+						add_plant.call(["flower_bed", "bush_round", "box_ball"][j], bq, rng.randf_range(0.8, 1.15))
+		_furniture(benches, lamps)
+	# Copses (a group of 4–8 trees, shrubs round their feet) and lone trees.
+	var copses := maxi(2, int(bb.get_area() / 9000.0))
+	for c in copses * 3:
+		if copses <= 0:
+			break
+		var cq := Vector2(rng.randf_range(bb.position.x, bb.end.x), rng.randf_range(bb.position.y, bb.end.y))
+		if not land.call(cq, 12.0) or _near_path(path, cq, 7.0):
+			continue
+		copses -= 1
+		for t in rng.randi_range(4, 8):
+			var a := rng.randf() * TAU
+			var r := sqrt(rng.randf()) * 9.0
+			var q := cq + Vector2(cos(a), sin(a)) * r
+			if land.call(q, 10.0) and not _near_path(path, q, 4.0):
+				add_tree.call(q, rng.randf_range(0.85, 1.25))
+		for t in 6:
+			var a := rng.randf() * TAU
+			var q := cq + Vector2(cos(a), sin(a)) * rng.randf_range(8.0, 12.0)
+			if land.call(q, 6.0) and not _near_path(path, q, 2.5):
+				add_plant.call(["bush_round", "shrub_tall", "bush_low"][t % 3], q, rng.randf_range(0.8, 1.2))
+	var singles := int(bb.get_area() / 3000.0)
+	for i in singles * 3:
+		if singles <= 0:
+			break
+		var q := Vector2(rng.randf_range(bb.position.x, bb.end.x), rng.randf_range(bb.position.y, bb.end.y))
+		if land.call(q, 14.0) and not _near_path(path, q, 5.0):
+			add_tree.call(q, rng.randf_range(0.9, 1.3))
+			singles -= 1
+	# Long grass towards the shore (between the lawn and the beach / rocks).
+	for i in int(bb.get_area() / 90.0):
+		var q := Vector2(rng.randf_range(bb.position.x, bb.end.x), rng.randf_range(bb.position.y, bb.end.y))
+		if Geometry2D.is_point_in_polygon(q, o):
+			var e: float = _edge_dist(f, q)
+			if e > 5.0 and e < 14.0 and _beach_dist(f, q) > 6.0:
+				add_plant.call("grass_tuft", q, rng.randf_range(0.9, 1.5))
 	for sp: String in by_sp:
 		TreeKit.instance_batch(self, sp, by_sp[sp], 900.0, true, 46.0)
+		if TreeImpostors.ready():
+			TreeImpostors.place(self, {sp: by_sp[sp]}, 880.0, 2600.0)
+	FoliageKit.place(self, plant, 240.0)
+
+
+static func _near_path(path: PackedVector2Array, q: Vector2, r: float) -> bool:
+	for i in path.size():
+		if Geometry2D.get_closest_point_to_segment(q, path[i], path[(i + 1) % path.size()]).distance_to(q) < r:
+			return true
+	return false
+
+
+## The gravel loop: a 2.6 m strip draped on the ground, edged with timber.
+func _path_mesh(f: Dictionary, path: PackedVector2Array) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := path.size()
+	var hw := 1.3
+	for i in n:
+		var a := path[i]
+		var b := path[(i + 1) % n]
+		var d := (b - a).normalized()
+		var nr := Vector2(-d.y, d.x) * hw
+		var pa := path[(i - 1 + n) % n]
+		var da := (a - pa).normalized()
+		var na := Vector2(-da.y, da.x) * hw
+		var nm := ((na + nr) * 0.5).normalized() * hw
+		var nb := ((nr + Vector2(-((path[(i + 2) % n] - b).normalized()).y, ((path[(i + 2) % n] - b).normalized()).x) * hw) * 0.5).normalized() * hw
+		var A0 := a + nm
+		var A1 := a - nm
+		var B0 := b + nb
+		var B1 := b - nb
+		var y := func(q: Vector2) -> float: return _height(f, q.x, q.y) + 0.035
+		var v := [Vector3(A0.x, y.call(A0), A0.y), Vector3(B0.x, y.call(B0), B0.y), Vector3(B1.x, y.call(B1), B1.y),
+			Vector3(A1.x, y.call(A1), A1.y)]
+		for idx in [0, 2, 1, 0, 3, 2]:
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(v[idx].x, v[idx].z) * 0.5)
+			st.add_vertex(v[idx])
+	var mi := MeshInstance3D.new()
+	mi.name = "ParkPath"
+	mi.mesh = st.commit()
+	var gm := StandardMaterial3D.new()
+	gm.albedo_color = Color(0.74, 0.69, 0.6)
+	gm.roughness = 0.95
+	gm.albedo_texture = load("res://assets/textures/pbr/worldstate_pavement_concrete.png")
+	gm.uv1_scale = Vector3(0.25, 0.25, 1.0)
+	mi.material_override = gm
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.visibility_range_end = 900.0
+	add_child(mi)
+
+
+## Benches and lamp posts (the city's own models) as MultiMeshes.
+func _furniture(benches: Array, lamps: Array) -> void:
+	for pair: Array in [["bench", benches], ["streetlight", lamps]]:
+		var xfs: Array = pair[1]
+		var path := "res://assets/models/%s.glb" % pair[0]
+		if xfs.is_empty() or not ResourceLoader.exists(path):
+			continue
+		var inst := (load(path) as PackedScene).instantiate()
+		var mis := inst.find_children("*", "MeshInstance3D", true, false)
+		var m: Mesh = (mis[0] as MeshInstance3D).mesh if not mis.is_empty() else null
+		inst.free()
+		if m == null:
+			continue
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = m
+		mm.instance_count = xfs.size()
+		for i in xfs.size():
+			mm.set_instance_transform(i, xfs[i])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "Park_" + String(pair[0])
+		mmi.multimesh = mm
+		mmi.visibility_range_end = 400.0
+		add_child(mmi)
 
 
 func _foam(f: Dictionary) -> void:

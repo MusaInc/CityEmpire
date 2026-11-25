@@ -19,7 +19,7 @@ extends Node3D
 const NEAR := 92.0           # (was 62: the hand-over to the GPU walkers happened in plain view)
 const KEEP := 104.0
 const DROP := 150.0           # past this anyone goes, seen or not (a few pixels tall)
-const SPACING := 28.0         # one person per this many metres of pavement (active streets, mobile-safe)
+const SPACING := 22.0         # one person per this many metres of pavement (was 28: streets read empty; still only the near band is CPU-driven)
 const LANES := [1.7, 3.0]     # m in from the block edge (as CityWorld)
 const MODEL := "res://assets/models/crowd.glb"
 const TOPS := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.12, 0.12), Color(0.16, 0.28, 0.5),
@@ -72,6 +72,13 @@ func setup(p_game: EmpireGame) -> void:
 				if ring.is_empty() or (ring[0] as PackedVector2Array).size() < 3:
 					continue
 				_add_loop(ring[0], 1 if li == 0 else -1, [], {}, bkind)
+			# Plazas and parks are walked across, not only round: two inner
+			# promenades (the middles of the big squares were empty).
+			if bkind in ["plaza", "park"]:
+				for inset: float in [9.0, 18.0]:
+					var inner := Geometry2D.offset_polygon(blk["poly"], -inset)
+					if not inner.is_empty() and (inner[0] as PackedVector2Array).size() >= 3:
+						_add_loop(inner[0], 1 if inset < 10.0 else -1, [], {}, bkind)
 	for city: CityWorld in [game.world, game.world.mainland]:
 		if city != null and city.traffic != null:
 			_add_city_crossings(city.traffic)

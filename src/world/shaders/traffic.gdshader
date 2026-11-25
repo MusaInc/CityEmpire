@@ -35,10 +35,19 @@ void vertex() {
 	VERTEX *= s;
 	VERTEX.z -= d;
 	if (spd > 0.0) {  // parked cars are placed on the ground by the CPU
-		vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-		vec2 hh = texture(ground_height, (w.xz - ground_rect.xy) / ground_rect.zw).rg;
-		// North-south traffic rides road decks (R); east-west passes under (G).
-		VERTEX.y += abs(MODEL_MATRIX[2].z) > 0.7 ? hh.r : hh.g;
+		// Rigid on the road: height from under the front and rear axles
+		// (half a wheelbase either side of the car's centre), pitch from
+		// their difference – the body no longer bends to every vertex's
+		// own ground height over crests and dips.
+		vec3 c = (MODEL_MATRIX * vec4(0.0, 0.0, -d, 1.0)).xyz;
+		vec3 fz = normalize(MODEL_MATRIX[2].xyz);
+		bool ns = abs(MODEL_MATRIX[2].z) > 0.7;   // (north-south traffic rides road decks: R; east-west passes under: G)
+		vec2 hf2 = texture(ground_height, ((c - fz * 1.35).xz - ground_rect.xy) / ground_rect.zw).rg;
+		vec2 hr2 = texture(ground_height, ((c + fz * 1.35).xz - ground_rect.xy) / ground_rect.zw).rg;
+		float hf = ns ? hf2.r : hf2.g;
+		float hr = ns ? hr2.r : hr2.g;
+		float grade = clamp((hf - hr) / 2.7, -0.6, 0.6);
+		VERTEX.y += 0.5 * (hf + hr) - (VERTEX.z + d) * grade;
 	}
 }
 
