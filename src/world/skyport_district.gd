@@ -51,7 +51,7 @@ static func terminal_glass() -> StandardMaterial3D:
 	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	gm.metallic = 0.25
 	gm.roughness = 0.06
-	gm.specular = 0.7
+	gm.metallic_specular = 0.7
 	gm.cull_mode = BaseMaterial3D.CULL_BACK
 	return gm
 
