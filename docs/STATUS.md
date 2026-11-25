@@ -1,5 +1,19 @@
 # Status (2026-11-19, WORLDSTATE final overhaul; branch final-overhaul → 0.8.0)
 
+## World overhaul pass (2026-11-25, branch world-overhaul from 0.13.1; local, not pushed)
+
+Done and checked in the running game (scenarios under xvfb, film frames reviewed):
+- **Vehicle spawn reliability** – SafeGround.road_spot (+ RoadNet.nearest_level): purchases, deliveries, unstick, water recovery and showroom/test cars land on the road at the player's own level (deck vs street below), kerb side first, four-corner surface check, tilted to the road. `--scenarios=RS` 29/29 (9 stacked road sites, both levels).
+- **Elevated infrastructure** – CityLayout.support_clear; City Loop piers slide clear or become portal frames (InfraKit.portal); bridge-approach bents placed after Westbank's streets; airport-line piers skip city streets; crane bases out of lanes. tools/infra_clearance.gd: 30 → 0 obstructions. `--scenarios=IC` physics sweep of every lane: 2 left (a SetPieceCol beam in a junction at (282, 5, −50); a solid prop at (169, 0.6, 613)) – not yet fixed.
+- **Vehicle damage** – Car: per-wheel tyres/suspension, engine/coolant/overheat (limp), progressive glass, per-lamp breakage, scuffs + paint transfer, rollover roof crush, impact kinds, repeat escalation, external_impact. CarVisual auto dents (all cars incl. wrecked traffic), lamp_lens / car_glass_damage / scratch shaders, dents replayed on spawn. Damage saved per owned car (v.damage, v.dent_state). Garage: repair_quote / repair_vehicle (mechanical vs full restoration + tow), phone Garage damage card, Motor Works desk. `--scenarios=VD` 10/10.
+- **Destruction** – breakable storefront spans (ShopInterior) + StorefrontSmash (speed/momentum, shards, broken → boarded → mended, stock spills off fixtures), Destructibles: bus shelters/planters by momentum, car damage per item, restoration out of sight; DamageDesk: property charges, a patrol car drives to the scene, fines (left-the-scene surcharge). `--scenarios=SM` 8/8.
+- **Vehicle access** – one 0.6–0.7 s transition for cars/boats/aircraft (door + sound + glide + camera blend), no full-body boarding animation. `--scenarios=VE` 6/6 (0.72 s in, 0.59 s out).
+- **Airport GSE** – bus, stairs, tug, cart, pushback rebuilt; detailed wheels and weathering on all GSE; C() rotated-cylinder bug fixed (every GSE wheel floated, the fuel bowser's tank was 3 m up). skyport_kit.glb 0.93 → 1.85 MB.
+- **Homes** – front opening glazed with collision (gap only at the lift door); side/back windows solid.
+- **Wear** – older baseline ages, stronger facade weathering, low-frequency grime on streets and kit plazas. Modest: the far sunlit plazas still read pale.
+
+Not done (next): moving the lifts and lobbies inside the buildings (needs BuildingMesher cut support for a lobby opening + shaft volume), enclosed hallways/front doors, per-tier apartment rework (curtains, switches, kitchens/bathrooms everywhere), balconies; a dedicated night/interior lighting review (0.13.1 decoupled interiors via InteriorKit lighting zones – not re-inspected here); walking/swimming/climbing refinement; fences (none exist in the street furniture set). Device performance not measured.
+
 
 ## Master plan implementation status (2026-11-22)
 
