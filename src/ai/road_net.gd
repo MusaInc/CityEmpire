@@ -311,6 +311,39 @@ func nearest(p: Vector3, heading := Vector3.ZERO, max_d := 40.0, exclude := -1, 
 	Prof.end("nearest")
 
 
+## Lane points near p on its own level: every lane within `max_d` (x/z)
+## whose point lies within `max_dy` of p.y, nearest first, one per lane:
+## [{lane, s, dist, dy, pos}, ...]. A bridge deck above or a street below
+## the player never wins over the road they are standing beside.
+func nearest_level(p: Vector3, max_d := 60.0, max_dy := 3.5, limit := 6) -> Array:
+	var best := {}   # lane -> entry
+	var r := int(ceil(max_d / CELL))
+	var k0 := Vector2i(floori(p.x / CELL), floori(p.z / CELL))
+	for dx in range(-r, r + 1):
+		for dz in range(-r, r + 1):
+			var key := k0 + Vector2i(dx, dz)
+			if not _grid.has(key):
+				continue
+			for code: int in (_grid[key] as PackedInt32Array):
+				var li: int = code >> 12
+				if lane_conn[li] == 1:
+					continue
+				var i: int = code & 4095
+				var q: Vector3 = (lanes[li] as PackedVector3Array)[i]
+				var dy := absf(q.y - p.y)
+				if dy > max_dy:
+					continue
+				var d := Vector2(q.x - p.x, q.z - p.z).length()
+				if d > max_d:
+					continue
+				var score := d + dy * 1.5
+				if not best.has(li) or score < float(best[li]["score"]):
+					best[li] = {"lane": li, "s": i * STEP, "dist": d, "dy": dy, "pos": q, "score": score}
+	var out: Array = best.values()
+	out.sort_custom(func(a, b): return float(a["score"]) < float(b["score"]))
+	return out.slice(0, limit)
+
+
 ## Next graph node at or after s on a lane.
 func node_after(lane: int, s: float) -> int:
 	var ids: PackedInt32Array = lane_nodes[lane]

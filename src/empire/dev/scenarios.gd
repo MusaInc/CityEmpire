@@ -115,6 +115,82 @@ func scenario_b() -> void:
 	game.drive_input.enabled = true
 
 
+## RS: road-vehicle spawn reliability. Finds places where one road runs over
+## another (bridge approaches, flyovers, viaducts), stands the hero on each
+## level and asks SafeGround.road_spot where a delivered / bought car goes:
+## it must land on the hero's own level, on solid dry ground, upright, with
+## all four wheels down after settling. Also the middle of each bridge deck
+## (over open water: never the sea). Then one real purchase through the game.
+func scenario_rs() -> void:
+	print("--- RS: vehicle spawn on the right level")
+	var net: RoadNet = game.gps.net
+	var buckets := {}
+	var stacked: Array = []   # [upper Vector3, lower Vector3]
+	for li in net.lanes.size():
+		if net.lane_conn[li] == 1:
+			continue
+		var lp: PackedVector3Array = net.lanes[li]
+		for i in range(0, lp.size(), 3):
+			var q := lp[i]
+			var k := Vector2i(floori(q.x / 6.0), floori(q.z / 6.0))
+			if buckets.has(k):
+				var o: Vector3 = buckets[k]
+				if absf(o.y - q.y) > 5.5:
+					stacked.append([q if q.y > o.y else o, o if q.y > o.y else q])
+					buckets.erase(k)
+					continue
+			buckets[k] = q
+	stacked.shuffle()
+	print("    stacked road sites: %d" % stacked.size())
+	var size: Vector3 = game._car_spec("hatch")["size"]
+	var tried := 0
+	for pair: Array in stacked:
+		if tried >= 6:
+			break
+		tried += 1
+		for lvl in 2:
+			var at: Vector3 = pair[lvl]
+			await stand(at)
+			await frames(4)
+			var r := game.safe.road_spot(at, size, {"exclude": [game.player.get_rid()], "min_d": 3.5})
+			var ok: bool = r["ok"]
+			var y := (r["xf"] as Transform3D).origin.y if ok else NAN
+			check(ok and absf(y - at.y) < 2.0, "%s level at (%.0f, %.1f, %.0f): car put at y %.1f (%s)" % [
+				"upper" if lvl == 0 else "lower", at.x, at.y, at.z, y, r.get("how", "")])
+	# Bridge decks over open water: never the sea.
+	var mids: Array = []
+	for li in range(0, net.lanes.size(), 7):
+		var lp2: PackedVector3Array = net.lanes[li]
+		if lp2.size() < 20 or net.lane_conn[li] == 1:
+			continue
+		var q2 := lp2[lp2.size() / 2]
+		if game.layout.is_water(q2) and q2.y > 3.0:
+			mids.append(q2)
+		if mids.size() >= 4:
+			break
+	for m: Vector3 in mids:
+		await stand(m)
+		await frames(4)
+		var r2 := game.safe.road_spot(m, size, {"exclude": [game.player.get_rid()], "min_d": 3.5})
+		var o2 := (r2["xf"] as Transform3D).origin
+		check(r2["ok"] and not game.layout.is_water(o2) or (r2["ok"] and o2.y > m.y - 2.0), "bridge deck at (%.0f, %.1f, %.0f): car on the deck (y %.1f, %s)" % [m.x, m.y, m.z, o2.y, r2.get("how", "")])
+	# A real purchase on the last stacked site's upper level, settled.
+	if not stacked.is_empty():
+		var top: Vector3 = stacked[0][0]
+		await stand(top)
+		await frames(4)
+		game.empire.personal_cash += 100000.0
+		var n0 := game.cars.size()
+		check(game.buy_vehicle("hatch") == "", "bought a car on the upper level")
+		var c: Car = game.cars.values()[game.cars.size() - 1] if game.cars.size() > n0 else null
+		if c:
+			await wait(2.5)
+			var cp := c.global_position
+			var under := _surface(cp.x, cp.z, cp.y + 0.5)
+			check(absf(cp.y - top.y) < 2.5 and absf(under - top.y) < 1.0 and c.global_basis.y.y > 0.9,
+				"it stands on that level (y %.1f vs %.1f, surface under it %.1f)" % [cp.y, top.y, under])
+
+
 # ------------------------------------------------- Skyport expansion
 ## Ground height of the driving surface under (x, z), cast from `from_y`
 ## down (roads, decks, land; not props). NAN = nothing.
@@ -1262,6 +1338,8 @@ func _run() -> void:
 		await scenario_p()
 	if _which.split(",").has("B"):
 		await scenario_b()
+	if _which.split(",").has("RS"):
+		await scenario_rs()
 	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XF", "XG", "XH", "XI", "XS", "XW"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())

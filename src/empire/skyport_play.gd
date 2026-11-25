@@ -147,7 +147,7 @@ func buy_car(model: String, at_site := "") -> String:
 	var v := game.empire.buy_vehicle(model, p + Vector3.UP * 0.3, 0.0)
 	if v.is_empty():
 		return "Not enough money"
-	game._spawn_car(v)
+	game._spawn_car(v, p)
 	return ""
 
 
@@ -379,7 +379,7 @@ func start_test(model: String, at_site: String) -> void:
 	var v := game.empire.add_vehicle(model, pos, yaw)
 	v["test"] = true
 	if kind == "car":
-		game._spawn_car(v)
+		game._spawn_car(v, pos)
 		game.ui.close_panel(true)
 		game.enter_vehicle(String(v["id"]))
 	else:

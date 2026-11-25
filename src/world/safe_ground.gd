@@ -172,6 +172,125 @@ func find(from: Vector3, size: Vector3, opts := {}) -> Dictionary:
 	return res
 
 
+# ------------------------------------------------------- road vehicles
+## Where to put a road vehicle down for someone standing at `from` – every
+## purchase, delivery, respawn and recovery of a car goes through here.
+## {ok, xf (Transform3D: underside on the surface, nose along the lane,
+## tilted to the road), how}.
+##  1. Lanes on the caller's own level (|dy| <= 3.5 m; a deck overhead or a
+##     street underneath never wins), within 60 m, then 160 m: the kerb-side
+##     parking strip first, then the lane itself, stepping along it.
+##  2. Solid dry ground at that level round the caller (verge, car park).
+##  3. Anything find() can offer (nearest lane on any level, last safe spot).
+## Each candidate is probed from just above its own level, must be dry,
+## solid and not steep, with clearance for the body and all four corners
+## on the same surface (no kerb edge, drop, ramp lip or wall).
+## opts: exclude (Array[RID]), min_d (keep this far from `from`), key, fallbacks.
+func road_spot(from: Vector3, size: Vector3, opts := {}) -> Dictionary:
+	var ex: Array[RID] = []
+	for r in opts.get("exclude", []):
+		ex.append(r)
+	var min_d := float(opts.get("min_d", 3.0))
+	var net = net_fn.call() if net_fn.is_valid() else null
+	if net != null and net.has_method("nearest_level"):
+		for reach: float in [60.0, 160.0]:
+			for near: Dictionary in net.nearest_level(from, reach, 3.5, 6):
+				var res := _lane_spot(net, near, from, size, ex, min_d)
+				if not res.is_empty():
+					_note(String(opts.get("key", "")), (res["xf"] as Transform3D).origin)
+					res["ok"] = true
+					return res
+	# 2. Ground at this level (a ring, closest in height first).
+	var ring := _ring(from, size, ex, 40.0)
+	if not ring.is_empty() and absf(float((ring["pos"] as Vector3).y) - from.y) < 3.5:
+		var at: Vector3 = ring["pos"]
+		var yaw := atan2(-(from - at).x, -(from - at).z) + PI * 0.5
+		var xf := _settle(at, size, yaw, ex)
+		if xf != Transform3D():
+			return {"ok": true, "xf": xf, "how": "roadside"}
+	# 3. Whatever is safe.
+	var f := find(from, size, {"kind": "car", "exclude": ex, "key": opts.get("key", ""), "fallbacks": opts.get("fallbacks", [])})
+	if not f["ok"]:
+		return {"ok": false, "xf": Transform3D(), "how": "none"}
+	var y0: float = f["yaw"] if not is_nan(float(f["yaw"])) else 0.0
+	var xf2 := _settle(f["pos"], size, y0, ex)
+	if xf2 == Transform3D():
+		xf2 = Transform3D(Basis(Vector3.UP, y0), f["pos"])
+	return {"ok": true, "xf": xf2, "how": String(f["how"])}
+
+
+func _lane_spot(net, near: Dictionary, from: Vector3, size: Vector3, ex: Array[RID], min_d: float) -> Dictionary:
+	var lane: int = near["lane"]
+	var s0: float = near["s"]
+	for ds: float in [0.0, 7.0, -7.0, 14.0, -14.0, 24.0, -24.0, 36.0, -36.0]:
+		var p: Vector3 = net.lane_point(lane, s0 + ds)
+		if p.y < WATER_Y + DRY_MARGIN + 0.2 or _is_bad(p):
+			continue
+		var dir: Vector3 = net.lane_dir(lane, s0 + ds)
+		var yaw := atan2(-dir.x, -dir.z)
+		var side := Vector3(-dir.z, 0.0, dir.x)
+		if side.dot(from - p) < 0.0:
+			side = -side
+		# Kerb side (parking strip) first, then the lane itself.
+		for off: float in [1.9, 1.1, 0.0]:
+			var q := p + side * off
+			if Vector2(q.x - from.x, q.z - from.z).length() < min_d:
+				continue
+			var pr := probe(Vector3(q.x, p.y + 2.2, q.z), 5.0, ex)
+			if not pr["hit"] or pr["wet"] or pr["steep"]:
+				continue
+			if absf(float(pr["y"]) - p.y) > 1.2:
+				continue   # (a kerb island, a drop beside the deck, a wall top)
+			var xf := _settle(Vector3(q.x, float(pr["y"]), q.z), size, yaw, ex)
+			if xf != Transform3D():
+				return {"xf": xf, "how": "kerb" if off > 0.0 else "road"}
+	return {}
+
+
+## The body standing at `at` facing `yaw`: all four corners on one surface
+## (each within 0.35 m of the plane through the centre) and room round the
+## body. The basis follows the surface (a car put down on a 12% street
+## sits on it instead of dropping onto its nose). Transform3D() = no.
+func _settle(at: Vector3, size: Vector3, yaw: float, ex: Array[RID]) -> Transform3D:
+	var b := Basis(Vector3.UP, yaw)
+	var hx := size.x * 0.42
+	var hz := size.z * 0.42
+	var ys: Array[float] = []
+	var pts: Array[Vector3] = []
+	for c: Vector2 in [Vector2(-hx, -hz), Vector2(hx, -hz), Vector2(-hx, hz), Vector2(hx, hz)]:
+		var w := at + b * Vector3(c.x, 0.0, c.y)
+		var pr := probe(Vector3(w.x, at.y + 1.6, w.z), 3.4, ex)
+		if not pr["hit"] or pr["wet"]:
+			return Transform3D()
+		ys.append(float(pr["y"]))
+		pts.append(Vector3(w.x, float(pr["y"]), w.z))
+	# Plane from the corners (front/rear and left/right averages).
+	var fwd_rise := ((ys[0] + ys[1]) - (ys[2] + ys[3])) * 0.5   # front minus rear
+	var side_rise := ((ys[1] + ys[3]) - (ys[0] + ys[2])) * 0.5
+	var mid := (ys[0] + ys[1] + ys[2] + ys[3]) * 0.25
+	if absf(mid - at.y) > 0.45:
+		return Transform3D()
+	for i in 4:
+		var c2 := Vector2(-1.0 if i % 2 == 0 else 1.0, -1.0 if i < 2 else 1.0)
+		var plane_y := mid + side_rise * 0.5 * c2.x - fwd_rise * 0.5 * c2.y
+		if absf(ys[i] - plane_y) > 0.35:
+			return Transform3D()
+	if absf(fwd_rise) / (2.0 * hz) > 0.2 or absf(side_rise) / (2.0 * hx) > 0.14:
+		return Transform3D()
+	var fwd := (b * Vector3.FORWARD) * (2.0 * hz) + Vector3.UP * fwd_rise
+	var right := (b * Vector3.RIGHT) * (2.0 * hx) + Vector3.UP * side_rise
+	var up := right.cross(fwd).normalized()
+	if up.y < 0.0:
+		up = -up
+	var z := -fwd.normalized()
+	var x := up.cross(z).normalized()
+	var basis := Basis(x, up, x.cross(up)).orthonormalized()
+	var centre := Vector3(at.x, mid, at.z)
+	if not clear_at(centre, size, yaw, ex):
+		return Transform3D()
+	return Transform3D(basis, centre)
+
+
 ## True when this key was recovered near here a moment ago (the last place
 ## didn't hold): that place is blacklisted and the search skips nearby land.
 func _looping(key: String, from: Vector3) -> bool:

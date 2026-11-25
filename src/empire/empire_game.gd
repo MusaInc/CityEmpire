@@ -455,7 +455,7 @@ func _after_start() -> void:
 		for om in String(args["own"]).split(","):
 			if SkyportPlay.vclass(om) == "car":
 				var ov := empire.add_vehicle(om, player.global_position + Vector3(8, 0, 8), 0.0)
-				_spawn_car(ov)
+				_spawn_car(ov, player.global_position + Vector3.DOWN * 0.9)
 			else:
 				var os := skyport_play.free_slot(SkyportPlay.vclass(om))
 				skyport_play._spawn(empire.add_vehicle(om, os[0], os[1]))
@@ -2334,7 +2334,10 @@ func view_yaw() -> float:
 	return camera.view_yaw()
 
 
-func _spawn_car(v: Dictionary) -> Car:
+## `settle_from`: a new car (bought, test drive, gift) is put down on the
+## nearest clear road at that point's level via SafeGround.road_spot, and
+## the record takes the settled spot.
+func _spawn_car(v: Dictionary, settle_from := Vector3.INF) -> Car:
 	if SkyportPlay.vclass(String(v["model"])) != "car":
 		return null   # (aircraft and boats: SkyportPlay)
 	var c := Car.new()
@@ -2355,6 +2358,13 @@ func _spawn_car(v: Dictionary) -> Car:
 			p = f["pos"]
 			yaw = f["yaw"] if not is_nan(float(f["yaw"])) else yaw
 	c.place(Transform3D(Basis(Vector3.UP, yaw), p + Vector3.UP * 0.3))
+	if settle_from != Vector3.INF and safe:
+		var rs := safe.road_spot(settle_from, c.spec["size"], {"exclude": [c.get_rid(), player.get_rid()], "min_d": 3.0})
+		if rs["ok"]:
+			var rx: Transform3D = rs["xf"]
+			c.place(Transform3D(rx.basis, rx.origin + rx.basis.y * 0.35))
+			v["pos"] = [rx.origin.x, rx.origin.y, rx.origin.z]
+			v["yaw"] = rx.basis.get_euler().y
 	c.splashed.connect(func(at: Vector3, spd: float):
 		var sc := clampf(c.mass / 1400.0, 0.85, 1.65)
 		if vfx:
@@ -2661,11 +2671,14 @@ func _recover_car(c: Car) -> void:
 	var fb: Array = []
 	if _car_safe.has(vid):
 		fb.append((_car_safe[vid] as Transform3D).origin)
-	var f := safe.find(p, c.spec["size"], {"kind": "car", "key": vid, "exclude": [c.get_rid()], "fallbacks": fb})
+	# The water surface is the level to search from (a car that sank off a
+	# deck comes back to the shore road, not up onto the deck it fell from).
+	var from := Vector3(p.x, maxf(p.y, Car.WATER_Y + 0.5), p.z)
+	var f := safe.road_spot(from, c.spec["size"], {"key": vid, "exclude": [c.get_rid()], "fallbacks": fb, "min_d": 0.0})
 	var xf: Transform3D
 	if f["ok"]:
-		var yaw: float = f["yaw"] if not is_nan(float(f["yaw"])) else c.global_basis.get_euler().y
-		xf = Transform3D(Basis(Vector3.UP, yaw), (f["pos"] as Vector3) + Vector3.UP * 0.6)
+		xf = f["xf"]
+		xf.origin += xf.basis.y * 0.6
 	elif _car_safe.has(vid):
 		xf = _car_safe[vid]
 		xf.origin += Vector3.UP * 0.6
@@ -2703,20 +2716,14 @@ func delivery_quote(vid: String) -> Dictionary:
 	if not gps.ready_net():
 		out["why"] = "Finding the roads…"
 		return out
-	var near := gps.net.nearest(me, Vector3.ZERO, 40.0, -1, true)
-	if near.is_empty():
-		out["why"] = "No road within 40 m – walk to a street"
+	# A road on the level you're standing on (a bridge deck, a street under
+	# it, a ramp, a tunnel), kerb side first, checked for solid ground and
+	# room – never the street under the bridge you're on, never the sea.
+	var spot_r := safe.road_spot(me + Vector3.DOWN * 0.9, c.spec["size"], {"exclude": [c.get_rid(), player.get_rid()], "min_d": 3.5})
+	if not spot_r["ok"]:
+		out["why"] = "No clear road here – walk to a street"
 		return out
-	# The kerb side of the lane nearest you, facing along the lane.
-	var lane: int = near["lane"]
-	var s: float = near["s"]
-	var p: Vector3 = gps.net.lane_point(lane, s)
-	var dir := gps.net.lane_dir(lane, s)
-	var side := Vector3(-dir.z, 0.0, dir.x)
-	if side.dot(me - p) < 0.0:
-		side = -side
-	var at := _kerb_point(p + side * 1.6)
-	out["at"] = Transform3D(Basis.looking_at(dir, Vector3.UP), at)
+	out["at"] = spot_r["xf"]
 	out["fee"] = clampf(roundf(30.0 + d * 0.03), 30.0, 150.0)
 	if not empire.can_afford(float(out["fee"])):
 		out["why"] = "Costs %s – not enough money" % EmpireData.money(float(out["fee"]))
@@ -2760,7 +2767,12 @@ func unstick() -> String:
 		var c: Car = cars[driving]
 		c.linear_velocity = Vector3.ZERO
 		c.angular_velocity = Vector3.ZERO
-		c.place(Transform3D(Basis.looking_at(dir, Vector3.UP), Vector3(p.x, p.y, p.z) + Vector3.UP * 0.6))
+		var rs := safe.road_spot(here, c.spec["size"], {"exclude": [c.get_rid()], "min_d": 0.0, "key": driving})
+		if rs["ok"]:
+			var rx: Transform3D = rs["xf"]
+			c.place(Transform3D(rx.basis, rx.origin + rx.basis.y * 0.4))
+		else:
+			c.place(Transform3D(Basis.looking_at(dir, Vector3.UP), Vector3(p.x, p.y, p.z) + Vector3.UP * 0.6))
 		return ""
 	# On foot: on the pavement beside that lane (the kerb side), not in it.
 	var side := Vector3(-dir.z, 0.0, dir.x)
@@ -2793,7 +2805,7 @@ func deliver_vehicle(vid: String) -> String:
 			return
 		c.linear_velocity = Vector3.ZERO
 		c.angular_velocity = Vector3.ZERO
-		c.place(Transform3D(xf.basis, xf.origin + Vector3.UP * 0.3))
+		c.place(Transform3D(xf.basis, xf.origin + xf.basis.y * 0.35))
 		var v := empire.vehicle(vid)
 		v["pos"] = [xf.origin.x, xf.origin.y, xf.origin.z]
 		v["yaw"] = xf.basis.get_euler().y
@@ -2803,14 +2815,17 @@ func deliver_vehicle(vid: String) -> String:
 
 
 func buy_vehicle(model: String) -> String:
-	# Delivered to the kerb outside where you are.
-	var p := player.global_position
+	# Delivered to the kerb of the road beside you, on your level (spawn
+	# reliability pass 2026-11-25: it used to go 6 m ahead of the camera at
+	# the terrain height – under the bridge you stood on, inside a shop,
+	# in the dock).
+	var p := player.global_position + Vector3.DOWN * 0.9
 	var yaw := camera.view_yaw()
 	var spot_p := _kerb_point(p + Vector3(sin(yaw), 0, cos(yaw)) * 6.0)
 	var v := empire.buy_vehicle(model, spot_p, yaw + PI * 0.5)
 	if v.is_empty():
 		return "Not enough money"
-	_spawn_car(v)
+	_spawn_car(v, p)
 	Settings.haptic(28, 0.36)
 	return ""
 
