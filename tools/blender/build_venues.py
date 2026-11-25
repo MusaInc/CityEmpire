@@ -986,16 +986,19 @@ def v_hq(m):
 
 def v_craft_sales(m, aviation):
     W, D, H = (74.0, 42.0, 10.0) if aviation else (27.0, 46.0, 8.7)
-    dark = m["wall_dark"] if aviation else m["wall"]
-    floor = m["floor_stone"] if aviation else m["floor_oak"]
+    # (2026-11-25) The aviation hall was a near-black box: now a bright
+    # gallery – warm plaster, a walnut feature wall with the brass wordmark,
+    # polished marble, every aircraft on a lit plinth.
+    dark = m["wall"] if aviation else m["wall"]
+    floor = m["marble"] if aviation else m["floor_oak"]
     trim = m["brass"] if aviation else m["steel"]
-    ink = m["white"] if aviation else m["wall_dark"]
-    parts = shell(m, W, D, H, floor, dark)
+    ink = m["gold"] if aviation else m["wall_dark"]
+    parts = shell(m, W, D, H, floor, dark, back_mat=m["walnut"] if aviation else None)
     glass_height = H - 1.65
     parts += curtain_wall("front", -W/2, W/2, .10, glass_height, m, bay=3.2,
                           door=(0, 4.8, 3.4), transom=3.5, mull=.13)
     parts += [
-        B("fascia", (W+.55, .6, H-glass_height), (0, -.12, (H+glass_height)/2), dark),
+        B("fascia", (W+.55, .6, H-glass_height), (0, -.12, (H+glass_height)/2), m["black_steel"] if aviation else dark),
         B("entrance_canopy", (9, 3.1, .28), (0, -1.36, 3.85), m["black_steel"], .035),
         B("entrance_lighting", (6, .09, .025), (0, -1.8, 3.70), m["led"]),
         B("threshold", (4.8, .8, .035), (0, .14, .016), m["rubber"]),
@@ -1035,18 +1038,46 @@ def v_craft_sales(m, aviation):
             ("swift", -7.5, 30, 4.4, 10.0),
             ("majesty", 5.1, 25.4, 8.5, 30.6),
         ]
-    for model, x, y, width, length in exhibits:
+    if aviation:
+        # Feature-wall halo, vertical walnut slats, a client lounge with a
+        # coffee bar on the left, hanging model banners.
+        parts.append(B("wordmark_halo", (W * 0.55, .04, .05), (0, D - .2, H - 1.35), m["led_gold"]))
+        for k in range(-30, 31, 3):
+            parts.append(B(f"slat_{k}", (.12, .14, H - .6), (k, D - .08, (H - .6) / 2), m["walnut"]))
         parts += [
-            B(f"{model}_inset", (width, length, .025), (x, y, .012), m["floor_light" if aviation else "floor_dark"], .008),
-            B(f"{model}_edge", (width, .045, .022), (x, y-length/2+.07, .029), trim),
+            B("bar", (6.0, .9, 1.08), (-W/2 + 6, D - 4.5, .54), m["walnut"], .04),
+            B("bar_top", (6.2, 1.02, .06), (-W/2 + 6, D - 4.5, 1.1), m["marble"], .02),
+            B("bar_back", (6.0, .4, 2.4), (-W/2 + 6, D - 1.0, 1.2), m["black_steel"]),
+            B("bar_shelf_led", (5.8, .05, .03), (-W/2 + 6, D - 1.22, 2.0), m["led_gold"]),
+            B("rug", (8.0, 6.0, .02), (-W/2 + 6, 9.0, .01), m["carpet"]),
         ]
+        parts.append(sofa("lounge_b", (-W/2 + 3.4, 11.5, 0), 0, 2.9, m, m["leather"]))
+        parts.append(sofa("lounge_c", (-W/2 + 8.6, 11.5, 0), 0, 2.9, m, m["leather"]))
+        parts += plant("palm_lounge", (-W/2 + 11.5, 13.0, .05), 2.8, m)
+    for model, x, y, width, length in exhibits:
+        if aviation:
+            # A round glass plinth with an LED ring, the aircraft on it; a
+            # light line nose to tail overhead; the model on a banner.
+            r = max(width, length) * 0.5 + 0.8
+            parts += [
+                C(f"{model}_plinth", r, .22, (x, y, 0), m["floor_dark"], 48),
+                C(f"{model}_ring", r + .06, .04, (x, y, .03), m["led_cool"], 48),
+                C(f"{model}_cap", r - .3, .02, (x, y, .22), m["floor_light"], 48),
+                B(f"{model}_spot", (.12, length * .9, .05), (x, y, H - .55), m["led"]),
+                B(f"{model}_banner", (.05, 2.2, 3.6), (x + (r * .7 if x <= 0 else -r * .7), y + length * .35, H - 2.4), m["walnut"]),
+            ]
+        else:
+            parts += [
+                B(f"{model}_inset", (width, length, .025), (x, y, .012), m["floor_light" if aviation else "floor_dark"], .008),
+                B(f"{model}_edge", (width, .045, .022), (x, y-length/2+.07, .029), trim),
+            ]
         if not aviation:
             # Short padded supports leave the hull shape visible from the aisle.
             for side in (-1, 1):
                 parts.append(B(f"{model}_cradle_{side}", (width*.62, .38, .38),
                                (x, y+length*.20*side, .19), m["black_steel"], .04))
         marks += [
-            (f"craft_{model}", (x, y, .04 if aviation else .55), 0),
+            (f"craft_{model}", (x, y, .26 if aviation else .55), 0),
             (f"inspect_{model}", (x-width*.33, y-length/2-.75, 0), 0),
         ]
     return parts, nodes, marks, {"size": [W, D, H]}

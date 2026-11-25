@@ -346,6 +346,7 @@ static func build_link(P: Dictionary, target: Node3D, body: StaticBody3D, isl: S
 	# single central column where the path is off the road.
 	var total := 0.0
 	var seg_len: Array = []
+	var ik := {}
 	for i in path.size() - 1:
 		seg_len.append(path[i].distance_to(path[i + 1]))
 		total += float(seg_len[-1])
@@ -358,8 +359,12 @@ static func build_link(P: Dictionary, target: Node3D, body: StaticBody3D, isl: S
 		var c2 := Vector2(p.x, p.z)
 		var top := p + Vector3.DOWN * 1.8
 		if not _on_road(P, c2, 1.0):
-			m.beam(Vector3(p.x, Y, p.z), top, 1.6, 1.6, conc)
-			m.beam(top + side * 2.2, top - side * 2.2, 1.0, 1.4, conc)
+			if SkyportKit.ready():
+				# (InfraKit: a chamfered column and tapered hammerhead.)
+				InfraKit.pier(ik, Vector3(p.x, Y, p.z), top.y, d, 1.5, 5.0, 1.3, 1.4)
+			else:
+				m.beam(Vector3(p.x, Y, p.z), top, 1.6, 1.6, conc)
+				m.beam(top + side * 2.2, top - side * 2.2, 1.0, 1.4, conc)
 			_col(body, Vector3(p.x, Y, p.z), top, 1.6, 1.6)
 		else:
 			var l1 := c2 + Vector2(side.x, side.z) * 13.5
@@ -401,6 +406,7 @@ static func build_link(P: Dictionary, target: Node3D, body: StaticBody3D, isl: S
 		m.solid(core.x - 2.6, core.y - 2.6, core.x + 2.6, core.y + 2.6, Y, p0.y + 5.0, Color(0.32, 0.4, 0.46))
 		CityWorld._add_box(body, AABB(Vector3(core.x - 2.6, Y, core.y - 2.6), Vector3(5.2, p0.y + 5.0 - Y, 5.2)))
 	isl._mesh_into(m, "SkyportLink", target, 0.0, 2600.0)
+	InfraKit.place(target, ik, 2000.0)
 	var shuttle := LinkShuttle.new()
 	shuttle.name = "LinkShuttle"
 	target.add_child(shuttle)
@@ -790,7 +796,7 @@ static func build_circus(P: Dictionary, target: Node3D, isl: SkyportIsland, arms
 	m.prism(_ring(C, Ri - 0.1, 48), Y, Y + 0.18, kerb)
 	m.prism(_ring(C, Ri - 0.55, 48), Y + 0.18, Y + 0.24, grass)
 	m.prism(_ring(C, Ri - 6.0, 32), Y + 0.24, Y + 0.5, grass.lightened(0.05))
-	var n_h := 28
+	var n_h := 0 if SkyportKit.ready() else 28   # (card hedges: SkyportDistrict._landscape)
 	for k in n_h:
 		if k % 7 == 0:
 			continue   # (gaps: the gardeners' way in)

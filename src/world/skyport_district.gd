@@ -500,6 +500,136 @@ static func build_landside(P: Dictionary, target: Node3D, body: StaticBody3D, is
 	for name: String in K:
 		SkyportKit.place(target, name, K[name], 900.0, name not in ["edge_post", "trolley_bay"])
 	_parked_extras(target, isl)
+	_landscape(P, target)
+	_billboards(target)
+
+
+## Planting: clipped box balls between the entrances, shrub beds round the
+## hotels, the fuel station and the rental centre, card hedges round
+## Terminal Circus (its old box hedges are skipped when the kit is in).
+static func _landscape(P: Dictionary, target: Node3D) -> void:
+	var pl := {}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7712
+	var add := func(nm: String, x: float, z: float, s := 1.0, yaw := -1.0) -> void:
+		if not pl.has(nm):
+			pl[nm] = []
+		(pl[nm] as Array).append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU if yaw < 0.0 else yaw).scaled(Vector3.ONE * s), Vector3(x, Y, z)))
+	# Forecourt: a pair of box balls either side of every entrance pod.
+	for x: float in DOORS:
+		for dx: float in [-5.4, 5.4]:
+			add.call("box_ball", x + dx, 164.0, 1.1)
+	# Hotels (records in SkyportIsland._buildings): beds along their street
+	# fronts.
+	for r: Rect2 in [Rect2(2036, -17, 66, 44), Rect2(2148, -15, 58, 40), Rect2(1878, 170, 44, 52)]:
+		var x := r.position.x + 2.0
+		while x < r.end.x - 1.0:
+			add.call(["bush_round", "box_ball", "flower_bed", "bush_low"][rng.randi() % 4], x, r.position.y - 2.2, rng.randf_range(0.8, 1.15))
+			x += rng.randf_range(2.4, 3.6)
+	# Fuel station and rental centre edges.
+	for x in range(int(FUEL.x - 20.0), int(FUEL.x + 21.0), 3):
+		if absf(x - FUEL.x) > 9.0:
+			add.call("bush_low", x, -19.5, 0.9)
+	var rc := RENTAL
+	var z := rc.position.y + 2.0
+	while z < rc.end.y - 2.0:
+		add.call("bush_round", rc.end.x + 2.5, z, 0.95)
+		z += 4.0
+	# Terminal Circus: a clipped hedge ring (cards), gaps for the gardeners.
+	var circ: Array = P.get("circus", [])
+	if not circ.is_empty():
+		var C: Vector2 = circ[0]
+		var Ri: float = float(circ[1]) - 6.0 - 2.2
+		var n := int(TAU * Ri / 2.0)
+		for k in n:
+			if k % 9 == 0:
+				continue
+			var a := TAU * (k + 0.5) / n
+			var q := C + Vector2.from_angle(a) * Ri
+			if not pl.has("hedge_block"):
+				pl["hedge_block"] = []
+			(pl["hedge_block"] as Array).append(Transform3D(Basis(Vector3.UP, -a + PI * 0.5), Vector3(q.x, Y + 0.24, q.y)))
+	FoliageKit.place(target, pl, 260.0)
+
+
+## Lit billboards from the city's advert atlas (assets/ads): a Skyport Air
+## campaign across the multi-storey car park, roadside boards on the avenue.
+static func _billboards(target: Node3D) -> void:
+	var meta_path := "res://assets/ads/ads_meta.json"
+	if not ResourceLoader.exists("res://assets/ads/ads_atlas.png") or not FileAccess.file_exists(meta_path):
+		return
+	var meta: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(meta_path))
+	var size: Array = meta["size"]
+	var rects := {}
+	for ad: Dictionary in meta["ads"]:
+		rects[String(ad["id"])] = ad["wide"]
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = load("res://assets/ads/ads_atlas.png")
+	mat.emission_enabled = true
+	mat.emission_texture = mat.albedo_texture
+	mat.emission_energy_multiplier = 0.55
+	mat.roughness = 0.35
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	var m := BuildingMesher.new()
+	# [brand, centre, yaw (board faces), width, height, posts]
+	var boards := [
+		["skyportair", Vector3(SkyportAirport.CAR_PARK.get_center().x, Y + 9.0, SkyportAirport.CAR_PARK.end.y + 0.32), 0.0, 22.0, 11.0, false],
+		["skyportair", Vector3(1840.0, Y + 7.5, -50.5), PI, 12.0, 6.0, true],
+		["ledgerline", Vector3(2210.0, Y + 7.5, -21.5), PI, 12.0, 6.0, true],
+		["brasa", Vector3(1700.0, Y + 7.5, -21.5), PI, 12.0, 6.0, true],
+		["harbourhale", Vector3(2120.0, Y + 7.5, 31.5), 0.0, 12.0, 6.0, true],
+	]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for b: Array in boards:
+		if not rects.has(b[0]):
+			continue
+		var r: Array = rects[b[0]]
+		var u0 := float(r[0]) / float(size[0])
+		var v0 := float(r[1]) / float(size[1])
+		var u1 := (float(r[0]) + float(r[2])) / float(size[0])
+		var v1 := (float(r[1]) + float(r[3])) / float(size[1])
+		var c: Vector3 = b[1]
+		var yaw: float = b[2]
+		var w: float = b[3]
+		var h: float = b[4]
+		var basis := Basis(Vector3.UP, yaw)
+		var rt := basis * Vector3(w * 0.5, 0, 0)
+		var up := Vector3(0, h * 0.5, 0)
+		var nrm := basis * Vector3(0, 0, 1)
+		var face := c + nrm * 0.12
+		var corners := [face - rt - up, face + rt - up, face + rt + up, face - rt + up]
+		var uvs := [Vector2(u0, v1), Vector2(u1, v1), Vector2(u1, v0), Vector2(u0, v0)]
+		for idx in [0, 2, 1, 0, 3, 2]:
+			st.set_normal(nrm)
+			st.set_uv(uvs[idx])
+			st.add_vertex(corners[idx])
+		# Frame (dark casing), and two posts with a catwalk for the roadside ones.
+		m.beam(c - rt - up * 1.04, c + rt - up * 1.04, 0.35, 0.3, Color(0.16, 0.17, 0.19))
+		m.beam(c - rt + up * 1.04, c + rt + up * 1.04, 0.35, 0.3, Color(0.16, 0.17, 0.19))
+		m.beam(c - rt * 1.02 - up, c - rt * 1.02 + up, 0.3, 0.35, Color(0.16, 0.17, 0.19))
+		m.beam(c + rt * 1.02 - up, c + rt * 1.02 + up, 0.3, 0.35, Color(0.16, 0.17, 0.19))
+		if b[5]:
+			for sx: float in [-0.3, 0.3]:
+				var foot := c + rt * (sx * 2.0) - nrm * 0.4
+				foot.y = Y
+				m.beam(foot, foot + Vector3(0, c.y - Y - h * 0.5, 0), 0.5, 0.5, Color(0.45, 0.47, 0.5))
+			m.beam(c - rt - up - nrm * 0.9, c + rt - up - nrm * 0.9, 1.0, 0.12, Color(0.4, 0.42, 0.44))
+			m.beam(c - rt - nrm * 0.2, c + rt - nrm * 0.2, 0.3, h, Color(0.12, 0.13, 0.14))   # (the board's back)
+	st.generate_tangents()
+	var mi := MeshInstance3D.new()
+	mi.name = "AirportBillboards"
+	mi.mesh = st.commit()
+	mi.material_override = mat
+	mi.visibility_range_end = 1200.0
+	target.add_child(mi)
+	_mesher_into(m, target, "AirportBillboardFrames")
+
+
+static func _mesher_into(m: BuildingMesher, target: Node3D, nm: String) -> void:
+	var isl := target.get_parent() as SkyportIsland
+	if isl:
+		isl._mesh_into(m, nm, target, 0.0, 1200.0)
 
 
 ## Taxis on the rank and cars in the rental centre's bays (the city's
@@ -546,6 +676,77 @@ static func _parked_extras(target: Node3D, isl: SkyportIsland) -> void:
 		mi.multimesh = mm
 		mi.visibility_range_end = 320.0
 		target.add_child(mi)
+
+
+## Profiled-metal sheds (warehouses, hangars, the cargo terminal): the city
+## mesher drew them with office windows. Records marked "clad" are drawn
+## here – cladding bays round every tier, a roof cap with rooflights and a
+## parapet, loading docks along a "docks" face; a hangar's front stays open
+## for its doors (SkyportIsland._build_airport_dressing) with a header over.
+## (Unless the kit is missing, in which case the city mesher draws them.)
+static func build_clad(P: Dictionary, target: Node3D, isl: SkyportIsland) -> void:
+	var K := {}
+	var m := BuildingMesher.new()
+	for b: Dictionary in P["buildings"]:
+		if not b.has("clad"):
+			continue
+		var kind: String = b["clad"]
+		var tiers: Array = b["tiers"]
+		for ti in tiers.size():
+			var t: Array = tiers[ti]
+			var x0: float = t[0]
+			var z0: float = t[1]
+			var x1: float = t[2]
+			var z1: float = t[3]
+			var y0: float = t[4]
+			var y1: float = t[5]
+			var h := y1 - y0
+			# [a, b, outward normal]
+			for e: Array in [[Vector2(x0, z0), Vector2(x1, z0), Vector2(0, -1)], [Vector2(x1, z1), Vector2(x0, z1), Vector2(0, 1)],
+					[Vector2(x0, z1), Vector2(x0, z0), Vector2(-1, 0)], [Vector2(x1, z0), Vector2(x1, z1), Vector2(1, 0)]]:
+				var a: Vector2 = e[0]
+				var c: Vector2 = e[1]
+				var n: Vector2 = e[2]
+				var L := a.distance_to(c)
+				var bays := maxi(1, ceili(L / 6.0))
+				var yaw := atan2(n.x, n.y)
+				var front := b.has("hangar_front") and ti == 0 and n.y > 0.5 and absf(z1 - float(b["hangar_front"])) < 0.5
+				var wall_y0 := y0
+				if front:
+					# (Doors below: the header band from the door head up.)
+					wall_y0 = y1 - 3.6
+				for k in bays:
+					var q := a.lerp(c, (k + 0.5) / bays)
+					var xf := Transform3D(Basis(Vector3.UP, yaw) * Basis.from_scale(Vector3(L / bays / 6.0, y1 - wall_y0, 1.0)),
+						Vector3(q.x + n.x * 0.04, wall_y0, q.y + n.y * 0.04))
+					if not K.has(kind):
+						K[kind] = []
+					(K[kind] as Array).append(xf)
+				# Corner flashing and a concrete kick band.
+				m.beam(Vector3(a.x, y0, a.y), Vector3(a.x, y1 + 0.3, a.y), 0.35, 0.35, Color(0.32, 0.34, 0.36))
+				if not front:
+					m.solid(minf(a.x, c.x) + minf(n.x, 0.0) * 0.18, minf(a.y, c.y) + minf(n.y, 0.0) * 0.18,
+						maxf(a.x, c.x) + maxf(n.x, 0.0) * 0.18, maxf(a.y, c.y) + maxf(n.y, 0.0) * 0.18, y0, y0 + 0.9, Color(0.6, 0.59, 0.56))
+			# Roof: cap, parapet line, rooflight strips (only the top tier
+			# shows its roof).
+			m.solid(x0 - 0.15, z0 - 0.15, x1 + 0.15, z1 + 0.15, y1, y1 + 0.3, Color(0.55, 0.57, 0.6))
+			if ti == tiers.size() - 1 or (tiers.size() > 1 and ti == 0):
+				var rx := x0 + 6.0
+				while rx < x1 - 4.0:
+					m.solid(rx - 0.7, z0 + 4.0, rx + 0.7, z1 - 4.0, y1 + 0.3, y1 + 0.42, Color(0.78, 0.85, 0.9))
+					rx += 9.0
+		if b.has("docks"):
+			var t0: Array = tiers[0]
+			var dz: float = b["docks"]
+			var x: float = float(t0[0]) + 6.0
+			while x < float(t0[2]) - 4.0:
+				if not K.has("dock_door"):
+					K["dock_door"] = []
+				(K["dock_door"] as Array).append(Transform3D(Basis(Vector3.UP, PI), Vector3(x, Y, dz)))
+				x += 7.5
+	for nm: String in K:
+		SkyportKit.place(target, nm, K[nm], 1400.0, true)
+	isl._mesh_into(m, "CladTrim", target, 0.0, 1400.0)
 
 
 ## Walking loops for the crowd (local): the halls, the airside mall, the

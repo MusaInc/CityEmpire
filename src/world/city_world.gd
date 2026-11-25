@@ -1251,6 +1251,25 @@ func _place_furniture() -> Dictionary:
 						var b := Basis(Vector3.UP, prng.randf() * TAU).scaled(Vector3(sc, sc, sc))
 						out[key].append([kind, Transform3D(b, Vector3(p2.x, layout.ground_y(p2.x, p2.y), p2.y))])
 					pd += prng.randf_range(2.6, 5.4)
+			# Across the lawn too (it was a flat green sheet inside the border):
+			# low clumps of long grass and the odd shrub, one per ~140 m².
+			var pbb := Rect2(ppoly[0], Vector2.ZERO)
+			for v in ppoly:
+				pbb = pbb.expand(v)
+			var clumps := int(pbb.get_area() / 140.0)
+			for ci in clumps:
+				var cq := Vector2(prng.randf_range(pbb.position.x, pbb.end.x), prng.randf_range(pbb.position.y, pbb.end.y))
+				if not Geometry2D.is_point_in_polygon(cq, ppoly):
+					continue
+				var key := Vector2i(floori(cq.x / CHUNK), floori(cq.y / CHUNK))
+				if not out.has(key):
+					out[key] = []
+				var shrub := prng.randf() < 0.1
+				for t in (1 if shrub else prng.randi_range(2, 5)):
+					var q := cq + Vector2(prng.randf_range(-1.4, 1.4), prng.randf_range(-1.4, 1.4))
+					var sc := prng.randf_range(0.8, 1.3)
+					out[key].append(["hedge_cluster" if shrub else "grass_tuft",
+						Transform3D(Basis(Vector3.UP, prng.randf() * TAU).scaled(Vector3(sc, sc, sc)), Vector3(q.x, layout.ground_y(q.x, q.y), q.y))])
 			continue
 		if blk["kind"] not in ["block", "plaza"]:
 			continue

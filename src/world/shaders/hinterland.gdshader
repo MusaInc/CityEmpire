@@ -97,7 +97,7 @@ void fragment() {
 				* cluster * elev_band * gentle * night_k * far_fade;
 		}
 	}
-	ALBEDO = c * (1.0 - haze);
+	ALBEDO = c * (1.0 - haze) * mix(1.0, 0.55, night);   // (moonlit slopes read green-bright)
 	EMISSION = emit;
 	ROUGHNESS = mix(0.95, 0.6, snowy);
 }

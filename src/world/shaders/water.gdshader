@@ -226,14 +226,14 @@ void fragment() {
 		if (night > 0.05) {
 			// Vertical shimmering light columns from waterfront lamps & windows
 			// dancing across the wave facets along the strait and harbours.
-			float az_w = atan(r.z, r.x) * 26.0 + dot(p0, vec2(0.019, 0.013));
+			float az_w = atan(r.z, r.x) * 26.0;   // (direction only: a position term broke them into speckle over every wave)
 			float col_id = floor(az_w);
 			float col_h = fr_h(col_id + 17.3);
 			float col_core = 1.0 - smoothstep(0.08, 0.42, abs(fract(az_w) - 0.5));
 			float ripple_glint = smoothstep(0.02, 0.24, abs(nw.x) + abs(nw.z));
 			float band_y = (1.0 - smoothstep(0.0, 0.34, r.y)) * smoothstep(0.46, 0.96, col_h);
 			vec3 lcol = mix(vec3(1.0, 0.72, 0.38), vec3(0.76, 0.88, 1.0), step(0.74, fr_h(col_id + 5.7)));
-			cr += lcol * col_core * band_y * (0.35 + 1.15 * ripple_glint) * night * 0.85;
+			cr += lcol * col_core * band_y * (0.25 + 0.75 * ripple_glint) * night * 0.4 * (1.0 - smoothstep(250.0, 900.0, dist));
 		}
 		refl = mix(sky, cr, urban_w * mix(0.60, 0.92, night) * (1.0 - 0.52 * blow));
 	}

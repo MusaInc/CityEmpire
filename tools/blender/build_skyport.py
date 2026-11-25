@@ -869,13 +869,55 @@ def clearance_sign():
                             B((0.06, 0.06, 0.6), (-0.8, 0.0, 0.6), grey), B((0.06, 0.06, 0.6), (0.8, 0.0, 0.6), grey)])
 
 
+def _clad(name, base_rgb, rib_rgb):
+    """Profiled metal cladding bay: 6 m wide, 1 m tall (Godot scales it to
+    the wall), facing -Y: trapezoid ribs every 0.5 m, a darker shadow line
+    beside each rib."""
+    mb = M(name + "_m", base_rgb)
+    mr = M(name + "_r", rib_rgb)
+    mdk = M(name + "_d", tuple(c * 0.62 for c in base_rgb))
+    p = [B((6.0, 0.06, 1.0), (0, 0.03, 0.5), mb)]
+    for k in range(12):
+        x = -2.75 + k * 0.5
+        p.append(B((0.16, 0.08, 1.0), (x, -0.04, 0.5), mr))
+        p.append(B((0.04, 0.02, 1.0), (x + 0.1, -0.005, 0.5), mdk))
+    done(name, p)
+
+
+def clad_bay():
+    _clad("clad_bay", srgb("c9ccd0"), srgb("dadde0"))
+
+
+def clad_bay_blue():
+    _clad("clad_bay_blue", srgb("6f8396"), srgb("7f93a6"))
+
+
+def clad_bay_sand():
+    _clad("clad_bay_sand", srgb("cdbf9f"), srgb("d9cdb0"))
+
+
+def dock_door():
+    """Loading dock: roller door 3.4 × 4.2, dock leveller, bumpers, a canopy
+    and a lamp, on the wall at y=0 facing -Y."""
+    p = [B((3.6, 0.12, 4.4), (0, -0.05, 2.2), grey),
+         B((3.4, 0.08, 4.2), (0, -0.12, 2.1), M("roller", srgb("9aa3ab")))]
+    for k in range(14):
+        p.append(B((3.4, 0.1, 0.03), (0, -0.16, 0.15 + k * 0.3), dark))
+    p += [B((3.6, 1.4, 0.25), (0, -0.7, 4.7), dark), B((0.6, 0.12, 0.25), (0, -0.2, 5.1), lamp_warm),
+          B((3.0, 1.2, 1.1), (0, -0.6, 0.55), stone)]
+    for x in (-1.3, 1.3):
+        p.append(B((0.35, 0.25, 0.5), (x, -1.25, 0.9), rubber))
+    done("dock_door", p)
+
+
 for f in (jet_bridge, gse_tug, gse_cart, gse_belt, gse_pushback, gse_fuel, gse_catering, gse_bus,
           gse_stairs, gse_gpu, gse_follow, runway_light, taxi_light, approach_bar, stand_sign, windsock,
           radar_mast, radar_head, fence, fence_gate, checkin_island, seat_row, shop_unit, cafe_unit,
           fids_board, security_lane, gate_desk, carousel, indoor_planter, trolley, trolley_bay,
           info_desk, entrance_pod, gantry_sign, taxi_shelter, fuel_canopy, fuel_kiosk, rental_canopy,
           rental_booth, barrier, bus_stop_airport, flag_pole, runway_light_g, runway_light_r, ceiling_lamp,
-          flood_head, edge_post, pier_column, pier_head, pier_foot, deck_girders, underpass_lamp, clearance_sign):
+          flood_head, edge_post, pier_column, pier_head, pier_foot, deck_girders, underpass_lamp, clearance_sign,
+          clad_bay, clad_bay_blue, clad_bay_sand, dock_door):
     f()
 
 # Lay them out on a grid so the preview shows everything (Godot reads each

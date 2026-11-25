@@ -1429,8 +1429,10 @@ static func _buildings(P: Dictionary) -> Array:
 	var ind := [[2032, -160, 2160, -60, 16.0], [2180, -160, 2312, -60, 12.0], [2350, -150, 2448, -82, 13.0],
 		[2032, -296, 2130, -200, 14.0]]
 	for r in ind:
-		out.append(_b([[r[0], r[1], r[2], r[3], LAND_Y, LAND_Y + r[4]]], S.WAREHOUSE,
-			[Color(0.6, 0.62, 0.64), Color(0.42, 0.5, 0.58), Color(0.55, 0.52, 0.48)][rng.randi() % 3], rng.randf()))
+		var wh := _b([[r[0], r[1], r[2], r[3], LAND_Y, LAND_Y + r[4]]], S.WAREHOUSE,
+			[Color(0.6, 0.62, 0.64), Color(0.42, 0.5, 0.58), Color(0.55, 0.52, 0.48)][rng.randi() % 3], rng.randf())
+		wh["clad"] = "clad_bay" if out.size() % 2 == 0 else "clad_bay_blue"   # (SkyportDistrict.build_clad: profiled metal, no office windows)
+		out.append(wh)
 	# Airport: terminal (long glass hall on a stone base), control tower,
 	# hangars, cargo terminal.
 	# (The terminal is a glazed hall under a curved roof: _build_terminal.)
@@ -1475,10 +1477,16 @@ static func _buildings(P: Dictionary) -> Array:
 		var tiers: Array = [[x0, z0, x1, z1, LAND_Y, LAND_Y + hh],
 			[x0 + span * 0.18, z0, x1 - span * 0.18, z1, LAND_Y + hh, LAND_Y + hh + 2.2],
 			[x0 + span * 0.38, z0, x1 - span * 0.38, z1, LAND_Y + hh + 2.2, LAND_Y + hh + 3.4]]
-		out.append(_b(tiers, S.WAREHOUSE, hg[5], hg[6]))
+		var hb := _b(tiers, S.WAREHOUSE, hg[5], hg[6])
+		hb["clad"] = "clad_bay_blue" if (hg[5] as Color).b > (hg[5] as Color).r + 0.05 else ("clad_bay_sand" if (hg[5] as Color).r > (hg[5] as Color).b + 0.06 else "clad_bay")
+		hb["hangar_front"] = float(hg[3])
+		out.append(hb)
 		if hg[7]:
 			out.append(_b([[x0, z0 - 14.0, x0 + span * 0.45, z0, LAND_Y, LAND_Y + 8.0]], S.MODERN, Color(0.86, 0.86, 0.84), float(hg[6]) + 0.05))
-	out.append(_b([[2340, 170, 2455, 290, LAND_Y, LAND_Y + 15.0]], S.WAREHOUSE, Color(0.45, 0.52, 0.6), 0.9))
+	var cg := _b([[2340, 170, 2455, 290, LAND_Y, LAND_Y + 15.0]], S.WAREHOUSE, Color(0.45, 0.52, 0.6), 0.9)
+	cg["clad"] = "clad_bay_blue"
+	cg["docks"] = 170.0   # (loading docks along the landside face)
+	out.append(cg)
 	# Landside aviation businesses on the open ground south of Hangar Lane:
 	# flight catering (a loading dock towards the apron) and an aviation
 	# academy with a simulator hall.
@@ -1657,6 +1665,7 @@ func _start_near() -> void:
 		func(): if SkyportKit.ready(): SkyportDistrict.build_terminal_interior(near_root, body, self),
 		func(): if SkyportKit.ready(): SkyportDistrict.build_airside(plan_data, near_root, body, self),
 		func(): if SkyportKit.ready(): SkyportDistrict.build_landside(plan_data, near_root, body, self),
+		func(): if SkyportKit.ready(): SkyportDistrict.build_clad(plan_data, near_root, self),
 		func():
 			var mv := SkyportDistrict.Movers.new()
 			mv.name = "Movers"
@@ -2643,7 +2652,7 @@ func _build_skyline() -> void:
 	for key in groups:
 		var far := BuildingMesher.new()
 		for b: Dictionary in groups[key]:
-			if b.get("mesh", true):
+			if b.get("mesh", true) or b.has("clad"):
 				far.add_building(b, false)
 		_mesh(far, "Skyline_" + key, 0.0, FAR_RANGE)
 
@@ -2652,7 +2661,7 @@ func _build_skyline() -> void:
 func _build_detail(key: String) -> void:
 	var near := BuildingMesher.new()
 	for b: Dictionary in _groups().get(key, []):
-		if b.get("mesh", true):   # (the terminal and the tower are drawn by SkyportAirport)
+		if b.get("mesh", true) and not b.has("clad"):   # (the terminal and the tower: SkyportAirport; clad sheds: SkyportDistrict)
 			near.add_building(b, true)
 			near.add_features(b)
 		if b.get("hollow", false) or b.get("walkin", false):
@@ -3549,8 +3558,8 @@ func _build_trees() -> void:
 	var batches := {}
 	for xf: Transform3D in kept:
 		var p := xf.origin
-		if hash(Vector3i(roundi(p.x * 4.0), roundi(p.z * 4.0), 43)) % 3 != 0:
-			continue
+		if hash(Vector3i(roundi(p.x * 4.0), roundi(p.z * 4.0), 43)) % 3 == 2:
+			continue   # (two in three kept: the landside lawns read empty at one in three)
 		var plot := Vector2i(floori(p.x / 10.0), floori(p.z / 10.0))
 		if plots.has(plot):
 			continue
