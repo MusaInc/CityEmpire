@@ -61,7 +61,7 @@ const HANGARS := [
 	[1722, 184, 1808, 292, 25.0, Color(0.62, 0.68, 0.74), 0.33, false],
 	[1818, 204, 1870, 282, 15.0, Color(0.84, 0.8, 0.7), 0.47, true],
 	# (2026-11-25) The MRO hangar east of the cargo apron: wide-body bay (kept west of the coast notch: its east third stood over the sea).
-	[2462, 200, 2498, 288, 24.0, Color(0.88, 0.89, 0.9), 0.52, false],
+	[2462, 210, 2489, 288, 22.0, Color(0.88, 0.89, 0.9), 0.52, false],
 ]
 const COL_PAVE := Color(0.56, 0.56, 0.55)
 const COL_GRASS := Color(0.33, 0.47, 0.26)
