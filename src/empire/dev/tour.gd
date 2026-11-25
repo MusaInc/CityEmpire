@@ -2,7 +2,7 @@ extends Node
 ## Captures: many fixed views from one start-up (the world loads once).
 ##   --tour=<file> [--tour-wait=s] [--stats]
 ## Each line of <file>: name:at_x,at_z:cam_x,cam_y,cam_z,look_x,look_y,look_z
-## in world metres (absolute y, unlike --cam). The hero is put down at at_x,
+## in world metres (optional suffixes :rel and :hour=H). The hero is put down at at_x,
 ## at_z (centres the streaming), the camera fixed, and after tour-wait
 ## seconds the frame is saved next to the file as <name>.png.
 
@@ -55,12 +55,21 @@ func _run() -> void:
 		if is_nan(gy):
 			gy = 1.0
 		game.call("_teleport", Vector3(at[0], gy + 1.0, at[1]), 0.0)
-		# (The clock keeps running: every view at the hour asked for.)
-		if args.has("hour"):
-			(game.get("empire") as Object).set("minute", float(args["hour"]) * 60.0)
+		var hour := float(args.get("hour", -1.0))
+		var relative_height := false
+		for option in parts.slice(3):
+			if option == "rel":
+				relative_height = true
+			elif option.begins_with("hour="):
+				hour = float(option.trim_prefix("hour="))
+		if hour >= 0.0:
+			(game.get("empire") as Object).set("minute", hour * 60.0)
+			var atmosphere := game.get("atmosphere") as Atmosphere
+			atmosphere.hour = hour
+			atmosphere.fixed_hour = true
 		var from := Vector3(cv[0], cv[1], cv[2])
 		var to := Vector3(cv[3], cv[4], cv[5])
-		if parts.size() > 3 and parts[3] == "rel":
+		if relative_height:
 			# (Heights relative to the ground at the hero's spot.)
 			from.y += gy
 			to.y += gy

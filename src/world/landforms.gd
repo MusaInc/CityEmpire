@@ -131,58 +131,45 @@ static func forms(layout: CityLayout = null) -> Array:
 		var side: int = sp[1]
 		var L: CityLayout = layout if side > 0 else layout.mainland
 		var join := PackedVector2Array()
+		var join_start := -1
 		if sp.size() > 3 and String(sp[3]) == "coast" and L != null:
 			# Snap both ends onto the coast and close along it (the shorter way).
-			join = _coast_between(L.coast, cps[n - 1][0], cps[0][0])
+			var coast_join := _coast_between(L.coast, cps[n - 1][0], cps[0][0])
+			for j in coast_join.size() - 1:
+				var a := coast_join[j]
+				var b := coast_join[j + 1]
+				var count := maxi(1, ceili(a.distance_to(b) / 4.0))
+				for k in count:
+					join.append(a.lerp(b, float(k) / count))
+			join.append(coast_join[-1])
 			pts[0] = join[join.size() - 1]
+			join_start = pts.size()
 			for v in join:
 				pts.append(v)
 				kinds.append(3)
 			pts.remove_at(pts.size() - 1)
 			kinds.remove_at(kinds.size() - 1)
 		else:
-			pts.append(cps[n - 1][0])
-			kinds.append(3)   # (closing edge, back along the quay: attached)
+			var end: Vector2 = cps[n - 1][0]
+			var start := pts[0]
+			var count := maxi(1, ceili(end.distance_to(start) / 4.0))
+			for j in count:
+				pts.append(end.lerp(start, float(j) / count))
+				kinds.append(3)
 		var ax := W + 4.0 if side > 0 else E - 4.0
 		var bb := Rect2(pts[0], Vector2.ZERO)
 		for v in pts:
 			bb = bb.expand(v)
-		# The quay's height along the join (sampled every 4 m).
-		var h0 := {}
-		var z := bb.position.y - 8.0
-		while z <= bb.end.y + 8.0:
-			var hz := L.ground_y(ax, z) if L != null else 1.0
-			h0[int(floorf(z / 4.0))] = hz if not is_nan(hz) else 1.0
-			z += 4.0
-		var f := {"name": sp[0], "poly": pts, "kinds": kinds, "bbox": bb, "attach_x": ax, "side": side, "h0": h0, "L": L,
+		var f := {"name": sp[0], "poly": pts, "kinds": kinds, "bbox": bb, "attach_x": ax, "side": side, "L": L,
 			"paved": String(sp[0]).ends_with("Mole")}
 		if not join.is_empty():
-			# Heights along the join, sampled 5 m inside the city's sea wall.
-			var cen := Vector2.ZERO
-			for v in pts:
-				cen += v
-			cen /= pts.size()
-			# (Inland along the join's own normal, the esplanade's top over the
-			# first 3–9 m: sampled along "away from the centroid" a long join
-			# could land on the shore apron, and the landform then sat metres
-			# below the esplanade with the sea wall's face showing over it.)
-			var jh := PackedFloat32Array()
-			for ji in join.size():
-				var v: Vector2 = join[ji]
-				var tg := (join[mini(ji + 1, join.size() - 1)] - join[maxi(ji - 1, 0)]).normalized()
-				var nv := Vector2(-tg.y, tg.x)
-				if nv.dot(v - cen) < 0.0:
-					nv = -nv
-				var best := -INF
-				for dd: float in [3.0, 5.0, 7.0, 9.0]:
-					var inl := v + nv * dd
-					var hz := L.ground_y(inl.x, inl.y)
-					if not is_nan(hz) and not L.is_water(Vector3(inl.x, 0.0, inl.y)):
-						best = maxf(best, hz)
-				jh.append(best + 0.02 if best > -INF else 1.0)
+			var heights := PackedFloat32Array()
+			for v in join:
+				heights.append(L.terrain.road_y(v.x, v.y) + CityTerrain.KERB)
 			f["join"] = join
-			f["jh"] = jh
-			f["join_i"] = pts.size() - join.size() + 1
+			f["jh"] = heights
+			f["join_i"] = join_start
+
 		_forms.append(f)
 	return _forms
 
@@ -275,11 +262,11 @@ static func _base_h(f: Dictionary, q: Vector2) -> float:
 
 
 static func _quay_h(f: Dictionary, z: float) -> float:
-	var h0: Dictionary = f["h0"]
-	var i := int(floorf(z / 4.0))
-	var a: float = h0.get(i, h0.get(i - 1, 1.0))
-	var b: float = h0.get(i + 1, a)
-	return lerpf(a, b, z / 4.0 - floorf(z / 4.0))
+	var layout: CityLayout = f["L"]
+	if layout == null:
+		return CityTerrain.KERB
+	var edge_x := CityLayout.RIVER_EDGE if int(f["side"]) > 0 else CityLayout.FAR_SHORE
+	return layout.terrain.road_y(edge_x, z) + CityTerrain.KERB
 
 
 ## The landform containing (x, z), or {}.

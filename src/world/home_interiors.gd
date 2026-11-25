@@ -177,7 +177,7 @@ func _build(mat: Material) -> Node3D:
 	m._end()
 	glow._end()
 	glass._end()
-	var root: Node3D = _LIGHTS.new()
+	var root := Node3D.new()
 	root.name = "Home_" + String(h["id"])
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, m.arrays())
@@ -193,6 +193,8 @@ func _build(mat: Material) -> Node3D:
 	var contact := Node3D.new()
 	contact.transform = xf * room_frame
 	root.add_child(contact)
+	var zone := InteriorKit.add_lighting_zone(root, AABB(Vector3(0.0, 0.0, -D), Vector3(W, H, D)), contact.transform)
+	InteriorKit.room_probe(zone, Color(1.0, 0.92, 0.82), 0.61, 0.26)
 	var feet: Array[Rect2] = []
 	var room_inv := room_frame.affine_inverse()
 	for bx in col_boxes:
@@ -222,8 +224,7 @@ func _build(mat: Material) -> Node3D:
 		var lp: Vector3 = L[0]
 		o.position = xf * P(lp.x, lp.z, lp.y)
 		o.light_color = L[1]
-		InteriorKit.tune_light(o, L[2], L[3])
-		o.set_meta("base", o.light_energy)
+		InteriorKit.tune_light(o, float(L[2]) * 2.05, L[3])
 		root.add_child(o)
 	var floor_mesh := PlaneMesh.new()
 	floor_mesh.size = Vector2(W, D)
@@ -462,7 +463,6 @@ func _wall_corners(side: String, at: float, a0: float, a1: float, y0: float, y1:
 
 
 static var _mats := {}
-const _LIGHTS := preload("res://src/world/home_lights.gd")
 ## The trophy shelf of each built home, for the close-up: id -> {centre, out}.
 static var trophy_views := {}
 

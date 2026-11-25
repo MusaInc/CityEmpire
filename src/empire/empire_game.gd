@@ -1117,7 +1117,8 @@ func _process(dt: float) -> void:
 	if rig:
 		var phone_up: bool = ui != null and ui.phone != null and is_instance_valid(ui.phone) and ui.phone.visible
 		rig.using_phone = phone_up and driving == "" and (skyport_play == null or skyport_play.piloting == "")
-	atmosphere.hour = empire.hour() if state != "title" else TITLE_HOUR
+	if not atmosphere.fixed_hour:
+		atmosphere.hour = empire.hour() if state != "title" else TITLE_HOUR
 	_stream_t -= dt
 	if _stream_t <= 0.0:
 		_stream_t = 0.4
@@ -1330,11 +1331,14 @@ func _refresh_signs(unit_id: String) -> void:
 	if si == null:
 		return
 	var b := empire.business_at(unit_id)
+	var local := si.to_local(player.global_position)
+	var occupied := local.x > 0.0 and local.x < si.W and local.z < 0.0 and local.z > -si.D and absf(local.y - 1.0) < 1.6
 	if not si.rival.is_empty():
 		var h := empire.hour()
-		si.update_signs(h >= 7.0 and h < (22.0 if si.rival.get("firm", false) else 23.0), h < 6.5 or h >= 21.5)
+		si.update_signs(h >= 7.0 and h < (22.0 if si.rival.get("firm", false) else 23.0), h < 6.5 or h >= 21.5, occupied)
 		return
-	si.update_signs((si.unit.has("street_use") and b == null) or (b != null and b.open and b.within_hours(empire.hour())))
+	var trading := (si.unit.has("street_use") and b == null) or (b != null and b.open and b.within_hours(empire.hour()))
+	si.update_signs(trading, false, occupied)
 
 
 func _show_stock_delivery(b: Business) -> void:

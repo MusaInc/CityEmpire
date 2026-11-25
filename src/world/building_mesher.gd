@@ -2174,19 +2174,36 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 				_inner_walls(w2, -3.0, level + 0.01, Color(0.4, 0.33, 0.28))
 	_coast(layout, chunk_rect)
 	_shore(layout, chunk_rect)
-	# The strait's quay wall (west promenade edge).
-	var I := layout.island
-	if chunk_rect.position.x <= CityLayout.RIVER_EDGE and chunk_rect.end.x > CityLayout.RIVER_EDGE:
-		var x := CityLayout.RIVER_EDGE
-		# (Broken where a landform joins the quay – Strait Point, Lighthouse
-		# Point – and at the railing openings: the plinth and railing used to
-		# run straight across every park's entrance, a raised blue-grey strip
-		# and a fence between the promenade and the grass.)
-		for span: Vector2 in strait_quay_spans(maxf(chunk_rect.position.y, I.position.y), minf(chunk_rect.end.y, I.end.y)):
+	# The retaining face continues under promenade openings and park joins.
+	# Railing gaps only cut the coping and balustrade above the pavement.
+	var x := CityLayout.FAR_SHORE if layout.is_mainland else CityLayout.RIVER_EDGE
+	var outward := Vector3.RIGHT if layout.is_mainland else Vector3.LEFT
+	for i in layout.coast.size():
+		var a: Vector2 = layout.coast[i]
+		var b: Vector2 = layout.coast[(i + 1) % layout.coast.size()]
+		if absf(a.x - x) > 0.01 or absf(b.x - x) > 0.01:
+			continue
+		var landward_x := x - outward.x * 0.006
+		if not (chunk_rect.position.x <= landward_x and chunk_rect.end.x > landward_x):
+			continue
+		var start := maxf(minf(a.y, b.y), chunk_rect.position.y)
+		var finish := minf(maxf(a.y, b.y), chunk_rect.end.y)
+		if finish <= start:
+			continue
+		var points := T.splits(start, finish, T.zs, KERB_STEP)
+		for j in points.size() - 1:
+			var p := Vector2(x, points[j])
+			var q := Vector2(x, points[j + 1])
+			var yp := T.road_y(p.x, p.y) + CityTerrain.KERB
+			var yq := T.road_y(q.x, q.y) + CityTerrain.KERB
+			_vface(Vector3(p.x, yp, p.y), Vector3(q.x, yq, q.y),
+				Vector3(q.x, SEA_WALL_LOW, q.y), Vector3(p.x, SEA_WALL_LOW, p.y),
+				outward, Color(0.45, 0.40, 0.34), KIND_WALL)
+	if not layout.is_mainland and chunk_rect.position.x <= x and chunk_rect.end.x > x:
+		var island := layout.island
+		for span: Vector2 in strait_quay_spans(maxf(chunk_rect.position.y, island.position.y), minf(chunk_rect.end.y, island.end.y)):
 			var z0 := span.x
 			var z1 := span.y
-			quad(Vector3(x, 0.0, z0), Vector3(x, 0.0, z1), Vector3(x, -4.0, z1), Vector3(x, -4.0, z0), Vector3.LEFT,
-				Vector2(z0, 0), Vector2(z1, 0), Vector2(z1, -4), Vector2(z0, -4), Color(0.45, 0.4, 0.34), KIND_WALL, 5, 0.3)
 			solid(x, z0, x + 0.6, z1, 0.0, RAIL_PLINTH, Color(0.36, 0.38, 0.39))
 			_iron_bar(Vector3(x + 0.3, RAIL_H - 0.03, z0), Vector3(x + 0.3, RAIL_H - 0.03, z1), Vector3.LEFT, 0.07, 0.06)
 			_iron_bar(Vector3(x + 0.3, RAIL_PLINTH + 0.3, z0), Vector3(x + 0.3, RAIL_PLINTH + 0.3, z1), Vector3.LEFT, 0.035, 0.035)
@@ -2482,8 +2499,7 @@ func _coast(layout: CityLayout, clip: Rect2) -> void:
 			if not clip.has_point((p + q) * 0.5):
 				continue
 			var under := (p + q) * 0.5 + o * 1.5
-			if Landforms.enabled and Landforms.contains(under.x, under.y):
-				continue  # (a landform's ground carries on over it)
+			var joined := Landforms.enabled and Landforms.contains(under.x, under.y)
 			var yp := T.road_y(p.x, p.y) + CityTerrain.KERB
 			var yq := T.road_y(q.x, q.y) + CityTerrain.KERB
 			var high := maxf(yp, yq) > 6.0
@@ -2493,6 +2509,8 @@ func _coast(layout: CityLayout, clip: Rect2) -> void:
 			var P1 := Vector3(p.x, SEA_WALL_LOW, p.y)
 			var Q1 := Vector3(q.x, SEA_WALL_LOW, q.y)
 			_vface(P0, Q0, Q1, P1, n3, face, KIND_WALL)
+			if joined:
+				continue
 			# Railing: a stone plinth just inside the edge riding the slope, an
 			# iron balustrade on it (posts, mid and hand rails) – a promenade
 			# edge you can see the sea through, not a 1.1 m blank wall.

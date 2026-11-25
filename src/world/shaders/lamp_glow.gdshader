@@ -40,7 +40,8 @@ void fragment() {
 		// whatever is really there – slopes, kerbs, decks, cars); the draped
 		// pool only carries the far streets.
 		vec3 wp = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
-		a *= smoothstep(near_real * 0.75, near_real, distance(wp, CAMERA_POSITION_WORLD));
+		float near_fade = smoothstep(near_real * 0.72, near_real + 0.01, distance(wp, CAMERA_POSITION_WORLD));
+		a *= mix(0.32, 1.0, near_fade);
 	} else {
 		a = pow(clamp(1.0 - r, 0.0, 1.0), 3.0) * (0.9 + 0.5 * rain);
 	}

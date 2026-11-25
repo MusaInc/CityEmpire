@@ -9,6 +9,8 @@ extends RefCounted
 const PATH := "res://assets/models/skyport_kit.glb"
 static var _meshes := {}
 static var _mat: ShaderMaterial
+static var _terminal_mat: ShaderMaterial
+static var _terminal_meshes := {}
 static var _mesh_mat: StandardMaterial3D
 
 
@@ -53,10 +55,22 @@ static func _load() -> void:
 
 
 ## One MultiMesh of `name` at the given transforms under target.
-static func place(target: Node3D, name: String, xforms: Array, range_end := 900.0, shadows := true) -> MultiMeshInstance3D:
+static func place(target: Node3D, name: String, xforms: Array, range_end := 900.0, shadows := true, terminal := false) -> MultiMeshInstance3D:
 	var m := mesh(name)
 	if m == null or xforms.is_empty():
 		return null
+	if terminal:
+		if not _terminal_meshes.has(name):
+			if _terminal_mat == null:
+				_terminal_mat = _mat.duplicate()
+				_terminal_mat.set_shader_parameter("terminal", true)
+				_terminal_mat.set_shader_parameter("terminal_anchor", SkyportDistrict.terminal_anchor())
+			var room_mesh := m.duplicate() as ArrayMesh
+			for i in room_mesh.get_surface_count():
+				if room_mesh.surface_get_material(i) == _mat:
+					room_mesh.surface_set_material(i, _terminal_mat)
+			_terminal_meshes[name] = room_mesh
+		m = _terminal_meshes[name]
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = m

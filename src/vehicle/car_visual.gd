@@ -37,6 +37,7 @@ var tail_mat: StandardMaterial3D
 var head_mat: StandardMaterial3D
 var _reverse_mat: ShaderMaterial
 var _reverse_light: SpotLight3D
+var _brake_light: OmniLight3D
 var _brake_level := 0.0
 var _reverse_level := 0.0
 var _contact_weight := 0.0
@@ -571,23 +572,34 @@ func enable_headlights(_shadows := false) -> void:
 	var main := SpotLight3D.new()
 	main.name = "Headlight"
 	main.light_color = Color(0.95, 0.96, 1.0)
-	main.spot_range = 42.0
-	main.spot_angle = 30.0
+	main.spot_range = 48.0
+	main.spot_angle = 33.0
 	main.spot_angle_attenuation = 1.15
-	main.spot_attenuation = 1.36
+	main.spot_attenuation = 1.16
 	main.light_specular = 0.56
 	main.position = Vector3(0.0, mid.y, mid.z - 0.54)
-	main.rotation = Vector3(deg_to_rad(-12.0), 0.0, 0.0)
+	main.rotation = Vector3(deg_to_rad(-9.5), 0.0, 0.0)
 	main.light_energy = 0.0
 	main.shadow_enabled = false
 	main.visible = false
 	add_child(main)
 	head_lights.append(main)
-	if not lamp_pos["tail"].is_empty() and _reverse_mat != null:
+	if not lamp_pos["tail"].is_empty():
 		var tail := Vector3.ZERO
 		for p: Vector3 in lamp_pos["tail"]:
 			tail += p
 		tail /= float(lamp_pos["tail"].size())
+		_brake_light = OmniLight3D.new()
+		_brake_light.name = "BrakeSpill"
+		_brake_light.position = Vector3(0, tail.y * 0.72, tail.z + 0.40)
+		_brake_light.light_color = Color(1.0, 0.09, 0.035)
+		_brake_light.omni_range = 3.4
+		_brake_light.omni_attenuation = 1.35
+		_brake_light.light_specular = 0.35
+		_brake_light.visible = false
+		add_child(_brake_light)
+		if _reverse_mat == null:
+			return
 		_reverse_light = SpotLight3D.new()
 		_reverse_light.name = "ReverseSpill"
 		_reverse_light.light_color = Color(0.84, 0.91, 1.0)
@@ -668,6 +680,9 @@ func _process(dt: float) -> void:
 	head_mat.emission_energy_multiplier = 0.16 + night_lights * 3.25
 	if _reverse_mat:
 		_reverse_mat.set_shader_parameter("reverse_level", _reverse_level * 2.9)
+	if _brake_light:
+		_brake_light.visible = not switched_off and _brake_level > 0.04 and night_lights > 0.08
+		_brake_light.light_energy = 1.05 * _brake_level * night_lights
 	if _reverse_light:
 		_reverse_light.visible = _reverse_level > 0.025 and night_lights > 0.08
 		_reverse_light.light_energy = _reverse_level * night_lights * 3.1
@@ -680,7 +695,7 @@ func _process(dt: float) -> void:
 	if not head_lights.is_empty():
 		var on := night_lights > 0.05
 		head_lights[0].visible = on
-		head_lights[0].light_energy = 8.5 * night_lights
+		head_lights[0].light_energy = 10.5 * night_lights
 		if head_lights.size() > 1:
 			head_lights[1].visible = on
 			head_lights[1].light_energy = 3.0 * night_lights

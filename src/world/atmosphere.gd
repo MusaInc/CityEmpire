@@ -75,6 +75,9 @@ var _weather_left := 240.0
 var _rng := RandomNumberGenerator.new()
 var _sky_t := 0.0
 var _world: Node
+var _interior_mix := 0.0
+var _interior_target := 0.0
+var _interior_poll := 0.0
 
 
 static func sun_direction() -> Vector3:
@@ -94,7 +97,7 @@ static func sun_angles(h: float) -> Vector2:
 
 
 func _ready() -> void:
-	add_to_group("atmosphere")  # (homes read `night` to warm their lights)
+	add_to_group("atmosphere")
 	_rng.randomize()
 	var settings := get_node_or_null("/root/Settings")
 	var preset: Dictionary = settings.preset() if settings else {"shadows": true, "glow": true}
@@ -327,8 +330,8 @@ func _apply(dt: float, instant: bool) -> void:
 	else:
 		# Moon: high in the south-east, cool and crisp.
 		sun.rotation_degrees = Vector3(-42.0, 150.0, 0.0)
-		sun.light_color = Color(0.66, 0.76, 0.98)
-		sun.light_energy = 0.52 * (1.0 - smoothstep(-12.0, -3.0, el))
+		sun.light_color = Color(0.88, 0.92, 1.0)
+		sun.light_energy = 0.56 * (1.0 - smoothstep(-12.0, -3.0, el))
 		sky_mat.set_shader_parameter("sun_glow", 0.28)
 		sky_mat.set_shader_parameter("disc_size", 0.999984)
 		sky_mat.set_shader_parameter("disc_k", 2.4)
@@ -342,12 +345,12 @@ func _apply(dt: float, instant: bool) -> void:
 	# water and burns off by mid-morning (less if it's windy and wet).
 	var dawn := smoothstep(4.0, 6.0, hour) * (1.0 - smoothstep(8.0, 10.5, hour))
 	var mist := maxf(float(w["mist"]), dawn * 0.75 * (1.0 - float(w["rain"])) * (1.0 - 0.7 * punch))
-	sun.shadow_opacity = lerpf(1.0 - 0.52 * overcast, 0.98 - 0.65 * cloud_softness, day_light)
+	sun.shadow_opacity = lerpf(0.64 - 0.35 * overcast, 0.98 - 0.65 * cloud_softness, day_light)
 
 	# --- sky colours by sun height, moody slate-blue under rain/storm.
-	var zen := _ramp(el, [[-18.0, Color(0.018, 0.032, 0.075)], [-6.0, Color(0.06, 0.11, 0.28)],
+	var zen := _ramp(el, [[-18.0, Color(0.022, 0.030, 0.054)], [-6.0, Color(0.06, 0.11, 0.28)],
 		[0.0, Color(0.13, 0.25, 0.52)], [8.0, Color(0.17, 0.35, 0.64)], [25.0, ZENITH], [60.0, Color(0.15, 0.40, 0.76)]])
-	var hor := _ramp(el, [[-18.0, Color(0.065, 0.095, 0.165)], [-6.0, Color(0.32, 0.28, 0.42)],
+	var hor := _ramp(el, [[-18.0, Color(0.095, 0.108, 0.145)], [-6.0, Color(0.32, 0.28, 0.42)],
 		[0.0, Color(0.92, 0.66, 0.50)], [8.0, Color(0.88, 0.80, 0.74)], [25.0, HORIZON], [60.0, Color(0.72, 0.82, 0.92)]])
 	var haze := _ramp(el, [[-18.0, Color(0.07, 0.09, 0.15)], [-6.0, Color(0.46, 0.30, 0.34)],
 		[0.0, Color(0.96, 0.64, 0.42)], [8.0, Color(0.98, 0.74, 0.54)], [25.0, Color(1.0, 0.78, 0.58)],
@@ -391,18 +394,24 @@ func _apply(dt: float, instant: bool) -> void:
 
 	# --- ambient, exposure, fog.
 	# Deeper, sky-tinted shadows by day; readable urban glow at night.
-	env.ambient_light_energy = _rampf(el, [[-15.0, 0.30], [-4.0, 0.38], [2.0, 0.46], [20.0, 0.52]]) \
+	env.ambient_light_energy = _rampf(el, [[-15.0, 0.48], [-4.0, 0.49], [2.0, 0.50], [20.0, 0.52]]) \
 		* (1.0 + 0.14 * overcast + 0.06 * hz * day_light) + fl * 2.0
 	var direct_daylight := day_light * (1.0 - overcast)
 	env.ambient_light_energy *= 1.0 + 0.08 * direct_daylight
 	# (Shade was ~80 % blue sky light: streets in shadow read as dusk. Now
 	# mostly neutral-warm bounce off the pavements and walls, a third sky.)
-	env.ambient_light_sky_contribution = lerpf(0.56, 0.3, direct_daylight)
+	env.ambient_light_sky_contribution = lerpf(0.56, 0.30, direct_daylight) * lerpf(1.0, 0.25, night)
 	# The non-sky share: warm ground bounce by day, cool slate-blue at night.
-	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.36, 0.45, 0.66)], [2.0, Color(0.70, 0.60, 0.58)],
+	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.67, 0.68, 0.73)], [2.0, Color(0.72, 0.66, 0.63)],
 		[15.0, Color(0.80, 0.77, 0.73)], [40.0, Color(0.82, 0.80, 0.77)]]).lerp(Color(0.70, 0.73, 0.78), overcast * 0.65)
-	env.tonemap_exposure = lerpf(1.02, 1.16, night) * lerpf(1.0, 1.08, overcast) * (1.0 + 0.03 * hz * day_light)
-	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	var cam := get_viewport().get_camera_3d()
+	_interior_poll -= dt
+	if instant or _interior_poll <= 0.0:
+		_interior_poll = 0.10
+		_interior_target = InteriorKit.camera_weight(get_tree(), cam.global_position) if cam else 0.0
+	_interior_mix = lerpf(_interior_mix, _interior_target, 1.0 if instant else 1.0 - exp(-dt * 3.8))
+	var street_exposure := lerpf(1.02, 1.20, night) * lerpf(1.0, 1.08, overcast) * (1.0 + 0.03 * hz * day_light)
+	env.tonemap_exposure = lerpf(street_exposure, 1.13, _interior_mix)
 	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
 	var hk := lerpf(1.0, 0.58, hz)
 	# (Fair weather: clear air – the distance was washed out from 185 m.)
@@ -415,11 +424,11 @@ func _apply(dt: float, instant: bool) -> void:
 	env.fog_sun_scatter = (0.38 + 0.25 * hz) * day_light * (1.0 - overcast)
 	env.fog_aerial_perspective = lerpf(0.55, 0.45, hz)
 	env.fog_height = MIST_TOP + 4.0 * mist
-	env.fog_height_density = MIST_DENSITY * mist
-	env.glow_intensity = lerpf(0.24 + 0.04 * punch + 0.04 * hz, 0.48, night)
+	env.fog_height_density = MIST_DENSITY * mist * (1.0 - _interior_mix)
+	env.glow_intensity = lerpf(0.24 + 0.04 * punch + 0.04 * hz, 0.38, night)
 	env.glow_hdr_threshold = lerpf(1.38, 0.95, night)
-	env.adjustment_contrast = 1.09 + (0.03 * punch - 0.02 * hz) * day_light - 0.03 * fog - 0.02 * overcast
-	env.adjustment_saturation = 1.09 + (0.04 * punch - 0.02 * hz) * day_light - 0.05 * fog - 0.06 * overcast
+	env.adjustment_contrast = lerpf(1.09, 1.025, night) + (0.03 * punch - 0.02 * hz) * day_light - 0.03 * fog - 0.02 * overcast
+	env.adjustment_saturation = lerpf(1.09, 1.01, night) + (0.04 * punch - 0.02 * hz) * day_light - 0.05 * fog - 0.06 * overcast
 
 	# --- shared shader inputs.
 	var top_l := zen.srgb_to_linear()

@@ -5,6 +5,10 @@
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
+#include "res://src/world/shaders/terminal_light.gdshaderinc"
+
+uniform bool terminal = false;
+uniform vec2 terminal_anchor;
 global uniform float wetness;
 global uniform float night;
 
@@ -38,7 +42,7 @@ void fragment() {
 	float gloss = step(0.3, COLOR.a) * (1.0 - step(0.8, COLOR.a));
 	float up = clamp(dot(NORMAL, (VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz), 0.0, 1.0);
 	float ao = mix(0.72, 1.0, smoothstep(0.0, 0.5, v_y));
-	float wet = clamp(wetness, 0.0, 1.0) * mix(0.4, 1.0, up);
+	float wet = (terminal ? 0.0 : clamp(wetness, 0.0, 1.0)) * mix(0.4, 1.0, up);
 	// Weathering on matte surfaces (concrete, paint): broad blotches, and
 	// faint vertical rain streaks on walls; none on lamps and gloss.
 	float matte = step(0.8, COLOR.a);
@@ -48,5 +52,8 @@ void fragment() {
 	ALBEDO = col * ao * (1.0 - 0.22 * wet) * (1.0 - lamp * 0.72);
 	ROUGHNESS = mix(mix(0.72, 0.28, gloss), 0.18, wet * 0.8);
 	METALLIC = gloss * 0.45;
-	EMISSION = col * lamp * mix(lamp_day, lamp_night, clamp(night, 0.0, 1.0));
+	EMISSION = col * lamp * (terminal ? 2.0 : mix(lamp_day, lamp_night, clamp(night, 0.0, 1.0)));
+	if (terminal) {
+		EMISSION += col * ao * terminal_irradiance(terminal_axes(v_wp, terminal_anchor), up) * (1.0 - lamp);
+	}
 }

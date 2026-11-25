@@ -681,10 +681,16 @@ func _build_geometry() -> void:
 	_lobby_light = OmniLight3D.new()
 	_lobby_light.position = Vector3(0.0, LOBBY_H - 0.45, z_lob0 + LOBBY_D * 0.5)
 	_lobby_light.light_color = Color(1.0, 0.90, 0.74)
-	_lobby_light.light_energy = 1.45
-	_lobby_light.omni_range = 8.5
-	_lobby_light.shadow_enabled = false
+	InteriorKit.tune_light(_lobby_light, 2.65, 7.0)
 	add_child(_lobby_light)
+	InteriorKit.add_lighting_zone(self, AABB(Vector3(-hw, 0, z_lob0), Vector3(LOBBY_W, LOBBY_H, LOBBY_D)))
+	var landing := InteriorKit.add_lighting_zone(self,
+		AABB(Vector3(-ul_w, top_y, -bridge_len), Vector3(ul_w * 2.0, 2.85, bridge_len + 0.12)))
+	var landing_light := OmniLight3D.new()
+	landing_light.position = Vector3(0.0, top_y + 2.63, -bridge_len * 0.5)
+	landing_light.light_color = Color(1.0, 0.94, 0.84)
+	InteriorKit.tune_light(landing_light, 1.9, 3.8)
+	landing.add_child(landing_light)
 
 	# ==================== 7. 3D WORKING ELEVATOR CABIN ====================
 	_build_cabin(c_wood, c_floor, c_metal, c_trim)
@@ -759,10 +765,9 @@ func _build_cabin(c_wood: Color, c_floor: Color, c_metal: Color, c_trim: Color) 
 	_cabin_light = OmniLight3D.new()
 	_cabin_light.position = Vector3(0.0, CAB_H - 0.25, SHAFT_D * 0.5)
 	_cabin_light.light_color = Color(1.0, 0.94, 0.84)
-	_cabin_light.light_energy = 1.15
-	_cabin_light.omni_range = 4.5
-	_cabin_light.shadow_enabled = false
+	InteriorKit.tune_light(_cabin_light, 1.85, 3.8)
 	_cabin.add_child(_cabin_light)
+	InteriorKit.add_lighting_zone(_cabin, AABB(Vector3(-chw, 0.0, z0), Vector3(CAB_W, CAB_H, CAB_D)))
 
 	# Cabin sliding doors (front = toward ground lobby, back = toward upper apartment)
 	var lw := DOOR_W * 0.5

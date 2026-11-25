@@ -4,6 +4,7 @@
 shader_type spatial;
 render_mode diffuse_burley;
 uniform vec3 base_col : source_color = vec3(0.78, 0.77, 0.74);
+uniform vec3 fixture_tint : source_color = vec3(1.0, 0.95, 0.89);
 uniform vec2 room_size = vec2(10.0);
 uniform int style = 0;
 uniform sampler2D surface_detail : filter_linear_mipmap_anisotropic, repeat_enable;
@@ -78,6 +79,9 @@ void fragment() {
 	float back_edge = room_size.y - p.y;
 	c *= mix(0.77, 1.0, smoothstep(0.0, 0.48, min(side_edge, back_edge)));
 	ALBEDO = c;
+	// Low-frequency ceiling and wall bounce survives local light culling.
+	float footprint = smoothstep(0.0, 1.9, min(side_edge, back_edge));
+	EMISSION = c * fixture_tint * mix(0.065, 0.21, footprint);
 	ROUGHNESS = rough;
 	SPECULAR = 0.3;
 }

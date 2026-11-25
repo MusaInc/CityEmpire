@@ -3130,11 +3130,7 @@ func _build_terminal(street: StaticBody3D) -> void:
 	var roof := MeshInstance3D.new()
 	roof.name = "TerminalRoof"
 	roof.mesh = st.commit()
-	var rm := StandardMaterial3D.new()
-	rm.albedo_color = Color(0.9, 0.91, 0.92)
-	rm.metallic = 0.12
-	rm.roughness = 0.42
-	roof.material_override = rm
+	roof.material_override = SkyportDistrict.terminal_surface(true)
 	roof.visibility_range_end = 2600.0
 	_target.add_child(roof)
 	var sh := ConcavePolygonShape3D.new()

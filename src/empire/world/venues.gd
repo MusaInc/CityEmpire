@@ -441,29 +441,14 @@ func _lights(root: Node3D, id: String) -> void:
 	var nx := clampi(int(W / 14.0), 2, 4)
 	var nz := clampi(int(D / 12.0), 1, 2)
 	var warm := id in ["arden", "meridian", "aviation", "marina"]
-	# Indoors the floor would take its ambient from the blue zenith sky (dark
-	# slate floors): an interior probe gives the room its own ambient light
-	# and reflections (rendered once, on load).
-	var pr := ReflectionProbe.new()
-	pr.name = "RoomProbe"
-	pr.interior = true
-	pr.update_mode = ReflectionProbe.UPDATE_ONCE
-	pr.size = Vector3(W, H, D)
-	pr.position = Vector3(0, H * 0.5, -D * 0.5)
-	pr.origin_offset = Vector3(0, -H * 0.5 + 1.6, 0)
-	pr.box_projection = true
-	pr.ambient_mode = ReflectionProbe.AMBIENT_COLOR
-	pr.ambient_color = Color(1.0, 0.93, 0.84) if warm else Color(0.95, 0.96, 1.0)
-	pr.ambient_color_energy = 0.55
-	pr.max_distance = maxf(W, D) * 1.5
-	pr.blend_distance = 0.5
-	root.add_child(pr)
+	var zone := InteriorKit.add_lighting_zone(root, AABB(Vector3(-W * 0.5, 0.0, -D), Vector3(W, H, D)))
+	InteriorKit.room_probe(zone, Color(1.0, 0.93, 0.84) if warm else Color(0.96, 0.98, 1.0), 0.67, 0.42)
 	for i in nx:
 		for k in nz:
 			var o := OmniLight3D.new()
 			o.position = Vector3(-W * 0.5 + W * (i + 0.5) / nx, H - 0.8, -D * (k + 0.5) / nz)
 			o.light_color = Color(1.0, 0.94, 0.85) if warm else Color(0.96, 0.98, 1.0)
-			InteriorKit.tune_light(o, 1.72, maxf(W / nx, D / nz) * 1.1 + 2.0)
+			InteriorKit.tune_light(o, 4.0, maxf(W / nx, D / nz) * 1.1 + 2.0)
 			o.distance_fade_begin = 80.0
 			o.distance_fade_length = 30.0
 			root.add_child(o)

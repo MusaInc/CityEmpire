@@ -8,9 +8,9 @@ extends Node3D
 ## deck, a car, a wall) – and the draped pools fade out inside RANGE
 ## (lamp_glow.gdshader near_real), carrying only the far streets.
 ## Night only; re-listed a few times a second. COUNT stays under the Mobile
-## renderer's per-object light limit (8) so nothing flickers.
+## spot limit, with slots available for vehicle lamps and signs.
 
-const COUNT := 8
+const COUNT := 6
 const RANGE := 70.0
 const EVERY := 0.3
 const WET_ROAD_LIGHTS := 4
@@ -76,7 +76,8 @@ func setup(p_worlds: Array, p_camera_fn: Callable) -> void:
 func _process(dt: float) -> void:
 	if worlds.is_empty():
 		return
-	var on: bool = (worlds[0] as CityWorld)._glow_on
+	var night_level := CarVisual.lamps
+	var on := night_level > 0.24
 	_t -= dt
 	if _t > 0.0:
 		return
@@ -117,7 +118,7 @@ func _process(dt: float) -> void:
 					var head := lamp * CityWorld.LAMP_HEAD
 					var d := head.distance_squared_to(cam)
 					if d < range_sq:
-						cand.append([d, head, -lamp.basis.z.normalized()])
+						cand.append([d, head, -lamp.basis.z.normalized(), w.layout.district(head.x, head.z)])
 	if skyport == null and not worlds.is_empty():
 		var sp: Variant = worlds[0].get("skyport")
 		if sp is SkyportIsland:
@@ -126,13 +127,13 @@ func _process(dt: float) -> void:
 		for head: Vector3 in skyport.lamp_heads():
 			var d := head.distance_squared_to(cam)
 			if d < range_sq:
-				cand.append([d, head, Vector3.ZERO])
+				cand.append([d, head, Vector3.ZERO, "airport"])
 	cand.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
 	for i in WET_ROAD_LIGHTS:
 		_wet_road_lights[i] = Vector4.ZERO
 		if i < cand.size():
 			var head: Vector3 = cand[i][1]
-			_wet_road_lights[i] = Vector4(head.x, head.y, head.z, _lamp_temperature(head))
+			_wet_road_lights[i] = Vector4(head.x, head.y, head.z, _lamp_temperature(head, cand[i][3]))
 	for world: CityWorld in worlds:
 		if world.ground_mat:
 			world.ground_mat.set_shader_parameter("wet_road_lamps", _wet_road_lights)
@@ -145,7 +146,11 @@ func _process(dt: float) -> void:
 			var roadward: Vector3 = cand[i][2]
 			l.global_position = head - Vector3.UP * 0.15
 			l.look_at(l.global_position + Vector3.DOWN + roadward * 0.18, Vector3.FORWARD)
-			l.light_color = Color(1.0, 0.76, 0.52).lerp(Color(0.88, 0.92, 1.0), _lamp_temperature(head))
+			var district: String = cand[i][3]
+			l.light_color = Color(1.0, 0.76, 0.52).lerp(Color(0.91, 0.95, 1.0), _lamp_temperature(head, district))
+			l.light_energy = smoothstep(0.24, 0.70, night_level) * float(DISTRICT_ENERGY.get(district, 6.8))
+			l.spot_range = 20.0 if district in ["airport", "docks"] else 17.0
+			l.spot_angle = 56.0 if district in ["cbd", "midtown", "airport"] else 51.0
 			# One local shadow pool on Medium or High. The other lamps
 			# keep the rendered street coverage without extra shadow maps.
 			l.shadow_enabled = i == 0 and Settings.quality >= Settings.Quality.MEDIUM and float(cand[i][0]) < SHADOW_RANGE * SHADOW_RANGE
@@ -154,9 +159,11 @@ func _process(dt: float) -> void:
 			l.visible = false
 
 
-static func _lamp_temperature(head: Vector3) -> float:
-	# Westbank's older lanterns are warm. The commercial core and Skyport
-	# mix in neutral-white LED replacements. Zero is reserved for no lamp.
-	var modern := head.z > 895.0 or head.x > 190.0
-	var mix_k := 0.55 if modern else 0.16
-	return mix_k + float(absi(hash(Vector2i(roundi(head.x), roundi(head.z)))) % 17) * 0.014
+const DISTRICT_ENERGY := {"suburb": 5.8, "georgian": 5.8, "docks": 7.4, "cbd": 8.2, "airport": 8.0}
+const DISTRICT_TEMPERATURE := {"suburb": 0.15, "georgian": 0.20, "waterfront": 0.38,
+	"midtown": 0.54, "cbd": 0.72, "docks": 0.37, "airport": 0.77}
+
+
+static func _lamp_temperature(head: Vector3, district: String) -> float:
+	var variation := float(absi(hash(Vector2i(roundi(head.x), roundi(head.z)))) % 17) * 0.01
+	return float(DISTRICT_TEMPERATURE.get(district, 0.4)) + variation

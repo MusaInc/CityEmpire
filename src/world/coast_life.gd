@@ -100,7 +100,7 @@ func _beach() -> void:
 		var block := int(s / 60.0)
 		# Steps down from the esplanade every 60 m.
 		if posmod(int(s / 7.5), 8) == 0:
-			_steps(k, p, n, t, top, _sand_y(sm, 6.0))
+			_steps(k, sm, p, n, t, top)
 			continue
 		# A row of beach huts under the wall (in runs, with gaps).
 		if block % 3 != 2:
@@ -124,19 +124,29 @@ func _beach() -> void:
 				_umbrella(k, p + n * d2 + t * 3.5, n, t, y2, UMBRELLAS[rng.randi() % UMBRELLAS.size()])
 
 
-func _steps(k: Dictionary, p: Vector2, n: Vector2, t: Vector2, top: float, sand: float) -> void:
-	var rise := top - sand
-	if rise < 0.6:
+func _steps(k: Dictionary, sample: Array, p: Vector2, n: Vector2, t: Vector2, top: float) -> void:
+	const TREAD := 0.45
+	const MAX_RISE := 0.29
+	var sand := _sand_y(sample, 6.0)
+	if top - sand < 0.6:
 		return
-	var steps := ceili(rise / 0.3)
-	var h := rise / steps
+	# Match the landing to the sand at the end of the actual stair run.
+	# The longer flights used to terminate at the height of the six-metre sample.
+	var steps := ceili((top - sand) / MAX_RISE) + 1
+	for _pass in 4:
+		sand = _sand_y(sample, steps * TREAD)
+		var needed := maxi(2, ceili((top - sand) / MAX_RISE) + 1)
+		if needed == steps:
+			break
+		steps = needed
+	sand = _sand_y(sample, steps * TREAD)
 	for i in steps:
-		var y1 := top - h * i
-		var a := p + n * (0.3 + i * 0.45)
-		var b := a + n * 0.45
-		# (A flight 3 m wide, each step a solid block down to the sand.)
-		var pts := PackedVector2Array([a - t * 1.5, a + t * 1.5, b + t * 1.5, b - t * 1.5])
-		L._kprism(k, pts, sand - 0.4, y1 - h, Color(0.72, 0.68, 0.6))
+		var y := lerpf(top, sand, float(i) / (steps - 1))
+		var a := p + n * (-0.65 if i == 0 else i * TREAD)
+		var b := p + n * ((i + 1) * TREAD)
+		var points := PackedVector2Array([a - t * 1.5, a + t * 1.5, b + t * 1.5, b - t * 1.5])
+		L._kprism(k, points, minf(y, sand) - 0.45, y, Color(0.72, 0.68, 0.6))
+	CoastKit._gap(p, 1.7)
 
 
 func _hut(k: Dictionary, c: Vector2, n: Vector2, t: Vector2, y: float, col: Color) -> void:

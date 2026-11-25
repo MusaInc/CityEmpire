@@ -262,9 +262,50 @@ static func _batch(root: Node3D, mesh_id: String, offsets: Array[Transform3D], c
 static func tune_light(light: OmniLight3D, energy: float, reach: float) -> void:
 	light.light_energy = energy
 	light.omni_range = reach
-	light.omni_attenuation = 1.47
+	light.omni_attenuation = 1.26
 	light.light_specular = 0.42
 	light.shadow_enabled = false
 	light.distance_fade_enabled = true
 	light.distance_fade_begin = 46.0
 	light.distance_fade_length = 18.0
+
+
+## Use the room frame so bounds follow rotated storefronts and home floors.
+static func add_lighting_zone(parent: Node3D, bounds: AABB, room_transform := Transform3D.IDENTITY) -> Node3D:
+	var zone := Node3D.new()
+	zone.name = "InteriorLightingZone"
+	zone.transform = room_transform
+	zone.set_meta("bounds", bounds)
+	zone.add_to_group("interior_lighting_zones")
+	parent.add_child(zone)
+	return zone
+
+
+static func camera_weight(tree: SceneTree, camera_position: Vector3) -> float:
+	var weight := 0.0
+	for zone: Node3D in tree.get_nodes_in_group("interior_lighting_zones"):
+		if not zone.is_visible_in_tree() or zone.is_queued_for_deletion():
+			continue
+		var p := zone.to_local(camera_position)
+		var room: AABB = zone.get_meta("bounds")
+		var margin := (p - room.position).min(room.end - p)
+		weight = maxf(weight, smoothstep(-0.30, 1.20, minf(margin.x, minf(margin.y, margin.z))))
+	return weight
+
+
+static func room_probe(zone: Node3D, tint: Color, ambient_energy: float, reflection: float) -> void:
+	var room: AABB = zone.get_meta("bounds")
+	var probe := ReflectionProbe.new()
+	probe.name = "InteriorBounce"
+	probe.position = room.get_center()
+	probe.size = room.size
+	probe.origin_offset.y = minf(0.0, 1.7 - room.size.y * 0.5)
+	probe.interior = true
+	probe.box_projection = true
+	probe.blend_distance = 0.65
+	probe.ambient_mode = ReflectionProbe.AMBIENT_COLOR
+	probe.ambient_color = tint
+	probe.ambient_color_energy = ambient_energy
+	probe.intensity = reflection
+	probe.max_distance = room.size.length()
+	zone.add_child(probe)

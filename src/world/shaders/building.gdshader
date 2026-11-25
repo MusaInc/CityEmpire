@@ -799,7 +799,8 @@ void fragment() {
 			// tungsten, cool office white or the odd blue TV glow.
 			bool office = style == 0.0 || style == 2.0 || style == 4.0 || style == 6.0 || style == 7.0;
 			float day_share = office ? 0.18 + 0.16 * fract(seed * 5.3) : lit_fraction;
-			float night_share = mix(0.06, 0.5, pow(fract(seed * 3.7), 1.4));
+			float occupied_share = pow(fract(seed * 3.7), 1.4);
+			float night_share = office ? mix(0.07, 0.42, occupied_share) : mix(0.15, 0.62, occupied_share);
 			float lit_share = mix(day_share, night_share, night);
 			float lit = step(1.0 - lit_share, hash12(cell * 1.31 + seed * 7.0)) * (shop ? 1.0 : 0.7);
 			if (office && !shop) {
@@ -808,7 +809,10 @@ void fragment() {
 				lit = max(lit, occupied * mix(0.32, 0.82, rnd) * step(0.18, rnd));
 			}
 			float lk = hash12(cell * 3.17 + seed * 11.0);
-			vec3 lamp_col = lk < 0.55 ? interior_warm : (lk < 0.88 ? vec3(0.86, 0.9, 1.0) : vec3(0.5, 0.66, 1.0));
+			vec3 lamp_col = mix(interior_warm, vec3(0.93, 0.96, 1.0), smoothstep(0.45, 0.93, lk));
+			if (office) {
+				lamp_col = mix(vec3(1.0, 0.91, 0.75), vec3(0.91, 0.97, 1.0), lk);
+			}
 			lamp_col = mix(office ? vec3(0.95, 0.95, 0.9) : interior_warm, lamp_col, night);
 			float lit_k = mix(lit_strength, 1.3, night) * (0.45 + 0.75 * hash12(cell * 0.71 + seed));
 			vec3 interior = tint * (0.75 + 0.35 * rnd);
@@ -877,7 +881,11 @@ void fragment() {
 		}
 		// Night walls never go black: a faint city-glow bounce everywhere and
 		// warm light washing up from the street lamps over the lowest floors.
-		emit += wall * (1.0 - glass) * night * (0.012 + 0.045 * exp(-uv.y / 5.5)) * vec3(1.0, 0.87, 0.74);
+		float facade_wash = exp(-max(uv.y, 0.0) / 6.5);
+		float uplights = pow(0.5 + 0.5 * cos(uv.x * 0.68 + seed * 21.0), 3.0);
+		float architectural = style == 0.0 || style == 5.0 || style == 7.0 ? 0.12 : 0.03;
+		emit += wall * (1.0 - glass) * night * (0.012 + (0.034 + architectural * uplights) * facade_wash)
+			* vec3(1.0, 0.87, 0.74);
 		// Window reveal: slightly darker frame around each opening.
 		vec3 framed = mix(wall, wall * 0.72, (1.0 - glass) * frame * detail);
 		if (punched && window_zone && detail > 0.0) {

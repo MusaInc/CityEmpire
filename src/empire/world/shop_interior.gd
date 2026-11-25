@@ -222,6 +222,7 @@ func rebuild() -> void:
 	_static = Node3D.new()
 	_static.name = "Static"
 	add_child(_static)
+	InteriorKit.add_lighting_zone(_static, AABB(Vector3(0, 0, -D), Vector3(W, H, D)))
 	_goods = Node3D.new()
 	_goods.name = "Goods"
 	add_child(_goods)
@@ -1587,13 +1588,13 @@ func _sign_text() -> String:
 
 ## `night`: the street's shut for the night (other people's shops with a
 ## roller shutter pull it down then).
-func update_signs(trading: bool, night := false) -> void:
+func update_signs(trading: bool, night := false, occupied := false) -> void:
 	if is_instance_valid(_trade_board):
 		_trade_board.text = _aboard_text() if trading else "CLOSED"
 	if kind == "shop" and (biz != null or not rival.is_empty()):
-		_lighting_open = trading or is_instance_valid(_delivery_worker)
+		_lighting_open = trading or occupied or is_instance_valid(_delivery_worker)
 		for light in _sales_lights:
-			light.light_energy = float(light.get_meta("open_energy")) * (1.0 if _lighting_open else 0.16)
+			light.light_energy = float(light.get_meta("open_energy")) * (1.0 if _lighting_open else 0.62)
 		if _trade_glow:
 			_trade_glow.visible = _lighting_open
 		if is_instance_valid(_sign_light):
@@ -3594,6 +3595,8 @@ func _floor(c: Color, style: int) -> void:
 	fm.shader = load("res://src/empire/world/shop_floor.gdshader")
 	fm.set_shader_parameter("base_col", c)
 	fm.set_shader_parameter("room_size", Vector2(W, D))
+	var warm := String(unit.get("street_use", "")) in ["hotel", "residential", "restaurant", "cafe"]
+	fm.set_shader_parameter("fixture_tint", Color(1.0, 0.92, 0.79) if warm else Color(0.97, 0.98, 1.0))
 	fm.set_shader_parameter("style", style)
 	fm.set_shader_parameter("surface_detail", load(FLOOR_DETAIL[clampi(style, 0, FLOOR_DETAIL.size() - 1)]))
 	var fi := MeshInstance3D.new()
@@ -3612,17 +3615,17 @@ func _spot_light(p: Vector3, tint: Color, energy: float, radius: float, beam: fl
 	light.position = p
 	light.rotation.x = -PI * 0.5
 	light.light_color = tint
-	light.light_energy = energy
+	light.light_energy = energy * 1.65
 	light.light_specular = 0.31
 	light.spot_range = radius
 	light.spot_attenuation = 1.18
-	light.spot_angle = beam
-	light.spot_angle_attenuation = 1.72
+	light.spot_angle = beam + 8.0
+	light.spot_angle_attenuation = 1.25
 	var is_own_shop := biz != null and rival.is_empty() and not public_display
 	light.distance_fade_enabled = true
 	light.distance_fade_begin = 42.0 if is_own_shop else 32.0
 	light.distance_fade_length = 12.0
-	light.set_meta("open_energy", energy)
+	light.set_meta("open_energy", light.light_energy)
 	_static.add_child(light)
 	_sales_lights.append(light)
 
@@ -3631,14 +3634,14 @@ func _light(p: Vector3, c: Color, e: float, r: float) -> void:
 	var o := OmniLight3D.new()
 	o.position = p
 	o.light_color = c
-	InteriorKit.tune_light(o, e, r)
+	InteriorKit.tune_light(o, e * 1.8, r)
 	# Tighten distance fade on non-player-occupied shops so distant interiors
 	# don't waste active mobile lights.
 	var is_own_shop := biz != null and rival.is_empty() and not public_display
 	o.distance_fade_begin = 42.0 if is_own_shop else 32.0
 	o.distance_fade_length = 12.0 if is_own_shop else 8.0
 	_static.add_child(o)
-	o.set_meta("open_energy", e)
+	o.set_meta("open_energy", o.light_energy)
 	_sales_lights.append(o)
 
 

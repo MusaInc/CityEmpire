@@ -173,9 +173,9 @@ func _steps(p: Vector2, n: Vector2, top: float, row: Array) -> void:
 	var h := rise / steps
 	for i in steps:
 		var y1 := top - h * i
-		var a := p + n * (0.2 + i * 0.4)
-		var b := a + n * 0.4
-		L._kprism(k, PackedVector2Array([a - t * 1.4, a + t * 1.4, b + t * 1.4, b - t * 1.4]), sand - 0.5, y1 - h, STONE)
+		var a := p + n * (-0.65 if i == 0 else i * 0.4)
+		var b := p + n * ((i + 1) * 0.4)
+		L._kprism(k, PackedVector2Array([a - t * 1.4, a + t * 1.4, b + t * 1.4, b - t * 1.4]), sand - 0.5, y1, STONE)
 	# Cheek walls with a handrail.
 	var e := p + n * (0.2 + steps * 0.4)
 	for sg: float in [-1.0, 1.0]:
@@ -208,7 +208,8 @@ func _jetty(p: Vector2, n: Vector2, deck: float, length: float, _west: bool, hw 
 	var k := _k(p)
 	var t := Vector2(-n.y, n.x)
 	var b := p + n * length
-	var A := Vector3(p.x, deck, p.y)
+	var land := p - n * 0.65
+	var A := Vector3(land.x, deck, land.y)
 	var B := Vector3(b.x, deck, b.y)
 	var T := Vector3(t.x, 0.0, t.y)
 	L._kbeam(k, A + Vector3.DOWN * 0.15, B + Vector3.DOWN * 0.15, hw * 2.0, 0.3, WOOD)

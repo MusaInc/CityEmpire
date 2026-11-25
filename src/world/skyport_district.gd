@@ -34,6 +34,9 @@ const FUEL := Vector2(2342.0, 2.0)      # fuel station canopy centre
 const RENTAL := Rect2(2282, 44, 128, 92)
 const MRO := [2470.0, 196.0, 2546.0, 288.0]
 
+const FIXTURE_X := 1972.0
+const FIXTURE_SPACING := 16.0
+const FIXTURE_ROWS := [178.0, 196.0, 216.0]
 const TERMINAL_GLASS := Color(0.66, 0.78, 0.84, 0.3)
 
 
@@ -202,13 +205,28 @@ static func build_terminal_interior(target: Node3D, body: StaticBody3D, isl: Sky
 				pass
 		m.beam(Vector3(gx - 1.25, Y + BALCONY_Y + 1.0, bz), Vector3(gx - 1.25, fy + 1.0, bz - steps * 0.42), 0.06, 0.08, Color(0.75, 0.76, 0.78))
 		m.beam(Vector3(gx + 1.25, Y + BALCONY_Y + 1.0, bz), Vector3(gx + 1.25, fy + 1.0, bz - steps * 0.42), 0.06, 0.08, Color(0.75, 0.76, 0.78))
-	# Ceiling luminaires (rows over each zone) – lit at night through the
-	# glass.
-	var lx := H.position.x + 10.0
-	while lx < H.end.x - 6.0:
-		for lz: float in [178.0, 196.0, 216.0]:
+	# Always-on luminaires. Static surfaces share the same lighting grid as
+	# this fixture layout. Real lights are drawn from a small nearby pool.
+	var light_points := PackedVector3Array()
+	var balcony_fixtures := BuildingMesher.new()
+	for x in 18:
+		var lx := FIXTURE_X + x * FIXTURE_SPACING
+		for lz: float in FIXTURE_ROWS:
 			put.call("ceiling_lamp", at(lx, lz, 0.0, Y + 10.5))
-		lx += 16.0
+			light_points.append(Vector3(lx, Y + 8.5, lz))
+		var underside := Y + BALCONY_Y - 0.41
+		balcony_fixtures.solid(lx - 1.7, 233.04, lx + 1.7, 233.36, underside, underside + 0.07, Color.WHITE)
+		light_points.append(Vector3(lx, Y + BALCONY_Y - 0.62, 233.2))
+	for x: float in DOORS:
+		light_points.append(Vector3(x, Y + 2.9, H.position.y - 1.9))
+	var zone := InteriorKit.add_lighting_zone(target,
+		AABB(Vector3(H.position.x, Y, H.position.y), Vector3(H.size.x, 14.0, H.size.y)))
+	for x: float in DOORS:
+		InteriorKit.add_lighting_zone(target, AABB(Vector3(x - 4.0, Y, H.position.y - 4.0), Vector3(8.0, 3.6, 4.0)))
+	var lighting := TerminalLights.new()
+	lighting.name = "TerminalLights"
+	lighting.points = light_points
+	zone.add_child(lighting)
 	# The glazing of the security line and the balcony.
 	gl.generate_normals()
 	var gmi := MeshInstance3D.new()
@@ -219,9 +237,102 @@ static func build_terminal_interior(target: Node3D, body: StaticBody3D, isl: Sky
 	gmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	target.add_child(gmi)
 	isl._mesh_into(m, "TerminalInterior", target, 0.0, 700.0)
+	isl._mesh_into(balcony_fixtures, "TerminalBalconyFixtures", target, 0.0, 420.0)
+	var fixtures := target.get_node("TerminalBalconyFixtures") as MeshInstance3D
+	var diffuser := StandardMaterial3D.new()
+	diffuser.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	diffuser.albedo_color = Color(1.0, 0.97, 0.91)
+	diffuser.emission_enabled = true
+	diffuser.emission = diffuser.albedo_color
+	diffuser.emission_energy_multiplier = 1.6
+	fixtures.material_override = diffuser
+	fixtures.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var surfaces := target.get_node("TerminalInterior") as MeshInstance3D
+	surfaces.material_override = terminal_surface()
+	_terminal_contacts(target, K, fy)
 	for name: String in K:
 		var far := 900.0 if name == "entrance_pod" else 420.0
-		SkyportKit.place(target, name, K[name], far, name in ["entrance_pod", "checkin_island"])
+		SkyportKit.place(target, name, K[name], far, name in ["entrance_pod", "checkin_island"], true)
+
+
+## Soft contact under the fixed furniture, batched in sections so each can
+## cull independently along the length of the hall.
+static func _terminal_contacts(target: Node3D, props: Dictionary, floor_y: float) -> void:
+	var footprints := {}
+	for name in ["checkin_island", "security_lane", "seat_row", "gate_desk", "indoor_planter", "info_desk", "carousel", "trolley_bay"]:
+		var mesh := SkyportKit.mesh(name)
+		if mesh == null:
+			continue
+		var bounds := mesh.get_aabb()
+		for xf: Transform3D in props.get(name, []):
+			var box := xf * bounds
+			var section := floori((xf.origin.x - HALL.position.x) / 48.0)
+			if not footprints.has(section):
+				var feet: Array[Rect2] = []
+				footprints[section] = feet
+			footprints[section].append(Rect2(box.position.x, box.position.z, box.size.x, box.size.z))
+	for section in footprints:
+		var contact := Node3D.new()
+		contact.position.y = floor_y
+		target.add_child(contact)
+		InteriorKit.add_contacts(contact, footprints[section])
+
+
+static func terminal_anchor() -> Vector2:
+	return SkyportIsland.w2(Vector2(FIXTURE_X, FIXTURE_ROWS[0]))
+
+
+static func terminal_surface(roof := false) -> ShaderMaterial:
+	var surface := ShaderMaterial.new()
+	surface.shader = preload("res://src/world/shaders/terminal_surface.gdshader")
+	surface.set_shader_parameter("terminal_anchor", terminal_anchor())
+	surface.set_shader_parameter("floor_height", Y + FLOOR)
+	surface.set_shader_parameter("roof", roof)
+	surface.set_shader_parameter("terrazzo", InteriorKit.finish_texture("terrazzo"))
+	return surface
+
+
+class TerminalLights extends Node3D:
+	const LIGHT_COUNT := 6
+	var points: PackedVector3Array
+	var lights: Array[OmniLight3D] = []
+	var refresh := 0.0
+
+	func _ready() -> void:
+		for i in LIGHT_COUNT:
+			var light := OmniLight3D.new()
+			InteriorKit.tune_light(light, 5.2, 19.0)
+			light.light_color = Color(1.0, 0.965, 0.91)
+			light.light_specular = 0.24
+			light.visible = false
+			add_child(light)
+			lights.append(light)
+
+	func _process(dt: float) -> void:
+		refresh -= dt
+		if refresh > 0.0:
+			return
+		refresh = 0.15
+		var camera := get_viewport().get_camera_3d()
+		if camera == null:
+			return
+		var p := to_local(camera.global_position)
+		var candidates: Array[Vector2] = []
+		if p.y < Y + 17.0 and HALL.grow(14.0).has_point(Vector2(p.x, p.z)):
+			for i in points.size():
+				var d := p.distance_squared_to(points[i])
+				if d < 31.0 * 31.0:
+					candidates.append(Vector2(d, i))
+			candidates.sort_custom(func(a: Vector2, b: Vector2) -> bool: return a.x < b.x)
+		for i in LIGHT_COUNT:
+			var light := lights[i]
+			light.visible = i < candidates.size()
+			if light.visible:
+				var point := points[int(candidates[i].y)]
+				var low := point.y < Y + 4.0
+				light.position = point
+				light.omni_range = 6.3 if low else 18.0
+				light.light_energy = (2.2 if low else 5.2) * (1.0 - smoothstep(19.0, 31.0, sqrt(candidates[i].x)))
 
 
 static func _glass_panel(st: SurfaceTool, a: Vector3, b: Vector3, h: float) -> void:
