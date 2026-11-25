@@ -186,6 +186,7 @@ func generate(p_seed := 1207) -> CityLayout:
 	# Westbank first: the City Loop crosses the strait and turns round on its
 	# quay (its ground, its buildings kept clear of the turning loop).
 	mainland = CityLayout.new().generate_mainland(p_seed)
+	_bridge_approach_piers()
 	rail = RailNetwork.new(self)
 	rail.build_city_loop()
 	_skybridges()  # (after the line: it may have cleared a tower from its path)
@@ -2090,9 +2091,15 @@ func _tower_crane(lot: Rect2, site_top: float, brng: RandomNumberGenerator) -> v
 	var counter := 16.0
 	var best := {}
 	var best_obst := INF
-	var corners := [lot.position + Vector2(2.5, 2.5), Vector2(lot.end.x - 2.5, lot.position.y + 2.5),
-		lot.end - Vector2(2.5, 2.5), Vector2(lot.position.x + 2.5, lot.end.y - 2.5)]
+	# (3.6 m in: the 6 m base stays inside the hoarding – at 2.5 m it stood
+	# half a metre out over the pavement into the kerb lane.)
+	var corners := [lot.position + Vector2(3.6, 3.6), Vector2(lot.end.x - 3.6, lot.position.y + 3.6),
+		lot.end - Vector2(3.6, 3.6), Vector2(lot.position.x + 3.6, lot.end.y - 3.6)]
 	for m in corners:
+		# (Lots are rectangles of curved blocks: a corner can lie over the
+		# street. The base never stands in a carriageway.)
+		if not support_clear(m, 4.4):
+			continue
 		for d in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
 			# Jib pointing out of the lot (over the street), not back over the frame.
 			if (m + d * 10.0).distance_to(lot.get_center()) < m.distance_to(lot.get_center()):
@@ -2284,19 +2291,71 @@ func _bridge_approach(x0: float, zc: float, deck: float) -> void:
 			if xb > x1 + 55.0:
 				_kbeam(k, A + o + Vector3.UP * 0.55, B + o + Vector3.UP * 0.55, 0.4, 1.1, conc)
 				_anchor(A + o * 1.03 + Vector3.DOWN * 1.4, B + o * 1.03 + Vector3.DOWN * 1.4)
+	_approach_piers = [x0, zc]
+
+
+var _approach_piers: Array = []
+
+
+## The approach viaduct's piers, once Westbank's streets exist (they run
+## under it): twin columns every ~40 m, each bent slid along the deck (up
+## to 16 m, longer spans) until both columns stand clear of every
+## carriageway and junction mouth by a metre – no column in a lane.
+func _bridge_approach_piers() -> void:
+	if _approach_piers.is_empty():
+		return
+	var x0: float = _approach_piers[0]
+	var zc: float = _approach_piers[1]
+	var k := _kit("bridge_approach")
+	var conc := Color(0.6, 0.59, 0.56)
+	var x1 := APPROACH_END
 	var x := x0 - 30.0
 	while x > x1 + 30.0:
-		var y := float(yf.call(x)) - 2.6
-		var g := CityTerrain.mainland_design(x, zc) - 0.5
-		if y - g > 2.0:
-			for sz: float in [-1.0, 1.0]:
-				_kbeam(k, Vector3(x, g, zc + sz * 5.5), Vector3(x, y, zc + sz * 5.5), 1.8, 1.8, conc)
-			_kbeam(k, Vector3(x, y + 0.3, zc - 8.0), Vector3(x, y + 0.3, zc + 8.0), 1.6, 1.2, conc)
+		var at := NAN
+		for dx: float in [0.0, -4.0, 4.0, -8.0, 8.0, -12.0, 12.0, -16.0, 16.0]:
+			var xx := x + dx
+			if xx > x0 - 12.0 or xx < x1 + 20.0:
+				continue
+			if support_clear(Vector2(xx, zc - 5.5), 1.3) and support_clear(Vector2(xx, zc + 5.5), 1.3):
+				at = xx
+				break
+		if not is_nan(at):
+			var y := approach_y(at) - 2.6
+			var g := CityTerrain.mainland_design(at, zc) - 0.5
+			if y - g > 2.0:
+				for sz: float in [-1.0, 1.0]:
+					_kbeam(k, Vector3(at, g, zc + sz * 5.5), Vector3(at, y, zc + sz * 5.5), 1.8, 1.8, conc)
+				_kbeam(k, Vector3(at, y + 0.3, zc - 8.0), Vector3(at, y + 0.3, zc + 8.0), 1.6, 1.2, conc)
 		x -= 40.0
 
 
-
-
+## Can a support (column, footing) of radius r stand at p? Clear of every
+## carriageway by a metre (kerb, wing mirrors), outside junction mouths and
+## roundabouts – on either shore (Westbank's own street field west of the
+## strait). Used by every bridge, viaduct and rail pier generator.
+func support_clear(p: Vector2, r: float) -> bool:
+	var L: CityLayout = self
+	if not is_mainland and mainland != null and p.x < FAR_SHORE:
+		L = mainland
+	if L.roads == null or L.roads.field.is_empty():
+		return true
+	var fr: Rect2 = L.roads.field_rect
+	if not fr.has_point(p):
+		return true
+	var pts: Array[Vector2] = [p]
+	for i in 8:
+		var a := i * TAU / 8.0
+		pts.append(p + Vector2(cos(a), sin(a)) * r)
+	for q: Vector2 in pts:
+		var f := L.roads.field_at(q)
+		if absf(f.x) < absf(f.y) + 1.0:
+			return false
+		if f.w < 2.0 and absf(f.x) < absf(f.y) + 4.0:
+			return false   # (a junction mouth: turning cars sweep the corner)
+	for rb in L.roads.roundabouts:
+		if p.distance_to(rb["c"]) < float(rb["r"]) + float(rb["w"]) * 0.5 + 1.0 + r:
+			return false
+	return true
 
 
 # ------------------------------------------------------- district character

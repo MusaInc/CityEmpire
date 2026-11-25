@@ -270,6 +270,8 @@ static func _pier(m: BuildingMesher, body: StaticBody3D, pts: PackedVector3Array
 			return   # (a carriageway under the deck: spanned)
 		gy = SkyportIsland.LAND_Y - 0.3
 	elif not layout.is_water(Vector3(q2.x, 0.0, q2.y)):
+		if not layout.support_clear(q2, 1.6):
+			return   # (a city street under the deck: spanned, never a column in it)
 		var g := layout.ground_y(q2.x, q2.y)
 		gy = (g if not is_nan(g) else 0.0) - 0.3
 	var dir := RailNetwork._at(pts, s + 2.0, false) - RailNetwork._at(pts, s - 2.0, false)

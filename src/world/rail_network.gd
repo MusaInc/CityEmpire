@@ -294,42 +294,100 @@ func _viaduct(pts: PackedVector3Array) -> void:
 			var s1 := j * STEP
 			var sp := ceilf(s0 / 30.0) * 30.0
 			while sp < s1:
-				var p := _at(pts, sp)
-				# (No pier over the strait, nor in a junction's mouth: the span
-				# carries across it.)
-				var junction := p.x > CityLayout.RIVER_EDGE and L.roads.field_at(Vector2(p.x, p.z)).w < 2.0
-				# Nor in a roundabout or its mouths: the road field stops boulevards
-				# at the ring (shared roads, 2026-11-20), so those texels no longer
-				# read as junction – piers landed in the carriageway there (SH-04;
-				# CitySwing's Uptown/Riverside trials hit them).
-				# (Measured: all 8 stood 6-30 m inside a ring's outer kerb; every
-				# pier from before stands 2.5 m or more outside one.)
-				for rb in L.roads.roundabouts:
-					if Vector2(p.x, p.z).distance_to(rb["c"]) < float(rb["r"]) + float(rb["w"]) * 0.5 + 1.0:
-						junction = true
-				if not _over_water(Vector2(p.x, p.z)) and not junction:
-					var dir := _at(pts, sp + 2.0) - _at(pts, sp - 2.0)
-					dir.y = 0.0
-					dir = dir.normalized()
-					var ps := Vector3(-dir.z, 0.0, dir.x)
-					var gy := ground(p.x, p.z)
-					var top := p.y - RAIL_H - 2.1
-					if not k.has("kit_meshes"):
-						k["kit_meshes"] = {}
-					# (Collision only: the Blender pier – InfraKit – is drawn.)
-					L._box(p.x - 0.75, p.z - 0.75, p.x + 0.75, p.z + 0.75, gy - 0.3, top)
-					InfraKit.pier(k["kit_meshes"], Vector3(p.x, gy, p.z), top, dir, 1.6, 6.2, 1.5, 1.6)
-					# Underside detail where people walk and drive beneath it
-					# (merged into the same kit: no extra draws): a footing
-					# plinth and a drainage downpipe down the column.
-					var dp := Vector3(p.x, 0.0, p.z) + ps * 0.82 + dir * 0.55
-					L._kbeam(k, Vector3(dp.x, gy + 0.45, dp.z), Vector3(dp.x, top + 0.9, dp.z), 0.14, 0.14, Color(0.25, 0.27, 0.29), false)
+				_support(k, pts, sp)
 				sp += 30.0
 		run += d.length()
 		if run > 300.0:
 			run = 0.0
 			k = L._kit("city_%d" % L.structures.size())
 		i = j
+
+
+## One viaduct support at s along the line (infrastructure clearance pass,
+## 2026-11-25: the Spine's median piers stood in the boulevard's lanes – the
+## audit found 28 columns in live carriageways). In order of preference:
+##  1. a single median-style pier, slid up to ±12 m along the deck to where
+##     its footing is clear of every carriageway and junction mouth
+##     (CityLayout.support_clear);
+##  2. a portal frame: a column on each side of the road below, on the
+##     pavements a metre past the kerbs, under a steel box crossbeam that
+##     carries the deck – up to 34 m between columns;
+##  3. nothing (the deck girders carry a longer span) over water, junctions,
+##     roundabouts and roads too wide to portal.
+func _support(k: Dictionary, pts: PackedVector3Array, sp: float) -> void:
+	for ds: float in [0.0, -4.0, 4.0, -8.0, 8.0, -12.0, 12.0]:
+		var q := _at(pts, sp + ds)
+		var q2 := Vector2(q.x, q.z)
+		if _over_water(q2) or _in_ring(q2):
+			continue
+		if L.support_clear(q2, 1.4):
+			_pier_at(k, pts, sp + ds)
+			return
+	var p := _at(pts, sp)
+	var p2 := Vector2(p.x, p.z)
+	if _over_water(p2) or _in_ring(p2):
+		return
+	var dir := _at(pts, sp + 2.0) - _at(pts, sp - 2.0)
+	dir.y = 0.0
+	dir = dir.normalized()
+	var side := Vector3(-dir.z, 0.0, dir.x)
+	# March out both ways across the deck's line to the first clear ground.
+	var ends: Array[float] = []
+	for sgn: float in [-1.0, 1.0]:
+		var found := NAN
+		var off := 2.0
+		while off <= 19.0:
+			var w := p + side * sgn * off
+			if L.support_clear(Vector2(w.x, w.z), 1.1):
+				found = off * sgn
+				break
+			off += 0.5
+		if is_nan(found):
+			return
+		ends.append(found)
+	var top := p.y - RAIL_H - 2.1
+	var cols: Array[Vector3] = []
+	for e: float in ends:
+		var c := p + side * e
+		cols.append(Vector3(c.x, ground(c.x, c.z), c.z))
+	if top - maxf(cols[0].y, cols[1].y) < 6.0:
+		return   # (no headroom for a portal: leave the span to the girders)
+	if not k.has("kit_meshes"):
+		k["kit_meshes"] = {}
+	InfraKit.portal(k["kit_meshes"], cols[0], cols[1], top, 1.25, 1.7)
+	for c: Vector3 in cols:
+		L._box(c.x - 0.62, c.z - 0.62, c.x + 0.62, c.z + 0.62, c.y - 0.3, top - 1.7)
+		var dp := c + dir * 0.7
+		L._kbeam(k, Vector3(dp.x, c.y + 0.45, dp.z), Vector3(dp.x, top - 1.2, dp.z), 0.14, 0.14, Color(0.25, 0.27, 0.29), false)
+
+
+func _in_ring(q: Vector2) -> bool:
+	var R: CityLayout = L.mainland if q.x < CityLayout.FAR_SHORE and L.mainland else L
+	for rb in R.roads.roundabouts:
+		if q.distance_to(rb["c"]) < float(rb["r"]) + float(rb["w"]) * 0.5 + 1.0:
+			return true
+	return false
+
+
+func _pier_at(k: Dictionary, pts: PackedVector3Array, sp: float) -> void:
+	var p := _at(pts, sp)
+	var dir := _at(pts, sp + 2.0) - _at(pts, sp - 2.0)
+	dir.y = 0.0
+	dir = dir.normalized()
+	var ps := Vector3(-dir.z, 0.0, dir.x)
+	var gy := ground(p.x, p.z)
+	var top := p.y - RAIL_H - 2.1
+	if top - gy < 1.0:
+		return
+	if not k.has("kit_meshes"):
+		k["kit_meshes"] = {}
+	# (Collision only: the Blender pier – InfraKit – is drawn.)
+	L._box(p.x - 0.75, p.z - 0.75, p.x + 0.75, p.z + 0.75, gy - 0.3, top)
+	InfraKit.pier(k["kit_meshes"], Vector3(p.x, gy, p.z), top, dir, 1.6, 6.2, 1.5, 1.6)
+	# Underside detail where people walk and drive beneath it (merged into
+	# the same kit: no extra draws): a drainage downpipe down the column.
+	var dp := Vector3(p.x, 0.0, p.z) + ps * 0.82 + dir * 0.55
+	L._kbeam(k, Vector3(dp.x, gy + 0.45, dp.z), Vector3(dp.x, top + 0.9, dp.z), 0.14, 0.14, Color(0.25, 0.27, 0.29), false)
 
 
 ## A station: a platform each side of the track, canopies on columns, a

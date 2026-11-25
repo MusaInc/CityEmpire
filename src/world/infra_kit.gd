@@ -36,6 +36,33 @@ static func pier(list: Dictionary, ground: Vector3, top_y: float, dir: Vector3, 
 	_add(list, "pier_head", Transform3D(basis_of.call(span, head_depth, head_t), Vector3(ground.x, top_y, ground.z)))
 
 
+## A portal frame: a column on each footing (a, b: ground points either
+## side of the road it straddles) under a cap beam whose top is top_y,
+## carrying whatever deck rests on it. Wide-span replacement for a median
+## pier that would stand in a carriageway. The cap is the pier head mesh
+## run the full width (haunched ends) with steel girders hung beneath.
+static func portal(list: Dictionary, a: Vector3, b: Vector3, top_y: float, col_w: float, beam_depth: float) -> void:
+	var d := Vector3(b.x - a.x, 0.0, b.z - a.z)
+	var span := d.length()
+	if span < 0.5:
+		return
+	var across := d / span
+	var along := Vector3(across.z, 0.0, -across.x)   # (the deck's direction, roughly)
+	var basis_of := func(sx: float, sy: float, sz: float) -> Basis:
+		return Basis(across * sx, Vector3.UP * sy, -along * sz)
+	var head_bot := top_y - beam_depth
+	for g: Vector3 in [a, b]:
+		var h := head_bot - g.y + 0.1
+		if h < 0.5:
+			continue
+		_add(list, "pier_foot", Transform3D(basis_of.call(col_w * 2.0, maxf(col_w * 0.6, 0.9), col_w * 2.0), g))
+		_add(list, "pier_column", Transform3D(basis_of.call(col_w, h, col_w * 0.95), g))
+	var mid := Vector3((a.x + b.x) * 0.5, top_y, (a.z + b.z) * 0.5)
+	_add(list, "pier_head", Transform3D(basis_of.call(span + col_w * 1.4, beam_depth * 0.55, 2.1), mid))
+	_add(list, "deck_girders", Transform3D(Basis(across * (span + col_w * 0.8), Vector3.UP * beam_depth * 0.45, -along * 1.9),
+		mid + Vector3.DOWN * beam_depth * 0.55))
+
+
 ## The deck's underside from a to b (points on the soffit centre line):
 ## girders `width` across, `depth` deep, and a soffit lamp every other bay
 ## when `lamps` (over roads and paths).
