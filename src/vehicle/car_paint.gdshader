@@ -26,6 +26,16 @@ uniform float peel_scale = 8.3;
 uniform float peel_depth = 0.07;
 uniform sampler2D bake_tex : hint_default_white, filter_linear_mipmap, repeat_disable;
 uniform float ao_strength = 0.0;
+// Localised damage (CarVisual, from Car.scuff / transfer): scratches and
+// bare metal per side (front, rear, left, right) and the paint another car
+// left on each side. half_size = the body's half extents (body-local).
+uniform vec4 scuff = vec4(0.0);
+uniform vec4 transfer_on = vec4(0.0);
+uniform vec3 tr_front : source_color = vec3(0.5);
+uniform vec3 tr_rear : source_color = vec3(0.5);
+uniform vec3 tr_left : source_color = vec3(0.5);
+uniform vec3 tr_right : source_color = vec3(0.5);
+uniform vec3 half_size = vec3(0.9, 0.75, 2.3);
 
 varying float v_y;
 varying vec3 v_p;
@@ -39,6 +49,15 @@ float hash3(vec3 p) {
 	p = fract(p * vec3(443.897, 441.423, 437.195));
 	p += dot(p, p.yzx + 19.19);
 	return fract((p.x + p.y) * p.z);
+}
+
+float vnoise3(vec3 p) {
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float a = mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y);
+	float b = mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y);
+	return mix(a, b, f.z);
 }
 
 void fragment() {
@@ -60,6 +79,42 @@ void fragment() {
 	// Stone chips / scrapes on the sharp edges once the car is knocked about.
 	float chip = smoothstep(0.45, 0.85, edge) * smoothstep(0.25, 0.8, dirt) * step(0.55, hash3(floor(v_p * 70.0)));
 	base = mix(base, vec3(0.42, 0.42, 0.40), chip * 0.85);
+	// Collision scratches: long streaks along the panel (lengthwise on the
+	// flanks, across on the noses), deeper ones down to primer and bare metal,
+	// the other car's colour smeared in between.
+	float bare = 0.0;
+	if (dot(scuff, vec4(1.0)) > 0.001) {
+		vec3 q = v_p / max(half_size, vec3(0.1));
+		float hgt = smoothstep(0.08, 0.3, v_y) * (1.0 - smoothstep(0.95, 1.25, v_y));
+		float wf = smoothstep(0.55, 0.92, -q.z) * scuff.x;
+		float wr = smoothstep(0.55, 0.92, q.z) * scuff.y;
+		float wl = smoothstep(0.6, 0.95, -q.x) * scuff.z;
+		float wrt = smoothstep(0.6, 0.95, q.x) * scuff.w;
+		float side_w = max(wl, wrt);
+		float nose_w = max(wf, wr);
+		float w_all = max(side_w, nose_w);
+		// Where: a few clustered zones (a scrape is local), growing with the
+		// amount of scuffing; nothing elsewhere.
+		float zone = smoothstep(0.55, 0.85, vnoise3(v_p * 1.3 + 4.0) + w_all * 0.45 - 0.22);
+		// What: thin scratch lines along the panel (lengthwise on the flanks,
+		// across the noses), only some lines, broken into runs.
+		float along = side_w >= nose_w ? v_p.z : v_p.x;
+		float ly = v_p.y * 46.0 + vnoise3(vec3(along * 1.7, 0.0, 3.0)) * 3.0;
+		float line_w = clamp(fwidth(ly) * 1.2, 0.08, 0.6);
+		float l = 1.0 - smoothstep(0.0, line_w, abs(fract(ly) - 0.5) * 2.0 - (1.0 - line_w));
+		float gate = step(0.55, hash3(vec3(floor(ly), floor(along * 1.4), 2.0)));
+		float near_k = 1.0 - smoothstep(3.0, 10.0, distance_to_lens);
+		float s_amt = clamp(l * gate * zone * hgt * w_all * 1.6, 0.0, 1.0) * mix(0.35, 1.0, near_k);
+		bare = s_amt * step(0.7, hash3(vec3(floor(ly), floor(along * 4.0), 5.0)));
+		vec3 tr = tr_front * transfer_on.x * wf + tr_rear * transfer_on.y * wr + tr_left * transfer_on.z * wl + tr_right * transfer_on.w * wrt;
+		float tr_w = clamp(dot(transfer_on, vec4(wf, wr, wl, wrt)), 0.0, 1.0);
+		vec3 scratch_col = mix(base * 1.45 + 0.1, tr / max(tr_w, 0.001), tr_w * 0.6);
+		// A dull scuffed haze over the zone, sharp scratches on top.
+		base = mix(base, base * 1.12 + 0.03, zone * w_all * hgt * 0.35);
+		base = mix(base, scratch_col, s_amt * 0.8);
+		base = mix(base, vec3(0.6, 0.61, 0.62), bare);
+		chip = max(chip, bare);
+	}
 	// Ground-bounce AO: subtle darkening along rocker panels and lower bumper
 	// (the bake carries the real occlusion; this is the fallback).
 	float under_ao = mix(mix(0.74, 0.9, ao_strength), 1.0, smoothstep(0.06, 0.58, v_y));

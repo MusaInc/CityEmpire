@@ -173,6 +173,7 @@ func _build(mat: Material) -> Node3D:
 			oy0 - float(h["y0"]) + 0.03, Color(0.86, 0.84, 0.8))  # stone sill
 	_frame(tier)
 	_glaze(tier)
+	_front_glaze(tier)
 	_residence(tier, pal)
 	m._end()
 	glow._end()
@@ -546,6 +547,12 @@ func _glaze(tier: int) -> void:
 		bx.call(a0, a1, lo, hi, y1, y1 + 0.02, reveal)
 		bx.call(a0 - 0.04, a1 + 0.04, minf(at - sgn * 0.06, o1), maxf(at - sgn * 0.06, o1), y0 - 0.03, y0, sill)
 		gl.call(a0, a1, mid - 0.01, mid + 0.01, y0, y1)
+		# (Glass is solid: no stepping out of a 30th-floor window.)
+		var cg := func(p0: float, p1: float, q0: float, q1: float, h0: float, h1: float) -> void:
+			var pa := P(p0, q0, h0) if side == "back" else P(q0, p0, h0)
+			var pb := P(p1, q1, h1) if side == "back" else P(q1, p1, h1)
+			col_boxes.append(AABB(pa.min(pb), (pa - pb).abs()))
+		cg.call(a0, a1, mid - 0.06, mid + 0.06, 0.0, y1)
 		var t := 0.05 if tier < 3 else 0.035
 		var f0 := mid - 0.04
 		var f1 := mid + 0.04
@@ -561,6 +568,44 @@ func _glaze(tier: int) -> void:
 			bx.call(a0, a1, f0, f1, y0 + 2.2, y0 + 2.2 + t, fc)  # the loft's transom
 		far_glass.append([side, a0, a1, y0, y1])
 	far_glass.append(["front", ox0(), ox1(), float(h["oy0"]) - float(h["y0"]), float(h["oy1"]) - float(h["y0"])])
+
+
+## The front: once the open "window you swing through" (CitySwing), now a
+## floor-to-ceiling glazed wall with mullions and a transom, solid to walk
+## into (apartment overhaul 2026-11-25: no open walls, no escape routes).
+## The one gap is the lift's landing door at the opening's centre, which the
+## lift car closes from outside (ApartmentElevator).
+func _front_glaze(tier: int) -> void:
+	var fc := FRAME if tier != 4 else Color(0.62, 0.6, 0.55)
+	if tier == 2:
+		fc = STEEL
+	var x0 := ox0()
+	var x1 := ox1()
+	var y0 := float(h["oy0"]) - float(h["y0"])
+	var y1 := float(h["oy1"]) - float(h["y0"])
+	var cx := (x0 + x1) * 0.5
+	var gap0 := cx - 1.32
+	var gap1 := cx + 1.32
+	var z := 0.16
+	var t := 0.06 if tier < 3 else 0.045
+	for run: Vector2 in [Vector2(x0, gap0), Vector2(gap1, x1)]:
+		if run.y - run.x < 0.1:
+			continue
+		pane(run.x, run.y, z - 0.01, z + 0.01, y0, y1)
+		var lo := P(run.x, z - 0.07, 0.0)
+		var hi := P(run.y, z + 0.07, y1)
+		col_boxes.append(AABB(lo.min(hi), (lo - hi).abs()))
+		var n := maxi(1, int(ceil((run.y - run.x) / 1.6)))
+		for k in n + 1:
+			var x := lerpf(run.x, run.y, float(k) / n)
+			box(x - t * 0.5, x + t * 0.5, z - 0.04, z + 0.04, y0, y1, fc)
+		box(run.x, run.y, z - 0.04, z + 0.04, y0, y0 + t, fc)              # sill rail
+		box(run.x, run.y, z - 0.04, z + 0.04, y1 - t, y1, fc)              # head
+		box(run.x, run.y, z - 0.03, z + 0.05, y0 + 1.05, y0 + 1.05 + t * 0.7, fc)  # guard rail line
+	# The lift door's frame in the glazing.
+	box(gap0 - 0.08, gap0, z - 0.08, z + 0.08, y0, y1, fc)
+	box(gap1, gap1 + 0.08, z - 0.08, z + 0.08, y0, y1, fc)
+	box(gap0, gap1, z - 0.08, z + 0.08, minf(y1, y0 + 2.4), minf(y1, y0 + 2.5), fc)
 
 
 ## A wall patch (side/at as feature(), a0..a1 along it, y0..y1) minus the

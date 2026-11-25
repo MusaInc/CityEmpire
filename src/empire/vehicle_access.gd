@@ -213,7 +213,7 @@ func start(body: PhysicsBody3D, board: bool, found: Dictionary, done: Callable, 
 		driver_seat = entry_seat
 		_cross_cabin = false
 	seat = driver_seat
-	_duration = 1.72 if _cross_cabin else 1.48
+	_duration = 0.62 if body is Car else 0.72
 	_walk_speed = clampf(Vector2(game.player.s.velocity.x, game.player.s.velocity.z).length(), 0.45, WALK_RATE)
 	if body is Craft:
 		craft_grip = Marker3D.new()
@@ -245,31 +245,24 @@ func start(body: PhysicsBody3D, board: bool, found: Dictionary, done: Callable, 
 	_last_clear_check = 0.0
 	_door_opened_sfx = false
 	_door_closed_sfx = false
+	game.rig.vehicle_pose = 0.0
 	if not board:
 		var root := vehicle.global_transform
 		game.player.global_position = root * driver_seat
-		game.rig.vehicle_pose = 1.0
-		game.rig.vehicle_facing = -root.basis.z
+		game.player.visible = false
 	acting = true
 
 
-func _ensure_interior_grip() -> void:
-	if not (vehicle is Car) or not is_instance_valid(handle):
-		return
-	var pivot := handle.get_parent()
-	if pivot == null:
-		return
-	if is_instance_valid(interior_grip) and interior_grip.get_parent() == pivot:
-		return
-	if is_instance_valid(interior_grip):
-		interior_grip.queue_free()
-	interior_grip = Marker3D.new()
-	var hinge: Array = profile["hinge"]
-	var int_pull: Array = profile["interior_pull"]
-	interior_grip.position = Vector3(-side * 0.08, float(int_pull[1]) - float(hinge[1]), float(int_pull[0]) - float(hinge[0]))
-	pivot.add_child(interior_grip)
-
-
+## One quick, universal transition for every vehicle (cars, boats, planes,
+## helicopters; vehicle interaction pass 2026-11-25 – the 1.5–1.7 s
+## full-body boarding animation is gone). Entering, ~0.6 s: the door opens
+## with its sound, the hero glides to it on their normal walk cycle (round
+## the car's end if that's the clear side), slips in as the camera eases
+## straight into the driving view, the door shuts. Leaving: the door opens,
+## the hero is placed standing beside it on solid ground facing the way the
+## car points, takes a step clear, the door shuts and the walking camera
+## takes over from where the transition camera is – no snap, no clipping,
+## no floating (every point is a ground probe from landing()).
 func tick(dt: float) -> void:
 	if not acting:
 		return
@@ -277,146 +270,66 @@ func tick(dt: float) -> void:
 		_cancel()
 		return
 	var player := game.player
-	if entering and not route.is_empty():
-		var to := route[0]
-		var before := player.global_position
-		# Remaining horizontal walk distance to smoothly decelerate into the door.
-		var rem := Vector2(to.x - before.x, to.z - before.z).length()
-		for i in range(route.size() - 1):
-			rem += Vector2(route[i + 1].x - route[i].x, route[i + 1].z - route[i].z).length()
-		var want_speed := lerpf(0.22, WALK_RATE, smoothstep(0.0, 0.90, rem))
-		var rate := 5.5 if want_speed < _walk_speed else 7.5
-		_walk_speed = move_toward(_walk_speed, want_speed, rate * dt)
-		var horiz := Vector2(to.x - before.x, to.z - before.z)
-		var hdist := horiz.length()
-		var step_len := minf(_walk_speed * dt, hdist)
-		var hdir := horiz / hdist if hdist > 0.001 else Vector2.ZERO
-		var next := Vector3(before.x + hdir.x * step_len, before.y, before.z + hdir.y * step_len)
-		# Follow kerb / ground elevation smoothly during approach.
-		var gy := _ground_y(next, vehicle)
-		if gy < INF:
-			var want_y := gy + STAND_HEIGHT
-			next.y = lerpf(before.y, want_y, 1.0 - exp(-18.0 * dt)) if absf(want_y - before.y) < 0.45 else move_toward(before.y, want_y, 2.5 * dt)
-		else:
-			next.y = move_toward(before.y, to.y, 1.8 * dt)
-		if not _walk_clear(before, next, vehicle):
-			_cancel()
-			return
-		player.global_position = next
-		var vel := (next - before) / maxf(dt, 0.001)
-		player.foot_velocity = vel
-		player.s.velocity = vel
-		var move_dir := Vector3(hdir.x, 0.0, hdir.y)
-		if route.size() == 1 and rem < 0.45:
-			var inward_hint := vehicle.global_basis.x * -side
-			inward_hint.y = 0.0
-			if inward_hint.length_squared() > 0.01:
-				move_dir = move_dir.lerp(inward_hint.normalized(), 1.0 - smoothstep(0.0, 0.45, rem)).normalized()
-		player.controls.move = move_dir
-		if Vector2(next.x - to.x, next.z - to.z).length() < 0.045:
-			if route.size() == 1:
-				stand.y = next.y
-			route.pop_front()
-		return
-
 	elapsed += dt
-	_last_clear_check -= dt
-	if _last_clear_check <= 0.0:
-		_last_clear_check = 0.1
-		if not _clear(stand, vehicle):
-			_cancel()
-			return
-	player.foot_velocity = Vector3.ZERO
-	player.s.velocity = Vector3.ZERO
-	player.controls.move = Vector3.ZERO
-	var root := vehicle.global_transform
 	var u := clampf(elapsed / _duration, 0.0, 1.0)
+	var root := vehicle.global_transform
 	var door := 0.0
-	var board := 0.0
-	var slide := 0.0
-	var opening := 0.0
-	var closing := 0.0
+	var prev := player.global_position
 	if entering:
-		if _cross_cabin:
-			# Passenger-side entry: reach & open from outside, duck & step into passenger seat,
-			# pull door shut from inside, then smoothly slide across to the driver's seat.
-			door = smoothstep(0.06, 0.30, u) * (1.0 - smoothstep(0.66, 0.84, u))
-			board = smoothstep(0.27, 0.63, u)
-			slide = smoothstep(0.67, 0.96, u)
-			opening = smoothstep(0.02, 0.14, u) * (1.0 - smoothstep(0.28, 0.39, u))
-			closing = smoothstep(0.62, 0.72, u) * (1.0 - smoothstep(0.80, 0.86, u))
-		else:
-			door = smoothstep(0.07, 0.34, u) * (1.0 - smoothstep(0.74, 0.98, u))
-			board = smoothstep(0.30, 0.74, u)
-			opening = smoothstep(0.02, 0.16, u) * (1.0 - smoothstep(0.31, 0.43, u))
-			closing = smoothstep(0.70, 0.81, u) * (1.0 - smoothstep(0.92, 1.0, u))
+		door = smoothstep(0.0, 0.3, u) * (1.0 - smoothstep(0.64, 0.96, u))
+		var glide := smoothstep(0.0, 0.46, u)
+		var pos := _path_at(glide)
+		var inside := smoothstep(0.42, 0.6, u)
+		pos = pos.lerp(root * entry_seat, inside)
+		player.global_position = pos
+		var vel := (pos - prev) / maxf(dt, 0.001)
+		vel.y = 0.0
+		player.foot_velocity = vel if inside < 0.5 else Vector3.ZERO
+		player.s.velocity = player.foot_velocity
+		player.controls.move = vel.normalized() if vel.length() > 0.3 and inside < 0.5 else Vector3.ZERO
+		if vel.length() > 0.3 and inside < 0.5:
+			game.rig.set_facing(vel.normalized())
+		# In through the door, then out of sight (a car with a see-through
+		# cabin shows its driver once the entry finishes).
+		player.visible = u < 0.52
 	else:
-		if _cross_cabin:
-			# Passenger-side exit: slide from driver seat to passenger seat, open door from
-			# inside before stepping out, then close door from outside.
-			slide = 1.0 - smoothstep(0.04, 0.28, u)
-			door = smoothstep(0.24, 0.46, u) * (1.0 - smoothstep(0.78, 0.98, u))
-			board = 1.0 - smoothstep(0.45, 0.76, u)
-			opening = smoothstep(0.20, 0.30, u) * (1.0 - smoothstep(0.42, 0.50, u))
-			closing = smoothstep(0.74, 0.84, u) * (1.0 - smoothstep(0.93, 1.0, u))
+		door = smoothstep(0.0, 0.26, u) * (1.0 - smoothstep(0.52, 0.92, u))
+		var out := root.basis.x * side
+		out.y = 0.0
+		out = out.normalized()
+		if u >= 0.24:
+			var step := smoothstep(0.24, 0.62, u)
+			var pos2 := stand - out * 0.32 * (1.0 - step)
+			var gy := _ground_y(pos2, vehicle)
+			if gy < INF:
+				pos2.y = gy + STAND_HEIGHT
+			player.global_position = pos2
+			var fwd := -root.basis.z
+			fwd.y = 0.0
+			var face := out.lerp(fwd.normalized(), step).normalized()
+			game.rig.set_facing(face)
+			var vel2 := (pos2 - prev) / maxf(dt, 0.001) if player.visible else Vector3.ZERO
+			vel2.y = 0.0
+			player.foot_velocity = vel2
+			player.s.velocity = vel2
+			player.controls.move = vel2.normalized() if vel2.length() > 0.2 else Vector3.ZERO
+			player.visible = true
 		else:
-			# Driver-side exit: open door smoothly from inside before stepping out.
-			door = smoothstep(0.07, 0.33, u) * (1.0 - smoothstep(0.74, 0.98, u))
-			board = 1.0 - smoothstep(0.32, 0.74, u)
-			opening = smoothstep(0.02, 0.14, u) * (1.0 - smoothstep(0.28, 0.39, u))
-			closing = smoothstep(0.70, 0.81, u) * (1.0 - smoothstep(0.92, 1.0, u))
+			player.visible = false
+			player.global_position = root * driver_seat
 	if vehicle is Car and (vehicle as Car).visual:
 		handle = (vehicle as Car).visual.pose_access(side, door, profile)
-		_ensure_interior_grip()
-		if not _door_opened_sfx and door > 0.16:
+		if not _door_opened_sfx and door > 0.12:
 			_door_opened_sfx = true
 			if game.car_audio and game.car_audio.has_method("play_door"):
 				game.car_audio.call("play_door", true)
-		elif _door_opened_sfx and not _door_closed_sfx and door < 0.08 and u > 0.65:
+		elif _door_opened_sfx and not _door_closed_sfx and door < 0.1 and u > 0.6:
 			_door_closed_sfx = true
 			if game.car_audio and game.car_audio.has_method("play_door"):
 				game.car_audio.call("play_door", false)
-
-	# Clean quadratic Bezier arc through the open door aperture so the body clears
-	# the door sill without clipping the sill, seat bolster, or roof header.
-	var entry_world := root * entry_seat
-	var driver_world := root * driver_seat
-	var hinge_z := float(profile["hinge"][0])
-	var handle_z := float(profile["handle"][0])
-	var thresh_local := Vector3(side * (float(profile["edge"]) + 0.14), entry_seat.y, lerpf(hinge_z, handle_z, 0.62))
-	var thresh_world := root * thresh_local
-	if vehicle is Craft:
-		thresh_world.y = lerpf(stand.y, entry_world.y, 0.55) + clampf(maxf(entry_world.y - stand.y, 0.0) * 0.35 + 0.08, 0.04, 0.22)
-	elif entry_world.y > stand.y + 0.04:
-		thresh_world.y = lerpf(stand.y, entry_world.y, 0.55) + 0.07
-	else:
-		thresh_world.y = lerpf(stand.y, entry_world.y, 0.52) - 0.03
-	var inv_b := 1.0 - board
-	var pos := stand * (inv_b * inv_b) + thresh_world * (2.0 * inv_b * board) + entry_world * (board * board)
-	if _cross_cabin and slide > 0.001:
-		pos = pos.lerp(driver_world, slide) - Vector3.UP * (sin(slide * PI) * 0.035)
-	player.global_position = pos
-
-	var inward := root.basis.x * -side
-	var facing := inward.rotated(Vector3.UP, -side * PI * 0.5 * smoothstep(0.18, 0.89, board))
-	if _cross_cabin and slide > 0.001 and slide < 0.999:
-		var slide_yaw := -side * 0.22 * sin(slide * PI)
-		facing = facing.rotated(Vector3.UP, slide_yaw)
-	game.rig.vehicle_facing = facing.normalized()
-	game.rig.vehicle_pose = maxf(0.001, smoothstep(0.09, 0.96, board))
-
-	# Use interior door pull when seated inside and exterior handle only when outside.
-	var active_grip: Node3D = handle
-	var grip_w := 0.0
-	if vehicle is Car:
-		var use_interior := (entering and closing >= opening) or (not entering and opening >= closing)
-		if use_interior and is_instance_valid(interior_grip):
-			active_grip = interior_grip
-		grip_w = maxf(opening, closing * 0.88)
-	else:
-		grip_w = sin(u * PI)
-	game.rig.vehicle_grip = active_grip
-	game.rig.vehicle_grip_weight = grip_w
+	elif vehicle is Craft and not _door_opened_sfx and u > 0.1:
+		_door_opened_sfx = true
+		Sfx.play("click", -9.0, 0.8)
 	if elapsed >= _duration:
 		var from := game.camera.cam.global_transform
 		var fov := game.camera.cam.fov
@@ -425,28 +338,53 @@ func tick(dt: float) -> void:
 		done.call(stand, from, fov)
 
 
+## The glide from where the hero stood, round the car if needed, to the door.
+func _path_at(t: float) -> Vector3:
+	var pts: Array[Vector3] = [prior_player]
+	pts.append_array(route)
+	if pts[pts.size() - 1].distance_to(stand) > 0.05:
+		pts.append(stand)
+	var total := 0.0
+	for i in pts.size() - 1:
+		total += pts[i].distance_to(pts[i + 1])
+	if total < 0.01:
+		return stand
+	var want := t * total
+	for i in pts.size() - 1:
+		var seg := pts[i].distance_to(pts[i + 1])
+		if want <= seg:
+			return pts[i].lerp(pts[i + 1], want / maxf(seg, 0.001))
+		want -= seg
+	return pts[pts.size() - 1]
+
+
 func _camera(_dt: float) -> Array:
 	if not is_instance_valid(vehicle):
 		return [prior_camera, prior_fov]
-	var p := game.player.global_position
-	var car_basis := vehicle.global_basis
-	var forward := -car_basis.z
-	var sidewards := car_basis.x * side
-	var focus := p + Vector3.UP * 0.26
-	var eye := focus + sidewards * 2.9 - forward * 1.25 + Vector3.UP * 1.07
-	var angle := Basis.looking_at(focus - eye, Vector3.UP)
-	var near := Transform3D(angle, eye)
-	var start_blend := smoothstep(0.0, 0.43, elapsed)
-	var aimed := prior_camera.interpolate_with(near, start_blend)
-	var fov := lerpf(prior_fov, 66.0, start_blend)
+	var u := clampf(elapsed / _duration, 0.0, 1.0)
+	var k := u * u * u * (u * (u * 6.0 - 15.0) + 10.0)   # smootherstep
+	var target := prior_camera
+	var tfov := prior_fov
 	if entering and is_instance_valid(camera_to):
-		var end := smoothstep(_duration * 0.63, _duration, elapsed)
-		aimed = aimed.interpolate_with(camera_to.global_transform, end)
-		fov = lerpf(fov, camera_to.fov, end)
-	var q := PhysicsRayQueryParameters3D.create(focus, aimed.origin, 1 | CityWorld.HUMAN_LAYER, [game.player.get_rid(), vehicle.get_rid()])
+		target = camera_to.global_transform
+		tfov = camera_to.fov
+	elif not entering:
+		# Where the walking camera will sit: behind the hero, looking the way
+		# the car points (EmpireGame._finish_on_foot faces it along the car).
+		var fwd := -vehicle.global_basis.z
+		fwd.y = 0.0
+		fwd = fwd.normalized()
+		var focus := stand + Vector3.UP * 0.55 + fwd * 1.5
+		var eye := stand - fwd * 3.4 + Vector3.UP * 1.25
+		target = Transform3D(Basis.looking_at(focus - eye, Vector3.UP), eye)
+		tfov = 70.0
+	var aimed := prior_camera.interpolate_with(target, k)
+	var fov := lerpf(prior_fov, tfov, k)
+	var focus2 := game.player.global_position + Vector3.UP * 0.3
+	var q := PhysicsRayQueryParameters3D.create(focus2, aimed.origin, 1 | CityWorld.HUMAN_LAYER, [game.player.get_rid(), vehicle.get_rid()])
 	var hit := game.player.get_world_3d().direct_space_state.intersect_ray(q)
 	if not hit.is_empty():
-		aimed.origin = (hit["position"] as Vector3).move_toward(focus, 0.29)
+		aimed.origin = (hit["position"] as Vector3).move_toward(focus2, 0.29)
 	return [aimed, fov]
 
 

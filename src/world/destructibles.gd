@@ -18,7 +18,21 @@ extends Node3D
 signal broke(kind: String, at: Vector3, by: Car)
 
 const BREAKABLE := ["streetlight", "traffic_light", "sign_post", "bench", "bin", "hydrant", "bollard", "tree", "tree_tall",
-	"utility_box", "crates"]
+	"utility_box", "crates", "bus_shelter", "planter"]
+## Solid street furniture (CityWorld.SOLID_PROPS) only gives way to enough
+## momentum (kg·m/s): a parking nudge stops against a planter, a van at
+## 30 km/h takes a bus shelter down (destruction overhaul 2026-11-25).
+const HEAVY := {"bus_shelter": 11000.0, "planter": 17000.0}
+## The knock the car takes from each (m/s of velocity change into Car's own
+## localised damage model: below ~3 it's paint, above it dents and breaks).
+const HIT := {"streetlight": 7.0, "traffic_light": 7.5, "sign_post": 3.6, "bench": 4.2, "bin": 2.4, "hydrant": 5.5,
+	"bollard": 8.0, "utility_box": 6.0, "crates": 2.2, "bus_shelter": 9.0, "planter": 10.5}
+## What it costs the city to put back (property damage, DamageDesk).
+const COST := {"streetlight": 1800.0, "traffic_light": 4200.0, "sign_post": 260.0, "bench": 650.0, "bin": 180.0, "hydrant": 900.0,
+	"bollard": 420.0, "utility_box": 1500.0, "crates": 60.0, "bus_shelter": 5200.0, "planter": 1100.0, "tree": 1400.0}
+## Broken things are put back a while later, once nobody is near to see it.
+const RESTORE_AFTER := 300.0
+const RESTORE_AWAY := 110.0
 const TALL := ["streetlight", "traffic_light", "sign_post"]   # topple over the car's nose
 const CELL := 8.0
 const SLOW := {"streetlight": 0.92, "traffic_light": 0.9, "sign_post": 0.97, "bench": 0.95, "bin": 0.98,
@@ -32,6 +46,8 @@ var _pieces: Array = []  # [RigidBody3D, age]
 var _dirty := {}       # [CityWorld, chunk key] -> seconds until refresh
 var _meshes := {}
 var _rng := RandomNumberGenerator.new()
+var _restore: Array = []   # [age s, item Array]
+var focus_fn := Callable() # () -> Vector3: where the player is (restoration waits until they're away)
 
 
 func setup(world: CityWorld) -> void:
@@ -93,6 +109,33 @@ func _physics_process(dt: float) -> void:
 		else:
 			keep.append(p)
 	_pieces = keep
+	_tick_restore(dt)
+
+
+func _tick_restore(dt: float) -> void:
+	if _restore.is_empty():
+		return
+	var fp: Vector3 = focus_fn.call() if focus_fn.is_valid() else Vector3.INF
+	for i in range(_restore.size() - 1, -1, -1):
+		var r: Array = _restore[i]
+		r[0] = float(r[0]) + dt
+		if float(r[0]) < RESTORE_AFTER:
+			continue
+		var it: Array = r[1]
+		var xf: Transform3D = it[1]
+		if fp != Vector3.INF and fp.distance_to(xf.origin) < RESTORE_AWAY:
+			continue
+		var w: CityWorld = it[3]
+		if not is_instance_valid(w):
+			_restore.remove_at(i)
+			continue
+		w.unbreak_item(xf.origin)
+		_dirty[[w, it[2]]] = 0.1
+		var c := Vector2i(floori(xf.origin.x / CELL), floori(xf.origin.z / CELL))
+		if not _grid.has(c):
+			_grid[c] = []
+		(_grid[c] as Array).append(it)
+		_restore.remove_at(i)
 
 
 func _check(car: Car) -> void:
@@ -114,7 +157,16 @@ func _check(car: Car) -> void:
 				# Height in world terms: a car pitched up a kerb would otherwise
 				# lift the item's base out of its own (tilted) frame.
 				var dy := xf.origin.y - p.y
-				if absf(l.x) < hw and absf(l.z) < hl and dy > -1.5 and dy < 2.0:
+				var kind: String = it[0]
+				var heavy := HEAVY.has(kind)
+				if heavy:
+					# (Solid: test a short way ahead along the motion, or the
+					# contact stops the car before the footprint reaches it.)
+					var ahead := inv.basis * (car.linear_velocity * 0.12)
+					l -= ahead
+				if absf(l.x) < hw + (1.2 if heavy else 0.0) and absf(l.z) < hl + (1.2 if heavy else 0.0) and dy > -1.5 and dy < 2.0:
+					if heavy and car.mass * car.speed < float(HEAVY[kind]):
+						continue   # (not enough to take it down: physics stops the car)
 					cell.remove_at(i)
 					_break(it, car)
 
@@ -131,7 +183,21 @@ func _break(it: Array, car: Car) -> void:
 			w.break_item((b[0] as Transform3D).origin)
 			_dirty[[b[2], b[1]]] = 0.15
 		_banners.erase(bk)
-	car.linear_velocity *= SLOW.get(kind, 0.86 if kind.begins_with("tree") else 0.95)
+	var slow: float = SLOW.get(kind, 0.86 if kind.begins_with("tree") else 0.95)
+	if HEAVY.has(kind):
+		slow = 0.72
+	# Heavier cars plough on; light ones lose more.
+	slow = clampf(lerpf(slow, 1.0, clampf((car.mass - 1400.0) / 6000.0, -0.3, 0.6)), 0.55, 0.995)
+	car.linear_velocity *= slow
+	# The car feels it: a localised hit through its own damage model, sized
+	# by the item and the speed it was going.
+	var dv: float = HIT.get(kind, 9.0 if kind.begins_with("tree") else 3.0) * clampf(car.speed / 12.0, 0.4, 1.8)
+	var to_item := xf.origin - car.global_position
+	to_item.y = 0.0
+	if to_item.length() > 0.01 and car.has_method("external_impact"):
+		var at := car.global_position + to_item.normalized() * minf(to_item.length(), (car.spec["size"] as Vector3).z * 0.5) + Vector3.UP * 0.45
+		car.external_impact(at, -to_item.normalized(), dv)
+	_restore.append([0.0, it])
 	_throw(kind, xf, car, w)
 	broke.emit(kind, xf.origin, car)
 

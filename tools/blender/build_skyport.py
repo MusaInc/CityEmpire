@@ -101,9 +101,14 @@ def B(size, loc, m, bevel=0.0):
 
 
 def C(r, h, loc, m, verts=12, r2=None, axis="z"):
+    """axis z: loc = the base centre. axis x / y: loc = the CENTRE of the
+    lying cylinder (2026-11-25: it used to be the base before turning, which
+    put every GSE wheel's hub half a tyre-width up and off to one side – the
+    floating airport vehicles – and the fuel bowser's tank 3 m high)."""
+    if axis != "z":
+        loc = (loc[0], loc[1], loc[2] - h / 2)
     ob = cyl("c", r, h, loc, m, verts, r2=r2)
     if axis != "z":
-        # Rotate about its own centre (the helper puts the base at loc).
         me = ob.data
         c = Vector(loc) + Vector((0, 0, h / 2))
         rot = {"x": (0, math.pi / 2, 0), "y": (math.pi / 2, 0, 0)}[axis]
@@ -114,8 +119,35 @@ def C(r, h, loc, m, verts=12, r2=None, axis="z"):
     return ob
 
 
+rim = M("rim", srgb("b9bcc0"), "gloss")
+hub = M("hub", srgb("5d6166"), "gloss")
+grime = M("grime", srgb("3b3732"))
+chrome = M("chrome", srgb("d6d9dc"), "gloss")
+mirror = M("mirror", srgb("1c1f22"), "gloss")
+bag_a = M("bag_a", srgb("2b3f63"))
+bag_b = M("bag_b", srgb("7a2b2b"))
+bag_c = M("bag_c", srgb("3c3c3c"))
+bag_d = M("bag_d", srgb("8a6a3a"))
+hazard = M("hazard", srgb("e8c21c"))
+
+
 def wheel(x, y, r, w, m=tyre):
-    return C(r, w, (x - w / 2, y, r), m, 12, axis="x")
+    """Tyre with a sidewall bulge, a recessed rim, hub and nuts on the
+    outboard face (outboard = away from the centre line)."""
+    out = 1.0 if x >= 0 else -1.0
+    parts = [C(r, w, (x, y, r), m, 18, axis="x"),
+             C(r * 0.93, w * 1.06, (x, y, r), m, 18, axis="x")]
+    parts.append(C(r * 0.62, 0.03, (x + out * (w / 2 + 0.0), y, r), rim, 16, axis="x"))
+    parts.append(C(r * 0.24, 0.04, (x + out * (w / 2 + 0.015), y, r), hub, 10, axis="x"))
+    for k in range(5):
+        a = k * math.tau / 5
+        parts.append(B((0.03, r * 0.07, r * 0.07), (x + out * (w / 2 + 0.02), y + math.cos(a) * r * 0.16, r + math.sin(a) * r * 0.16), chrome))
+    return parts
+
+
+def arch(x, y, r, w):
+    """A wheel arch: the dark well above the tyre."""
+    return B((w + 0.1, r * 2.3, r * 0.5), (x, y, r * 1.85), dark)
 
 
 def beam(a, b, w, h, m):
@@ -137,11 +169,46 @@ def beam(a, b, w, h, m):
 OBJECTS = []
 
 
-def done(name, parts):
-    ob = join(name, parts)
+def _flat(parts):
+    out = []
+    for q in parts:
+        if isinstance(q, (list, tuple)):
+            out += _flat(q)
+        elif q is not None:
+            out.append(q)
+    return out
+
+
+def done(name, parts, weather=0.0):
+    ob = join(name, _flat(parts))
     _bake(ob)
+    if weather > 0.0:
+        _weather(ob, weather)
     OBJECTS.append(ob)
     return ob
+
+
+def _weather(ob, k):
+    """Subtle use: road grime darkening the lowest 0.9 m (stronger at the
+    sills), a little dust on upward faces – vertex colours only, lamps and
+    glass untouched (lamp alpha 0 stays 0)."""
+    me = ob.data
+    attr = me.color_attributes["Col"]
+    for poly in me.polygons:
+        if poly.material_index == 1:
+            continue
+        up = poly.normal.z
+        for li in poly.loop_indices:
+            c = list(attr.data[li].color)
+            if c[3] < 0.05:
+                continue
+            z = me.vertices[me.loops[li].vertex_index].co.z
+            low = max(0.0, 1.0 - z / 0.9)
+            g = 1.0 - k * (0.32 * low * low + 0.06)
+            dust = k * 0.05 * max(0.0, up)
+            for i in range(3):
+                c[i] = c[i] * g + dust * 0.55
+            attr.data[li].color = c
 
 
 def _bake(ob):
@@ -209,7 +276,7 @@ def jet_bridge():
         p.append(B((0.35, 0.35, z - 0.6), (sx * 1.0, 40.0, (z - 0.6) / 2 + 0.6), grey))
     p.append(B((3.2, 1.8, 0.7), (0, 40.0, 0.75), yellow))
     for sx in (-1.25, 1.25):
-        p.append(wheel(sx, 40.0, 0.5, 0.45))
+        p += (wheel(sx, 40.0, 0.5, 0.45))
     # Service stair to the apron at the rotunda.
     for k in range(10):
         p.append(B((1.0, 0.32, 0.12), (3.4, 6.4 - k * 0.42, z - 0.44 * (k + 1) + 0.2), grey))
@@ -221,29 +288,62 @@ def jet_bridge():
 
 
 def gse_tug():
-    p = [B((1.5, 2.7, 0.75), (0, 0, 0.6), yellow, 0.04),
-         B((1.4, 1.1, 0.06), (0, -0.4, 2.0), yellow),
-         B((1.3, 1.0, 0.5), (0, 0.85, 1.2), dark)]
-    for sx, sy in ((-0.62, 0.85), (0.62, 0.85), (-0.62, -0.85), (0.62, -0.85)):
-        p.append(wheel(sx, sy, 0.32, 0.28))
-        p.append(B((0.06, 0.06, 1.05), (sx * 0.95, sy * 0.4 - 0.4, 1.45), dark))
-    p.append(B((0.9, 0.6, 0.45), (0, -0.45, 1.2), seat))
-    p.append(B((0.12, 0.12, 0.12), (0, -0.4, 2.1), lamp_amber))
-    p.append(B((0.5, 0.06, 0.12), (0, 1.36, 0.8), lamp_warm))
-    done("gse_tug", p)
+    """Baggage tractor: low bonnet, open cab under a canopy on four posts,
+    bench seat, wheel, beacon, tow hitch, bumper and lamps."""
+    p = [B((1.46, 2.9, 0.5), (0, 0.05, 0.6), yellow, 0.06),          # chassis tub
+         B((1.36, 1.1, 0.42), (0, 0.95, 1.05), yellow, 0.08),         # bonnet
+         B((1.5, 0.16, 0.36), (0, 1.55, 0.55), dark, 0.03),           # front bumper
+         B((1.5, 0.2, 0.3), (0, -1.45, 0.5), dark),                   # rear bumper
+         B((1.4, 1.5, 0.08), (0, -0.35, 2.05), yellow, 0.03),         # canopy
+         B((1.3, 1.4, 0.04), (0, -0.35, 2.0), grey),
+         B((0.95, 0.55, 0.14), (0, -0.55, 1.0), seat, 0.03),          # bench
+         B((0.95, 0.12, 0.55), (0, -0.84, 1.3), seat, 0.03),          # backrest
+         B((0.9, 0.08, 0.5), (0, 0.42, 1.18), dark),                  # bulkhead / dash
+         beam((0, 0.3, 1.25), (0, 0.05, 1.55), 0.05, 0.05, dark),     # column
+         C(0.17, 0.04, (0, 0.05, 1.53), dark, 14),                    # steering wheel
+         B((0.16, 0.3, 0.12), (0, -1.6, 0.48), steel),                # hitch
+         C(0.04, 0.55, (0.58, 0.7, 1.15), dark, 8),                   # exhaust
+         C(0.09, 0.12, (0, -0.35, 2.09), lamp_amber, 10),             # beacon
+         B((0.24, 0.05, 0.14), (-0.5, 1.53, 0.95), lamp_white),
+         B((0.24, 0.05, 0.14), (0.5, 1.53, 0.95), lamp_white),
+         B((0.16, 0.05, 0.1), (-0.58, -1.56, 0.6), lamp_red),
+         B((0.16, 0.05, 0.1), (0.58, -1.56, 0.6), lamp_red)]
+    for sx, sy in ((-0.66, 0.2), (0.66, 0.2), (-0.66, -0.9), (0.66, -0.9)):
+        p.append(B((0.07, 0.07, 1.2), (sx, sy, 1.42), dark))         # canopy posts
+    for k in range(5):
+        p.append(B((1.48, 0.09, 0.08), (0, 1.25 - k * 0.12, 1.28), dark))  # grille
+    for sx, sy, r in ((-0.63, 0.95, 0.3), (0.63, 0.95, 0.3), (-0.63, -0.9, 0.34), (0.63, -0.9, 0.34)):
+        p += wheel(sx, sy, r, 0.26)
+        p.append(arch(sx, sy, r, 0.26))
+    done("gse_tug", p, 0.8)
 
 
 def gse_cart():
-    p = [B((1.5, 2.6, 0.12), (0, 0, 0.55), grey),
-         B((1.5, 2.6, 0.08), (0, 0, 1.95), canvas),
-         B((1.52, 2.62, 1.3), (0, 0, 1.25), canvas)]
-    for sx in (-0.72, 0.72):
-        for sy in (-1.25, 1.25):
-            p.append(B((0.08, 0.08, 1.45), (sx, sy, 1.25), steel))
-    for sx, sy in ((-0.55, 0.9), (0.55, 0.9), (-0.55, -0.9), (0.55, -0.9)):
-        p.append(wheel(sx, sy, 0.24, 0.16))
-    p.append(beam((0, 1.3, 0.5), (0, 2.1, 0.35), 0.08, 0.08, dark))
-    done("gse_cart", p)
+    """Covered baggage cart: steel deck on a small-wheeled frame, corner
+    posts, a roof, side curtains half drawn (the bags show), tow bar."""
+    p = [B((1.5, 2.7, 0.1), (0, 0, 0.52), grey, 0.02),
+         B((1.4, 2.6, 0.12), (0, 0, 0.4), dark),
+         B((1.56, 2.76, 0.07), (0, 0, 2.02), canvas, 0.03),
+         B((1.5, 2.7, 0.1), (0, 0, 1.94), grey),
+         beam((0, 1.35, 0.42), (0, 2.25, 0.32), 0.08, 0.08, dark),
+         B((0.3, 0.12, 0.08), (0, 2.28, 0.32), steel),
+         B((1.48, 0.06, 0.3), (0, 1.36, 0.72), grey),                 # end rails
+         B((1.48, 0.06, 0.3), (0, -1.36, 0.72), grey)]
+    for sx in (-0.74, 0.74):
+        for sy in (-1.33, 0.0, 1.33):
+            p.append(B((0.07, 0.07, 1.4), (sx, sy, 1.27), steel))
+        # Curtains: drawn over the back half, gathered at the front post.
+        p.append(B((0.03, 1.3, 1.35), (sx * 1.01, -0.68, 1.28), canvas))
+        p.append(B((0.08, 0.2, 1.35), (sx * 1.01, 1.18, 1.28), canvas))
+    # Bags on the deck.
+    for i, (bx, by, bw, bd, bh, bm) in enumerate(((-0.35, 0.8, 0.55, 0.38, 0.7, bag_a), (0.32, 0.85, 0.5, 0.32, 0.55, bag_b),
+            (-0.3, 0.25, 0.6, 0.4, 0.45, bag_c), (0.35, 0.2, 0.45, 0.35, 0.75, bag_d), (0.0, 0.5, 0.5, 0.3, 0.35, bag_b),
+            (-0.32, 0.5, 0.5, 0.3, 0.3, bag_d))):
+        z0 = 0.57 + (0.48 if i >= 4 else 0.0)
+        p.append(B((bw, bd, bh), (bx, by, z0 + bh / 2), bm, 0.03))
+    for sx, sy in ((-0.58, 0.95), (0.58, 0.95), (-0.58, -0.95), (0.58, -0.95)):
+        p += wheel(sx, sy, 0.2, 0.14)
+    done("gse_cart", p, 0.9)
 
 
 def gse_belt():
@@ -254,35 +354,51 @@ def gse_belt():
         p.append(beam((sx, -1.6, 1.45), (sx, 3.6, 3.65), 0.06, 0.3, steel))
     p.append(beam((0, 1.6, 1.0), (0, 1.9, 2.5), 0.4, 0.2, grey))
     for sx, sy in ((-0.78, 2.0), (0.78, 2.0), (-0.78, -2.0), (0.78, -2.0)):
-        p.append(wheel(sx, sy, 0.38, 0.3))
+        p += (wheel(sx, sy, 0.38, 0.3))
     p.append(B((0.12, 0.12, 0.12), (0, -2.4, 2.06), lamp_amber))
-    done("gse_belt", p)
+    done("gse_belt", p, 0.8)
 
 
 def gse_pushback():
-    p = [B((2.6, 6.0, 1.1), (0, 0, 0.75), yellow, 0.06),
-         B((2.2, 1.5, 0.9), (0, 1.6, 1.75), dark),
-         B((2.25, 1.55, 0.6), (0, 1.6, 1.85), glass),
-         B((0.6, 0.6, 0.3), (0, 3.15, 0.6), dark)]
-    for sx, sy in ((-1.2, 2.0), (1.2, 2.0), (-1.2, -2.0), (1.2, -2.0)):
-        p.append(wheel(sx, sy, 0.55, 0.42))
-    p.append(B((0.14, 0.14, 0.14), (0, 1.6, 2.28), lamp_amber))
-    done("gse_pushback", p)
+    """Aircraft tug (conventional towbarless-style): long low wedge body
+    with chamfered ends, an offset glazed cab, four big wheels in arches,
+    coupling at the front, hazard chevrons, lamps and a beacon."""
+    p = [B((2.7, 6.2, 0.95), (0, 0, 0.82), yellow, 0.12),
+         B((2.5, 5.6, 0.25), (0, 0, 1.42), yellow, 0.06),
+         B((2.2, 1.8, 0.8), (-0.12, 1.2, 1.95), yellow, 0.1),        # cab
+         B((2.24, 1.6, 0.55), (-0.12, 1.25, 2.1), glass),
+         B((2.0, 1.5, 0.08), (-0.12, 1.2, 2.39), dark),               # cab roof
+         B((1.0, 0.35, 0.5), (0, 3.25, 0.7), dark, 0.04),             # coupling
+         B((0.4, 0.4, 0.2), (0, 3.45, 0.62), steel),
+         B((2.72, 0.12, 0.32), (0, 3.08, 0.55), dark),
+         B((2.72, 0.12, 0.32), (0, -3.08, 0.55), dark),
+         C(0.1, 0.14, (-0.12, 1.2, 2.43), lamp_amber, 10),
+         B((0.9, 1.3, 0.55), (0.1, 1.2, 1.55), seat),                 # seat behind glass
+         B((0.8, 0.6, 0.06), (0, -1.5, 1.56), grey)]                  # access hatch
+    for k in range(6):
+        p.append(beam((-1.35 + k * 0.5, 3.1, 1.0), (-1.1 + k * 0.5, 3.1, 0.45), 0.18, 0.02, dark))
+    for sx in (-0.95, 0.95):
+        p.append(B((0.4, 0.05, 0.16), (sx, 3.11, 1.05), lamp_white))
+        p.append(B((0.3, 0.05, 0.14), (sx, -3.11, 1.0), lamp_red))
+    for sx, sy in ((-1.22, 2.0), (1.22, 2.0), (-1.22, -2.0), (1.22, -2.0)):
+        p += wheel(sx, sy, 0.58, 0.44)
+        p.append(arch(sx, sy, 0.58, 0.44))
+    done("gse_pushback", p, 0.8)
 
 
 def gse_fuel():
     p = [B((2.4, 2.2, 2.0), (0, 3.6, 1.45), white, 0.08),
          B((2.42, 0.9, 0.8), (0, 4.4, 2.0), glass),
          B((2.2, 7.0, 0.35), (0, -0.8, 0.9), dark),
-         C(1.15, 6.4, (0, -4.0, 2.25), white, 16, axis="y"),
+         C(1.15, 6.4, (0, -1.0, 2.15), white, 16, axis="y"),
          B((2.36, 6.2, 0.18), (0, -0.8, 1.9), red),
          B((1.0, 1.0, 0.8), (0, -4.6, 1.2), grey),
          B((1.6, 0.4, 2.0), (0, 2.25, 2.4), steel)]
     for sx in (-1.0, 1.0):
         for sy in (3.6, -1.6, -3.0):
-            p.append(wheel(sx, sy, 0.5, 0.4))
+            p += (wheel(sx, sy, 0.5, 0.4))
     p.append(B((0.15, 0.15, 0.15), (0, 3.6, 2.6), lamp_amber))
-    done("gse_fuel", p)
+    done("gse_fuel", p, 0.6)
 
 
 def gse_catering():
@@ -297,48 +413,115 @@ def gse_catering():
         p.append(beam((1.0, 1.0, 1.05 + k * 1.45), (1.0, -3.4, 2.5 + k * 1.45), 0.12, 0.12, steel))
     for sx in (-1.0, 1.0):
         for sy in (3.4, -2.4):
-            p.append(wheel(sx, sy, 0.48, 0.38))
-    done("gse_catering", p)
+            p += (wheel(sx, sy, 0.48, 0.38))
+    done("gse_catering", p, 0.6)
 
 
 def gse_bus():
-    """Apron bus: low floor, glazed all round, three doors on the right."""
-    p = [B((3.0, 13.0, 0.9), (0, 0, 0.75), white, 0.05),
-         B((3.0, 13.0, 0.4), (0, 0, 3.0), white, 0.05),
-         B((3.04, 12.6, 1.8), (0, 0, 2.1), glass),
-         B((3.06, 13.02, 0.22), (0, 0, 1.25), blue)]
-    for y in (-5.5, -2.0, 2.0, 5.5):
-        p.append(B((3.08, 0.2, 1.8), (0, y, 2.1), white))
-    for sy in (-4.6, 4.6):
+    """Apron bus (wide, low-floor): rounded white body, glazed all round with
+    slim pillars, three double doors on the right, a raked windscreen with a
+    destination display, seats and grab poles inside (it's see-through),
+    roof air-con pod, mirrors, lamps and a blue band."""
+    L, W, H = 13.4, 3.0, 3.05
+    p = [B((W, L, 0.75), (0, 0, 0.72), white, 0.06),                  # lower body
+         B((W, L - 0.3, 0.28), (0, 0, 2.95), white, 0.12),            # roof
+         B((W + 0.02, L + 0.02, 0.2), (0, 0, 1.17), blue),             # band
+         B((W - 0.2, L - 0.6, 0.06), (0, 0, 0.75), floor_dark),        # floor
+         B((W + 0.04, 0.22, 0.4), (0, L / 2 + 0.02, 0.5), dark, 0.03), # bumpers
+         B((W + 0.04, 0.22, 0.4), (0, -L / 2 - 0.02, 0.5), dark, 0.03),
+         B((1.8, 3.6, 0.38), (0, -1.0, 3.25), offwhite, 0.1),          # a/c pod
+         B((W + 0.03, 0.12, 2.0), (0, L / 2 - 0.05, 2.0), glass),      # windscreen
+         B((W + 0.03, 0.12, 1.7), (0, -L / 2 + 0.05, 2.05), glass),
+         B((1.6, 0.06, 0.3), (0, L / 2 + 0.02, 2.82), screen),         # destination
+         B((W + 0.04, L - 0.6, 1.62), (0, 0, 2.06), glass)]            # side glazing
+    # Pillars between panes; door frames (doors at y = 4.2, 0, -4.2 on +x).
+    for y in (-5.8, -3.0, -1.4, 1.4, 3.0, 5.8):
+        p.append(B((W + 0.08, 0.12, 1.66), (0, y, 2.06), white))
+    for dy in (4.2, 0.0, -4.2):
+        p.append(B((0.06, 1.5, 0.1), (W / 2 + 0.03, dy, 2.84), dark))
+        p.append(B((0.06, 0.06, 2.1), (W / 2 + 0.03, dy, 1.83), dark))     # door split
+        for e in (-0.76, 0.76):
+            p.append(B((0.07, 0.08, 2.1), (W / 2 + 0.03, dy + e, 1.83), dark))
+        p.append(B((0.05, 1.5, 0.75), (W / 2 + 0.02, dy, 0.72), glass))   # door bottoms glazed too
+    # Inside: a few seats along the left, poles and a hand rail.
+    for y in (-5.0, -2.2, 2.2, 5.0):
+        p.append(B((0.5, 1.6, 0.45), (-W / 2 + 0.4, y, 1.0), seat, 0.03))
+        p.append(B((0.1, 1.6, 0.5), (-W / 2 + 0.2, y, 1.45), seat))
+    for y in (-3.6, -1.6, 1.6, 3.6):
+        p.append(C(0.025, 2.1, (0.3, y, 0.78), M("pole", srgb("e2c33a"), "gloss"), 8))
+    p.append(beam((0.3, -6.2, 2.7), (0.3, 6.2, 2.7), 0.04, 0.04, steel))
+    # Lamps, mirrors.
+    for sx in (-1.1, 1.1):
+        p.append(B((0.55, 0.06, 0.22), (sx, L / 2 + 0.04, 0.95), lamp_white))
+        p.append(B((0.35, 0.06, 0.12), (sx, L / 2 + 0.04, 0.72), lamp_amber))
+        p.append(B((0.45, 0.06, 0.22), (sx, -L / 2 - 0.04, 0.95), lamp_red))
+        p.append(beam((sx * 1.36, L / 2 - 0.3, 2.6), (sx * 1.75, L / 2 + 0.25, 2.5), 0.05, 0.05, dark))
+        p.append(B((0.12, 0.08, 0.42), (sx * 1.78, L / 2 + 0.28, 2.3), mirror))
+    for sy in (-4.7, 4.7):
         for sx in (-1.3, 1.3):
-            p.append(wheel(sx, sy, 0.45, 0.32))
-    for sx in (-1.0, 1.0):
-        p.append(B((0.5, 0.06, 0.2), (sx, 6.52, 0.9), lamp_warm))
-        p.append(B((0.5, 0.06, 0.2), (sx, -6.52, 0.9), lamp_red))
-    done("gse_bus", p)
+            p += wheel(sx, sy, 0.46, 0.32)
+            p.append(arch(sx, sy, 0.46, 0.32))
+    done("gse_bus", p, 0.55)
 
 
 def gse_stairs():
-    p = [B((2.2, 6.0, 0.4), (0, 0, 0.75), white),
-         B((2.0, 1.6, 1.4), (0, 2.2, 1.6), white)]
-    for k in range(14):
-        p.append(B((1.4, 0.36, 0.1), (0, -0.4 - k * 0.32, 1.1 + k * 0.28), grey))
-    for sx in (-0.74, 0.74):
-        p.append(beam((sx, -0.3, 2.0), (sx, -4.6, 5.0), 0.06, 0.06, yellow))
-        p.append(beam((sx, -0.3, 1.0), (sx, -4.6, 4.0), 0.12, 0.3, white))
-    p.append(B((1.6, 1.4, 0.12), (0, -5.0, 4.1), grey))
-    for sx in (-0.95, 0.95):
-        for sy in (2.0, -2.0):
-            p.append(wheel(sx, sy, 0.4, 0.3))
-    done("gse_stairs", p)
+    """Self-propelled passenger stairs: a small truck cab at the front, the
+    stair rising backwards over the chassis to a railed platform with a
+    canopy, open treads, handrails on posts both sides, side skirts,
+    stabiliser jacks, lamps."""
+    p = [B((2.3, 6.6, 0.42), (0, 0, 0.72), white, 0.05),               # chassis
+         B((2.3, 6.6, 0.12), (0, 0, 0.98), M("stair_blue", srgb("2f5f9e"))),
+         B((2.1, 1.7, 1.3), (0, 2.45, 1.6), white, 0.1),                # cab
+         B((2.14, 1.2, 0.75), (0, 2.55, 1.85), glass),
+         B((2.12, 0.08, 0.7), (0, 3.31, 1.85), glass),
+         B((1.9, 1.5, 0.08), (0, 2.45, 2.29), offwhite),
+         B((2.32, 0.18, 0.32), (0, 3.38, 0.58), dark, 0.03),            # bumper
+         B((1.7, 0.5, 0.55), (0, 2.6, 1.4), seat)]
+    for sx in (-0.9, 0.9):
+        p.append(B((0.4, 0.05, 0.16), (sx, 3.36, 1.05), lamp_white))
+        p.append(B((0.25, 0.05, 0.14), (sx, -3.32, 0.85), lamp_red))
+    n = 15
+    top = 5.2
+    for k in range(n):
+        t = k / (n - 1)
+        y = 1.3 - t * 4.9
+        z = 1.25 + t * (top - 1.25)
+        p.append(B((1.5, 0.3, 0.06), (0, y, z), grey))                  # tread
+        p.append(B((1.5, 0.04, 0.05), (0, y + 0.14, z + 0.035), hazard))  # nosing
+    for sx in (-0.8, 0.8):
+        p.append(beam((sx, 1.4, 1.0), (sx, -3.7, top - 0.15), 0.1, 0.35, white))   # stringers
+        p.append(beam((sx, 1.45, 2.1), (sx, -3.7, top + 1.05), 0.05, 0.05, steel))  # handrail
+        p.append(beam((sx, 1.45, 1.6), (sx, -3.7, top + 0.55), 0.03, 0.03, steel))  # mid rail
+        for k in range(6):
+            t = k / 5
+            y = 1.45 - t * 5.15
+            z = 1.15 + t * (top - 1.15)
+            p.append(B((0.04, 0.04, 1.0), (sx, y, z + 0.5), steel))     # posts
+    # Platform at the top (it meets the aircraft door at y = -4.6).
+    p.append(B((1.7, 1.5, 0.1), (0, -4.35, top), grey))
+    for sx in (-0.85, 0.85):
+        p.append(B((0.05, 1.5, 0.05), (sx, -4.35, top + 1.05), steel))
+        p.append(B((0.05, 0.05, 1.05), (sx, -5.05, top + 0.52), steel))
+        p.append(B((0.05, 0.05, 2.3), (sx, -3.7, top + 1.15), steel))  # canopy posts
+    p.append(B((1.9, 1.6, 0.06), (0, -4.35, top + 2.3), M("canopy_w", srgb("eef0f2"))))
+    # Supports from chassis to the upper stair.
+    p.append(beam((0, -1.0, 1.0), (0, -3.4, top - 0.3), 0.18, 0.18, grey))
+    p.append(beam((-0.6, -2.6, 1.0), (-0.6, -3.9, top - 0.2), 0.12, 0.12, grey))
+    p.append(beam((0.6, -2.6, 1.0), (0.6, -3.9, top - 0.2), 0.12, 0.12, grey))
+    for sx in (-1.05, 1.05):
+        p.append(B((0.15, 0.15, 0.6), (sx, -3.0, 0.42), dark))           # jacks
+    for sx, sy in ((-0.98, 2.2), (0.98, 2.2), (-0.98, -2.1), (0.98, -2.1)):
+        p += wheel(sx, sy, 0.4, 0.3)
+        p.append(arch(sx, sy, 0.4, 0.3))
+    done("gse_stairs", p, 0.6)
 
 
 def gse_gpu():
     p = [B((1.3, 2.4, 1.3), (0, 0, 0.95), white, 0.05),
          B((1.32, 2.0, 0.3), (0, 0, 1.2), grey)]
     for sx, sy in ((-0.55, 0.8), (0.55, 0.8), (-0.55, -0.8), (0.55, -0.8)):
-        p.append(wheel(sx, sy, 0.25, 0.18))
-    done("gse_gpu", p)
+        p += (wheel(sx, sy, 0.25, 0.18))
+    done("gse_gpu", p, 0.8)
 
 
 def gse_follow():
@@ -350,8 +533,8 @@ def gse_follow():
         p.append(B((1.87, 0.38, 0.2), (0, -2.0 + k * 0.76, 0.95), dark if k % 2 else yellow))
     p.append(B((1.2, 0.3, 0.16), (0, 0.4, 1.88), lamp_amber))
     for sx, sy in ((-0.8, 1.4), (0.8, 1.4), (-0.8, -1.4), (0.8, -1.4)):
-        p.append(wheel(sx, sy, 0.34, 0.24))
-    done("gse_follow", p)
+        p += (wheel(sx, sy, 0.34, 0.24))
+    done("gse_follow", p, 0.5)
 
 
 def runway_light():
@@ -384,7 +567,7 @@ def stand_sign():
 def windsock():
     p = [C(0.1, 9.0, (0, 0, 0), white, 8), C(0.6, 0.1, (0, 0, 0), grey, 8)]
     for k in range(5):
-        p.append(C(0.55 - k * 0.07, 0.8, (0, 0.15 + k * 0.8, 8.4), orange if k % 2 == 0 else white, 10, r2=0.5 - k * 0.07, axis="y"))
+        p.append(C(0.55 - k * 0.07, 0.8, (0, 0.15 + k * 0.8, 8.8), orange if k % 2 == 0 else white, 10, r2=0.5 - k * 0.07, axis="y"))
     done("windsock", p)
 
 
@@ -596,7 +779,7 @@ def trolley():
          beam((0, -0.45, 0.32), (0, -0.55, 1.1), 0.56, 0.04, steel),
          B((0.6, 0.05, 0.05), (0, -0.58, 1.12), dark)]
     for sx, sy in ((-0.25, 0.4), (0.25, 0.4), (-0.25, -0.4), (0.25, -0.4)):
-        p.append(wheel(sx, sy, 0.09, 0.05))
+        p += (wheel(sx, sy, 0.09, 0.05))
     done("trolley", p)
 
 

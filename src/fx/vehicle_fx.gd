@@ -356,6 +356,17 @@ func _car_fx(c: Car, dt: float) -> void:
 	if c.health < 0.2 and _rng.randf() < dt * 30.0:
 		fire.emit(hood + Vector3(_rng.randf_range(-0.3, 0.3), 0, _rng.randf_range(-0.3, 0.3)), Vector3(0, _rng.randf_range(1.5, 3.0), 0),
 			_rng.randf_range(0.3, 0.6), 0.5, 0.15, Color(1.0, _rng.randf_range(0.35, 0.6), 0.1, 1.0))
+	# A boiling or leaking radiator: white steam off the bonnet (not the
+	# engine-damage smoke above: that one is oil, this one is coolant).
+	if (c.overheated or (c.coolant < 0.9 and c.temp > 0.6)) and _rng.randf() < dt * (14.0 if c.overheated else 5.0):
+		smoke.emit(hood + Vector3(_rng.randf_range(-0.25, 0.25), 0.0, _rng.randf_range(-0.25, 0.25)),
+			Vector3(_rng.randf_range(-0.3, 0.3), _rng.randf_range(1.2, 2.2), _rng.randf_range(-0.3, 0.3)) - c.linear_velocity * 0.3,
+			_rng.randf_range(0.9, 1.6), 0.3, 1.5, Color(0.9, 0.91, 0.92, 0.32))
+	# Running on a flat: the rim sparks on the road.
+	for wi in 4:
+		if c.tyre[wi] > 0.5 and sp > 6.0 and c.wheel_contact(wi) and _rng.randf() < dt * 22.0:
+			sparks.emit(c.wheel_contact_point(wi) + Vector3.UP * 0.04, -c.linear_velocity * 0.25 + Vector3(_rng.randf_range(-1.5, 1.5), _rng.randf_range(0.6, 2.4), _rng.randf_range(-1.5, 1.5)),
+				0.3, 0.07, 0.02, Color(1.0, 0.72, 0.32, 1.0))
 	# Scraping: sparks off the side.
 	if c.scraping > 0.3 and sp > 5.0 and _rng.randf() < dt * 40.0 * c.scraping:
 		var side := xf.basis.x * (1.0 if _rng.randf() < 0.5 else -1.0) * (c.spec["size"] as Vector3).x * 0.5
@@ -407,6 +418,42 @@ func _skid_flush(dt: float) -> void:
 	arr[Mesh.ARRAY_INDEX] = _skid_idx
 	skid_mesh.clear_surfaces()
 	skid_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+
+
+## Every Car's own damage feeds back here (WorldState vehicle damage
+## overhaul): impact sparks and chunks in the car's paint, glass shards
+## when a pane breaks, a burst of lens fragments for a smashed lamp, a gout
+## of steam when it boils over. One call per car when it's created.
+func watch(c: Car) -> void:
+	if c == null or c.has_meta("fx_watched"):
+		return
+	c.set_meta("fx_watched", true)
+	c.impact.connect(func(strength: float, at: Vector3, n: Vector3, _o: Object):
+		if is_instance_valid(c) and strength > 3.0:
+			var paint: Color = c.visual.paint_colour() if c.visual and c.visual.has_method("paint_colour") else Color(0.5, 0.5, 0.5)
+			impact(at, n, minf(strength, 30.0), paint))
+	c.damaged.connect(_on_damaged.bind(c))
+
+
+func _on_damaged(kind: String, what: Variant, at: Vector3, c: Car) -> void:
+	if not is_instance_valid(c):
+		return
+	if kind == "glass":
+		var lvl := float((what as Array)[1]) if what is Array else 0.5
+		var shards := 10 if lvl >= 1.0 else 3
+		for i in shards:
+			sparks.emit(at + Vector3.UP * 0.4, c.linear_velocity * 0.5 + Vector3(_rng.randf_range(-2, 2), _rng.randf_range(0.5, 3.0), _rng.randf_range(-2, 2)),
+				_rng.randf_range(0.5, 0.9), 0.06, 0.035, Color(0.78, 0.86, 0.9, 0.9))
+	elif kind == "lamp":
+		var red := String(what).begins_with("tail")
+		for i in 6:
+			sparks.emit(at, c.linear_velocity * 0.4 + Vector3(_rng.randf_range(-1.5, 1.5), _rng.randf_range(0.5, 2.0), _rng.randf_range(-1.5, 1.5)),
+				_rng.randf_range(0.4, 0.7), 0.05, 0.03, Color(0.9, 0.1, 0.06, 0.95) if red else Color(0.92, 0.94, 0.9, 0.95))
+	elif kind == "overheat" or kind == "breakdown":
+		var hood := c.global_transform * Vector3(0, (c.spec["size"] as Vector3).y * 0.7, -(c.spec["size"] as Vector3).z * 0.32)
+		for i in 14:
+			smoke.emit(hood, Vector3(_rng.randf_range(-0.5, 0.5), _rng.randf_range(1.5, 3.0), _rng.randf_range(-0.5, 0.5)),
+				_rng.randf_range(1.4, 2.4), 0.4, 2.0, Color(0.88, 0.89, 0.9, 0.45))
 
 
 ## A hit: sparks, a puff of dust/debris, chunks off the car for big ones.

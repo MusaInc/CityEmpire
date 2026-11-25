@@ -54,6 +54,8 @@ const PURSUIT_REWARD := 2500.0
 var traffic_bodies: TrafficBodies
 var wrecks: Wrecks
 var props: Destructibles
+var damage_desk: DamageDesk
+var smash: StorefrontSmash
 var car_audio: CarAudio
 var units: Array = []
 var unit_by_id := {}
@@ -88,6 +90,7 @@ var _cloud_sync := Callable()
 
 
 func _ready() -> void:
+	CarVisual.auto_dent = true   # (every car's impacts dent its own body)
 	for a in OS.get_cmdline_user_args():
 		var kv := a.trim_prefix("--").split("=", true, 1)
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
@@ -282,6 +285,15 @@ func _ready() -> void:
 			out.append_array(pursuit.police.filter(func(c): return is_instance_valid(c)))
 		return out
 	props.broke.connect(_on_prop_broke)
+	props.focus_fn = func() -> Vector3: return player.global_position if player else Vector3.INF
+	damage_desk = DamageDesk.new()
+	damage_desk.name = "DamageDesk"
+	add_child(damage_desk)
+	damage_desk.setup(self)
+	smash = StorefrontSmash.new()
+	smash.name = "StorefrontSmash"
+	add_child(smash)
+	smash.setup(self)
 	# Clouds in the world at the towers' height (weather-driven).
 	if Settings.quality > 0 and not args.has("no-clouds"):
 		var clouds := CloudLayer.new()
@@ -1305,6 +1317,8 @@ func _build_interior(u: Dictionary) -> ShopInterior:
 		ground = func(x: float, z: float) -> float:
 			var p := SkyportIsland.l(Vector3(x, 0.0, z))
 			return SkyportIsland.ground_y_local(p.x, p.z)
+	if smash:
+		si.front_state = smash.state_for(String(u["id"]))   # (a smashed window stays smashed)
 	si.setup(u, b, ground, occupier(u["id"]) if b == null and not u.has("street_use") else {})
 	add_child(si)
 	interiors[u["id"]] = si
@@ -2010,6 +2024,17 @@ func act() -> void:
 			elif use == "furniture":
 				ui.open_property(si.unit)
 			else:
+				if use == "garage":
+					# The Motor Works desk: the car you came in (nearest) is the one quoted.
+					var near_v := ""
+					var nd := 60.0
+					for k in cars:
+						var dk := (cars[k] as Car).global_position.distance_to(player.global_position)
+						if dk < nd:
+							nd = dk
+							near_v = k
+					if near_v != "":
+						Phone.st("vehicles")["sel"] = near_v
 				ui.open_phone({"bank": "finances", "garage": "garage", "warehouse": "businesses"}.get(use, "property"))
 		"retail_checkout":
 			if String(si.unit.get("street_use", "")) in ["clothing", "department"]:
@@ -2305,6 +2330,8 @@ func in_vehicle() -> bool:
 func _on_prop_broke(kind: String, at: Vector3, by: Car) -> void:
 	if by != vehicle_node():
 		return
+	if damage_desk:
+		damage_desk.report(kind.replace("_", " "), at, float(Destructibles.COST.get(kind, 1400.0 if kind.begins_with("tree") else 300.0)))
 	var tree := kind.begins_with("tree")
 	if car_audio:
 		car_audio.play("crash_heavy_%d" % (randi() % 3) if tree else "crash_light_%d" % (randi() % 2),
@@ -2358,6 +2385,10 @@ func _spawn_car(v: Dictionary, settle_from := Vector3.INF) -> Car:
 			p = f["pos"]
 			yaw = f["yaw"] if not is_nan(float(f["yaw"])) else yaw
 	c.place(Transform3D(Basis(Vector3.UP, yaw), p + Vector3.UP * 0.3))
+	# Damage comes back with the car (parked, stored, saved): mechanical
+	# state, glass, lamps, paint, and the dents replayed into the body.
+	c.apply_damage_state(v.get("damage", {}))
+	vis.apply_visual_state(v.get("dent_state", {}))
 	if settle_from != Vector3.INF and safe:
 		var rs := safe.road_spot(settle_from, c.spec["size"], {"exclude": [c.get_rid(), player.get_rid()], "min_d": 3.0})
 		if rs["ok"]:
@@ -2371,9 +2402,32 @@ func _spawn_car(v: Dictionary, settle_from := Vector3.INF) -> Car:
 			vfx.splash(at, spd, sc)
 		if audio:
 			audio.play("splash", clampf(lerpf(-5.0, 3.0, spd / 20.0), -5.0, 3.0), clampf(lerpf(1.06, 0.72, spd / 24.0), 0.72, 1.1)))
+	vfx.watch(c)
+	# Your car's crashes: the camera feels them (shake + a punch on heavy
+	# frontal hits), the phone buzzes, the dashboard warns about what broke.
+	c.impact.connect(func(strength: float, _at: Vector3, _n: Vector3, _o: Object):
+		if driving == "" or cars.get(driving) != c or strength < 4.0:
+			return
+		chase.shake(clampf(strength / 32.0, 0.08, 0.75))
+		if strength > 12.0:
+			chase.punch(-clampf(strength / 6.0, 1.5, 5.0))
+		Settings.haptic(int(clampf(strength * 3.0, 15.0, 80.0)), clampf(strength / 30.0, 0.2, 1.0)))
+	c.damaged.connect(_on_own_car_damaged.bind(c))
 	cars[v["id"]] = c
 	vfx.cars = cars.values()
 	return c
+
+
+## What broke on the car you're driving, said once on screen.
+func _on_own_car_damaged(kind: String, what: Variant, _at: Vector3, c: Car) -> void:
+	if driving == "" or cars.get(driving) != c or ui == null:
+		return
+	if kind == "tyre":
+		ui.toast("Puncture! %s tyre" % ["Front-left", "Front-right", "Rear-left", "Rear-right"][int(what)], "warn")
+	elif kind == "overheat":
+		ui.toast("Engine overheating – ease off or get it to a Motor Works", "bad")
+	elif kind == "glass" and what is Array and float(what[1]) >= 1.0 and String(what[0]) == "front":
+		ui.toast("Windscreen smashed", "warn")
 
 
 func enter_vehicle(vid: String, animate := false) -> void:
@@ -2456,6 +2510,7 @@ func _finish_vehicle_exit(stand: Vector3, from: Transform3D, fov: float, vid: St
 	var xf := c.global_transform
 	v["pos"] = [xf.origin.x, xf.origin.y, xf.origin.z]
 	v["yaw"] = xf.basis.get_euler().y
+	_store_damage(v, c)
 	drive_input.car = null
 	drive_input.enabled = false
 	speed_fx.player = null
@@ -2827,6 +2882,153 @@ func buy_vehicle(model: String) -> String:
 		return "Not enough money"
 	_spawn_car(v, p)
 	Settings.haptic(28, 0.36)
+	return ""
+
+
+# ------------------------------------------------------- damage + repairs
+func _store_damage(v: Dictionary, c: Car) -> void:
+	v["damage"] = c.damage_state()
+	if c.visual:
+		v["dent_state"] = c.visual.visual_state()
+
+
+## What's wrong with an owned car, in words (garage card, quote screen).
+func damage_report(c: Car) -> Array[String]:
+	var out: Array[String] = []
+	if c == null:
+		return out
+	var g: Dictionary = c.glass
+	if float(g["front"]) >= 1.0:
+		out.append("Windscreen smashed")
+	elif float(g["front"]) > 0.05:
+		out.append("Windscreen cracked")
+	var panes := 0
+	for k in ["rear", "left", "right"]:
+		if float(g[k]) >= 1.0:
+			panes += 1
+	if panes > 0:
+		out.append("%d window%s broken" % [panes, "s" if panes > 1 else ""])
+	var lamps := 0
+	for k in c.lamps_ok:
+		if not c.lamps_ok[k]:
+			lamps += 1
+	if lamps > 0:
+		out.append("%d lamp%s smashed" % [lamps, "s" if lamps > 1 else ""])
+	var lost := c.parts_lost()
+	if lost > 0:
+		out.append("%d panel%s missing" % [lost, "s" if lost > 1 else ""])
+	var names := ["front-left", "front-right", "rear-left", "rear-right"]
+	for i in 4:
+		if c.tyre[i] > 0.5:
+			out.append("%s tyre flat" % names[i].capitalize())
+		if c.susp[i] > 0.25:
+			out.append("%s suspension bent" % names[i].capitalize())
+	if c.engine < 0.75:
+		out.append("Engine damaged (%d%%)" % int(c.engine * 100.0))
+	if c.coolant < 1.0:
+		out.append("Radiator leaking" if c.coolant > 0.0 else "Out of coolant")
+	if c.roof > 0.1:
+		out.append("Roof crushed")
+	var sc := 0.0
+	for k in c.scuff:
+		sc = maxf(sc, float(c.scuff[k]))
+	if sc > 0.15 and out.size() < 6:
+		out.append("Paint scratched")
+	return out
+
+
+var _garages: Array = []
+
+
+## The nearest Motor Works (garage) door and its distance: [unit, metres].
+func nearest_garage(p: Vector3) -> Array:
+	if _garages.is_empty():
+		for u: Dictionary in world.street_units + (skyport.street_units if skyport else []):
+			if String(u.get("street_use", "")) == "garage":
+				_garages.append(u)
+	var best := {}
+	var bd := INF
+	for u: Dictionary in _garages:
+		var d := p.distance_to(Premises.door_point(u))
+		if d < bd:
+			bd = d
+			best = u
+	return [best, bd]
+
+
+## A garage's price for a car: {ok, why, mech, full, tow, at_garage, garage}.
+## Mechanical = engine, cooling, tyres, suspension, alignment; restoration
+## = that plus bodywork, glass, lamps and paint. Prices follow what the car
+## is worth and how badly it's hurt; away from a Motor Works a tow is added.
+func repair_quote(vid: String) -> Dictionary:
+	var out := {"ok": false, "why": "", "mech": 0.0, "full": 0.0, "tow": 0.0, "at_garage": false, "garage": {}}
+	var c: Car = cars.get(vid)
+	if c == null:
+		out["why"] = "Not a road vehicle"
+		return out
+	# (Priced as a car is worth to fix – the free starter hatch still costs
+	# real money to repair.)
+	var value := maxf(float(EmpireData.vehicle_model(String(empire.vehicle(vid).get("model", ""))).get("price", 12000.0)), 9000.0)
+	var md := c.mech_damage()
+	var bd := c.body_damage()
+	var mech := 0.0
+	if md > 0.01:
+		mech = 60.0 + value * 0.05 * md
+		for i in 4:
+			mech += 95.0 * c.tyre[i] + 160.0 * c.susp[i]
+		if c.coolant < 1.0:
+			mech += 140.0
+	var body := 0.0
+	var sc := 0.0
+	for k in c.scuff:
+		sc = maxf(sc, float(c.scuff[k]))
+	if bd > 0.01 or sc > 0.02:
+		body = 120.0 + value * 0.16 * bd + value * 0.02 * sc
+		for k in c.glass:
+			body += 210.0 * minf(1.0, float(c.glass[k])) * (1.6 if k == "front" else 1.0)
+		for k in c.lamps_ok:
+			if not c.lamps_ok[k]:
+				body += 85.0 + value * 0.002
+		body += value * 0.03 * float(c.parts_lost())
+	out["mech"] = roundf(minf(mech, value * 0.35))
+	out["full"] = roundf(minf(mech + body, value * 0.6))
+	var g := nearest_garage(c.global_position)
+	out["garage"] = g[0]
+	out["at_garage"] = float(g[1]) < 45.0 and player.global_position.distance_to(c.global_position) < 30.0
+	if not out["at_garage"]:
+		out["tow"] = roundf(clampf(45.0 + float(g[1]) * 0.05, 45.0, 220.0)) if not (g[0] as Dictionary).is_empty() else 120.0
+	if float(out["full"]) <= 0.0:
+		out["why"] = "Nothing to fix"
+		return out
+	if driving == vid and absf(c.speed) > 1.0:
+		out["why"] = "Stop the car first"
+		return out
+	out["ok"] = true
+	return out
+
+
+## mode "mech" | "full". "" or why not.
+func repair_vehicle(vid: String, mode: String) -> String:
+	var q := repair_quote(vid)
+	if not q["ok"]:
+		return String(q["why"])
+	var c: Car = cars[vid]
+	var cost := float(q["mech"] if mode == "mech" else q["full"]) + float(q["tow"])
+	if mode == "mech" and float(q["mech"]) <= 0.0:
+		return "Nothing mechanical to fix"
+	if not empire.pay(cost, "vehicle", ("Mechanical repair" if mode == "mech" else "Full restoration") + (" + tow" if float(q["tow"]) > 0.0 else "")):
+		return "Not enough money (%s)" % EmpireData.money(cost)
+	if mode == "mech":
+		c.reset_mechanical()
+	else:
+		c.repair_full()
+		var v := empire.vehicle(vid)
+		v["condition"] = 1.0
+	if c.visual:
+		c.visual.refresh_damage()
+	_store_damage(empire.vehicle(vid), c)
+	Sfx.play("chime", -6.0)
+	save_game()
 	return ""
 
 
@@ -3333,6 +3535,7 @@ func save_game() -> void:
 		if c and is_instance_valid(c):
 			v["pos"] = [c.global_position.x, c.global_position.y, c.global_position.z]
 			v["yaw"] = c.global_basis.get_euler().y
+			_store_damage(v, c)
 	var yaw := view_yaw()
 	var d := {"empire": empire.to_dict(), "player": [player.global_position.x, player.global_position.y,
 		player.global_position.z, yaw], "driving": driving, "saved_at": Time.get_datetime_string_from_system()}

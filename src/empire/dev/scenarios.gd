@@ -191,6 +191,308 @@ func scenario_rs() -> void:
 				"it stands on that level (y %.1f vs %.1f, surface under it %.1f)" % [cp.y, top.y, under])
 
 
+## IC: infrastructure clearance in physics (complements tools/infra_clearance.gd,
+## which audits the city's structure data): a 2.2 m × 2.4 m box swept along
+## every lane (every 3 m, 0.45–2.85 m above it) must touch no world solid –
+## no pier, column, footing or crosshead in any carriageway, junction or
+## turning lane on any island. Whatever collision is live is checked (Skyport
+## is resident; the city near the hero is streamed in first).
+func scenario_ic() -> void:
+	print("--- IC: nothing solid stands in a traffic lane")
+	var net: RoadNet = game.gps.net
+	var space := game.get_world_3d().direct_space_state
+	var sh := BoxShape3D.new()
+	sh.size = Vector3(2.2, 2.4, 2.6)
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = sh
+	q.collision_mask = 1 | CityWorld.SOLID_LAYER
+	var bad := {}
+	var tested := 0
+	for li in net.lanes.size():
+		var lp: PackedVector3Array = net.lanes[li]
+		for i in lp.size():
+			var p := lp[i]
+			var d := net.lane_dir(li, i * RoadNet.STEP)
+			q.transform = Transform3D(Basis.looking_at(d, Vector3.UP), p + Vector3.UP * 1.65)
+			tested += 1
+			for h: Dictionary in space.intersect_shape(q, 4):
+				var col: Object = h.get("collider")
+				var nm: String = String((col as Node).name) if col is Node else str(col)
+				if nm.begins_with("Car_") or col is Car or col is CharacterBody3D:
+					continue
+				var key := Vector2i(floori(p.x / 6.0), floori(p.z / 6.0))
+				if not bad.has(key):
+					var what := ""
+					if col is CollisionObject3D:
+						var co := col as CollisionObject3D
+						var owner_id := co.shape_find_owner(int(h.get("shape", 0)))
+						var sh_node := co.shape_owner_get_owner(owner_id) as Node3D
+						if sh_node:
+							var shp := (sh_node as CollisionShape3D).shape if sh_node is CollisionShape3D else null
+							what = " shape at %s size %s" % [sh_node.global_position, (shp as BoxShape3D).size if shp is BoxShape3D else "?"]
+					bad[key] = "%s at (%.0f, %.1f, %.0f) lane %d%s%s" % [nm, p.x, p.y, p.z, li, " (junction)" if net.lane_conn[li] == 1 else "", what]
+	for k in bad:
+		print("    ", bad[k])
+	check(bad.is_empty(), "%d lane samples swept: %d obstructed spots" % [tested, bad.size()])
+
+
+## VD: vehicle damage. Your car is driven into a concrete block on a quiet
+## lane at parking, town and motorway speeds, scraped along it, hit from the
+## side and dropped on its roof; every stage is checked (and filmed with
+## `--sc-film=<dir>`: a close-up per stage). Then the damage must survive a
+## save (state + dents replayed into a fresh car), and a garage must quote
+## and fix it.
+func scenario_vd() -> void:
+	print("--- VD: localised vehicle damage")
+	var film := String(game.args.get("sc-film", ""))
+	var vid := String(game.empire.vehicles[0]["id"])
+	var car: Car = game.cars[vid]
+	var net: RoadNet = game.gps.net
+	var start := game._start_point()
+	var near := net.nearest(start, Vector3.ZERO, 200.0, -1, true)
+	var lane: int = near["lane"]
+	var s0: float = near["s"]
+	var p0 := net.lane_point(lane, s0)
+	var dir := net.lane_dir(lane, s0)
+	await stand(p0 + Vector3(-dir.z, 0, dir.x) * 6.0)
+	game.enter_vehicle(vid)
+	game.drive_input.enabled = false
+	await frames(5)
+	var wall := StaticBody3D.new()
+	wall.collision_layer = 1
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(6.0, 3.0, 1.0)
+	cs.shape = bs
+	wall.add_child(cs)
+	var wm := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = bs.size
+	wm.mesh = bm
+	wall.add_child(wm)
+	game.add_child(wall)
+	var basis := Basis.looking_at(dir, Vector3.UP)
+	var wall_at := p0 + dir * 14.0 + Vector3.UP * 1.5
+	wall.global_transform = Transform3D(basis, wall_at)
+	await get_tree().physics_frame
+	var stages := [["parking", 2.8, 0.0], ["town", 11.0, 0.0], ["fast", 24.0, 0.0]]
+	for st: Array in stages:
+		car.place(Transform3D(basis, p0 + Vector3.UP * 0.5), dir * float(st[1]))
+		for i in 90:
+			car.throttle = 0.2 if i < 40 else 0.0
+			car.brake = 0.0
+			await get_tree().physics_frame
+		car.linear_velocity = Vector3.ZERO
+		print("    %s (%.0f m/s): kind %s · front dmg %.2f · glass %s · lamps %s · engine %.2f · dents %d" % [st[0], st[1], car.impact_kind,
+			car.dmg["front"], car.glass, car.lamps_ok, car.engine, car.visual.dent_log.size()])
+		if film != "":
+			wall.visible = false
+			wall.process_mode = Node.PROCESS_MODE_DISABLED
+			await _shot(car, film + "/vd_%s.png" % st[0], Vector3(-2.4, 1.3, -4.4))
+			wall.visible = true
+			wall.process_mode = Node.PROCESS_MODE_INHERIT
+	check(car.dmg["front"] > 0.2 and float(car.glass["front"]) > 0.05, "front end and windscreen damaged after the fast hit (front %.2f, screen %.2f)" % [car.dmg["front"], car.glass["front"]])
+	check(not car.lamps_ok["head_l"] or not car.lamps_ok["head_r"], "a headlamp smashed")
+	check(car.engine < 1.0 and car.visual.dent_log.size() > 0, "engine hurt (%.2f) and the body dented (%d dents)" % [car.engine, car.visual.dent_log.size()])
+	# Side impact: the block swung alongside, the car shoved into it sideways.
+	var side := Vector3(-dir.z, 0, dir.x)
+	wall.global_transform = Transform3D(Basis.looking_at(side, Vector3.UP), p0 + side * 3.2 + Vector3.UP * 1.5)
+	await get_tree().physics_frame
+	car.place(Transform3D(basis, p0 + Vector3.UP * 0.5), side * 13.0)
+	for i in 70:
+		await get_tree().physics_frame
+	check(float(car.dmg["right"]) + float(car.dmg["left"]) > 0.05, "side hit damaged a flank (L %.2f R %.2f, glass %s)" % [car.dmg["left"], car.dmg["right"], car.glass])
+	if film != "":
+		wall.visible = false
+		await _shot(car, film + "/vd_side.png", Vector3(4.2, 1.5, 0.5))
+		wall.visible = true
+	# Rollover: on its roof from 1.6 m.
+	wall.queue_free()
+	car.place(Transform3D(basis * Basis(Vector3.FORWARD, PI), p0 + Vector3.UP * 2.6), Vector3.DOWN * 6.0)
+	for i in 50:
+		await get_tree().physics_frame
+	check(car.roof > 0.0, "rollover crushed the roof (%.2f, kind %s)" % [car.roof, car.impact_kind])
+	game._right_car(car)
+	await frames(30)
+	if film != "":
+		await _shot(car, film + "/vd_roof.png", Vector3(-3.0, 2.6, 3.4))
+	# Persistence: the record carries the damage; a fresh car gets it back.
+	var v := game.empire.vehicle(vid)
+	game._store_damage(v, car)
+	var copy := v.duplicate(true)
+	copy["id"] = "vd_copy"
+	var c2: Car = game._spawn_car(copy)
+	await frames(3)
+	check(c2 != null and absf(c2.engine - car.engine) < 0.001 and c2.glass == car.glass and c2.lamps_ok == car.lamps_ok
+		and c2.visual.dent_log.size() == car.visual.dent_log.size(), "damage survives a save (engine, glass, lamps, %d dents)" % (c2.visual.dent_log.size() if c2 else -1))
+	if c2:
+		game.cars.erase("vd_copy")
+		c2.queue_free()
+	# Garage: a quote, then a full restoration.
+	game.drive_input.enabled = true
+	car.linear_velocity = Vector3.ZERO
+	await frames(10)
+	game.empire.personal_cash += 50000.0
+	var q := game.repair_quote(vid)
+	print("    quote: ", q)
+	check(q["ok"] and float(q["full"]) > float(q["mech"]) and float(q["mech"]) > 0.0, "garage quotes mechanical %s / restoration %s (+ tow %s)" % [q["mech"], q["full"], q["tow"]])
+	check(game.repair_vehicle(vid, "full") == "" and car.body_damage() < 0.01 and car.mech_damage() < 0.01 and car.visual.dent_log.is_empty(), "restored as new")
+
+
+## VE: getting in and out of your car through the universal quick
+## transition: each way must finish inside 0.9 s of game time, leave the hero
+## standing on the ground clear of the bodywork (no floating, no clipping)
+## and hand over the controls. `--sc-film=<dir>` saves frames through both.
+func scenario_ve() -> void:
+	print("--- VE: quick vehicle entry and exit")
+	var film := String(game.args.get("sc-film", ""))
+	var vid := String(game.empire.vehicles[0]["id"])
+	var car: Car = game.cars[vid]
+	if game.driving != "":
+		game.exit_vehicle()
+		await frames(5)
+	var side := car.global_transform * Vector3(-(car.spec["size"] as Vector3).x * 0.5 - 1.6, 0.0, -0.4)
+	await stand(Vector3(side.x, car.global_position.y, side.z))
+	await wait(1.0)
+	var t0 := Time.get_ticks_msec()
+	var g0 := 0.0
+	game.enter_vehicle(vid, true)
+	var fr := 0
+	while game.driving != vid and Time.get_ticks_msec() - t0 < 20000:
+		await get_tree().process_frame
+		g0 += get_process_delta_time()
+		if film != "" and fr % 2 == 0:
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(film + "/ve_in_%02d.png" % fr)
+		fr += 1
+	check(game.driving == vid and g0 < 0.9, "in and driving after %.2f s of game time" % g0)
+	await wait(1.0)
+	car.linear_velocity = Vector3.ZERO
+	await frames(5)
+	var g1 := 0.0
+	var t1 := Time.get_ticks_msec()
+	game.exit_vehicle(true)
+	fr = 0
+	while game.driving != "" and Time.get_ticks_msec() - t1 < 20000:
+		await get_tree().process_frame
+		g1 += get_process_delta_time()
+		if film != "" and fr % 2 == 0:
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(film + "/ve_out_%02d.png" % fr)
+		fr += 1
+	check(game.driving == "" and g1 < 0.9, "out on foot after %.2f s of game time" % g1)
+	await wait(0.6)
+	var pp := game.player.global_position
+	var under := _surface(pp.x, pp.z, pp.y + 0.2)
+	var local := car.global_transform.affine_inverse() * pp
+	var half: Vector3 = (car.spec["size"] as Vector3) * 0.5
+	check(absf(pp.y - 0.9 - under) < 0.35, "standing on the ground (feet %.2f, ground %.2f)" % [pp.y - 0.9, under])
+	check(absf(local.x) > half.x + 0.15 or absf(local.z) > half.z + 0.15, "clear of the bodywork (%.2f m from the side)" % (absf(local.x) - half.x))
+	check(game.player.input_enabled, "controls handed back")
+
+
+## SM: environmental destruction. Your car at a shop window: a parking
+## nudge (2 m/s) must be stopped by it; at 9 m/s it smashes through into the
+## shop (window broken, the car inside, the bodywork hurt, a charge or a
+## repair bill raised), and the frame and pilasters stand. Then a bench and a
+## bus shelter: the bench always goes, the shelter only to enough momentum.
+func scenario_sm() -> void:
+	print("--- SM: storefronts and street furniture")
+	var film := String(game.args.get("sc-film", ""))
+	var vid := String(game.empire.vehicles[0]["id"])
+	var car: Car = game.cars[vid]
+	if game.driving == "":
+		game.enter_vehicle(vid)
+	game.drive_input.enabled = false
+	game.empire.personal_cash += 50000.0
+	# A street room with a window near the start.
+	var start := game._start_point()
+	car.place(Transform3D(Basis.IDENTITY, start + Vector3.UP * 0.5))
+	game.world.build_all_near(start, 200.0)
+	await frames(30)
+	var best: ShopInterior = null
+	var bd := INF
+	for _try in 40:
+		game._stream_interiors()
+		for r in get_tree().get_nodes_in_group("shop_spans"):
+			var si := r as ShopInterior
+			if si.span_count() == 0 or si.unit.get("island", "") == "skyport":
+				continue
+			var d := si.global_position.distance_to(start)
+			if d < bd:
+				bd = d
+				best = si
+		if best:
+			break
+		await frames(10)
+	check(best != null, "a shop with breakable windows streamed in (%s)" % (best.unit.get("id", "") if best else "none"))
+	if best == null:
+		return
+	var b := best.span_box(0)
+	var xf: Transform3D = b[0]
+	var lo: Vector3 = b[1]
+	var hi: Vector3 = b[2]
+	var centre := xf * ((lo + hi) * 0.5)
+	var out := xf.basis.z.normalized()
+	var face := Basis.looking_at(-out, Vector3.UP)
+	var spawn := centre + out * 7.0
+	spawn.y = _surface(spawn.x, spawn.z, spawn.y + 3.0)
+	var cash0 := game.empire.personal_cash + game.empire.company_cash
+	# 1. A nudge.
+	car.place(Transform3D(face, spawn + Vector3.UP * 0.4), -out * 2.0)
+	for i in 120:
+		car.throttle = 0.0
+		await get_tree().physics_frame
+	check(not best.span_broken(0), "a 2 m/s nudge doesn't break the window")
+	# 2. Through it.
+	car.place(Transform3D(face, spawn + Vector3.UP * 0.4), -out * 9.0)
+	var got_in := false
+	for i in 100:
+		car.throttle = 0.15
+		await get_tree().physics_frame
+		var l := xf.affine_inverse() * car.global_position
+		if l.z < -1.2:
+			got_in = true
+	car.throttle = 0.0
+	car.brake = 1.0
+	check(best.span_broken(0), "9 m/s smashes the window")
+	check(got_in, "and the car goes on into the shop")
+	check(car.dmg["front"] > 0.0 or car.scuff["front"] > 0.0, "the car took the hit (front %.2f, scuff %.2f, screen %.2f)" % [car.dmg["front"], car.scuff["front"], car.glass["front"]])
+	await wait(1.0)
+	if film != "":
+		await _shot(car, film + "/sm_inside.png", Vector3(0.0, 2.2, 7.5))
+		var cam := Camera3D.new()
+		game.add_child(cam)
+		cam.global_position = centre + out * 9.0 + Vector3.UP * 1.6 + xf.basis.x * 3.0
+		cam.look_at(centre, Vector3.UP)
+		cam.make_current()
+		await frames(6)
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(film + "/sm_front.png")
+		cam.queue_free()
+		game.chase.cam.make_current()
+	# The charge: right away for your own shop, after the patrol for others.
+	await until(func(): return game.empire.personal_cash + game.empire.company_cash < cash0 - 100.0, 90.0)
+	check(game.empire.personal_cash + game.empire.company_cash < cash0 - 100.0, "billed for the damage (%s)" % EmpireData.money(cash0 - game.empire.personal_cash - game.empire.company_cash))
+	# The room rebuilt from scratch keeps its broken window.
+	check(game.smash.state_for(String(best.unit["id"])).get(0, "") == "broken", "remembered as broken")
+
+
+func _shot(car: Car, path: String, off: Vector3) -> void:
+	var cam := Camera3D.new()
+	game.add_child(cam)
+	var at := car.global_transform * off
+	cam.global_position = at
+	cam.look_at(car.global_position + Vector3.UP * 0.6, Vector3.UP)
+	cam.fov = 50.0
+	cam.make_current()
+	await frames(6)
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(path)
+	cam.queue_free()
+	game.chase.cam.make_current()
+
+
 # ------------------------------------------------- Skyport expansion
 ## Ground height of the driving surface under (x, z), cast from `from_y`
 ## down (roads, decks, land; not props). NAN = nothing.
@@ -1340,6 +1642,14 @@ func _run() -> void:
 		await scenario_b()
 	if _which.split(",").has("RS"):
 		await scenario_rs()
+	if _which.split(",").has("IC"):
+		await scenario_ic()
+	if _which.split(",").has("VD"):
+		await scenario_vd()
+	if _which.split(",").has("VE"):
+		await scenario_ve()
+	if _which.split(",").has("SM"):
+		await scenario_sm()
 	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XF", "XG", "XH", "XI", "XS", "XW"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())

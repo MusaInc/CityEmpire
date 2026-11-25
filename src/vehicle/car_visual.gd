@@ -15,6 +15,7 @@ const RUBBER_SHADER := preload("res://src/vehicle/wheel_rubber.gdshader")
 const ROTOR_SHADER := preload("res://src/vehicle/brake_rotor.gdshader")
 const REVERSE_SHADER := preload("res://src/vehicle/reverse_lamp.gdshader")
 const FLARE_SHADER := preload("res://src/vehicle/lamp_flare.gdshader")
+const LENS_SHADER := preload("res://src/vehicle/lamp_lens.gdshader")
 
 static var _mesh_cache := {}
 static var _mat_cache := {}
@@ -24,6 +25,10 @@ static var _wheel_mats := {}
 ## 0 day .. 1 night (street lamps on). Set by Atmosphere every frame.
 static var lamps := 0.0
 static var visible_wetness := 0.0
+## WorldState: every Car's own impacts dent its body (player, wrecked
+## traffic, police alike). Off for games that dent from their own impact
+## handlers (NEVER STOP calls dent() itself).
+static var auto_dent := false
 
 var car: Car
 var body: MeshInstance3D
@@ -33,8 +38,14 @@ var paint_mat: ShaderMaterial
 var flares: MeshInstance3D
 var head_lights: Array[SpotLight3D] = []
 var lamp_pos := {}                  # "head"/"tail" -> Array[Vector3] (local, one per side)
-var tail_mat: StandardMaterial3D
-var head_mat: StandardMaterial3D
+var tail_mat: ShaderMaterial
+var head_mat: ShaderMaterial
+## Per-car copies of the shared glass materials, made on the first crack.
+var _glass_mats: Array[ShaderMaterial] = []
+## Dents as they happened (body-local centre, direction, depth, radius):
+## saved with an owned car and replayed when it is spawned again.
+var dent_log: Array = []
+const DENT_LOG_MAX := 48
 var _reverse_mat: ShaderMaterial
 var _reverse_light: SpotLight3D
 var _brake_light: OmniLight3D
@@ -55,6 +66,9 @@ var _rest: Array = []             # per surface: original vertices
 var dirt := 0.0
 var siren_on := false
 var _t := randf() * 10.0
+var _tail_e := -1.0
+var _head_e := -1.0
+var _heads_ok := 1.0             # share of headlamps still working
 
 
 static func load_mesh(name: String) -> Mesh:
@@ -382,16 +396,18 @@ func setup(p_car: Car) -> void:
 		paint2.set_shader_parameter("detail_n", VehicleTex.tex("paint_n"))
 		paint2.set_shader_parameter("detail_scale", 8.3)
 		paint2.set_shader_parameter("normal_depth", 0.06)
-	head_mat = StandardMaterial3D.new()
-	head_mat.albedo_color = Color(0.95, 0.95, 0.9)
-	head_mat.emission_enabled = true
-	head_mat.emission = Color(1.0, 0.95, 0.85)
-	head_mat.emission_energy_multiplier = 0.16
-	tail_mat = StandardMaterial3D.new()
-	tail_mat.albedo_color = Color(0.5, 0.02, 0.02)
-	tail_mat.emission_enabled = true
-	tail_mat.emission = Color(1.0, 0.04, 0.02)
-	tail_mat.emission_energy_multiplier = 0.0
+	head_mat = ShaderMaterial.new()
+	head_mat.shader = LENS_SHADER
+	head_mat.set_shader_parameter("albedo", Color(0.95, 0.95, 0.9))
+	head_mat.set_shader_parameter("emission_color", Color(1.0, 0.95, 0.85))
+	head_mat.set_shader_parameter("energy", 0.16)
+	tail_mat = ShaderMaterial.new()
+	tail_mat.shader = LENS_SHADER
+	tail_mat.set_shader_parameter("albedo", Color(0.5, 0.02, 0.02))
+	tail_mat.set_shader_parameter("emission_color", Color(1.0, 0.04, 0.02))
+	tail_mat.set_shader_parameter("energy", 0.0)
+	var hs: Vector3 = (spec.get("size", Vector3(1.8, 1.5, 4.6)) as Vector3) * 0.5
+	paint_mat.set_shader_parameter("half_size", hs)
 	if mesh:
 		for i in mesh.get_surface_count():
 			var src := mesh.surface_get_material(i)
@@ -463,6 +479,100 @@ func setup(p_car: Car) -> void:
 	_build_mods()
 	car.part_lost.connect(detach)
 	car.repaired.connect(reset_dents)
+	car.repaired.connect(refresh_damage)
+	car.damaged.connect(_on_damaged)
+	if auto_dent:
+		car.impact.connect(_auto_dent)
+
+
+## Localised deformation from the impact itself: depth and spread grow with
+## the velocity change (which already carries both cars' masses), a parking
+## nudge leaves only paint marks, a rollover dents the roof it landed on.
+func _auto_dent(strength: float, at: Vector3, n: Vector3, _other: Object) -> void:
+	if strength < 3.2 or _showroom:
+		return
+	var depth := clampf((strength - 3.2) / 55.0, 0.02, 0.26)
+	var radius := clampf(0.55 + strength / 30.0, 0.6, 1.35)
+	dent(at, -n, depth, radius)
+
+
+func paint_colour() -> Color:
+	return paint_mat.get_shader_parameter("base_color") if paint_mat else Color.GRAY
+
+
+func _on_damaged(kind: String, _what: Variant, _at: Vector3) -> void:
+	if kind in ["glass", "lamp", "scrape", "roof"]:
+		refresh_damage()
+
+
+## Car damage state → materials: scratches / paint transfer, glass cracks,
+## smashed lamps (and their night glow and beam).
+func refresh_damage() -> void:
+	if car == null or paint_mat == null:
+		return
+	var sc: Dictionary = car.scuff
+	paint_mat.set_shader_parameter("scuff", Vector4(sc["front"], sc["rear"], sc["left"], sc["right"]))
+	var on := Vector4.ZERO
+	var keys := ["front", "rear", "left", "right"]
+	var names := ["tr_front", "tr_rear", "tr_left", "tr_right"]
+	for i in 4:
+		if car.transfer.has(keys[i]):
+			on[i] = 1.0
+			paint_mat.set_shader_parameter(names[i], car.transfer[keys[i]])
+	paint_mat.set_shader_parameter("transfer_on", on)
+	var g: Dictionary = car.glass
+	var cr := Vector4(g["front"], g["rear"], g["left"], g["right"])
+	if cr.length() > 0.001 and _glass_mats.is_empty() and body and body.mesh:
+		# (Glass materials are shared by every car of a kind: crack a copy.)
+		for i in body.mesh.get_surface_count():
+			var m := body.get_surface_override_material(i)
+			if m is ShaderMaterial and (m as ShaderMaterial).shader and String((m as ShaderMaterial).shader.resource_path).contains("car_glass"):
+				var mine := (m as ShaderMaterial).duplicate() as ShaderMaterial
+				mine.set_shader_parameter("half_size", (car.spec["size"] as Vector3) * 0.5)
+				body.set_surface_override_material(i, mine)
+				_glass_mats.append(mine)
+	for gm in _glass_mats:
+		gm.set_shader_parameter("crack", cr)
+	var ok: Dictionary = car.lamps_ok
+	head_mat.set_shader_parameter("broken_l", 0.0 if ok["head_l"] else 1.0)
+	head_mat.set_shader_parameter("broken_r", 0.0 if ok["head_r"] else 1.0)
+	tail_mat.set_shader_parameter("broken_l", 0.0 if ok["tail_l"] else 1.0)
+	tail_mat.set_shader_parameter("broken_r", 0.0 if ok["tail_r"] else 1.0)
+	var heads := (1 if ok["head_l"] else 0) + (1 if ok["head_r"] else 0)
+	var new_ok := heads / 2.0
+	var sig := "%d%d%d%d" % [int(ok["head_l"]), int(ok["head_r"]), int(ok["tail_l"]), int(ok["tail_r"])]
+	_heads_ok = new_ok
+	if sig != _lamp_sig:
+		_lamp_sig = sig
+		if flares:
+			flares.queue_free()
+			flares = null
+		_make_flares()
+
+
+var _lamp_sig := "1111"
+
+
+## Dents, lost panels: everything visual that has to come back with a saved car.
+func visual_state() -> Dictionary:
+	return {"dents": dent_log.map(func(d): return [d[0].x, d[0].y, d[0].z, d[1].x, d[1].y, d[1].z, d[2], d[3]]), "lost": _lost.keys()}
+
+
+func apply_visual_state(d: Dictionary) -> void:
+	for e in d.get("dents", []):
+		if (e as Array).size() < 8:
+			continue
+		var c := Vector3(e[0], e[1], e[2])
+		var dir := Vector3(e[3], e[4], e[5])
+		_dent_local(c, dir, float(e[6]), float(e[7]))
+		dent_log.append([c, dir, float(e[6]), float(e[7])])
+	for part in d.get("lost", []):
+		if not _lost.has(part):
+			_lost[part] = true
+	if not (d.get("lost", []) as Array).is_empty():
+		_ensure_copy()
+		_rebuild()
+	refresh_damage()
 
 
 static var _cal_mesh: ArrayMesh
@@ -524,10 +634,13 @@ func _make_flares() -> void:
 	var uv2s := PackedVector2Array()
 	var idx := PackedInt32Array()
 	var lamps_list := []
+	var ok: Dictionary = car.lamps_ok if car else {}
 	for p in lamp_pos["head"]:
-		lamps_list.append([p, Vector3.FORWARD, Color(1.0, 0.93, 0.8, 1.0), 1.15])
+		if ok.get("head_l" if p.x < 0.0 else "head_r", true):
+			lamps_list.append([p, Vector3.FORWARD, Color(1.0, 0.93, 0.8, 1.0), 1.15])
 	for p in lamp_pos["tail"]:
-		lamps_list.append([p, Vector3.BACK, Color(1.0, 0.08, 0.05, 0.55), 0.7])
+		if ok.get("tail_l" if p.x < 0.0 else "tail_r", true):
+			lamps_list.append([p, Vector3.BACK, Color(1.0, 0.08, 0.05, 0.55), 0.7])
 	if lamps_list.is_empty():
 		return
 	for l in lamps_list:
@@ -676,8 +789,14 @@ func _process(dt: float) -> void:
 	var night_lights := 0.0 if switched_off else lamps
 	if flares:
 		flares.visible = not switched_off
-	tail_mat.emission_energy_multiplier = night_lights * 0.81 + _brake_level * 2.55
-	head_mat.emission_energy_multiplier = 0.16 + night_lights * 3.25
+	var te := night_lights * 0.81 + _brake_level * 2.55
+	var he := 0.16 + night_lights * 3.25
+	if absf(te - _tail_e) > 0.005:
+		_tail_e = te
+		tail_mat.set_shader_parameter("energy", te)
+	if absf(he - _head_e) > 0.005:
+		_head_e = he
+		head_mat.set_shader_parameter("energy", he)
 	if _reverse_mat:
 		_reverse_mat.set_shader_parameter("reverse_level", _reverse_level * 2.9)
 	if _brake_light:
@@ -694,8 +813,8 @@ func _process(dt: float) -> void:
 		paint_mat.set_shader_parameter("road_film", _visible_film)
 	if not head_lights.is_empty():
 		var on := night_lights > 0.05
-		head_lights[0].visible = on
-		head_lights[0].light_energy = 10.5 * night_lights
+		head_lights[0].visible = on and _heads_ok > 0.0
+		head_lights[0].light_energy = 10.5 * night_lights * (1.0 if _heads_ok > 0.99 else 0.55)
 		if head_lights.size() > 1:
 			head_lights[1].visible = on
 			head_lights[1].light_energy = 3.0 * night_lights
@@ -718,10 +837,19 @@ func dent(world_at: Vector3, dir: Vector3, amount: float, radius := 0.9) -> void
 	if body == null or body.mesh == null or _dent_cooldown > 0.0:
 		return
 	_dent_cooldown = 0.12
-	_ensure_copy()
 	var inv := body.global_transform.affine_inverse()
 	var c := inv * world_at
 	var d := (inv.basis * dir).normalized()
+	_dent_local(c, d, amount, radius)
+	if dent_log.size() >= DENT_LOG_MAX:
+		dent_log.remove_at(0)
+	dent_log.append([c, d, amount, radius])
+
+
+func _dent_local(c: Vector3, d: Vector3, amount: float, radius: float) -> void:
+	if body == null or body.mesh == null:
+		return
+	_ensure_copy()
 	var r2 := radius * radius
 	var size: Vector3 = car.spec["size"]
 	for s in _arrays.size():
@@ -794,6 +922,7 @@ func _rebuild() -> void:
 
 
 func reset_dents() -> void:
+	dent_log.clear()
 	for f in _frames:
 		if is_instance_valid(f):
 			f.queue_free()

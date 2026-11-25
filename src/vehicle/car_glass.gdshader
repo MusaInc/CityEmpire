@@ -11,8 +11,14 @@ global uniform float night;
 global uniform float wetness;
 #include "res://src/world/shaders/fake_reflect.gdshaderinc"
 
+#include "res://src/vehicle/car_glass_damage.gdshaderinc"
+
 void fragment() {
-	ALBEDO = tint;
+	float cr = glass_crack();
+	if (cr < 0.0) {
+		discard;
+	}
+	ALBEDO = mix(tint, vec3(0.72, 0.74, 0.75), cr * 0.8);
 	METALLIC = 0.04;
 	ROUGHNESS = mix(0.088, 0.13, wetness);
 	SPECULAR = 0.52;
@@ -30,5 +36,6 @@ void fragment() {
 	float sd = max(dot(r, normalize(sun_dir)), 0.0);
 	float glint = pow(sd, 240.0) * 0.58 + pow(sd, 36.0) * 0.055;
 	EMISSION = (env * mix(0.11, 0.68, fres) + vec3(glint)) * (1.0 - night * 0.46);
-	ALPHA = mix(0.30, 0.84, fres);
+	ALPHA = mix(mix(0.30, 0.84, fres), 0.92, cr * 0.85);
+	ROUGHNESS = mix(ROUGHNESS, 0.5, cr);
 }

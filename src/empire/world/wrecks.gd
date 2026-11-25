@@ -223,4 +223,6 @@ func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, 
 	var vis := CarVisual.new()
 	c.add_child(vis)
 	vis.setup(c)
+	if game.vfx:
+		game.vfx.watch(c)
 	wrecks.append({"car": c, "t": 0.0, "traffic": traffic_id, "source": source, "hit": false, "spawn_y": xf.origin.y, "parked": parked, "island": island})

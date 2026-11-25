@@ -29,6 +29,11 @@ signal wrecked
 signal part_lost(part: String, at: Vector3, normal: Vector3)
 signal repaired
 signal splashed(at: Vector3, speed: float)
+## A localised damage event (CarVisual and the game's feedback listen):
+## kind = "glass" (what = front/rear/left/right, crack 0..1, 1 = shattered),
+## "lamp" (head_l/head_r/tail_l/tail_r broken), "tyre" (wheel index),
+## "susp" (wheel index), "overheat", "breakdown", "scrape" (side), "roof".
+signal damaged(kind: String, what: Variant, at: Vector3)
 
 ## Body panels that can come off, and the impact side that wears each one.
 ## (Plates only exist with Workshop armour plating; they take the hit first.)
@@ -98,6 +103,28 @@ var climbed_kerb := 0.0        # > 0 just after hopping a kerb/ledge (camera, au
 var parts := {}
 ## The player's engine never dies: damage slows the car, never stops it.
 var immortal := false
+# --- localised damage (vehicle damage overhaul 2026-11-25) ---------------
+## Per wheel FL, FR, RL, RR: 0 sound .. 1 flat / collapsed.
+var tyre := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
+var susp := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
+## Engine 1 healthy .. 0 seized; coolant 1 full .. 0 dry; temp 0 cold .. 1 boiling.
+var engine := 1.0
+var coolant := 1.0
+var temp := 0.0
+var overheated := false        # boiling: limp power until it cools down
+## Glazing: crack level per pane group (>= 1 shattered).
+var glass := {"front": 0.0, "rear": 0.0, "left": 0.0, "right": 0.0}
+## Lamps that still work.
+var lamps_ok := {"head_l": true, "head_r": true, "tail_l": true, "tail_r": true}
+## Paint scratches / bare metal per side 0..1, and the colour scraped onto
+## each side by the other car (paint transfer).
+var scuff := {"front": 0.0, "rear": 0.0, "left": 0.0, "right": 0.0}
+var transfer := {}             # side -> Color
+var roof := 0.0                # roof crush from rollovers 0..1
+var impact_kind := ""          # last: parking / scrape / crash / heavy / rollover
+var _hits_near: Array = []     # [time, side] recent impacts (repeated-hit escalation)
+var _scrape_t := 0.0
+var _scrapes: Array = []       # low, sliding contacts this step: [at, other]
 var last_hit_by: Car            # who hit us last (for kill credit)
 var jump_cd := 0.0              # hydraulics cooldown (Workshop)
 
@@ -257,6 +284,96 @@ func reset_damage() -> void:
 	puncture = 0.0
 	nitro_amount = 1.0
 	_reset_parts()
+	reset_mechanical()
+	reset_body()
+
+
+## Garage: the mechanical half of a repair (engine, cooling, tyres,
+## suspension, alignment) – the bodywork stays as it is.
+func reset_mechanical() -> void:
+	tyre = PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
+	susp = PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
+	engine = 1.0
+	coolant = 1.0
+	temp = 0.0
+	overheated = false
+	puncture = 0.0
+	disabled = false
+	health = maxf(health, 1.0 - 0.5 * body_damage())
+	for k in dmg:
+		dmg[k] = minf(dmg[k], 0.35)   # (no pull, no power loss left over)
+
+
+## Garage: bodywork, glass, lamps and paint as new.
+func reset_body() -> void:
+	for k in glass:
+		glass[k] = 0.0
+	for k in lamps_ok:
+		lamps_ok[k] = true
+	for k in scuff:
+		scuff[k] = 0.0
+	transfer = {}
+	roof = 0.0
+	_reset_parts()
+
+
+## 0..1: how bad the bodywork looks (panels, dents by side, glass, roof).
+func body_damage() -> float:
+	var d := 0.0
+	for k in dmg:
+		d = maxf(d, float(dmg[k]))
+	var g := 0.0
+	for k in glass:
+		g += minf(1.0, float(glass[k])) * 0.25
+	var lost := float(parts_lost()) / maxf(float(parts.size()), 1.0)
+	return clampf(d * 0.6 + g * 0.2 + lost * 0.3 + roof * 0.3, 0.0, 1.0)
+
+
+## 0..1: how bad it drives (engine, cooling, tyres, suspension).
+func mech_damage() -> float:
+	var t := 0.0
+	var su := 0.0
+	for i in 4:
+		t = maxf(t, tyre[i])
+		su = maxf(su, susp[i])
+	return clampf((1.0 - engine) * 0.5 + (1.0 - coolant) * 0.15 + t * 0.2 + su * 0.25 + maxf(puncture, 0.0) * 0.1, 0.0, 1.0)
+
+
+## Everything that has to survive parking, storage and a save.
+func damage_state() -> Dictionary:
+	return {"health": health, "dmg": dmg.duplicate(), "parts": parts.duplicate(), "tyre": Array(tyre), "susp": Array(susp),
+		"engine": engine, "coolant": coolant, "glass": glass.duplicate(), "lamps": lamps_ok.duplicate(),
+		"scuff": scuff.duplicate(), "transfer": transfer.keys().map(func(k): return [k, (transfer[k] as Color).to_html()]),
+		"roof": roof, "puncture": puncture}
+
+
+func apply_damage_state(d: Dictionary) -> void:
+	if d.is_empty():
+		return
+	health = float(d.get("health", 1.0))
+	for k in (d.get("dmg", {}) as Dictionary):
+		dmg[k] = float(d["dmg"][k])
+	for k in (d.get("parts", {}) as Dictionary):
+		parts[k] = float(d["parts"][k])
+	var ty: Array = d.get("tyre", [])
+	var su: Array = d.get("susp", [])
+	for i in mini(4, ty.size()):
+		tyre[i] = float(ty[i])
+	for i in mini(4, su.size()):
+		susp[i] = float(su[i])
+	engine = float(d.get("engine", 1.0))
+	coolant = float(d.get("coolant", 1.0))
+	for k in (d.get("glass", {}) as Dictionary):
+		glass[k] = float(d["glass"][k])
+	for k in (d.get("lamps", {}) as Dictionary):
+		lamps_ok[k] = bool(d["lamps"][k])
+	for k in (d.get("scuff", {}) as Dictionary):
+		scuff[k] = float(d["scuff"][k])
+	transfer = {}
+	for e in d.get("transfer", []):
+		transfer[String(e[0])] = Color.html(String(e[1]))
+	roof = float(d.get("roof", 0.0))
+	puncture = float(d.get("puncture", 0.0))
 
 
 func _reset_parts() -> void:
@@ -361,6 +478,11 @@ func _physics_process(dt: float) -> void:
 	var power_scale: float = 1.0 - 0.45 * maxf(dmg["front"], dmg["rear"]) - 0.25 * (1.0 - health)
 	if immortal:
 		power_scale = maxf(power_scale, 0.62)  # beaten up, never dead
+	_cooling(dt)
+	# A tired engine pulls less; a boiling one limps home.
+	power_scale *= lerpf(0.45, 1.0, engine)
+	if overheated:
+		power_scale *= 0.3
 	jump_cd = maxf(0.0, jump_cd - dt)
 	_check_water(dt)
 	var thr := 0.0 if disabled or in_water else throttle
@@ -369,6 +491,8 @@ func _physics_process(dt: float) -> void:
 	var slide := clampf(power_slide, 0.0, 1.0) if not disabled and not in_water and brk < 0.18 and forward_speed > 7.0 else 0.0
 	# Front-end damage pulls the steering (misalignment) – correctable.
 	var pull: float = (dmg["left"] - dmg["right"]) * 0.12 + dmg["front"] * 0.05 * sin(_time * 0.7)
+	# Bent front suspension and a flat front tyre drag the car to their side.
+	pull += (susp[1] - susp[0]) * 0.16 + (tyre[1] - tyre[0]) * 0.12
 	var target_steer := clampf(str_in + pull, -1.0, 1.0) * max_steer_angle()
 	# Constant time from centre to full lock at any speed (~0.17 s, quicker
 	# on the sharper cars): fast enough to feel direct, slow enough that a
@@ -432,7 +556,8 @@ func _physics_process(dt: float) -> void:
 	var susp_stiff: float = maxf(float(spec.get("susp_stiff", 1.0)), 0.35)
 	var k: float = spec["spring"] * mass * susp_stiff
 	var c: float = spec["damper"] * mass * sqrt(susp_stiff)
-	var rest: float = spec["susp_len"]
+	var rest0: float = spec["susp_len"]
+	var rest := rest0
 	var wr: float = spec["wheel_r"]
 	var wet_grip := 1.0 - 0.11 * clampf(CarVisual.visible_wetness, 0.0, 1.0)
 	var mu: float = spec["grip"] * wet_grip * (1.0 - 0.25 * (1.0 - health)) * (1.0 - 0.28 * puncture)
@@ -456,6 +581,8 @@ func _physics_process(dt: float) -> void:
 		var front := i < 2
 		var driven := drv == "awd" or (drv == "rwd" and not front) or (drv == "fwd" and front)
 		var hb := handbrake and not front and not disabled
+		# A collapsed strut sits low and soft; a flat tyre rides on its rim.
+		rest = rest0 * (1.0 - 0.38 * susp[i]) - 0.06 * tyre[i]
 		r.force_raycast_update()
 		_hit[i] = r.is_colliding()
 		if not _hit[i]:
@@ -480,7 +607,7 @@ func _physics_process(dt: float) -> void:
 		_comp[i] = comp
 		wheel_comp_visual[i] = lerpf(wheel_comp_visual[i], minf(comp, rest), 1.0 - exp(-26.0 * dt))
 		var damp_k := 0.92 if comp_v >= 0.0 else 1.18
-		var fz := maxf(0.0, k * comp + c * damp_k * comp_v)
+		var fz := maxf(0.0, k * (1.0 - 0.3 * susp[i]) * comp + c * (1.0 - 0.45 * susp[i]) * damp_k * comp_v)
 		# Progressive bump stop: smooth cushion near full travel, firm past rest.
 		var cushion := rest * 0.85
 		if comp > cushion:
@@ -503,7 +630,7 @@ func _physics_process(dt: float) -> void:
 		var pv := vel + angular_velocity.cross(at)
 		var v_long := pv.dot(wfwd)
 		var v_lat := pv.dot(wside)
-		var mu_w: float = mu * (spec["grip_front"] if front else spec["grip_rear"] * rear_slip_k)
+		var mu_w: float = mu * (spec["grip_front"] if front else spec["grip_rear"] * rear_slip_k) * (1.0 - 0.42 * tyre[i]) * (1.0 - 0.15 * susp[i])
 		var slide_mu: float = mu_w * spec.get("slide", 0.82)
 		if hb:
 			slide_mu = mu_w * spec.get("hb_grip", 0.42)
@@ -529,7 +656,7 @@ func _physics_process(dt: float) -> void:
 			f_long -= signf(v_long) * minf(bf, absf(v_long) * mass * 0.25 / dt)
 		if hb:
 			f_long -= signf(v_long) * minf(mass * 3.5 * 0.5, absf(v_long) * mass * 0.25 / dt)
-		f_long -= v_long * mass * 0.0015  # rolling resistance
+		f_long -= v_long * mass * (0.0015 + 0.03 * tyre[i])  # rolling resistance (a flat drags)
 		if disabled:
 			f_long -= signf(v_long) * minf(mass * 6.0 * 0.25, absf(v_long) * mass * 0.25 / dt)
 		# Engine braking on the driven wheels.
@@ -700,6 +827,7 @@ func _physics_process(dt: float) -> void:
 	climbed_kerb = maxf(0.0, climbed_kerb - dt)
 	_handle_steps()
 	_handle_impacts()
+	_handle_scrapes(dt)
 	if in_water:
 		# Wallow: heavy drag, no grip to speak of.
 		var wv := linear_velocity
@@ -777,6 +905,8 @@ func _integrate(state: PhysicsDirectBodyState3D) -> void:
 		if j < mass * 1.2:
 			if j > mass * 0.15:
 				scraping = minf(1.0, scraping + 0.25)
+				if _scrapes.size() < 2 and n.dot(state.transform.basis.y) < 0.6:
+					_scrapes.append([at, other])
 			continue
 		# Ground contacts under the wheels aren't impacts.
 		if n.dot(state.transform.basis.y) > 0.75:
@@ -900,6 +1030,18 @@ func _handle_impacts() -> void:
 			_wear_part(pn, wear * (1.0 if pi == 0 else 0.55), at, n)
 		if gone > 0:
 			amount *= 1.0 + 0.25 * gone
+	# Repeated hits on the same side within a few seconds bite harder.
+	var repeats := 0
+	var keep: Array = []
+	for h: Array in _hits_near:
+		if _time - float(h[0]) < 6.0:
+			keep.append(h)
+			if h[1] == side:
+				repeats += 1
+	_hits_near = keep
+	_hits_near.append([_time, side])
+	amount *= 1.0 + 0.18 * mini(repeats, 3)
+	_localised(side, local, dv, n, other, amount)
 	dmg[side] = minf(1.0, dmg[side] + amount)
 	health = maxf(0.2 if immortal else 0.0, health - amount * 0.6)
 	if dv > 9.0 and (side == "left" or side == "right"):
@@ -915,6 +1057,137 @@ func _handle_impacts() -> void:
 		wrecked.emit()
 
 
+## Where on the car the hit landed decides what breaks: lamps at the
+## corners, the glass on that side, the wheel and strut nearest a low hit,
+## the radiator and engine behind the nose, the roof in a rollover. Kind:
+## parking (< 4 m/s: a scuff and maybe a lamp), crash, heavy (> 14 m/s),
+## rollover (the roof or upper body hit while upside down / on its side).
+func _localised(side: String, local: Vector3, dv: float, n: Vector3, other: Object, amount: float) -> void:
+	var size: Vector3 = spec["size"]
+	var nx := local.x / maxf(size.x * 0.5, 0.1)          # -1 left .. +1 right
+	var nz := local.z / maxf(size.z * 0.5, 0.1)          # -1 front .. +1 rear
+	var ny := (local.y + size.y * 0.15) / maxf(size.y, 0.1)  # ~0 sills .. 1 roof
+	var at := global_transform * local
+	var upright := global_basis.y.y
+	if upright < 0.35 and ny > 0.55:
+		impact_kind = "rollover"
+	elif dv < 4.0:
+		impact_kind = "parking"
+	elif dv > 14.0:
+		impact_kind = "heavy"
+	else:
+		impact_kind = "crash"
+	# Paint: every hit scuffs; another car leaves its colour behind.
+	scuff[side] = minf(1.0, float(scuff[side]) + clampf(dv / 30.0, 0.05, 0.35))
+	if other is Car and (other as Car).visual and (other as Car).visual.has_method("paint_colour"):
+		transfer[side] = (other as Car).visual.paint_colour()
+	if impact_kind == "rollover":
+		roof = minf(1.0, roof + clampf(dv / 16.0, 0.15, 0.6))
+		for g in glass:
+			_crack(g, clampf(dv / 10.0, 0.3, 1.0), at)
+		damaged.emit("roof", roof, at)
+		return
+	# Lamps: a corner hit breaks the lamp on that corner (parking knocks too).
+	var corner_x := "l" if nx < 0.0 else "r"
+	if absf(nz) > 0.7 and dv > (2.6 if absf(nx) > 0.35 else 5.0):
+		var lamp := ("head_" if nz < 0.0 else "tail_") + corner_x
+		if lamps_ok.get(lamp, false):
+			lamps_ok[lamp] = false
+			damaged.emit("lamp", lamp, at)
+		if dv > 10.0 and absf(nx) < 0.5:   # (square on: both go)
+			var other_lamp := ("head_" if nz < 0.0 else "tail_") + ("r" if corner_x == "l" else "l")
+			if lamps_ok.get(other_lamp, false):
+				lamps_ok[other_lamp] = false
+				damaged.emit("lamp", other_lamp, at)
+	# Glass: progressive cracks, shattered past 1. Windscreen from frontal
+	# hits (the body flexes), side windows from side impacts at window height.
+	if dv > 6.5:
+		var g := side
+		var k := clampf((dv - 6.5) / 16.0, 0.08, 0.7)
+		if side == "left" or side == "right":
+			k *= 1.4 if ny > 0.45 else 0.6
+		_crack(g, k, at)
+		if side == "front" and dv > 16.0:
+			_crack("left", k * 0.4, at)
+			_crack("right", k * 0.4, at)
+	# Wheels and struts: a low hit near a wheel (kerbing a corner, a side
+	# swipe into the arch) bends the strut and can burst the tyre.
+	if ny < 0.5 and dv > 5.0 and (absf(nz) > 0.45 or side == "left" or side == "right"):
+		var wi := (0 if nx < 0.0 else 1) + (0 if nz < 0.0 else 2)
+		if side == "front":
+			wi = 0 if nx < 0.0 else 1
+		elif side == "rear":
+			wi = 2 if nx < 0.0 else 3
+		var sk := clampf((dv - 5.0) / 22.0, 0.05, 0.5) / maxf(float(spec.get("durability", 1.0)), 0.3)
+		susp[wi] = minf(1.0, susp[wi] + sk)
+		damaged.emit("susp", wi, at)
+		if dv > 11.0 and randf() < clampf((dv - 11.0) / 14.0, 0.15, 0.8):
+			tyre[wi] = 1.0
+			damaged.emit("tyre", wi, at)
+	# Nose: radiator and engine behind the front bumper.
+	if side == "front" and dv > 7.0:
+		engine = maxf(0.0, engine - amount * (0.7 if dv > 14.0 else 0.4))
+		if dmg["front"] + amount > 0.4:
+			coolant = minf(coolant, 0.98)   # (a holed radiator starts to leak)
+
+
+func _crack(g: String, k: float, at: Vector3) -> void:
+	var before := float(glass.get(g, 0.0))
+	if before >= 1.0:
+		return
+	glass[g] = minf(1.0, before + k)
+	damaged.emit("glass", [g, float(glass[g])], at)
+
+
+## Sliding contact (along a wall, down another car's flank): scratches and
+## paint transfer on that side, no dents.
+func _handle_scrapes(dt: float) -> void:
+	_scrape_t -= dt
+	if _scrapes.is_empty():
+		return
+	var e: Array = _scrapes[0]
+	_scrapes.clear()
+	if _scrape_t > 0.0 or speed < 2.5:
+		return
+	_scrape_t = 0.25
+	var local := global_transform.affine_inverse() * (e[0] as Vector3)
+	var size: Vector3 = spec["size"]
+	var side := "front"
+	if absf(local.x) / size.x > absf(local.z) / size.z:
+		side = "right" if local.x > 0.0 else "left"
+	else:
+		side = "front" if local.z < 0.0 else "rear"
+	impact_kind = "scrape"
+	scuff[side] = minf(1.0, float(scuff[side]) + 0.035 * clampf(speed / 8.0, 0.5, 2.5))
+	var other: Object = e[1]
+	if other is Car and (other as Car).visual and (other as Car).visual.has_method("paint_colour"):
+		transfer[side] = (other as Car).visual.paint_colour()
+	damaged.emit("scrape", side, e[0])
+
+
+## Cooling: a leaking radiator empties while the engine runs; without
+## coolant the temperature climbs with load until it boils (limp power,
+## steam) and has to cool off. A seized engine (CPU cars, engine 0) breaks
+## down for good; the player's never quite does – it limps.
+func _cooling(dt: float) -> void:
+	if coolant < 1.0 and coolant > 0.0:
+		var leak := 0.004 + 0.012 * clampf(dmg["front"], 0.0, 1.0)
+		coolant = maxf(0.0, coolant - leak * dt * (0.4 + absf(throttle)))
+	var heat := (0.0 if coolant > 0.35 else (0.35 - coolant) * 0.35) * (0.3 + absf(throttle)) * (0.4 + clampf(speed / 20.0, 0.0, 1.0))
+	heat += (1.0 - engine) * 0.02 * absf(throttle)
+	var cool := 0.03 * (1.0 - absf(throttle) * 0.7) + (0.05 if coolant > 0.35 else 0.0)
+	temp = clampf(temp + (heat - cool * temp) * dt, 0.0, 1.0)
+	if not overheated and temp > 0.97:
+		overheated = true
+		damaged.emit("overheat", temp, global_position)
+	elif overheated and temp < 0.55:
+		overheated = false
+	if engine <= 0.0 and not immortal and not disabled:
+		disabled = true
+		damaged.emit("breakdown", 0, global_position)
+		wrecked.emit()
+
+
 func _check_water(dt: float) -> void:
 	var p := global_position
 	var wet := p.y < WATER_Y + 0.5 and water_check.is_valid() and bool(water_check.call(p))
@@ -922,6 +1195,14 @@ func _check_water(dt: float) -> void:
 		splashed.emit(p, linear_velocity.length())
 	in_water = wet
 	water_t = water_t + dt if wet else 0.0
+
+
+## A hit from something that isn't a physics contact (a lamp post the car
+## knocked flat, a storefront it smashed): handled next step exactly like a
+## collision – localised damage, dents, effects, sounds. normal points from
+## the obstacle back at the car.
+func external_impact(at: Vector3, normal: Vector3, dv: float, other: Object = null) -> void:
+	_impacts.append([dv, at, normal, other])
 
 
 ## Velocity on the step before this one (= just before an impact, when read

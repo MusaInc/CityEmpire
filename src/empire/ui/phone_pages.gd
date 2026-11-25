@@ -923,6 +923,42 @@ static func garage(ph: Phone, body: VBoxContainer) -> void:
 	sell.disabled = why != ""
 	sell.tooltip_text = why
 	acts2.add_child(sell)
+	# Damage and the garage (vehicle damage overhaul): what's broken, and a
+	# Motor Works quote for a mechanical repair or a full restoration.
+	if cls == "car" and g.cars.has(vid):
+		var car_n: Car = g.cars[vid]
+		var report := g.damage_report(car_n)
+		var rc := G.card(16, 8)
+		var rv: VBoxContainer = rc[1]
+		var rtop := G.hbox(10)
+		rtop.add_child(G.line("Damage", "headline"))
+		var sev := maxf(car_n.body_damage(), car_n.mech_damage())
+		rtop.add_child(G.badge("NONE" if report.is_empty() else ("MINOR" if sev < 0.25 else ("SERIOUS" if sev < 0.6 else "SEVERE")),
+			G.GREEN if report.is_empty() else (G.ORANGE if sev < 0.6 else G.RED)))
+		rv.add_child(rtop)
+		rv.add_child(G.para("No damage – it's as it left the showroom." if report.is_empty() else " · ".join(report), "footnote"))
+		if not report.is_empty():
+			var rq := g.repair_quote(vid)
+			var tow := float(rq["tow"])
+			rv.add_child(G.para(("At %s." % String((rq["garage"] as Dictionary).get("name", "Motor Works"))) if rq["at_garage"]
+				else "Nearest Motor Works is away – collection and return adds %s." % EmpireData.money(tow), "caption"))
+			var rb := G.hbox(10)
+			rv.add_child(rb)
+			var mb := G.button("Mechanical · %s" % EmpireData.money(float(rq["mech"]) + tow), func():
+				var err := g.repair_vehicle(vid, "mech")
+				ui.toast(err if err != "" else "Engine, tyres and suspension fixed", "bad" if err != "" else "good")
+				ph.refresh(), "gray", "regular", null, "wrench")
+			mb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			mb.disabled = not rq["ok"] or float(rq["mech"]) <= 0.0
+			rb.add_child(mb)
+			var fb2 := G.button("Full restoration · %s" % EmpireData.money(float(rq["full"]) + tow), func():
+				var err := g.repair_vehicle(vid, "full")
+				ui.toast(err if err != "" else "Restored: bodywork, glass and paint as new", "bad" if err != "" else "good")
+				ph.refresh(), "filled", "regular", null, "wrench")
+			fb2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			fb2.disabled = not rq["ok"]
+			rb.add_child(fb2)
+		info.add_child(rc[0])
 	# Charter Operations for aircraft and boats (passive daily revenue).
 	if Ventures.is_charterable(veh):
 		var chartered := Ventures.is_chartered(e, vid)

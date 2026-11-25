@@ -245,6 +245,7 @@ func rebuild() -> void:
 		_build_shop(st)
 	_fit_wall_bays()
 	_furniture_contact()
+	_finish_spans()
 	var mi := MeshInstance3D.new()
 	mi.name = "Shell"
 	mi.mesh = st.commit()
@@ -818,9 +819,180 @@ func _front_opening_height() -> float:
 ## Joining two transparent faces at the same edge causes dark seams and
 ## makes double reflections through the shop.
 func _pane(a: Vector3, b: Vector3, c: Vector3, d: Vector3, tint: Color) -> void:
+	if _cur_span >= 0:
+		var sg: _Batch = (_spans[_cur_span] as Dictionary)["glass"]
+		sg._quad(a, b, c, d, (b - a).cross(d - a).normalized(), tint)
+		return
 	if _glass == null:
 		_glass = _Batch.new()
 	_glass._quad(a, b, c, d, (b - a).cross(d - a).normalized(), tint)
+
+
+# ------------------------------------------------- breakable shopfronts
+## Each display window either side of the door is its own breakable span
+## (destruction overhaul 2026-11-25): its stall riser, sill, mullions and
+## glass are drawn as one node with its own collision body, so a car can
+## smash through it into the shop while the pilasters, reveals, fascia and
+## the walls of the building (the structure) stay put. StorefrontSmash
+## finds the spans (group "shop_spans"), DamageDesk bills them, and
+## `front_state` (set by the game before the room is built) keeps a broken
+## window broken – then boarded up – until it's repaired.
+var _spans: Array = []        # {shell: _Batch, glass: _Batch, lo, hi (room), node, body, broken}
+var _cur_span := -1
+## unit-level state from the game: span index -> "broken" | "boarded".
+var front_state := {}
+
+
+func span_count() -> int:
+	return _spans.size()
+
+
+## Span i's box in world space: [Transform3D (room), lo, hi] for hit tests.
+func span_box(i: int) -> Array:
+	var sp: Dictionary = _spans[i]
+	return [global_transform, sp["lo"], sp["hi"]]
+
+
+func span_broken(i: int) -> bool:
+	return String((_spans[i] as Dictionary).get("state", "")) != ""
+
+
+func _begin_span(lo: Vector3, hi: Vector3) -> _Batch:
+	var sp := {"shell": _Batch.new(), "glass": _Batch.new(), "lo": lo.min(hi), "hi": lo.max(hi), "state": ""}
+	_spans.append(sp)
+	_cur_span = _spans.size() - 1
+	return sp["shell"]
+
+
+func _finish_spans() -> void:
+	_cur_span = -1
+	for i in _spans.size():
+		var sp: Dictionary = _spans[i]
+		var node := Node3D.new()
+		node.name = "Span_%d" % i
+		_static.add_child(node)
+		var shell := MeshInstance3D.new()
+		shell.name = "Frame"
+		shell.mesh = (sp["shell"] as _Batch).commit()
+		shell.material_override = _mat("vc")
+		shell.visibility_range_end = 260.0
+		node.add_child(shell)
+		var gl := MeshInstance3D.new()
+		gl.name = "Glass"
+		gl.mesh = (sp["glass"] as _Batch).commit()
+		gl.material_override = _mat("glass")
+		gl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		gl.visibility_range_end = 180.0
+		node.add_child(gl)
+		var body := StaticBody3D.new()
+		body.name = "SpanBody_%d" % i
+		body.collision_layer = CityWorld.HUMAN_LAYER | 1
+		body.collision_mask = 0
+		var cs := CollisionShape3D.new()
+		var bs := BoxShape3D.new()
+		bs.size = ((sp["hi"] as Vector3) - (sp["lo"] as Vector3)).max(Vector3.ONE * 0.02)
+		cs.shape = bs
+		cs.position = ((sp["lo"] as Vector3) + (sp["hi"] as Vector3)) * 0.5
+		body.add_child(cs)
+		body.set_meta("shop_span", i)
+		add_child(body)
+		sp["node"] = node
+		sp["body"] = body
+		sp["shell"] = null
+		sp["glass"] = null
+		var st0 := String(front_state.get(i, ""))
+		if st0 != "":
+			_set_span_state(i, st0)
+	if not _spans.is_empty():
+		add_to_group("shop_spans")
+
+
+## "broken": window gone (jagged teeth of glass left in a bent frame, open
+## to drive or walk through); "boarded": plywood over the opening (solid
+## again); "": as built.
+func _set_span_state(i: int, state: String) -> void:
+	var sp: Dictionary = _spans[i]
+	sp["state"] = state
+	var node: Node3D = sp["node"]
+	var body: StaticBody3D = sp["body"]
+	var old := node.get_node_or_null("Damage")
+	if old:
+		old.queue_free()
+	node.get_node("Frame").visible = state == ""
+	node.get_node("Glass").visible = state == ""
+	(body.get_child(0) as CollisionShape3D).set_deferred("disabled", state == "broken")
+	if state == "":
+		return
+	var lo: Vector3 = sp["lo"]
+	var hi: Vector3 = sp["hi"]
+	var dmg := _Batch.new()
+	var glass := _Batch.new()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([unit.get("id", ""), i])
+	var z := (lo.z + hi.z) * 0.5
+	if state == "boarded":
+		# Plywood sheets screwed over the hole, a batten across them.
+		var n := maxi(1, ceili((hi.x - lo.x) / 1.22))
+		for k in n:
+			var x0 := lerpf(lo.x, hi.x, float(k) / n) + 0.01
+			var x1 := lerpf(lo.x, hi.x, float(k + 1) / n) - 0.01
+			var ply := Color(0.71, 0.58, 0.4).darkened(rng.randf_range(0.0, 0.12))
+			dmg.box(Vector3(x0, lo.y + 0.02, z - 0.02), Vector3(x1, hi.y - 0.05, z + 0.03), ply)
+		dmg.box(Vector3(lo.x, lo.y + (hi.y - lo.y) * 0.45, z + 0.03), Vector3(hi.x, lo.y + (hi.y - lo.y) * 0.45 + 0.09, z + 0.07), Color(0.48, 0.38, 0.27))
+	else:
+		# The frame left behind: a buckled bottom rail and the stubs of the
+		# mullions, and teeth of glass hanging from the head and standing in
+		# the sill.
+		var frame := Color(0.17, 0.17, 0.16)
+		dmg.box(Vector3(lo.x, lo.y, z - 0.05), Vector3(hi.x, lo.y + 0.12, z + 0.05), frame.darkened(0.2))
+		dmg.box(Vector3(lo.x, hi.y - 0.14, z - 0.05), Vector3(hi.x, hi.y, z + 0.05), frame)
+		var stubs := maxi(1, ceili((hi.x - lo.x) / 1.9))
+		for k in stubs + 1:
+			var x := lerpf(lo.x, hi.x, float(k) / stubs)
+			var hgt := rng.randf_range(0.3, 1.2)
+			dmg.box(Vector3(x - 0.03, lo.y, z - 0.04), Vector3(x + 0.03, lo.y + hgt, z + 0.04), frame)
+		var tint := Color(0.65, 0.75, 0.81, 0.35)
+		var x := lo.x
+		while x < hi.x - 0.05:
+			var w := rng.randf_range(0.12, 0.35)
+			var x1 := minf(hi.x, x + w)
+			var top_len := rng.randf_range(0.08, 0.6)
+			var bot_len := rng.randf_range(0.05, 0.35)
+			var tip := lerpf(x, x1, rng.randf())
+			glass._tri(Vector3(x, hi.y - 0.14, z), Vector3(x1, hi.y - 0.14, z), Vector3(tip, hi.y - 0.14 - top_len, z), Vector3.BACK, tint)
+			glass._tri(Vector3(x1, lo.y + 0.12, z), Vector3(x, lo.y + 0.12, z), Vector3(tip, lo.y + 0.12 + bot_len, z), Vector3.BACK, tint)
+			x = x1
+	var dn := Node3D.new()
+	dn.name = "Damage"
+	node.add_child(dn)
+	var dm := MeshInstance3D.new()
+	dm.mesh = dmg.commit()
+	dm.material_override = _mat("vc")
+	dn.add_child(dm)
+	if state == "broken":
+		var gm := MeshInstance3D.new()
+		gm.mesh = glass.commit()
+		gm.material_override = _mat("glass")
+		gm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		dn.add_child(gm)
+
+
+func break_span(i: int) -> void:
+	if i >= 0 and i < _spans.size() and not span_broken(i):
+		front_state[i] = "broken"
+		_set_span_state(i, "broken")
+
+
+func board_span(i: int) -> void:
+	if i >= 0 and i < _spans.size():
+		front_state[i] = "boarded"
+		_set_span_state(i, "boarded")
+
+
+func mend_span(i: int) -> void:
+	if i >= 0 and i < _spans.size():
+		front_state.erase(i)
+		_set_span_state(i, "")
 
 
 func _glazed_bays(st: _Batch, span: Vector2, y: Vector2, depth: float,
@@ -874,10 +1046,14 @@ func _shopfront(st: _Batch, _trim: Color) -> void:
 		if x1 - x0 < 0.2:
 			continue
 		spans.append([x0, x1])
-		_riser(st, x0, x1, gd, rh, fc, sf)
-		st.box(R(x0, gd - 0.13, rh), R(x1, gd + 0.06, rh + 0.05), fc.lightened(0.15))  # sill
-		_glazed_bays(st, Vector2(x0, x1), Vector2(rh + 0.05, th), gd, mw, 1.9, fc, glass_c)
-		_solid(R(x0, gd - 0.08, 0.0), R(x1, gd + 0.08, oh))
+		# (Its own breakable span: riser, sill, mullions, glass, collision.)
+		var sb := _begin_span(R(x0, gd - 0.08, 0.0), R(x1, gd + 0.08, th))
+		_riser(sb, x0, x1, gd, rh, fc, sf)
+		sb.box(R(x0, gd - 0.13, rh), R(x1, gd + 0.06, rh + 0.05), fc.lightened(0.15))  # sill
+		_glazed_bays(sb, Vector2(x0, x1), Vector2(rh + 0.05, th), gd, mw, 1.9, fc, glass_c)
+		_cur_span = -1
+		# The transom above the window stays (it's under the fascia beam).
+		_solid(R(x0, gd - 0.08, th), R(x1, gd + 0.08, oh))
 	# The transom has its own small lights, aligned with the display bays.
 	st.box(R(ox.x, gd - 0.07, th), R(ox.y, gd + 0.06, th + 0.07), fc)
 	for sp: Array in spans:
