@@ -22,6 +22,9 @@ uniform vec4 wet_road_lamps[4];
 #include "res://src/world/shaders/pbr_detail.gdshaderinc"
 global uniform float night;
 global uniform float wetness;
+// Standing water that outlasts the rain (leftover puddles on dry, sunny
+// streets); the atmosphere keeps it >= wetness.
+global uniform float puddles;
 global uniform float rain;
 global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
@@ -37,6 +40,7 @@ float hash12(vec2 p) {
 	p3 += dot(p3, p3.yzx + 33.33);
 	return fract((p3.x + p3.y) * p3.z);
 }
+#include "res://src/world/shaders/rain_splash.gdshaderinc"
 
 float vnoise(vec2 p) {
 	vec2 i = floor(p);
@@ -590,18 +594,26 @@ void fragment() {
 	}
 	float puddle = 0.0;
 	float surface_wet = 0.0;
-	if (wetness > 0.001 && !shore && flat_top && (asphalt || pave)) {
+	float standing = max(wetness, puddles);
+	if (standing > 0.001 && !shore && flat_top && (asphalt || pave)) {
 		// Porous asphalt darkens before any standing water forms. A road
 		// crown drains toward its edges; wheel tracks break up the water.
+		// Puddles (standing) outlast the wet surface: after the rain the
+		// tarmac dries but the dips and gutters keep their water.
 		surface_wet = wetness * (asphalt ? 1.0 : 0.72);
 		// Allow wet pooling across Westbank's gentle hills & sloped junctions
 		// while still draining steep embankments (> ~22 deg).
 		float flatness = smoothstep(0.925, 0.985, normalize(v_wn).y);
 		float basin = n * 0.18 + vnoise(p * vec2(0.21, 0.18) + 46.0) * 0.62;
-		basin += 0.32 * shoulder_depression - 0.11 * wheel_tracks;
-		float threshold = mix(0.82, 0.54, surface_wet);
+		// (gutters hold water in separate pools, not one continuous strip)
+		basin += 0.32 * shoulder_depression * smoothstep(0.25, 0.75, vnoise(p * 0.35 + 13.0)) - 0.11 * wheel_tracks;
+		float stand = standing * (asphalt ? 1.0 : 0.88);
+		float threshold = mix(0.80, 0.50, stand);
 		puddle = smoothstep(threshold, threshold + max(0.065, aa * 0.12), basin)
-			* flatness * smoothstep(0.20, 0.82, surface_wet) * (asphalt ? 1.0 : 0.42);
+			* flatness * smoothstep(0.20, 0.82, stand) * (asphalt ? 1.0 : 0.75);
+		// a damp, darker rim where the water is drying back from
+		float halo = smoothstep(threshold - 0.08, threshold, basin) * flatness * smoothstep(0.2, 0.7, stand);
+		surface_wet = max(surface_wet, halo * (asphalt ? 0.62 : 0.4));
 		puddle *= 1.0 - smoothstep(125.0, 250.0, camera_distance);
 		albedo *= (1.0 - (asphalt ? 0.32 : 0.14) * surface_wet) * (1.0 - 0.06 * puddle);
 		rough = mix(rough, asphalt ? 0.34 : 0.58, surface_wet);
@@ -658,9 +670,9 @@ void fragment() {
 				float rfade = (1.0 - smoothstep(8.0, 22.0, camera_distance)) * (1.0 - smoothstep(0.025, 0.12, aa));
 				ripple += ring_w * 0.28 * rain * rfade;
 			}
-			vec3 sky_grad = mix(sky_horizon, sky_top, clamp(reflected.y * 1.8, 0.0, 1.0));
-			vec3 rain_sky = mix(sky_grad * 0.32, max(sky_horizon * 0.38, vec3(0.045, 0.060, 0.088)), night);
-			float sd_wet = pow(max(dot(reflected, normalize(sun_dir)), 0.0), 64.0) * (1.0 - night) * 0.26;
+			vec3 sky_grad = mix(sky_horizon, mix(sky_top, sky_horizon, 0.35), clamp(reflected.y * 1.8, 0.0, 1.0));
+			vec3 rain_sky = mix(sky_grad * mix(0.78, 0.32, clamp(rain * 1.6, 0.0, 1.0)), max(sky_horizon * 0.38, vec3(0.045, 0.060, 0.088)), night);
+			float sd_wet = pow(max(dot(reflected, normalize(sun_dir)), 0.0), 64.0) * (1.0 - night) * mix(0.26, 0.9, puddle * (1.0 - clamp(rain * 1.6, 0.0, 1.0)));
 			float hemisphere = mix(0.45, 1.0, smoothstep(-0.04, 0.22, reflected.y));
 			float sheet = max(puddle * 0.88, surface_wet * 0.10 * (0.4 + 0.6 * wheel_tracks));
 			EMISSION += (rain_sky * mix(0.10, 0.72, fres) + vec3(sd_wet)) * sheet * hemisphere * ripple;
@@ -709,7 +721,13 @@ void fragment() {
 			EMISSION += rain_sky * puddle * grazing * hemisphere * 0.30;
 		}
 	}
+	if (rain > 0.02 && !shore && flat_top && (asphalt || pave)) {
+		float sp = rain_splash(p, camera_distance, aa, rain, TIME);
+		vec3 drop_col = mix(sky_horizon * 0.9 + vec3(0.12), vec3(0.55, 0.42, 0.3), night);
+		EMISSION += drop_col * sp * (0.55 + 0.45 * max(puddle, surface_wet));
+		rough = mix(rough, 0.05, sp);
+	}
 	ALBEDO = albedo;
-	ROUGHNESS = clamp(rough, 0.12, 1.0);
+	ROUGHNESS = clamp(rough, 0.05, 1.0);
 	SPECULAR = 0.25 + 0.18 * surface_wet + 0.33 * puddle + 0.09 * wheel_tracks;
 }

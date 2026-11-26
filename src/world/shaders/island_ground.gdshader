@@ -11,6 +11,7 @@ render_mode diffuse_burley;
 #include "res://src/world/shaders/rock.gdshaderinc"
 
 global uniform float wetness;
+global uniform float puddles;
 global uniform float rain;
 global uniform float night;
 global uniform vec3 sky_horizon;
@@ -33,6 +34,7 @@ float hash12(vec2 p) {
 	p3 += dot(p3, p3.yzx + 33.33);
 	return fract((p3.x + p3.y) * p3.z);
 }
+#include "res://src/world/shaders/rain_splash.gdshaderinc"
 
 float vnoise(vec2 p) {
 	vec2 i = floor(p);
@@ -335,11 +337,13 @@ void fragment() {
 	bool is_paved = !is_shore && (v_kind == 0.0 || v_kind == 5.0 || v_kind == 6.0 || is_road);
 	float surface_wet = is_paved ? wetness * (is_road ? 1.0 : 0.72) : 0.0;
 	float puddle = 0.0;
-	if (surface_wet > 0.001 && v_wn.y > 0.9) {
+	float stand = is_paved ? max(wetness, puddles) * (is_road ? 1.0 : 0.72) : 0.0;
+	if (stand > 0.001 && v_wn.y > 0.9) {
 		float basin = vnoise(p * 0.21 + 46.0) * 0.8 + vnoise(p * 0.7) * 0.2;
-		float th = mix(0.89, 0.68, surface_wet);
-		puddle = smoothstep(th, th + 0.09, basin) * smoothstep(0.24, 0.86, surface_wet)
+		float th = mix(0.89, 0.68, stand);
+		puddle = smoothstep(th, th + 0.09, basin) * smoothstep(0.24, 0.86, stand)
 			* (1.0 - smoothstep(120.0, 260.0, v_dist));
+		surface_wet = max(surface_wet, smoothstep(th - 0.07, th, basin) * smoothstep(0.24, 0.7, stand) * 0.5);
 		albedo *= (1.0 - (is_road ? 0.24 : 0.12) * surface_wet) * (1.0 - 0.025 * puddle);
 		rough = mix(rough, is_road ? 0.36 : 0.48, surface_wet);
 		rough = mix(rough, 0.12, puddle);
@@ -364,7 +368,7 @@ void fragment() {
 				float rip_w = (0.35 + 0.65 * clamp(rain, 0.0, 1.0));
 				ripple += rip * 0.11 * rip_w * (1.0 - smoothstep(7.0, 19.0, v_dist)) * (1.0 - smoothstep(0.025, 0.12, aa));
 			}
-			vec3 rain_sky = mix(sky_horizon * 0.18, max(sky_horizon * 0.33, vec3(0.040, 0.047, 0.060)), night);
+			vec3 rain_sky = mix(sky_horizon * mix(0.6, 0.18, clamp(rain * 1.6, 0.0, 1.0)), max(sky_horizon * 0.33, vec3(0.040, 0.047, 0.060)), night);
 			float hemisphere = mix(0.42, 1.0, smoothstep(-0.04, 0.22, reflected.y));
 			emit += rain_sky * puddle * grazing * hemisphere * ripple * (is_road ? 1.0 : 0.72);
 		}
@@ -386,5 +390,9 @@ void fragment() {
 	ALBEDO = albedo;
 	ROUGHNESS = clamp(rough, 0.12, 1.0);
 	SPECULAR = is_paved ? (0.25 + 0.18 * surface_wet + 0.32 * puddle + 0.09 * sheen) : 0.25;
+	if (is_paved && rain > 0.02 && v_wn.y > 0.9) {
+		float sp = rain_splash(p, v_dist, aa, rain, TIME);
+		emit += mix(sky_horizon * 0.9 + vec3(0.12), vec3(0.55, 0.42, 0.3), night) * sp * (0.55 + 0.45 * max(puddle, surface_wet));
+	}
 	EMISSION = emit;
 }

@@ -18,10 +18,10 @@ extends Node3D
 
 signal charged(total: float, memo: String)
 
-const SEND_AT := 250.0          # £ of third-party damage before a patrol is sent
-const FINE := 0.25              # fine on top of the damage, first offence
-const REPEAT_FINE := 0.2        # + per earlier incident this hour
-const LEFT_SCENE := 0.5         # surcharge when you'd gone before they arrived
+const SEND_AT := 900.0          # £ of third-party damage before a patrol is sent
+const FINE := 0.12              # fine on top of the damage, first offence
+const REPEAT_FINE := 0.06       # + per earlier incident this hour
+const LEFT_SCENE := 0.2         # surcharge when you'd gone before they arrived
 const LEFT_DIST := 160.0
 const ARRIVE_DIST := 14.0
 const GIVE_UP := 75.0           # s: a patrol that can't get there issues by post

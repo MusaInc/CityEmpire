@@ -27,7 +27,7 @@ const DEFAULT_HOUR := 16.0
 const DAY_MINUTES := 16.0
 ## Sun direction at DEFAULT_HOUR (kept for callers that want the fixed one).
 const SUN_ROT := Vector3(-38.0, -112.0, 0.0)
-const WEATHERS := ["clear", "bright", "haze", "cloudy", "rain", "storm", "fog"]
+const WEATHERS := ["clear", "bright", "haze", "cloudy", "showers", "rain", "storm", "fog"]
 ## Per weather: cloud cover, rain, fog, storm (lightning), cloud darkness,
 ## and the look on top: sun (sunlight ×), haze (extra distance haze that
 ## fades far buildings into the sky, 0..1), warm (a warm, dusty haze colour),
@@ -45,6 +45,10 @@ const WEATHER_PARAMS := {
 		"sun": 1.3, "haze": 0.28, "warm": 1.0, "punch": 0.95, "mist": 0.0},
 	"cloudy": {"cloud": 0.74, "rain": 0.0, "fog": 0.04, "storm": 0.0, "dark": 0.32,
 		"sun": 1.0, "haze": 0.18, "warm": 0.0, "punch": 0.0, "mist": 0.0},
+	# A sun shower: light rain out of a broken sky, the sun still out –
+	# splashes on the pavement, shining streets (2026-11-26).
+	"showers": {"cloud": 0.48, "rain": 0.3, "fog": 0.0, "storm": 0.0, "dark": 0.16,
+		"sun": 1.06, "haze": 0.1, "warm": 0.1, "punch": 0.5, "mist": 0.0},
 	"rain": {"cloud": 0.90, "rain": 0.82, "fog": 0.20, "storm": 0.0, "dark": 0.82,
 		"sun": 1.0, "haze": 0.36, "warm": 0.0, "punch": 0.15, "mist": 0.22},
 	"storm": {"cloud": 1.0, "rain": 1.0, "fog": 0.28, "storm": 1.0, "dark": 1.0,
@@ -68,6 +72,9 @@ var weather := "clear"
 ## Current (eased) weather parameters and derived values other systems read.
 var w := WEATHER_PARAMS["clear"].duplicate()
 var wetness := 0.0
+## Standing water never quite dries: leftover puddles in the dips and
+## gutters on the sunniest day (the `puddles` shader global, >= wetness).
+const PUDDLE_FLOOR := 0.7
 var night := 0.0
 var _flash := 0.0
 var _next_bolt := 8.0
@@ -285,6 +292,7 @@ func _next_weather() -> String:
 		"bright": 0.24,
 		"haze": 0.12,
 		"cloudy": 0.18,
+		"showers": 0.0 if wet_now else 0.12,
 		"rain": 0.0 if wet_now else 0.09,
 		"storm": 0.0 if wet_now else 0.03,
 		"fog": foggy,
@@ -478,6 +486,7 @@ func _apply(dt: float, instant: bool) -> void:
 	RenderingServer.global_shader_parameter_set("sun_dir", sun.global_basis * Vector3.BACK)
 	RenderingServer.global_shader_parameter_set("night", lamps)
 	RenderingServer.global_shader_parameter_set("wetness", wetness)
+	RenderingServer.global_shader_parameter_set("puddles", maxf(PUDDLE_FLOOR, wetness))
 	CarVisual.visible_wetness = wetness
 	RenderingServer.global_shader_parameter_set("rain", w["rain"])
 	CarVisual.lamps = lamps   # (your cars' headlights, lamp glows and brake-light boost)

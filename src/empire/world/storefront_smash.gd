@@ -27,8 +27,8 @@ const BREAK_MOMENTUM := 6500.0  # kg·m/s
 const LOOKAHEAD := 0.12         # s of motion tested ahead
 const BOARD_AFTER := 90.0       # game minutes broken, then boarded
 const MEND_AFTER := 600.0       # game minutes until it's glazed again
-const SPAN_COST := 2400.0       # per window, plus per metre below
-const COST_PER_M := 650.0
+const SPAN_COST := 380.0        # per window, plus per metre below (was 2400: toned down 2026-11-26)
+const COST_PER_M := 90.0
 
 var game: EmpireGame
 ## unit id -> {span index: game minute broken}

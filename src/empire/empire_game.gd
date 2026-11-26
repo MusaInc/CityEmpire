@@ -796,7 +796,7 @@ func _after_start() -> void:
 
 
 func _phone_shots(dir: String, secs: String) -> void:
-	await get_tree().create_timer(5.0, true, false, true).timeout
+	await get_tree().create_timer(float(args.get("phone-delay", "5")), true, false, true).timeout
 	DirAccess.make_dir_recursive_absolute(dir)
 	for sec in secs.split(",", false):
 		var parts := sec.split(":")
@@ -1093,6 +1093,12 @@ func _sync_weather() -> void:
 		"foggy":
 			if h >= 11.0 and h < 20.5:
 				sky = "clear"
+	# Passing sun showers on dry days: about one half-hour in nine, picked
+	# per day and slot so it's the same on a reload.
+	if sky in ["clear", "bright", "cloudy"] and h > 6.5 and h < 21.0:
+		var slot := int(h * 2.0)
+		if float(hash(Vector2i(empire.day, slot)) % 1000) / 1000.0 < 0.11:
+			sky = "showers"
 	if atmosphere.weather != sky:
 		atmosphere.set_weather(sky, state != "play")
 
@@ -1307,7 +1313,9 @@ func _process(dt: float) -> void:
 		_update_live_floor()
 		for id: String in interiors:
 			_refresh_signs(id)
-		if state == "play":
+		if state == "play" and args.has("objective-gps"):
+			# (Off since 2026-11-26: the objective no longer routes itself –
+			# no permanent route on screen; Go on the phone sets it.)
 			_objective_gps()
 			_update_stadium()
 			_update_pursuit()
@@ -2539,7 +2547,7 @@ func _on_prop_broke(kind: String, at: Vector3, by: Car) -> void:
 	if by != vehicle_node():
 		return
 	if damage_desk:
-		damage_desk.report(kind.replace("_", " "), at, float(Destructibles.COST.get(kind, 1400.0 if kind.begins_with("tree") else 300.0)))
+		damage_desk.report(kind.replace("_", " "), at, float(Destructibles.COST.get(kind, 160.0 if kind.begins_with("tree") else 40.0)))
 	var tree := kind.begins_with("tree")
 	if car_audio:
 		car_audio.play("crash_heavy_%d" % (randi() % 3) if tree else "crash_light_%d" % (randi() % 2),

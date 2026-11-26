@@ -137,7 +137,7 @@ func _physics_process(dt: float) -> void:
 		if v.has("wanted_at") and String(v.get("stored", "")) == "" and now >= float(v["wanted_at"]):
 			v.erase("wanted_at")
 			if String(v["id"]) == game.driving:
-				var fine := 250.0 + roundf(float(EmpireData.vehicle_model(String(v["model"])).get("price", 6000.0)) * 0.1)
+				var fine := minf(150.0 + roundf(float(EmpireData.vehicle_model(String(v["model"])).get("price", 6000.0)) * 0.01), 900.0)
 				game.empire.personal_cash -= fine
 				game.empire._book("personal", -fine, "fine", "Fine: driving a stolen car (ANPR)")
 				game.ui.toast("Caught on a number-plate camera – fined %s" % EmpireData.money(fine), "bad")

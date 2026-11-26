@@ -28,8 +28,9 @@ const HEAVY := {"bus_shelter": 11000.0, "planter": 17000.0}
 const HIT := {"streetlight": 7.0, "traffic_light": 7.5, "sign_post": 3.6, "bench": 4.2, "bin": 2.4, "hydrant": 5.5,
 	"bollard": 8.0, "utility_box": 6.0, "crates": 2.2, "bus_shelter": 9.0, "planter": 10.5}
 ## What it costs the city to put back (property damage, DamageDesk).
-const COST := {"streetlight": 1800.0, "traffic_light": 4200.0, "sign_post": 260.0, "bench": 650.0, "bin": 180.0, "hydrant": 900.0,
-	"bollard": 420.0, "utility_box": 1500.0, "crates": 60.0, "bus_shelter": 5200.0, "planter": 1100.0, "tree": 1400.0}
+## (2026-11-26: toned right down – every knock was costing ~£2k.)
+const COST := {"streetlight": 220.0, "traffic_light": 480.0, "sign_post": 45.0, "bench": 90.0, "bin": 25.0, "hydrant": 140.0,
+	"bollard": 60.0, "utility_box": 200.0, "crates": 10.0, "bus_shelter": 650.0, "planter": 120.0, "tree": 160.0}
 ## Broken things are put back a while later, once nobody is near to see it.
 const RESTORE_AFTER := 300.0
 const RESTORE_AWAY := 110.0

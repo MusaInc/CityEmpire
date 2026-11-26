@@ -782,8 +782,8 @@ func show_settings(back: Callable) -> void:
 		Settings.save())
 	box.add_child(_row("Time of day", tod))
 	var wx := OptionButton.new()
-	var wx_ids := ["changing", "clear", "bright", "haze", "cloudy", "rain", "storm", "fog"]
-	for n in ["Changing", "Clear", "Bright sun", "Hazy", "Cloudy", "Rain", "Storm", "Fog"]:
+	var wx_ids := ["changing", "clear", "bright", "haze", "cloudy", "showers", "rain", "storm", "fog"]
+	for n in ["Changing", "Clear", "Bright sun", "Hazy", "Cloudy", "Sun showers", "Rain", "Storm", "Fog"]:
 		wx.add_item(n)
 	wx.selected = maxi(wx_ids.find(Settings.weather), 0)
 	wx.item_selected.connect(func(i):

@@ -38,6 +38,12 @@ func _ready() -> void:
 ## A TextureRect that shows the model's picture (now if cached, else when
 ## it's rendered).
 func vehicle(model: String, size := Vector2(260, 150)) -> TextureRect:
+	# Studio photography when the model has it (CatalogArt): no live render.
+	if CatalogArt.has(model):
+		var ph := PhotoBook.Photo.new()
+		ph.src = CatalogArt.path(model)
+		ph.custom_minimum_size = size
+		return ph
 	var tr := TextureRect.new()
 	tr.custom_minimum_size = size
 	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE

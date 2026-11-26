@@ -64,9 +64,12 @@ func test_pad_zones(t) -> void:
 	var hard := EmpireTouch.read_pad(Vector2(0, 112), K)
 	t.check(float(light["brake"]) > 0.0 and float(light["brake"]) < 0.45, "a short pull brakes lightly (%.2f)" % light["brake"])
 	t.near(float(hard["brake"]), 1.0, 0.01, "a full pull brakes fully")
+	# (Sideways on the pad adds the power slide – "drift" – since the
+	# drift pass; gas, brake and kickdown stay exactly the same.)
+	var core := func(d: Dictionary) -> Array: return [d["gas"], d["brake"], d["kick"]]
 	for x in [-112.0, -50.0, 50.0, 112.0]:
-		t.check(EmpireTouch.read_pad(Vector2(x, 0), K) == hold, "sideways motion on the throttle pad keeps the same input")
-		t.check(EmpireTouch.read_pad(Vector2(x, 112), K) == hard, "diagonal braking keeps the same input")
+		t.check(core.call(EmpireTouch.read_pad(Vector2(x, 0), K)) == core.call(hold), "sideways motion on the throttle pad keeps the same input")
+		t.check(core.call(EmpireTouch.read_pad(Vector2(x, 112), K)) == core.call(hard), "diagonal braking keeps the same input")
 	t.check(EmpireTouch.verb("PARK & GET OUT") == "OUT" and EmpireTouch.verb("TO LET · £26/day") == "VIEW", "action button verbs")
 
 

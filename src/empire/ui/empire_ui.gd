@@ -376,7 +376,9 @@ func update_hud() -> void:
 	if _hud_cache.get("obj") != obj_txt:
 		_hud_cache["obj"] = obj_txt
 		_obj.text = obj_txt
-		_obj_panel.visible = obj_txt != ""
+		# (2026-11-26: no permanent objective on screen – it lives on the
+		# phone's Overview, with Go for its route.)
+		_obj_panel.visible = false
 	# The route: the next turn (big) and what's left (small) under the
 	# minimap, purple as on both maps. One place for distances.
 	var gps: Gps = game.gps
@@ -3253,6 +3255,11 @@ func objective_action() -> void:
 	var ob := game.objective()
 	var act := String(ob[3]) if ob.size() > 3 else ""
 	var b: Business = game.empire.businesses[0] if not game.empire.businesses.is_empty() else null
+	# Go always sets the route when the objective has a place (the objective
+	# no longer routes itself, 2026-11-26).
+	if (ob[1] as Vector3) != Vector3.INF:
+		game.set_gps(ob[1], String(ob[2]) if ob.size() > 2 else "", {"kind": "objective"})
+		game.empire.flags.erase("gps_manual")
 	match act:
 		"map":
 			open_phone("map")

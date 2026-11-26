@@ -94,6 +94,10 @@ wetness={
 "type": "float",
 "value": 0.0
 }
+puddles={
+"type": "float",
+"value": 0.7
+}
 rain={
 "type": "float",
 "value": 0.0

@@ -621,9 +621,13 @@ static func market(ph: Phone, body: VBoxContainer) -> void:
 						var mdl := String(model)
 						var sd := String(sid)
 						var own := SkyportUI._owned(ph.ui, mdl)
-						(car[1] as HBoxContainer).add_child(photo_card(ph.ui.thumbs.vehicle(mdl, Vector2(340, 190)), 340, 190, String(md.get("name", mdl)),
-							SkyportUI._specs(md), EmpireData.money(float(md.get("price", 0))), G.LABEL, "YOU OWN %d" % own if own > 0 else "", G.GREEN,
-							func(): ph.push("vehicle", {"model": mdl, "site": sd}, String(md.get("name", mdl)), "Marketplace", "car")))
+						var vcw := clampf(width(ph) * 0.78, 300.0, 420.0)
+						var vc := CatalogArt.showcase(CatalogArt.picture(ph.ui, mdl, "hero", Vector2(vcw, vcw * 0.6)), Vector2(vcw, vcw * 0.6),
+							String(md.get("name", mdl)), SkyportUI._specs(md), EmpireData.money(float(md.get("price", 0))),
+							"YOU OWN %d" % own if own > 0 else "", G.GREEN,
+							func(): ph.push("vehicle", {"model": mdl, "site": sd}, String(md.get("name", mdl)), "Marketplace", "car"))
+						vc.size_flags_horizontal = Control.SIZE_FILL
+						(car[1] as HBoxContainer).add_child(vc)
 				if not any_v:
 					v.add_child(G.para("No vehicles match right now.", "subhead"))
 			"fashion":
@@ -675,11 +679,22 @@ static func _listing_grid(ph: Phone, items: Array, n: int, card_w: float, ph_h: 
 		var args := {"id": String(info["id"]), "home": rec.get("kind", "") == "home"}
 		var ttl := String(info["title"])
 		var sel := String(Phone.st(sec).get("sel", "")) == String(info["id"])
-		gd.add_child(photo_card(PhotoBook.frame(String(info["id"]), "front", Vector2(card_w, ph_h), info["world"], 0), card_w, ph_h,
-			ttl, String(info["sub"]), String(info["price"]), info["col"], String(info["status"]), info["col"], func():
+		gd.add_child(CatalogArt.showcase(place_pic(String(info["id"]), "front", info["world"]), Vector2(card_w, ph_h + 40.0),
+			ttl, String(info["sub"]), String(info["price"]), String(info["status"]), info["col"], func():
 				Phone.st(sec)["sel"] = args["id"]
 				ph.push("listing", args, ttl, String(info["sub"]), "property"), sel))
 	return gd
+
+
+## A place's photograph filling its parent (or its map crop).
+static func place_pic(id: String, view: String, world: Vector3) -> Control:
+	if PhotoBook.has(id, view):
+		var p := PhotoBook.Photo.new()
+		p.src = PhotoBook.path(id, view)
+		return p
+	if world.is_finite():
+		return Thumbs.place(world, 140.0)
+	return Control.new()
 
 
 # -------------------------------------------------------------- listing
@@ -715,16 +730,21 @@ static func listing(ph: Phone, body: VBoxContainer, args: Dictionary) -> void:
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lay.add_child(left)
 	var pw := (width(ph) * 0.6) if wide else width(ph)
-	var big := PhotoBook.frame(id, view, Vector2(pw, pw * 0.58), info["world"], 26)
+	var makers: Array = []
+	var caps: Array = []
+	var wpos: Vector3 = info["world"]
+	for vw in views:
+		var vk := String(vw)
+		makers.append(func(): return place_pic(id, vk, wpos))
+		caps.append(String(PhotoBook.VIEW_NAMES.get(vk, vk)))
+	var big := CatalogArt.Gallery.new(makers, caps if views.size() > 1 else [], views.find(view), 26)
+	big.aspect = 0.6
+	big.custom_minimum_size = Vector2(pw, pw * 0.6)
 	big.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left.add_child(big)
 	var bd := G.badge(String(info["status"]), info["col"], true)
 	bd.position = Vector2(18, 18)
 	big.add_child(bd)
-	if views.size() > 1:
-		left.add_child(G.segmented(views.map(func(x): return [x, String(PhotoBook.VIEW_NAMES.get(x, x))]), view, func(k):
-			Phone.st("listing")[id] = k
-			ph.refresh()))
 	var right := G.vbox(14)
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if wide:
@@ -732,7 +752,8 @@ static func listing(ph: Phone, body: VBoxContainer, args: Dictionary) -> void:
 	lay.add_child(right)
 	right.add_child(G.text(String(info["title"]), "title1"))
 	right.add_child(G.para(String(info["sub"]), "subhead"))
-	right.add_child(G.text(String(info["price"]), "title3", info["col"]))
+	right.add_child(_hairline())
+	right.add_child(G.text(String(info["price"]), "title2", CatalogArt.GOLD if info["col"] == G.LABEL else info["col"]))
 	right.add_child(G.para(String(info["income"]), "callout", G.LABEL))
 	# The deal: the same windows as at the door (agent fee shown there).
 	var kind := MapKit.unit_kind(g, rec) if not args.get("home", false) else "home"
@@ -848,34 +869,15 @@ static func garage(ph: Phone, body: VBoxContainer) -> void:
 	var wide := width(ph) > 980.0
 	var lay: BoxContainer = G.hbox(24) if wide else G.vbox(16)
 	v.add_child(lay)
-	# The showroom shot.
-	var stage := Panel.new()
-	stage.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
-	stage.add_theme_stylebox_override("panel", G.box(Color.WHITE, 30, 0))
+	# The showroom: the car's studio photography, swipeable.
 	var sw := width(ph) * (0.58 if wide else 1.0)
-	stage.custom_minimum_size = Vector2(sw, sw * 0.56)
+	var stage := CatalogArt.model_gallery(ui, String(veh["model"]), Vector2(sw, sw * 0.5625), 30)
 	stage.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var gr := Gradient.new()
-	gr.set_color(0, Color(0.86, 0.87, 0.9) if not G.dark else Color(0.2, 0.21, 0.24))
-	gr.set_color(1, Color(0.97, 0.97, 0.98) if not G.dark else Color(0.08, 0.08, 0.1))
-	var gt := GradientTexture2D.new()
-	gt.gradient = gr
-	gt.fill = GradientTexture2D.FILL_RADIAL
-	gt.fill_from = Vector2(0.5, 0.7)
-	gt.fill_to = Vector2(1.1, 0.0)
-	var bg := TextureRect.new()
-	bg.texture = gt
-	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	bg.stretch_mode = TextureRect.STRETCH_SCALE
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	stage.add_child(bg)
-	var shot := ui.thumbs.vehicle(String(veh["model"]), stage.custom_minimum_size)
-	shot.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	stage.add_child(shot)
 	lay.add_child(stage)
 	var info := G.vbox(12)
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lay.add_child(info)
+	info.add_child(G.text(({"car": "MOTOR", "heli": "ROTORCRAFT", "plane": "AVIATION", "boat": "MARINE"}.get(cls, "") as String) + "  ·  YOURS", "caption2", CatalogArt.GOLD, "semibold"))
 	info.add_child(G.text(String(md.get("name", "")), "title1"))
 	var inside := g.driving == vid or (g.skyport_play and g.skyport_play.piloting == vid)
 	var here := g.player.global_position
@@ -1003,10 +1005,12 @@ static func garage(ph: Phone, body: VBoxContainer) -> void:
 		var xd: Dictionary = x
 		var xm := EmpireData.vehicle_model(String(xd["model"]))
 		var xid := String(xd["id"])
-		(car[1] as HBoxContainer).add_child(photo_card(ui.thumbs.vehicle(String(xd["model"]), Vector2(250, 140)), 250, 140,
-			String(xm.get("name", "")), "%d%% condition" % int(float(xd["condition"]) * 100.0), "", G.LABEL, "", Color.WHITE, func():
+		var xc := CatalogArt.showcase(CatalogArt.picture(ui, String(xd["model"]), "hero", Vector2(280, 168)), Vector2(280, 168),
+			String(xm.get("name", "")), "%d%% condition" % int(float(xd["condition"]) * 100.0), "", "", Color.WHITE, func():
 				Phone.st("vehicles")["sel"] = xid
-				ph.refresh(), xid == vid))
+				ph.refresh(), xid == vid)
+		xc.size_flags_horizontal = Control.SIZE_FILL
+		(car[1] as HBoxContainer).add_child(xc)
 
 
 # ---------------------------------------------------- vehicle (market)
@@ -1015,28 +1019,40 @@ static func vehicle_offer(ph: Phone, body: VBoxContainer, model: String, site: S
 	var g := ph.game
 	var md := EmpireData.vehicle_model(model)
 	var cls := String(md.get("class", "car"))
+	var price := float(md.get("price", 0))
 	var v := scroller(body, 18)
 	var wide := width(ph) > 980.0
-	var lay: BoxContainer = G.hbox(24) if wide else G.vbox(16)
+	var lay: BoxContainer = G.hbox(28) if wide else G.vbox(18)
 	v.add_child(lay)
 	var sw := width(ph) * (0.6 if wide else 1.0)
-	var shot := ui.thumbs.vehicle(model, Vector2(sw, sw * 0.56))
-	var stage := G.rounded(shot, Vector2(sw, sw * 0.56), 30)
-	stage.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	lay.add_child(stage)
+	var gal := CatalogArt.model_gallery(ui, model, Vector2(sw, sw * 0.5625), 28)
+	gal.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lay.add_child(gal)
+	var own := SkyportUI._owned(ui, model)
+	if own > 0:
+		var ob := G.badge("YOU OWN %d" % own, G.GREEN, true)
+		ob.position = Vector2(18, 18)
+		gal.add_child(ob)
 	var info := G.vbox(12)
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lay.add_child(info)
-	info.add_child(G.text(EmpireData.money(float(md.get("price", 0))), "title1"))
+	info.add_child(G.text(({"car": "MOTOR", "heli": "ROTORCRAFT", "plane": "AVIATION", "boat": "MARINE"}.get(cls, "") as String)
+		+ ("  ·  %s" % String(g.skyport_play.site(site).get("name", "")).to_upper() if not g.skyport_play.site(site).is_empty() else ""), "caption2", CatalogArt.GOLD, "semibold"))
+	info.add_child(G.text(String(md.get("name", model)), "title1"))
 	var d := String(md.get("desc", ""))
 	if d != "":
-		info.add_child(G.para(d, "body", G.LABEL))
-	info.add_child(G.para(SkyportUI._specs(md), "headline", G.LABEL))
-	info.add_child(G.para(SkyportUI._running(md), "subhead"))
-	var own := SkyportUI._owned(ui, model)
-	if own > 0:
-		info.add_child(G.badge("YOU OWN %d" % own, G.GREEN))
-	info.add_child(confirm_button("Buy · %s" % EmpireData.money(float(md.get("price", 0))), "Tap again to pay %s" % EmpireData.money(float(md.get("price", 0))), func():
+		info.add_child(G.para(d, "body", G.LABEL2))
+	info.add_child(_spec_chips(md))
+	info.add_child(_hairline())
+	var pr := G.hbox(10)
+	var pv := G.vbox(0)
+	pv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pv.add_child(G.text("PRICE", "caption2", G.LABEL2, "semibold"))
+	pv.add_child(G.text(EmpireData.money(price), "title2", CatalogArt.GOLD))
+	pr.add_child(pv)
+	info.add_child(pr)
+	info.add_child(G.para(SkyportUI._running(md), "footnote"))
+	info.add_child(confirm_button("Buy · %s" % EmpireData.money(price), "Tap again to pay %s" % EmpireData.money(price), func():
 		var err := g.skyport_play.buy_car(model, site) if cls == "car" else g.skyport_play.buy(model)
 		if err != "":
 			ui.toast(err, "bad")
@@ -1045,14 +1061,65 @@ static func vehicle_offer(ph: Phone, body: VBoxContainer, model: String, site: S
 		ui.toast("It's yours: %s" % ({"car": "parked on the forecourt", "heli": "on the helipad – the GPS shows where",
 			"plane": "on a stand by the hangars", "boat": "in a berth at the marina"}.get(cls, "")), "good")
 		ph.refresh()))
-	info.add_child(G.button({"car": "Test drive", "boat": "Test sail"}.get(cls, "Test flight"), func():
-		g.skyport_play.start_test(model, site), "gray", "large"))
+	var row2 := G.hbox(10)
+	info.add_child(row2)
+	var tb := G.button({"car": "Test drive", "boat": "Test sail"}.get(cls, "Test flight"), func():
+		g.skyport_play.start_test(model, site), "gray", "large")
+	tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row2.add_child(tb)
 	var st := g.skyport_play.site(site)
 	if not st.is_empty():
 		var door: Vector3 = st["door"]
-		info.add_child(G.button("Directions to the showroom", func():
+		var db := G.button("Showroom", func():
 			g.set_gps(door, String(st["name"]), {"kind": "place", "id": site})
-			ui.toast("Route set: %s" % st["name"], "info"), "tinted", "large", G.BLUE, "gps"))
+			ui.toast("Route set: %s" % st["name"], "info"), "tinted", "large", G.BLUE, "gps")
+		db.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row2.add_child(db)
+	v.add_child(G.gap(8))
+
+
+## A fine gold-tinted rule between sections.
+static func _hairline() -> Control:
+	var r := ColorRect.new()
+	r.color = Color(CatalogArt.GOLD, 0.28)
+	r.custom_minimum_size = Vector2(0, 1)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return r
+
+
+## The headline numbers as small chips (wraps on narrow phones).
+static func _spec_chips(md: Dictionary) -> Control:
+	var cls := String(md.get("class", "car"))
+	var chips: Array = []
+	match cls:
+		"heli", "plane":
+			chips = [["Cruise", "%d kt" % int(float(md.get("cruise", 0)) * 1.944)], ["Seats", str(int(md.get("seats", 2 if cls == "heli" else 4)))]]
+			if cls == "heli":
+				chips.append(["Climb", "%d m/s" % int(md.get("climb", 0))])
+			else:
+				chips.append(["Top", "%d kt" % int(float(md.get("vmax", 0)) * 1.944)])
+		"boat":
+			chips = [["Top", "%d kt" % int(float(md.get("vmax", 0)) * 1.944)], ["Length", "%d m" % int((md.get("size", [0, 0, 6]) as Array)[2])]]
+		_:
+			chips = [["Top speed", "%d mph" % int(float(md.get("top_speed", 30.0)) * 2.237)], ["Cargo", "%d cases" % int(md.get("cargo", 8))],
+				["Grip", "%d / 10" % clampi(int(roundf(float(md.get("grip", 1.4)) * 5.5)), 1, 10)]]
+	var fl := HFlowContainer.new()
+	fl.add_theme_constant_override("h_separation", 10)
+	fl.add_theme_constant_override("v_separation", 10)
+	for c in chips:
+		var p := PanelContainer.new()
+		var sb := G.box(G.FILL, 16, 0)
+		sb.content_margin_left = 16
+		sb.content_margin_right = 16
+		sb.content_margin_top = 8
+		sb.content_margin_bottom = 8
+		p.add_theme_stylebox_override("panel", sb)
+		var cv := G.vbox(0)
+		cv.add_child(G.text(String(c[0]).to_upper(), "caption2", G.LABEL2, "semibold"))
+		cv.add_child(G.text(String(c[1]), "headline"))
+		p.add_child(cv)
+		fl.add_child(p)
+	return fl
 
 
 # -------------------------------------------------------------- city500

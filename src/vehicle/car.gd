@@ -479,10 +479,14 @@ func _physics_process(dt: float) -> void:
 	if immortal:
 		power_scale = maxf(power_scale, 0.62)  # beaten up, never dead
 	_cooling(dt)
-	# A tired engine pulls less; a boiling one limps home.
-	power_scale *= lerpf(0.45, 1.0, engine)
+	# A tired engine pulls less; a boiling one limps home. (Your own car,
+	# 2026-11-26: a much tougher engine – the penalties no longer stack
+	# down to a standstill after a few crashes; it always keeps >= 78 %.)
+	power_scale *= lerpf(0.8 if immortal else 0.45, 1.0, engine)
 	if overheated:
-		power_scale *= 0.3
+		power_scale *= 0.85 if immortal else 0.3
+	if immortal:
+		power_scale = maxf(power_scale, 0.78)
 	jump_cd = maxf(0.0, jump_cd - dt)
 	_check_water(dt)
 	var thr := 0.0 if disabled or in_water else throttle
@@ -1121,12 +1125,12 @@ func _localised(side: String, local: Vector3, dv: float, n: Vector3, other: Obje
 		var sk := clampf((dv - 5.0) / 22.0, 0.05, 0.5) / maxf(float(spec.get("durability", 1.0)), 0.3)
 		susp[wi] = minf(1.0, susp[wi] + sk)
 		damaged.emit("susp", wi, at)
-		if dv > 11.0 and randf() < clampf((dv - 11.0) / 14.0, 0.15, 0.8):
+		if dv > (18.0 if immortal else 11.0) and randf() < clampf((dv - 11.0) / 14.0, 0.15, 0.8) * (0.4 if immortal else 1.0):
 			tyre[wi] = 1.0
 			damaged.emit("tyre", wi, at)
 	# Nose: radiator and engine behind the front bumper.
 	if side == "front" and dv > 7.0:
-		engine = maxf(0.0, engine - amount * (0.7 if dv > 14.0 else 0.4))
+		engine = maxf(0.4 if immortal else 0.0, engine - amount * (0.7 if dv > 14.0 else 0.4) * (0.35 if immortal else 1.0))
 		if dmg["front"] + amount > 0.4:
 			coolant = minf(coolant, 0.98)   # (a holed radiator starts to leak)
 
@@ -1171,7 +1175,7 @@ func _handle_scrapes(dt: float) -> void:
 ## down for good; the player's never quite does – it limps.
 func _cooling(dt: float) -> void:
 	if coolant < 1.0 and coolant > 0.0:
-		var leak := 0.004 + 0.012 * clampf(dmg["front"], 0.0, 1.0)
+		var leak := (0.004 + 0.012 * clampf(dmg["front"], 0.0, 1.0)) * (0.3 if immortal else 1.0)
 		coolant = maxf(0.0, coolant - leak * dt * (0.4 + absf(throttle)))
 	var heat := (0.0 if coolant > 0.35 else (0.35 - coolant) * 0.35) * (0.3 + absf(throttle)) * (0.4 + clampf(speed / 20.0, 0.0, 1.0))
 	heat += (1.0 - engine) * 0.02 * absf(throttle)
