@@ -52,14 +52,40 @@ static func write(path: String, data: Dictionary) -> String:
 		DirAccess.remove_absolute(_abs(tmp))
 		if e2 != OK:
 			return "cannot replace the save (%s)" % error_string(e2)
+	_rotate_history(path)
 	return ""
+
+
+## Older backups (2026-11-26): with one .bak every autosave replaced it, so a
+## save that parsed but held a bad state pushed out the last good one within
+## minutes. Every HISTORY_EVERY seconds the current .bak steps down to .bak2,
+## .bak2 to .bak3 (each only if it parses).
+const HISTORY_EVERY := 1200
+const HISTORY := [".bak2", ".bak3"]
+
+
+static func _rotate_history(path: String) -> void:
+	var bak := path + ".bak"
+	if not FileAccess.file_exists(bak):
+		return
+	var newest := path + String(HISTORY[0])
+	if FileAccess.file_exists(newest) and Time.get_unix_time_from_system() - FileAccess.get_modified_time(newest) < HISTORY_EVERY:
+		return
+	if not (JSON.parse_string(FileAccess.get_file_as_string(bak)) is Dictionary):
+		return
+	for i in range(HISTORY.size() - 1, 0, -1):
+		var older := path + String(HISTORY[i])
+		var newer := path + String(HISTORY[i - 1])
+		if FileAccess.file_exists(newer):
+			DirAccess.copy_absolute(_abs(newer), _abs(older))
+	DirAccess.copy_absolute(_abs(bak), _abs(newest))
 
 
 static func read(path: String, check: Callable = Callable()) -> Variant:
 	last_error = ""
 	last_source = ""
 	var why: Array[String] = []
-	for p in [path, path + ".bak"]:
+	for p in [path, path + ".bak"] + HISTORY.map(func(x): return path + String(x)):
 		if not FileAccess.file_exists(p):
 			continue
 		var d = JSON.parse_string(FileAccess.get_file_as_string(p))

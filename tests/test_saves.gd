@@ -5,7 +5,7 @@ const P := "user://test_safesave.json"
 
 
 func _clean() -> void:
-	for s in ["", ".bak", ".tmp", ".broken"]:
+	for s in ["", ".bak", ".bak2", ".bak3", ".tmp", ".broken"]:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(P + s))
 
 
@@ -98,3 +98,16 @@ func test_old_app_folder_is_copied_not_moved(t) -> void:
 	DirAccess.remove_absolute(cur.path_join("ss_migrate.json"))
 	DirAccess.remove_absolute(old.path_join("ss_migrate.json"))
 	DirAccess.remove_absolute(old)
+
+
+## Older backups (2026-11-26): a good .bak steps down to .bak2, and a load
+## with the primary and .bak both unusable still finds the older one.
+func test_backup_history_rotates_and_rescues(t) -> void:
+	_clean()
+	t.check(SafeSave.write(P, _good()) == "" and SafeSave.write(P, _good()) == "", "two saves written")
+	t.check(FileAccess.file_exists(P + ".bak2"), "the backup stepped down to .bak2")
+	_raw(P, "garbage")
+	_raw(P + ".bak", "[]")
+	var d = SafeSave.read(P, EmpireGame.save_problem)
+	t.check(d is Dictionary and SafeSave.last_source == "backup", "loaded the older backup when both newer ones were broken")
+	_clean()

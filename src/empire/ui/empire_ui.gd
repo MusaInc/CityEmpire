@@ -3934,3 +3934,157 @@ func _you_tab(v: VBoxContainer) -> void:
 	for p in shops.slice(0, 12):
 		col.add_child(ExploreUI._row(self, p, here, seen.has(p["key"]), gr == p["ref"]))
 	right.add_child(_scroll(col, 400))
+
+
+# ------------------------------------------------------------ office floors & the club
+## The office floor's reception (2026-11-26: the desk called a panel that
+## didn't exist – offices couldn't be opened or run at all). Vacant floor:
+## choose a company to open; your floor: the day's figures, desks, fit-out.
+func open_office(unit: Dictionary) -> void:
+	var e := game.empire
+	if unit.is_empty():
+		toast("This reception isn't taking enquiries", "warn")
+		return
+	var o := Offices.at(e, String(unit.get("id", "")))
+	var v := _open(String(unit.get("name", "Office floor")), 1040, 520)
+	if o.is_empty():
+		v.add_child(S.label("Office floor to let · %s/day rent · opening costs %s (three days' rent and the fit-out)" % [
+			EmpireData.money(Offices.rent(unit)), EmpireData.money(Offices.open_cost(unit))], 16, S.MUTED))
+		var grid := GridContainer.new()
+		grid.columns = 3
+		grid.add_theme_constant_override("h_separation", 12)
+		grid.add_theme_constant_override("v_separation", 12)
+		v.add_child(grid)
+		for t: String in Offices.types():
+			var td := Offices.type_def(t)
+			var c := _card(0)
+			(c[0] as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			grid.add_child(c[0])
+			var cv: VBoxContainer = c[1]
+			cv.add_child(S.label(String(td.get("name", t)), 22, S.PAPER, "black"))
+			var pk := S.label(String(td.get("perk", "")), 14, S.MUTED)
+			pk.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			pk.custom_minimum_size = Vector2(280, 54)
+			cv.add_child(pk)
+			cv.add_child(S.label("Each desk earns ~%s/day, costs %s in wages" % [EmpireData.money(float(td.get("per_desk", 150))), EmpireData.money(float(td.get("wage", 100)))], 14, S.PAPER))
+			var b := S.button("Open · %s" % EmpireData.money(Offices.open_cost(unit)), func():
+				var err := Offices.open(e, unit, t)
+				if err != "":
+					toast(err, "bad")
+					return
+				Sfx.play("chime", -2.0)
+				game.save_game()
+				open_office(unit), true)
+			b.disabled = not e.can_afford(Offices.open_cost(unit))
+			cv.add_child(b)
+		return
+	var td2 := Offices.type_def(String(o["type"]))
+	v.add_child(S.label("%s · %s · fit-out: %s" % [String(o["name"]), String(td2.get("name", "")),
+		String(Offices.level_def(int(o["level"])).get("name", ""))], 20, S.PAPER, "black"))
+	var perk := S.label(String(td2.get("perk", "")), 15, S.MUTED)
+	perk.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(perk)
+	var row := S.hbox(10)
+	v.add_child(row)
+	var hist: Array = o.get("history", [])
+	var last: Dictionary = hist[-1] if not hist.is_empty() else {}
+	for f in [["Desks", "%d / %d" % [int(o["desks"]), Offices.max_desks(o)]], ["Expected", "%s/day" % EmpireData.money(Offices.expected(o))],
+			["Yesterday", EmpireData.money(float(last.get("profit", 0.0)))], ["Lifetime", EmpireData.money(float((o.get("lifetime", {}) as Dictionary).get("profit", 0.0)))]]:
+		var fc := _card(0)
+		(fc[0] as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		(fc[1] as VBoxContainer).add_child(S.label(String(f[0]), 13, S.MUTED, "black"))
+		(fc[1] as VBoxContainer).add_child(S.label(String(f[1]), 22, S.PAPER, "black"))
+		row.add_child(fc[0])
+	var acts := S.hbox(10)
+	v.add_child(acts)
+	acts.add_child(S.button("Hire a desk", func():
+		var err := Offices.set_desks(e, o, 1)
+		if err != "":
+			toast(err, "warn")
+		open_office(unit), true, 170))
+	acts.add_child(S.button("Let one go", func():
+		var err := Offices.set_desks(e, o, -1)
+		if err != "":
+			toast(err, "warn")
+		open_office(unit), false, 160))
+	var ls: Array = Offices.cfg().get("levels", [])
+	if int(o["level"]) < ls.size():
+		var nd: Dictionary = ls[int(o["level"])]
+		acts.add_child(S.button("%s · %s" % [String(nd.get("name", "Fit-out")), EmpireData.money(float(nd.get("cost", 0)))], func():
+			var err := Offices.upgrade(e, o)
+			if err != "":
+				toast(err, "bad")
+				return
+			Sfx.play("chime", -2.0)
+			open_office(unit), false, 260))
+
+
+## The club's reception at The Heights Ground (2026-11-26: there was no
+## panel – the club couldn't be bought or run).
+func open_club() -> void:
+	var e := game.empire
+	Club.ensure(e)
+	var cl: Dictionary = e.club
+	var cfg := Club.cfg()
+	var v := _open(String(cfg.get("name", "Harbour City FC")), 1080, 560)
+	var pos := Club.position(e)
+	v.add_child(S.label("%s · %d%s of %d · squad rating %d · next match day %d (%s)" % [String(cfg.get("ground", "The Heights Ground")),
+		pos, ["th", "st", "nd", "rd"][pos] if pos < 4 else "th", (cl["table"] as Array).size(), int(cl["rating"]),
+		Club.next_match_day(e), "home" if Club.is_home(e, Club.next_match_day(e)) else "away"], 16, S.MUTED))
+	if not cl.get("owned", false):
+		var why := Club.buy_block(e)
+		var b := S.button("Buy the club · %s" % EmpireData.money(float(cfg.get("price", 240000))), func():
+			var err := Club.buy(e)
+			if err != "":
+				toast(err, "bad")
+				return
+			Sfx.play("chime", -2.0)
+			game.save_game()
+			open_club(), true, 320)
+		b.disabled = why != ""
+		v.add_child(b)
+		if why != "":
+			v.add_child(S.label(why, 15, S.AMBER))
+		return
+	# Tickets
+	var th := S.hbox(10)
+	v.add_child(S.label("TICKETS", 13, S.MUTED, "black"))
+	v.add_child(th)
+	var tickets: Array = cfg.get("tickets", [])
+	for i in tickets.size():
+		var t: Dictionary = tickets[i]
+		th.add_child(S.button("%s · £%d%s" % [String(t["name"]), int(t["price"]), "  ✓" if int(cl.get("ticket", 1)) == i else ""], func():
+			Club.set_ticket(e, i)
+			open_club(), int(cl.get("ticket", 1)) == i, 200))
+	v.add_child(S.label("Expected crowd %d of %d" % [Club.attendance(e), Club.capacity(e)], 14, S.PAPER))
+	# Signings
+	v.add_child(S.label("SIGNINGS", 13, S.MUTED, "black"))
+	var sh := S.hbox(10)
+	v.add_child(sh)
+	for s in cfg.get("signings", []):
+		var sd: Dictionary = s
+		var b2 := S.button("%s +%d · %s" % [String(sd["name"]), int(sd["rating"]), EmpireData.money(float(sd["fee"]))], func():
+			var err := Club.sign(e, String(sd["id"]))
+			if err != "":
+				toast(err, "bad")
+			open_club(), false, 250)
+		b2.disabled = not e.can_afford(float(sd["fee"]))
+		sh.add_child(b2)
+	if not (cl.get("signings", []) as Array).is_empty():
+		sh.add_child(S.button("Sell the last signing", func():
+			Club.sell_last(e)
+			open_club(), false, 210))
+	# Ground upgrades
+	v.add_child(S.label("THE GROUND", 13, S.MUTED, "black"))
+	var uh := S.hbox(10)
+	v.add_child(uh)
+	for u in cfg.get("upgrades", []):
+		var ud: Dictionary = u
+		var have := Club.has_upgrade(e, String(ud["id"]))
+		var b3 := S.button(("%s ✓" % ud["name"]) if have else "%s · %s" % [String(ud["name"]), EmpireData.money(float(ud["cost"]))], func():
+			var err := Club.buy_upgrade(e, String(ud["id"]))
+			if err != "":
+				toast(err, "bad")
+			open_club(), false, 250)
+		b3.disabled = have or not e.can_afford(float(ud["cost"]))
+		uh.add_child(b3)

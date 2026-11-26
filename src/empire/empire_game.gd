@@ -54,6 +54,7 @@ const PURSUIT_REWARD := 2500.0
 var traffic_bodies: TrafficBodies
 var wrecks: Wrecks
 var street_cars: StreetCars   # stealing cars, lock-up garages
+var career: CareerPlay       # courier runs, shift work, the driver
 var props: Destructibles
 var damage_desk: DamageDesk
 var smash: StorefrontSmash
@@ -275,6 +276,10 @@ func _ready() -> void:
 	street_cars.name = "StreetCars"
 	add_child(street_cars)
 	street_cars.setup(self)
+	career = CareerPlay.new()
+	career.name = "CareerPlay"
+	add_child(career)
+	career.setup(self)
 	props = Destructibles.new()
 	props.name = "Destructibles"
 	add_child(props)
@@ -1163,7 +1168,47 @@ func _surface_sound_at(p: Vector3) -> String:
 
 
 # --------------------------------------------------------------- frame
+## The apartment you were last in (flags.last_home): the app starts you
+## there (2026-11-26). Checked every couple of seconds.
+var _home_t := 0.0
+
+
+func _track_home(dt: float) -> void:
+	_home_t -= dt
+	if _home_t > 0.0 or empire == null or driving != "" or player == null:
+		return
+	_home_t = 2.0
+	var p := player.global_position
+	for home in homes():
+		var h: Dictionary = home["h"]
+		var f := Apartments.to_face(h, p)
+		# (to_face: x along, y out of the facade, z height)
+		if f.x > float(h["a0"]) and f.x < float(h["a1"]) and f.y < 0.0 and f.y > -float(h["depth"]) - 0.2 \
+				and f.z > float(h["y0"]) - 0.3 and f.z < float(h["y0"]) + 3.0:
+			empire.flags["last_home"] = String(home["id"])
+			return
+
+
+## Inside the last apartment you were in, if it's still yours to live in.
+func _home_spawn() -> Dictionary:
+	var hid := String(empire.flags.get("last_home", ""))
+	if hid == "" or not empire.owns_property(hid):
+		return {}
+	var q := empire.properties.filter(func(x): return x["id"] == hid)
+	if not q.is_empty() and q[0].get("let", false):
+		return {}
+	var home := home_by_id(hid)
+	if home.is_empty():
+		return {}
+	var h: Dictionary = home["h"]
+	var a := (float(h["a0"]) + float(h["a1"])) * 0.5 + (float(h["a1"]) - float(h["a0"])) * 0.2
+	var p := Apartments.face_point(h, a, -1.7, float(h["y0"]) + 1.0)
+	var o := Apartments.outward(h)
+	return {"pos": p, "yaw": atan2(o.x, o.z)}
+
+
 func _process(dt: float) -> void:
+	_track_home(dt)
 	if empire == null:
 		return
 	var sim_dt := minf(dt, 0.1)
@@ -3361,7 +3406,8 @@ func sleep_until(hour: float) -> void:
 	_end_floor()
 	var target := hour * 60.0
 	var mins := fposmod(target - empire.minute, 1440.0)
-	empire.advance(mins)
+	var t0 := Time.get_ticks_msec()
+	empire.fast_forward(mins)
 	ui.toast("It's %s %s" % [empire.weekday(), empire.clock_text()], "info")
 
 
@@ -3720,7 +3766,11 @@ func load_game() -> bool:
 		# (Saved on Skyport Island before it moved: Empire.migrate v6.)
 		var q := SkyportIsland.migrate_point(Vector3(float(pp[0]), float(pp[1]), float(pp[2])))
 		pp = [q.x, q.y, q.z, float(pp[3])]
-	if pp.size() >= 4:
+	var hs := _home_spawn() if not args.has("goto") else {}
+	if not hs.is_empty():
+		# The app starts you in the apartment you were last in.
+		_teleport(hs["pos"], float(hs["yaw"]))
+	elif pp.size() >= 4:
 		_teleport(Vector3(pp[0], pp[1], pp[2]) + Vector3.UP * 0.2, float(pp[3]))
 	else:
 		var s := starter_unit()

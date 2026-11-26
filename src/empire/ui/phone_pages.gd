@@ -88,8 +88,10 @@ static func _sub_bar(ph: Phone, sec: String, items: Array, default_key: String, 
 
 
 static func overview_hub(ph: Phone, body: VBoxContainer) -> void:
-	var sub := _sub_bar(ph, "overview", [["summary", "Summary"], ["finances", "Finances"], ["city", "City"], ["goals", "Goals"]], "summary", body)
+	var sub := _sub_bar(ph, "overview", [["summary", "Summary"], ["jobs", "Jobs"], ["finances", "Finances"], ["city", "City"], ["goals", "Goals"]], "summary", body)
 	match sub:
+		"jobs":
+			CareerPages.jobs(ph, body)
 		"finances":
 			var v := G.vbox(12)
 			v.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -110,8 +112,12 @@ static func overview_hub(ph: Phone, body: VBoxContainer) -> void:
 
 
 static func businesses_hub(ph: Phone, body: VBoxContainer) -> void:
-	var sub := _sub_bar(ph, "businesses", [["shops", "My Businesses"], ["corporate", "Corporate"], ["city500", "City500"]], "shops", body)
+	var sub := _sub_bar(ph, "businesses", [["shops", "My Businesses"], ["ops", "Operations"], ["reports", "Reports"], ["corporate", "Corporate"], ["city500", "City500"]], "shops", body)
 	match sub:
+		"ops":
+			CareerPages.operations(ph, body)
+		"reports":
+			CareerPages.reports(ph, body)
 		"corporate":
 			var v := G.vbox(12)
 			v.size_flags_vertical = Control.SIZE_EXPAND_FILL

@@ -104,6 +104,22 @@ func weekday() -> String:
 	return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][(day - 1) % 7]
 
 
+## Fast-forward (sleep): every shop is settled by the off-screen model – a
+## live shop near you used to queue its shoppers for the floor, which takes
+## 30 and drops the rest, so a night's trade vanished – and no per-sale
+## signals fire until you wake (2026-11-26).
+var fast := false
+
+
+func fast_forward(minutes: float) -> void:
+	fast = true
+	advance(minutes)
+	fast = false
+	for b: Business in businesses:
+		b.pending_arrivals = 0
+	changed.emit()
+
+
 ## Steps the world `minutes` game-minutes forward (fractions carry over).
 func advance(minutes: float) -> void:
 	_carry_minutes += minutes
@@ -138,7 +154,7 @@ func _minute_tick() -> void:
 			# fraction (mean exact, and they don't come like clockwork).
 			var lam := DemandModel.arrivals_per_hour(b, h, competitors_near(b), CityLife.footfall_k(self, b)) / 60.0
 			var n := int(lam) + (1 if rng.randf() < lam - floorf(lam) else 0)
-			if b.live:
+			if b.live and not fast:
 				b.pending_arrivals += n
 			else:
 				for i in n:
@@ -261,7 +277,8 @@ func checkout(b: Business, basket: Stock, server := {}) -> float:
 		b.add_rep(float(EmpireData.trait_info("friendly").get("rep", 0.1)))
 	if Staff.is_ambitious_star(server):
 		b.add_rep(0.04)
-	sold.emit(b.id, total)
+	if not fast:
+		sold.emit(b.id, total)
 	if int(stats["sales"]) == 1:
 		_note("First sale! %s" % EmpireData.money(total, true), "good")
 	_check_goals()
@@ -485,6 +502,10 @@ func _note(text: String, kind := "info", ref := {}) -> void:
 ## Buys `order` ({pid: cases}) at a wholesaler; the goods wait on its
 ## collection bay (pallet). Returns "" or an error.
 func buy_wholesale(wholesaler: String, order: Dictionary, price_k := 1.0) -> String:
+	var cases := 0
+	for pid in order:
+		cases += maxi(int(order[pid]), 0)
+	price_k *= Careers.bulk_k(self, cases)   # (bulk buying: 5/10/15% off at 20/60/150 cases)
 	var cost := 0.0
 	for pid in order:
 		cost += case_price(pid) * float(order[pid]) * price_k
@@ -659,12 +680,19 @@ func order_delivery(b: Business, order: Dictionary, by_manager := false) -> Stri
 		units[pid] = c * EmpireData.case_qty(pid)
 	if units.is_empty():
 		return "Nothing to order"
+	var cases := 0
+	for pid in order:
+		cases += maxi(int(order[pid]), 0)
+	var bk := Careers.bulk_k(self, cases, by_manager)
+	cost *= bk
 	var fee := delivery_fee(b)
+	if by_manager and not b.has_role("manager"):
+		fee += Careers.auto_fee(self)   # (the supplier's auto-restock service)
 	if not pay(cost + fee, "stock", "Delivery order%s" % (" (manager)" if by_manager else ""), b.id):
 		return "Not enough money (%s)" % EmpireData.money(cost + fee, true)
 	var unit_prices := {}
 	for pid in units:
-		unit_prices[pid] = case_price(pid) / EmpireData.case_qty(pid)
+		unit_prices[pid] = case_price(pid) * bk / EmpireData.case_qty(pid)
 	var due := day + (1 if minute >= 360.0 else 0)
 	if Offices.same_day(self) and minute < 18.0 * 60.0:
 		due = day   # your logistics firm brings it this evening (19:00)
@@ -737,7 +765,7 @@ func restock_plan(b: Business, full := false, max_cases := 9999, budget := INF, 
 
 ## A driver with a company van collects for free; otherwise the wholesaler delivers for a fee.
 func delivery_fee(b: Business) -> float:
-	if Offices.free_delivery(self):
+	if Offices.free_delivery(self) or Careers.has_perk(self, "free_delivery"):
 		return 0.0
 	if b.has_role("driver") and vehicles.any(func(v): return v["model"] in ["van", "box"]):
 		return 0.0
@@ -774,12 +802,14 @@ func _deliver_orders() -> void:
 ## day's shelf-fill in total gets cases ordered (company money only).
 func _manager_reorders() -> void:
 	for b: Business in businesses:
-		if not b.has_role("manager"):
+		var pur := Careers.purchasing(self, b.id)
+		if not b.has_role("manager") and not bool(pur["auto"]):
 			continue
 		# Any line short of a shelf-fill gets two shelf-fills' worth (deliveries
-		# stack in the aisle when the racking's full); company money only.
+		# stack in the aisle when the racking's full); company money only,
+		# within the shop's daily purchasing budget.
 		var order := {}
-		var budget := company_cash - 200.0
+		var budget := minf(company_cash - 200.0, float(pur["budget"]))
 		var targets := b.shelf_targets()
 		for pid in b.sellable():
 			if not targets.has(pid):
@@ -1062,6 +1092,8 @@ func set_let(id: String, let: bool) -> void:
 # ---------------------------------------------------------------- day
 func end_day() -> void:
 	var report := {"day": day, "businesses": [], "revenue": 0.0, "profit": 0.0, "personal": 0.0}
+	report["bonuses"] = Careers.settle_targets(self)   # (before today's figures reset)
+	report["profit"] = float(report["bonuses"])
 	for b: Business in businesses:
 		b.tidy_pile()  # (cases left on the floor go into the stockroom overnight)
 		var t := b.today
@@ -1121,6 +1153,7 @@ func end_day() -> void:
 	report["club"] = cp
 	report["profit"] = float(report["profit"]) + op + cp
 	# Personal side: loans, let properties.
+	report["profit"] = float(report["profit"]) - Careers.credit_interest(self)
 	for l in loans:
 		var interest := float(l["principal"]) * float(l["rate"])
 		company_cash -= interest
@@ -1171,6 +1204,7 @@ func end_day() -> void:
 	if day_reports.size() > 30:
 		day_reports = day_reports.slice(day_reports.size() - 30)
 	day += 1
+	Careers.roll_targets(self)
 	candidates = fresh_candidates()
 	report["weather"] = weather
 	CityLife.new_day(self)
@@ -1242,7 +1276,7 @@ func loan_principal() -> float:
 
 
 func debt_value() -> float:
-	return loan_principal() + maxf(-company_cash, 0.0) + maxf(-personal_cash, 0.0)
+	return loan_principal() + maxf(-company_cash, 0.0) + maxf(-personal_cash, 0.0) + float(flags.get("career", {}).get("credit", 0.0))
 
 
 func asset_value() -> float:

@@ -88,11 +88,20 @@ static func sun_direction() -> Vector3:
 
 ## Sun elevation and azimuth (degrees) for an hour: up at ~05:30, highest
 ## (70°) at noon in the south, down at ~18:30 in the west.
+## A long, bright day (2026-11-26): sunrise ~05:00, full daylight ~07:00 to
+## ~20:00, golden evening light to sunset ~21:30, dusk into ~22:30, full
+## night ~23:00-04:30. The arc's ends are flattened (sin^1.5) so the sun
+## lingers low in the evening and morning instead of dropping straight away.
+const SUNRISE := 5.0
+const SUNSET := 21.5
+
+
 static func sun_angles(h: float) -> Vector2:
-	var el := 70.0 * sin(PI * (h - 5.5) / 13.0)
-	if h < 5.5 or h > 18.5:
+	var day_len := SUNSET - SUNRISE
+	var el := 70.0 * pow(maxf(sin(PI * (h - SUNRISE) / day_len), 0.0), 1.5)
+	if h < SUNRISE or h > SUNSET:
 		# Below the horizon: keep going down smoothly through the night.
-		var t := fposmod(h - 18.5, 24.0) / 11.0  # 0 at dusk, 1 at dawn
+		var t := fposmod(h - SUNSET, 24.0) / (24.0 - day_len)  # 0 at dusk, 1 at dawn
 		el = -40.0 * sin(PI * t)
 	var yaw := -112.0 + (h - DEFAULT_HOUR) * 15.0
 	return Vector2(el, yaw)
@@ -237,9 +246,9 @@ func _from_settings(instant: bool) -> void:
 		"day":
 			hour = 13.0
 		"sunset":
-			hour = 17.9
+			hour = 20.8   # (golden hour on the long day: sun sets ~21:30)
 		"night":
-			hour = 23.0
+			hour = 23.8
 	if st.weather in WEATHERS:
 		set_weather(st.weather, instant)
 	elif not weather in WEATHERS or instant:

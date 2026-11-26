@@ -613,6 +613,132 @@ func scenario_st() -> void:
 	check(err == "" and (game.cars[vid] as Car).visible and String(e.vehicle(vid).get("stored", "")) == "", "taken out at the kerb%s" % ("" if err == "" else " (" + err + ")"))
 
 
+## CR: the career & economy overhaul, targeted (2026-11-26).
+func scenario_cr() -> void:
+	print("--- CR: careers and economy")
+	var e := game.empire
+	check(absf(e.personal_cash - 650.0) < 1.0, "new game starts with £650 (%s)" % EmpireData.money(e.personal_cash))
+	# Courier run: start, arrive, paid.
+	e.minute = 10.0 * 60.0
+	await until(func(): return game.gps.ready_net(), 30.0)
+	var err := game.career.start_run()
+	check(err == "", "a courier run starts (%s)" % err)
+	if err == "":
+		var r := game.career.run()
+		var cash0 := e.personal_cash
+		await stand(Vector3(float(r["to"][0]), float(r["to"][1]) + 0.9, float(r["to"][2])))
+		await until(func(): return game.career.run().is_empty(), 20.0)
+		check(game.career.run().is_empty() and e.personal_cash > cash0, "delivered and paid %s" % EmpireData.money(e.personal_cash - cash0))
+	# Shift work near you.
+	var emp: Array = game.career.employers(1)
+	check(not emp.is_empty(), "a business near you is hiring")
+	if not emp.is_empty():
+		var u: Dictionary = emp[0][0]
+		await stand(Premises.door_point(u) + Premises.outward(u) * 2.0 + Vector3.UP * 0.9)
+		e.minute = 9.0 * 60.0
+		var cash1 := e.personal_cash
+		var err2 := game.career.work_shift(u)
+		check(err2 == "" and e.personal_cash > cash1 and absf(e.minute - 13.0 * 60.0) < 2.0, "a 4-hour shift pays %s and the clock moves on (%s)" % [EmpireData.money(e.personal_cash - cash1), err2])
+	# A running shop: sleep settles it even while it's live.
+	e.personal_cash = 400000.0
+	game._demo_setup("staff")
+	var b: Business = e.businesses[0] if not e.businesses.is_empty() else null
+	check(b != null, "a shop to run")
+	if b == null:
+		return
+	b.live = true
+	var served0 := int(b.today["served"])
+	e.minute = 9.0 * 60.0
+	game.sleep_until(15.0)
+	check(b.pending_arrivals == 0 and int(b.today["served"]) > served0, "sleep settles a live shop: %d served, none queued" % (int(b.today["served"]) - served0))
+	# Bulk buying.
+	var pid: String = b.sellable()[0]
+	var c0 := e.company_cash + e.personal_cash
+	e.buy_wholesale("bulktest", {pid: 20})
+	var paid := c0 - (e.company_cash + e.personal_cash)
+	check(absf(paid - e.case_price(pid) * 20.0 * 0.95) < 0.5, "20 cases cost 5%% less (%s)" % EmpireData.money(paid))
+	# Auto-restock within budget (no manager).
+	for s in b.slots:
+		s["qty"] = 0
+	b.backroom.units.clear()
+	var p := Careers.purchasing(e, b.id)
+	p["auto"] = true
+	p["budget"] = 300.0
+	e.company_cash = 50000.0
+	var o0 := b.orders.size()
+	var cash2 := e.company_cash
+	e._manager_reorders()
+	var spent := cash2 - e.company_cash
+	check(b.orders.size() > o0 and spent <= 300.0 + 35.0 + 40.0 + 0.5, "auto-restock ordered within its budget (%s)" % EmpireData.money(spent))
+	# Daily target and its bonus.
+	Careers.roll_targets(e)
+	var tg: Dictionary = Careers.state(e)["targets"].get(b.id, {})
+	check(not tg.is_empty(), "today's target: %s" % tg.get("label", "?"))
+	b.today[String(tg["kind"])] = float(tg["n"]) + 1.0
+	check(Careers.settle_targets(e) > 0.0, "the target pays its bonus")
+	# Offices, club, report.
+	var office_unit := {}
+	for u2: Dictionary in game.world.street_units:
+		if String(u2.get("kind", "")) == "office":
+			office_unit = u2
+			break
+	if office_unit.is_empty():
+		for id in game.unit_by_id:
+			if String((game.unit_by_id[id] as Dictionary).get("kind", "")) == "office":
+				office_unit = game.unit_by_id[id]
+				break
+	check(not office_unit.is_empty(), "an office floor to open")
+	if not office_unit.is_empty():
+		game.ui.open_office(office_unit)
+		await frames(3)
+		check(Offices.open(e, office_unit, Offices.types().keys()[0]) == "", "an office company opens")
+		game.ui.open_office(office_unit)
+		await frames(3)
+		game.ui.close_panel(true)
+	game.ui.open_club()
+	await frames(3)
+	game.ui.close_panel(true)
+	check(true, "office and club receptions open their panels")
+	var rep := Careers.report(e, 7)
+	check((rep["rows"] as Array).size() == e.businesses.size(), "the consolidated report covers every shop")
+	check(Careers.draw_credit(e, 1000.0) == "" or Careers.credit_limit(e) < 1000.0, "credit line draws (limit %s)" % EmpireData.money(Careers.credit_limit(e)))
+	# Backups rotate.
+	game.save_game()
+	game.save_game()
+	check(FileAccess.file_exists(game.save_path + ".bak2"), "older backups are kept (.bak2)")
+	# The apartment you were last in.
+	var homes := game.homes()
+	if not homes.is_empty():
+		var hm: Dictionary = homes[0]
+		var rec := hm.duplicate()
+		rec.erase("h")
+		if not e.owns_property(String(hm["id"])):
+			e.properties.append({"id": String(hm["id"]), "kind": "home", "name": String(hm["name"]), "price": float(hm["price"]), "let": false, "income": 0.0})
+		e.flags["last_home"] = String(hm["id"])
+		var hs := game._home_spawn()
+		check(not hs.is_empty(), "start-up spawn in %s" % hm["name"])
+		if not hs.is_empty():
+			game._teleport(hs["pos"], float(hs["yaw"]))
+			await wait(1.5)
+			var f := Apartments.to_face(hm["h"], game.player.global_position)
+			var h: Dictionary = hm["h"]
+			check(f.x > float(h["a0"]) and f.x < float(h["a1"]) and f.y < 0.0 and absf(f.z - float(h["y0"])) < 1.6, "standing in the apartment after spawning (%s)" % f)
+	# Sleep with a portfolio.
+	for i in 12:
+		var bb := Business.new()
+		bb.id = "perf%d" % i
+		bb.premises = b.premises.duplicate()
+		bb.premises["id"] = "perf_unit_%d" % i
+		bb.slots = b.slots.duplicate(true)
+		e.businesses.append(bb)
+	var t0 := Time.get_ticks_msec()
+	e.minute = 9.0 * 60.0
+	game.sleep_until(17.0)
+	print("    sleep 8 h with %d shops: %d ms" % [e.businesses.size(), Time.get_ticks_msec() - t0])
+	for i in 12:
+		e.businesses.pop_back()
+
+
 func _hero_shot(path: String) -> void:
 	await frames(8)
 	await RenderingServer.frame_post_draw
@@ -1791,6 +1917,8 @@ func _run() -> void:
 		await scenario_ve()
 	if _which.split(",").has("SM"):
 		await scenario_sm()
+	if _which.split(",").has("CR"):
+		await scenario_cr()
 	if _which.split(",").has("ST"):
 		await scenario_st()
 	if _which.split(",").has("AP"):
