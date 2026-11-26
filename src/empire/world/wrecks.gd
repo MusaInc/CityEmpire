@@ -226,3 +226,124 @@ func _spawn(k: int, xf: Transform3D, vel: Vector3, col: Color, traffic_id: int, 
 	if game.vfx:
 		game.vfx.watch(c)
 	wrecks.append({"car": c, "t": 0.0, "traffic": traffic_id, "source": source, "hit": false, "spawn_y": xf.origin.y, "parked": parked, "island": island})
+
+
+# ------------------------------------------------------------ stealing
+## (2026-11-26, "i want to steal cars"): any car you can walk up to – a
+## stopped or crawling traffic car (city, Westbank, Skyport), a parked car, a
+## settled wreck – can be taken. StreetCars turns it into a drivable car.
+
+## Gap from the point to a car's footprint (m), or INF if not level with it.
+static func _gap(p: Vector3, xf: Transform3D, half: Vector2) -> float:
+	var lp := xf.affine_inverse() * p
+	if absf(lp.y) > 2.4:
+		return INF
+	return Vector2(maxf(absf(lp.x) - half.x, 0.0), maxf(absf(lp.z) - half.y, 0.0)).length()
+
+
+## The nearest car within `reach` of p you could take: {} or {src, d, xf, k,
+## col, ...}. src: "traffic" | "island" | "parked" | "wreck".
+func stealable(p: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var bd := reach
+	var tb: TrafficBodies = game.traffic_bodies
+	if tb:
+		for it in tb.city_cars():
+			var tr: Traffic = it[2]
+			var id: int = it[0]
+			if tr.car_speed(id) > 1.6:
+				continue
+			var k := int(tr.c_kind[id])
+			var d := _gap(p, it[1], _half(game.world, k))
+			if d < bd:
+				bd = d
+				best = {"src": "traffic", "tr": tr, "id": id, "xf": it[1], "k": k, "col": tr.c_col[id]}
+		for it in tb.island_cars():
+			var ic: Dictionary = it[0]
+			if float(ic.get("v", 0.0)) > 1.6:
+				continue
+			var k2 := int(ic.get("kind", 0))
+			var d2 := _gap(p, it[1], _half(game.world, k2))
+			if d2 < bd:
+				bd = d2
+				best = {"src": "island", "ic": ic, "xf": it[1], "k": k2, "col": ic.get("col", Color(0.7, 0.7, 0.7))}
+	for w2 in [game.world, game.world.mainland]:
+		var w: CityWorld = w2
+		if w == null:
+			continue
+		var c0 := Vector2i(floori(p.x / CityWorld.CHUNK), floori(p.z / CityWorld.CHUNK))
+		for dx in [-1, 0, 1]:
+			for dz in [-1, 0, 1]:
+				var key := c0 + Vector2i(dx, dz)
+				if not w._loaded.has(key):
+					continue
+				var ck := [w, key]
+				if not _parked.has(ck):
+					_parked[ck] = w.parked_cars(key)
+				var list: Array = _parked[ck]
+				for i in list.size():
+					var pc: Array = list[i]
+					var d3 := _gap(p, pc[0], _half(w, int(pc[1])))
+					if d3 < bd:
+						bd = d3
+						var col: Color = pc[2] if pc.size() > 2 else CityWorld.kind_colour(int(pc[1]),
+							CityWorld.CAR_COLORS[absi(hash(key) + i) % CityWorld.CAR_COLORS.size()])
+						best = {"src": "parked", "w": w, "key": key, "entry": pc, "xf": pc[0], "k": int(pc[1]), "col": col}
+	for wr in wrecks:
+		var c: Car = wr["car"]
+		if not is_instance_valid(c) or c.linear_velocity.length() > 1.0:
+			continue
+		var s: Vector3 = c.spec["size"]
+		var d4 := _gap(p, c.global_transform, Vector2(s.x * 0.5, s.z * 0.5))
+		if d4 < bd:
+			bd = d4
+			best = {"src": "wreck", "wreck": wr, "xf": c.global_transform, "k": -1, "col": c.spec.get("paint", Color.WHITE)}
+	if not best.is_empty():
+		best["d"] = bd
+		best["world"] = (best["xf"] as Transform3D).origin
+	return best
+
+
+## Take the car out of the street: it leaves traffic / the kerb / the wreck
+## list. Returns [body, Transform3D, paint, damage, dent_state, release]
+## where release = [Traffic, id] to hand back to traffic once you're far
+## away (or []).
+func take(c: Dictionary) -> Array:
+	var xf: Transform3D = c["xf"]
+	var body := ""
+	var release := []
+	var damage := {}
+	var dents := {}
+	match String(c["src"]):
+		"traffic":
+			var tr: Traffic = c["tr"]
+			var id: int = c["id"]
+			game.traffic_bodies.drop(id, tr)
+			tr.knock(id)
+			release = [tr, id]
+			body = CityWorld.CAR_KINDS[int(c["k"])][2]
+		"island":
+			var ic: Dictionary = c["ic"]
+			game.traffic_bodies.drop_island(ic)
+			ic["wait"] = 1.0e9      # (gone for good: you've got it)
+			body = CityWorld.CAR_KINDS[int(c["k"])][2]
+		"parked":
+			var w: CityWorld = c["w"]
+			var key: Vector2i = c["key"]
+			var list: Array = _parked.get([w, key], [])
+			list.erase(c["entry"])
+			w.break_item(xf.origin)
+			w.refresh_parked(key)
+			body = CityWorld.CAR_KINDS[int(c["k"])][2]
+		"wreck":
+			var wr: Dictionary = c["wreck"]
+			var car: Car = wr["car"]
+			body = String(car.spec.get("body", "civ_sedan"))
+			damage = car.damage_state()
+			if car.visual:
+				dents = car.visual.visual_state()
+			wrecks.erase(wr)
+			if wr.get("source") and int(wr["traffic"]) >= 0:
+				release = [wr["source"], int(wr["traffic"])]
+			car.queue_free()
+	return [body, xf, c["col"], damage, dents, release]

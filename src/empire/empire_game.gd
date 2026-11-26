@@ -53,6 +53,7 @@ var speed_fx: SpeedFx
 const PURSUIT_REWARD := 2500.0
 var traffic_bodies: TrafficBodies
 var wrecks: Wrecks
+var street_cars: StreetCars   # stealing cars, lock-up garages
 var props: Destructibles
 var damage_desk: DamageDesk
 var smash: StorefrontSmash
@@ -270,6 +271,10 @@ func _ready() -> void:
 	wrecks.name = "Wrecks"
 	add_child(wrecks)
 	wrecks.setup(self)
+	street_cars = StreetCars.new()
+	street_cars.name = "StreetCars"
+	add_child(street_cars)
+	street_cars.setup(self)
 	props = Destructibles.new()
 	props.name = "Destructibles"
 	add_child(props)
@@ -1706,6 +1711,8 @@ func _update_spot() -> void:
 		# one handle on the driver's side.
 		for vid in cars:
 			var car: Car = cars[vid]
+			if not car.visible:
+				continue   # (in the lock-up)
 			var xf := car.global_transform
 			var lp := xf.affine_inverse() * p
 			var hw: float = car.spec["size"].x * 0.5
@@ -1725,6 +1732,12 @@ func _update_spot() -> void:
 		if not sk.is_empty() and float(sk["d"]) < best_d:
 			best = sk
 			best_d = float(sk["d"])
+	if street_cars and not in_vehicle() and not player.stunned and best_d > 0.9:
+		# Any other car you're standing at: steal it.
+		var sc := street_cars.spot_near(player.global_position)
+		if not sc.is_empty() and float(sc["d"]) * 0.9 < best_d:
+			best = sc
+			best_d = float(sc["d"]) * 0.9
 	var changed: bool = best.get("kind", "") != spot.get("kind", "") or best.get("slot", -9) != spot.get("slot", -9) \
 		or best.get("vehicle", "") != spot.get("vehicle", "") or best.get("interior") != spot.get("interior") \
 		or best.get("site") != spot.get("site") or best.get("model") != spot.get("model") \
@@ -1805,6 +1818,8 @@ func spot_prompt() -> Array:
 		# (Only offered once the car is slow enough to leave — matches exit_vehicle threshold.)
 		var dc: Car = cars.get(driving)
 		var slow := dc == null or Vector2(dc.linear_velocity.x, dc.linear_velocity.z).length() <= 1.15
+		if street_cars and not street_cars.store_spot().is_empty():
+			return ["STORE IN GARAGE", true]
 		return ["GET OUT", slow]
 	if spot.is_empty():
 		return ["", false]
@@ -1927,6 +1942,8 @@ func spot_prompt() -> Array:
 		"car_door":
 			var v := empire.vehicle(spot["vehicle"])
 			return ["DRIVE %s" % String(EmpireData.vehicle_model(v["model"])["name"]).to_upper(), true]
+		"steal_car":
+			return street_cars.prompt(spot)
 		"car_boot":
 			var v2 := empire.vehicle(spot["vehicle"])
 			var cargo: Stock = v2["cargo"]
@@ -1967,6 +1984,10 @@ func act() -> void:
 	if state != "play" or vehicle_access.active():
 		return
 	if driving != "":
+		var gu: Dictionary = street_cars.store_spot() if street_cars else {}
+		if not gu.is_empty():
+			street_cars.store_current(gu)
+			return
 		exit_vehicle(true)
 		return
 	if skyport_play and skyport_play.piloting != "":
@@ -2139,6 +2160,8 @@ func act() -> void:
 			ui.open_phone("property")
 		"car_door":
 			enter_vehicle(spot["vehicle"], true)
+		"steal_car":
+			street_cars.steal(spot)
 		"car_boot":
 			_boot_action(spot["vehicle"])
 
@@ -2341,6 +2364,8 @@ func _spawn_cars() -> void:
 	for v in empire.vehicles:
 		if SkyportPlay.vclass(String(v["model"])) == "car":
 			_spawn_car(v)
+	if street_cars:
+		street_cars.apply_stored()
 	if skyport_play:
 		skyport_play.spawn_all()   # (helicopters, planes, boats)
 
@@ -2394,7 +2419,10 @@ func _spawn_car(v: Dictionary, settle_from := Vector3.INF) -> Car:
 		return null   # (aircraft and boats: SkyportPlay)
 	var c := Car.new()
 	c.name = "Car_" + String(v["id"])
-	c.setup(_car_spec(v["model"]), "player")
+	var spec := _car_spec(v["model"])
+	if v.has("paint"):
+		spec["paint"] = Color.from_string(String(v["paint"]), spec["paint"])   # (a stolen car keeps its colour)
+	c.setup(spec, "player")
 	c.park_lock = true
 	add_child(c)
 	var vis := CarVisual.new()

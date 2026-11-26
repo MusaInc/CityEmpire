@@ -560,6 +560,59 @@ func scenario_ap() -> void:
 		el._player_riding = false
 
 
+## ST: steal a parked car, buy a lock-up, store it at a Motor Works (it
+## becomes yours), take it out again.
+func scenario_st() -> void:
+	print("--- ST: steal a car, lock-up garage")
+	var e := game.empire
+	e.personal_cash = 2000000.0
+	var sc: StreetCars = game.street_cars
+	# A parked car in a loaded chunk near the start.
+	var found := []
+	for key in game.world._loaded:
+		for pc in game.world.parked_cars(key):
+			found = [pc, key]
+			break
+		if not found.is_empty():
+			break
+	check(not found.is_empty(), "a parked car to steal")
+	if found.is_empty():
+		return
+	var xf: Transform3D = found[0][0]
+	var side := xf * Vector3(1.75, 0.0, 0.0)
+	await stand(side + Vector3.UP * 0.9)
+	await wait(0.6)
+	var sp := sc.spot_near(game.player.global_position)
+	check(not sp.is_empty(), "standing at a parked car offers STEAL (%s)" % ("" if sp.is_empty() else sc.prompt(sp)[0]))
+	if sp.is_empty():
+		return
+	var n0 := e.vehicles.size()
+	sc.steal(sp)
+	await until(func(): return game.driving != "", 40.0)
+	check(game.driving != "", "in the stolen car")
+	var v := e.vehicle(game.driving)
+	check(v.get("stolen", false) and e.vehicles.size() == n0 + 1, "it's a stolen car record (%s)" % v.get("model", "?"))
+	check(sc.buy_lockup() == "" and sc.lockup_slots() == StreetCars.LOCKUP_SLOTS, "bought a lock-up")
+	# Drive (teleport) it to the nearest Motor Works door.
+	var c: Car = game.cars[game.driving]
+	var ng := game.nearest_garage(c.global_position)
+	check(not (ng[0] as Dictionary).is_empty(), "a Motor Works to store it at")
+	var door := Premises.door_point(ng[0])
+	var at := door + Premises.outward(ng[0]) * 4.5
+	c.place(Transform3D(Basis.looking_at(Premises.outward(ng[0]).cross(Vector3.UP), Vector3.UP), Vector3(at.x, game._kerb_point(at).y + 0.4, at.z)))
+	await wait(2.0)
+	check(not sc.store_spot().is_empty(), "stopped at the door: STORE IN GARAGE (%s)" % game.spot_prompt()[0])
+	var vid := game.driving
+	sc.store_current(sc.store_spot())
+	await wait(0.5)
+	v = e.vehicle(vid)
+	check(game.driving == "" and String(v.get("stored", "")) != "" and not v.get("stolen", false), "stored: it's yours, you're on foot")
+	check(not (game.cars[vid] as Car).visible, "the car is put away")
+	var err := sc.take_out(vid)
+	await wait(1.0)
+	check(err == "" and (game.cars[vid] as Car).visible and String(e.vehicle(vid).get("stored", "")) == "", "taken out at the kerb%s" % ("" if err == "" else " (" + err + ")"))
+
+
 func _hero_shot(path: String) -> void:
 	await frames(8)
 	await RenderingServer.frame_post_draw
@@ -1738,6 +1791,8 @@ func _run() -> void:
 		await scenario_ve()
 	if _which.split(",").has("SM"):
 		await scenario_sm()
+	if _which.split(",").has("ST"):
+		await scenario_st()
 	if _which.split(",").has("AP"):
 		await scenario_ap()
 	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XF", "XG", "XH", "XI", "XS", "XW"]:

@@ -1,5 +1,5 @@
 {
- "_doc": "Vehicles you can own. body = assets/vehicles/<body>.glb (Never Stop's fleet). cargo = cases carried. Luxury cars carry little but show the city you've made it.",
+ "_doc": "Vehicles you can own. body = assets/vehicles/<body>.glb (Never Stop's fleet). cargo = cases carried. Luxury cars carry little but show the city you've made it. street = taken off the street (stolen), never sold in a showroom.",
  "models": {
   "hatch": {
    "name": "Kestrel Hatch",
@@ -423,6 +423,92 @@
    "drift_slip": 0.98,
    "downforce_gain": 0.95,
    "engine_sound": "i4"
+  },
+  "street_compact": {
+   "name": "Supermini",
+   "body": "civ_compact",
+   "base": "civ",
+   "cargo": 6,
+   "price": 0,
+   "top_speed": 46.0,
+   "paint": "#9aa3ad",
+   "class": "car",
+   "street": true,
+   "engine_sound": "i4"
+  },
+  "street_sedan": {
+   "name": "Family Saloon",
+   "body": "civ_sedan",
+   "base": "civ",
+   "cargo": 10,
+   "price": 0,
+   "top_speed": 52.0,
+   "paint": "#8c8c8c",
+   "class": "car",
+   "street": true,
+   "engine_sound": "i4"
+  },
+  "street_taxi": {
+   "name": "City Cab",
+   "body": "civ_taxi",
+   "base": "civ",
+   "cargo": 8,
+   "price": 0,
+   "top_speed": 50.0,
+   "paint": "#f2b812",
+   "class": "car",
+   "street": true,
+   "engine_sound": "i4"
+  },
+  "street_suv": {
+   "name": "Compact SUV",
+   "body": "civ_suv",
+   "base": "civ",
+   "cargo": 12,
+   "price": 0,
+   "top_speed": 49.0,
+   "paint": "#56606b",
+   "class": "car",
+   "street": true,
+   "engine_sound": "diesel"
+  },
+  "street_van": {
+   "name": "Panel Van",
+   "body": "civ_van",
+   "base": "civ",
+   "cargo": 30,
+   "price": 0,
+   "top_speed": 40.0,
+   "paint": "#e9e6df",
+   "class": "car",
+   "street": true,
+   "engine_sound": "diesel"
+  },
+  "street_police": {
+   "name": "Police Estate",
+   "body": "civ_sedan",
+   "base": "civ",
+   "cargo": 8,
+   "price": 0,
+   "top_speed": 56.0,
+   "paint": "#f4f4f2",
+   "class": "car",
+   "street": true,
+   "engine_sound": "v6",
+   "art": "civ_police"
+  },
+  "street_ambulance": {
+   "name": "Ambulance",
+   "body": "civ_van",
+   "base": "civ",
+   "cargo": 4,
+   "price": 0,
+   "top_speed": 44.0,
+   "paint": "#f2d21a",
+   "class": "car",
+   "street": true,
+   "engine_sound": "diesel",
+   "art": "civ_ambulance"
   }
  },
  "service_cost": 80,
