@@ -2263,6 +2263,8 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 		"foliage": _foliage_arrays(key),
 		"pools": _pool_arrays(key),
 		"walkers": _walker_buffers(key),
+		# Real 3D shopfronts on the decorative ground floors (ShopfrontKit).
+		"shopfronts": ShopfrontKit.bays_for(_by_chunk.get(key, []), layout),
 	}
 
 
@@ -2460,6 +2462,7 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 		gi.material_override = ground_mat
 		gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(gi)
+	ShopfrontKit.place(root, res.get("shopfronts", []))
 	var furn := _mesh_from(res.get("furniture"))
 	if furn:
 		var fi := MeshInstance3D.new()

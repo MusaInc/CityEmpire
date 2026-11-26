@@ -55,7 +55,7 @@ const WEATHER_PARAMS := {
 ## Low fog: its top (world m; the streets are ~2–60 m, the sea −1.6) and
 ## how fast it thickens below that.
 const MIST_TOP := 7.0
-const MIST_DENSITY := 0.09
+const MIST_DENSITY := 0.055
 
 var env: Environment
 var sun: DirectionalLight3D
@@ -149,6 +149,9 @@ func _ready() -> void:
 	# Reserve the near cascade for the hero, vehicles and immediate street furniture.
 	sun.directional_shadow_split_1 = 0.075
 	sun.directional_shadow_blend_splits = true
+	# A touch of PCF blur: with a 16-minute day the sun sweeps ~0.4°/s and
+	# shadow edges stepped a texel at a time on the far split (2026-11-26).
+	sun.shadow_blur = 1.6
 	add_child(sun)
 
 	rain_fx = RainFx.new()
@@ -214,8 +217,11 @@ func _apply_quality_preset() -> void:
 			sun.directional_shadow_max_distance = 160.0
 			sun.directional_shadow_split_1 = 0.11
 		else:
-			sun.directional_shadow_max_distance = 240.0
-			sun.directional_shadow_split_1 = 0.085
+			sun.directional_shadow_max_distance = 180.0
+			sun.directional_shadow_split_1 = 0.1
+		# Finer texels so moving shadows glide instead of stepping: 4096 on
+		# Medium and High, 2048 on Low.
+		RenderingServer.directional_shadow_atlas_set_size(4096 if q >= 1 else 2048, true)
 
 
 ## The Settings autoload (looked up, not named: tool scripts run without it).
@@ -348,7 +354,9 @@ func _apply(dt: float, instant: bool) -> void:
 	# Dawn mist: on calm mornings a low fog lies in the streets and over the
 	# water and burns off by mid-morning (less if it's windy and wet).
 	var dawn := smoothstep(4.0, 6.0, hour) * (1.0 - smoothstep(8.0, 10.5, hour))
-	var mist := maxf(float(w["mist"]), dawn * 0.75 * (1.0 - float(w["rain"])) * (1.0 - 0.7 * punch))
+	# (A light morning mist only: at 0.75 dawn streets and the mountains
+	# went milky – clarity pass 2026-11-26.)
+	var mist := maxf(float(w["mist"]), dawn * 0.28 * (1.0 - float(w["rain"])) * (1.0 - 0.7 * punch))
 	sun.shadow_opacity = lerpf(0.84 - 0.45 * overcast, 0.98 - 0.65 * cloud_softness, day_light)
 
 	# --- sky colours by sun height, moody slate-blue under rain/storm.
@@ -424,17 +432,18 @@ func _apply(dt: float, instant: bool) -> void:
 	# (Fair weather: clear air – the distance was washed out from 185 m.)
 	env.fog_depth_begin = lerpf(320.0, 26.0, fog) * lerpf(1.0, 0.7, hz) * (1.0 + 0.8 * alt * (1.0 - fog))
 	env.fog_depth_end = lerpf(3400.0, 620.0, fog) * hk * (1.0 + 0.45 * alt * (1.0 - fog))
-	env.fog_density = lerpf(lerpf(0.34, 0.58, hz), 0.90, fog) * (1.0 - 0.14 * alt * (1.0 - fog))
+	env.fog_density = lerpf(lerpf(0.24, 0.46, hz), 0.90, fog) * (1.0 - 0.14 * alt * (1.0 - fog))   # (0.34 base read milky)
 	env.fog_depth_curve = lerpf(1.45, 1.15, hz)
 	env.fog_light_color = fog_col
 	env.fog_light_energy = lerpf(1.0, 0.42, night)
-	env.fog_sun_scatter = (0.38 + 0.25 * hz) * day_light * (1.0 - overcast)
-	env.fog_aerial_perspective = lerpf(0.55, 0.45, hz)
+	# Sun scatter: a glow round a low sun, not a veil over the whole view.
+	env.fog_sun_scatter = (0.22 + 0.2 * hz) * day_light * (1.0 - overcast) * lerpf(0.55, 1.0, smoothstep(6.0, 25.0, el))
+	env.fog_aerial_perspective = lerpf(0.38, 0.32, hz)   # (0.55 washed distant hills into the sky)
 	env.fog_height = MIST_TOP + 4.0 * mist
 	env.fog_height_density = MIST_DENSITY * mist * (1.0 - _interior_mix)
 	env.glow_intensity = lerpf(0.24 + 0.04 * punch + 0.04 * hz, 0.44, night)
-	env.glow_hdr_threshold = lerpf(1.38, 0.88, night)
-	env.adjustment_contrast = lerpf(1.09, 1.06, night) + (0.03 * punch - 0.02 * hz) * day_light - 0.03 * fog - 0.02 * overcast
+	env.glow_hdr_threshold = lerpf(1.38, 0.88, night * night)   # (the low night threshold lingered past sunrise: a bloom veil)
+	env.adjustment_contrast = lerpf(1.09, 1.06, night) + (0.03 * punch - 0.02 * hz) * day_light - 0.03 * fog - 0.02 * overcast + 0.035 * dawn * day_light   # (crisp, not milky, mornings)
 	env.adjustment_saturation = lerpf(1.09, 1.01, night) + (0.04 * punch - 0.02 * hz) * day_light - 0.05 * fog - 0.06 * overcast
 	# Indoors (InteriorKit lighting zones round shops, lobbies, lift halls,
 	# lift cars, homes): the room's own light, the same at noon and at
