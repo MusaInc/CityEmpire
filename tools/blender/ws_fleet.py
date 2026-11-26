@@ -52,7 +52,10 @@ def design(L, W, H, wb, oh_f, wr, ride, belt, nose, kind, tyre_w=0.215, boot=Non
     AX = (wb / 2, -wb / 2)
     d = dict(WB=wb, WR=wr, TYRE_W=tyre_w, OH_F=oh_f, OH_R=oh_r, YF=YF, YR=YR, W2=W / 2, RIDE=ride, ROOF=H,
              ARCH=wr + 0.042, AX=AX, SILL_Z=ride + 0.17, TUMBLE=0.12, END_RF=0.34, END_RR=0.3, REAR_EXP=2.2,
-             SEALED=True, SEG_K=0.5)
+             SEALED=False, SEG_K=0.5,
+             # A real cabin, as the cars you buy (2026-11-26: "all vehicles need
+             # to be just as good as each other"): cavity sized from the ride.
+             CAV_Z0=ride + 0.26, CAV_ZM=ride + 0.6, CAV_Y0=None, CAV_Y1=None)
     if kind == "saloon":
         d.update(Y_COWL=AX[0] - 0.36, Y_WS=AX[0] - 1.18, Y_RE=AX[1] + 0.62, Y_TG=AX[1] - 0.12, REAR_EXP=1.25)
     elif kind == "hatch":
@@ -65,6 +68,7 @@ def design(L, W, H, wb, oh_f, wr, ride, belt, nose, kind, tyre_w=0.215, boot=Non
     elif kind == "van":
         d.update(Y_COWL=AX[0] + 0.32, Y_WS=AX[0] - 0.42, Y_RE=YR + 0.06, Y_TG=YR + 0.02, TUMBLE=0.05, END_RF=0.32,
                  END_RR=0.12, REAR_EXP=1.0)
+        d["CAV_Y0"] = AX[0] - (wr + 0.042) - 0.95    # cab only (bulkhead behind the seats)
     cowl = belt - 0.025
     bonnet = [(d["Y_COWL"] + (YF - d["Y_COWL"]) * t, cowl - (cowl - nose) * t ** 1.6) for t in (0.3, 0.6, 0.85)]
     rear_z = (boot if boot else belt + 0.02)
@@ -159,6 +163,67 @@ def livery(surf, m, out, y0, y1, z0, z1, cols, rows=2, cell=0.24):
                 g = K.patch(surf, "side", K.poly_fn([(ya, za), (yb, za), (yb, zb), (ya, zb)]), 3, 2, sd)
                 if all(c for row in g for c in row):
                     out.append(K.sheet("livery", g, 0.0025, mt))
+
+
+def cabin_interior(m, out, kind, doors):
+    """The Kestrel's interior (dashboard, binnacle, screen, vents, console,
+    bolstered seats, door cards, steering wheel) refitted to this car: moved
+    to its cowl, its floor and its roof (low cars get low-slung seats), wider
+    or narrower with the body, rear bench only where there are rear seats."""
+    tmp = []
+    K.interior(m, tmp)
+    dash_names = ("dash", "dash_top", "binnacle", "cluster", "gauge_ring", "screen", "screen_bezel",
+                  "vent", "wheel_rim", "spoke", "hub", "hub_badge", "column", "pedal")
+    rear_names = ("rear_bench", "rear_back", "rear_headrest")
+    rear = (doors == 4 or kind == "hatch") and kind not in ("pickup", "van", "box")
+    dash, seats, back = [], [], []
+    for o in tmp:
+        base = o.name.split(".")[0]
+        if base in ("floor_pan", "boot_floor", "door_card", "armrest", "door_pull") or (base in rear_names and not rear):
+            bpy.data.objects.remove(o, do_unlink=True)
+            continue
+        (dash if base in dash_names else back if base in rear_names else seats).append(o)
+    dy = K.Y_COWL - 0.97
+    kx = (K.W2 - 0.095) / 0.8
+    # Kestrel: cavity floor 0.4, headrest tops 1.34 under a 1.41 cavity roof.
+    room = K.ROOF - 0.06 - K.CAV_Z0
+    sz = min(1.0, (room - 0.07) / 0.94)
+    if seats:
+        g = kit.join("seats", seats)
+        g.location = (0, dy, K.CAV_Z0 - 0.4 * sz)
+        g.scale = (kx, 1.0, sz)
+        out.append(g)
+    # Door cards fitted to this cabin: inside the door skin, only as long as
+    # the cabin (the Kestrel's 1.8 m cards, widened, came out through the
+    # side intakes of the mid-engined cars).
+    y1 = K.Y_COWL - 0.3
+    y0 = max(K.CAV_Y0 + 0.08 if K.CAV_Y0 is not None else K.YR + 0.4, y1 - (1.95 if rear else 1.15))
+    yc = (y0 + y1) / 2
+    zc = K.smooth(K.DECK, yc) - 0.2
+    xc = K.ring(yc)[6].x - 0.12
+    for sx in (1, -1):
+        out.append(box("door_card", (0.03, y1 - y0, 0.34), (sx * xc, yc, zc), m["plastic"], bevel=0.01))
+        out.append(box("armrest", (0.07, min(0.5, y1 - y0 - 0.2), 0.045), (sx * (xc - 0.04), y1 - 0.45, zc - 0.03),
+                       m["interior"], bevel=0.018))
+    if back:
+        # Rear seats under the roof, not under the rear screen (saloons and
+        # coupes: the headrests poked through it).
+        need = max(0.0, (K.Y_RE + 0.05) - (-1.42 + dy))
+        ry = min(need, 0.28)
+        if need > ry + 0.02:     # (no room under the roof: lose the rear headrests)
+            for o in [o for o in back if o.name.startswith("rear_headrest")]:
+                back.remove(o)
+                bpy.data.objects.remove(o, do_unlink=True)
+        g = kit.join("rear_seats", back)
+        g.location = (0, dy + ry, K.CAV_Z0 - 0.4 * sz)
+        g.scale = (kx, 1.0, sz)
+        out.append(g)
+    if dash:
+        g = kit.join("dash", dash)
+        dz = K.smooth(K.DECK, K.Y_COWL) - 0.975
+        g.location = (0, dy, dz)
+        g.scale = (kx, 1.0, 1.0)
+        out.append(g)
 
 
 def build_traffic(name):
@@ -259,16 +324,20 @@ def build_traffic(name):
                pipes=[(W2 * 0.62, RIDE + 0.12, 0.03, "round")] if kind != "van" else [(W2 * 0.7, RIDE + 0.1, 0.032, "round")])
     R.front_end(body, clean, m, out, kind, zl=zl, lamp_poly=[(W2 * 0.38, zl - lh), (W2 * 0.89, zl - lh * 0.75), (W2 * 0.91, zl),
                                                             (W2 * 0.41, zl - 0.012)])
-    # Glass: sealed, tinted, on black borders.
+    # Glass: a real cabin (2026-11-26) – the shell hollowed out, every window
+    # cut through with clear glass set in a rubber seal, the Kestrel's
+    # interior fitted inside (as the cars you can buy: ws_cars). Van rear
+    # doors stay sealed (the cargo hold behind the cab's bulkhead).
+    K.cut(body, K.cavity_solid(), m["interior"])
     rs = K.Surface([body])
 
     def glass_sheet(_surf, m_, out_, view, poly, sd=1):
-        # The smooth shell itself inside the outline (no holes or torn edges,
-        # as the rays at the decimated shell gave), 14 mm proud of it, a
-        # black seal round it.
         axis, d0, d1 = {"side": ("x", 0.3 if sd > 0 else -2.0, 2.0 if sd > 0 else -0.3),
                         "top": ("z", 0.5, K.ROOF + 0.3), "rear": ("y", YR - 0.5, YR + 0.7)}[view]
-        K.glaze(body, clean, m_, out_, poly, axis, d0, d1, inset=-0.014, cut_body=False, glass=m_["glass"])
+        if kind == "van" and view == "rear":
+            K.glaze(body, clean, m_, out_, poly, axis, d0, d1, inset=-0.014, cut_body=False, glass=m_["glass"])
+        else:
+            K.glaze(body, clean, m_, out_, poly, axis, d0, d1)
         R.outline_trim(gs, m_, out_, poly, view, sd, mat="trim", r=0.0065, lift=0.01, step=0.08)
 
     zb = lambda y: K.smooth(K.DECK, y) + 0.02
@@ -294,6 +363,16 @@ def build_traffic(name):
         zt = K.ROOF - 0.08
         z0 = zb(K.Y_TG) + 0.03 if kind != "van" else RIDE + 1.0
         glass_sheet(rs, m, out, "rear", [(-W2 * 0.62, z0), (W2 * 0.62, z0), (W2 * 0.55, zt), (-W2 * 0.55, zt)])
+    n0 = len(out)
+    cabin_interior(m, out, kind, 2 if kind == "van" else 4)
+    # (Traffic: the seats and dash at half density – the same at street
+    # distance; ~4k triangles a car saved.)
+    for o in out[n0:]:
+        if o is not None and o.name.split(".")[0] in ("seats", "rear_seats", "dash"):
+            dm = o.modifiers.new("dec", "DECIMATE")
+            dm.ratio = 0.45
+            bpy.context.view_layer.objects.active = o
+            bpy.ops.object.modifier_apply(modifier=dm.name)
     # B-pillar black (not vans).
     if kind != "van":
         ymid = (arc_f[0][0] + arc_r[0][0]) / 2 + 0.08

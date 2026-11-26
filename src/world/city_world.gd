@@ -972,6 +972,10 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 		var sm0 := src.surface_get_material(i)
 		if sm0 and String(sm0.resource_name) == "interior":
 			sealed = false
+	if body.ends_with("_lod1"):
+		# The ~1k-triangle mid level has no cabin left to see: opaque glass
+		# with the traced cabin there; the real one from the near level in.
+		sealed = true
 	for i in src.get_surface_count():
 		var m := src.surface_get_material(i)
 		var n := String(m.resource_name) if m else ""

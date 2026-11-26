@@ -685,7 +685,7 @@ void fragment() {
 			vec3 shop_warm = mix(vec3(1.0, 0.73, 0.42), vec3(0.96, 0.86, 0.68), vnoise(p * 0.07 + 5.0));
 			float dist_fade = 1.0 - smoothstep(90.0, 180.0, camera_distance);
 			float night_k = smoothstep(0.08, 0.65, night);
-			EMISSION += albedo * shop_warm * frontage * win_pool * night_k * dist_fade * 0.30;
+			EMISSION += albedo * shop_warm * frontage * win_pool * night_k * dist_fade * 0.55;   // (0.30 vanished under the darker 2026-11-26 night)
 			if (surface_wet > 0.12 || puddle > 0.02) {
 				vec3 plane_normal = normalize(v_wn);
 				vec3 to_eye = normalize(CAMERA_POSITION_WORLD - v_world);
