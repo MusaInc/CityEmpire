@@ -46,6 +46,17 @@ var W := 0.0
 var D := 0.0
 var H := 0.0
 var col_boxes: Array[AABB] = []   # local frame
+## The tower core's lift hall carved out of the back of the room (room
+## x/z): nothing of the home's own is drawn or collides in it below the
+## hall's ceiling (Apartments.make_core; ApartmentElevator draws the hall).
+var _core := Rect2()
+const CORE_TOP := 2.95
+
+
+func _in_core(x0: float, x1: float, z0: float, z1: float, y0: float) -> bool:
+	if not _core.has_area() or y0 >= CORE_TOP:
+		return false
+	return Rect2(minf(x0, x1), minf(z0, z1), absf(x1 - x0), absf(z1 - z0)).grow(0.001).intersects(_core)
 var assets: Array = []
 var lights: Array = []           # [room point, colour, energy, range]
 var glow := BuildingMesher.new()  # unshaded, vertex-coloured (lamps, screens, flames)
@@ -119,6 +130,8 @@ func P(x: float, z: float, y: float) -> Vector3:
 
 ## A box in room coords (x0..x1, z0..z1, y0..y1); `solid` adds collision.
 func box(x0: float, x1: float, z0: float, z1: float, y0: float, y1: float, c: Color, solid := false) -> void:
+	if _in_core(x0, x1, z0, z1, minf(y0, y1)):
+		return
 	var a := P(x0, z0, y0)
 	var b := P(x1, z1, y1)
 	var lo := a.min(b)
@@ -135,6 +148,12 @@ func _build(mat: Material) -> Node3D:
 	H = float(h["y1"]) - float(h["y0"])
 	var pal: Array = PALETTE[tier]
 	wins = windows_for(tier, W, D, H)
+	var core: Dictionary = h.get("core", {})
+	if not core.is_empty():
+		var cx: float = core["x"]
+		var hw := maxf(Apartments.HALL_HW, Apartments.SHAFT_HW) + 0.2
+		var z0 := -float(core["o_hall"]) - 0.15
+		_core = Rect2(cx - hw, z0, hw * 2.0, D + 0.3 - z0)
 	var f := Apartments.face_of(h)
 	m._begin(h["b"])
 	glow._begin(h["b"])
@@ -221,8 +240,10 @@ func _build(mat: Material) -> Node3D:
 			body.add_child(cs)
 		root.add_child(body)
 	for L in lights:
-		var o := OmniLight3D.new()
 		var lp: Vector3 = L[0]
+		if _in_core(lp.x, lp.x, lp.z, lp.z, lp.y):
+			continue
+		var o := OmniLight3D.new()
 		o.position = xf * P(lp.x, lp.z, lp.y)
 		o.light_color = L[1]
 		InteriorKit.tune_light(o, float(L[2]) * 2.05, L[3])
@@ -586,6 +607,9 @@ func _front_glaze(tier: int) -> void:
 	var cx := (x0 + x1) * 0.5
 	var gap0 := cx - 1.32
 	var gap1 := cx + 1.32
+	if h.has("core"):
+		gap0 = cx   # (the lift is inside now: the front is glass end to end)
+		gap1 = cx
 	var z := 0.16
 	var t := 0.06 if tier < 3 else 0.045
 	for run: Vector2 in [Vector2(x0, gap0), Vector2(gap1, x1)]:
@@ -602,6 +626,8 @@ func _front_glaze(tier: int) -> void:
 		box(run.x, run.y, z - 0.04, z + 0.04, y0, y0 + t, fc)              # sill rail
 		box(run.x, run.y, z - 0.04, z + 0.04, y1 - t, y1, fc)              # head
 		box(run.x, run.y, z - 0.03, z + 0.05, y0 + 1.05, y0 + 1.05 + t * 0.7, fc)  # guard rail line
+	if h.has("core"):
+		return
 	# The lift door's frame in the glazing.
 	box(gap0 - 0.08, gap0, z - 0.08, z + 0.08, y0, y1, fc)
 	box(gap1, gap1 + 0.08, z - 0.08, z + 0.08, y0, y1, fc)
@@ -681,6 +707,8 @@ func _rug(x0: float, x1: float, z0: float, z1: float, c: Color) -> void:
 
 ## Shared metric furniture; no per-home material duplication. x/z are room coordinates.
 func asset(id: String, x: float, z: float, yaw := 0.0, y := 0.0) -> void:
+	if _in_core(x - 0.7, x + 0.7, z - 0.7, z + 0.7, y):
+		return
 	assets.append([id, x, z, yaw, y])
 
 func _place_assets(root: Node3D) -> void:
@@ -804,6 +832,8 @@ func ox1() -> float:
 
 ## A glowing box (lamp shades, screens, flames, backlights): unshaded.
 func gbox(x0: float, x1: float, z0: float, z1: float, y0: float, y1: float, c: Color) -> void:
+	if _in_core(x0, x1, z0, z1, minf(y0, y1)):
+		return
 	var a := P(x0, z0, y0)
 	var b := P(x1, z1, y1)
 	var lo := a.min(b)
@@ -813,6 +843,8 @@ func gbox(x0: float, x1: float, z0: float, z1: float, y0: float, y1: float, c: C
 
 ## A glass panel (transparent, shared material).
 func pane(x0: float, x1: float, z0: float, z1: float, y0: float, y1: float) -> void:
+	if _in_core(x0, x1, z0, z1, minf(y0, y1)):
+		return
 	var a := P(x0, z0, y0)
 	var b := P(x1, z1, y1)
 	var lo := a.min(b)
@@ -831,6 +863,8 @@ func _q(target: BuildingMesher, a: Vector3, b: Vector3, c: Vector3, d: Vector3, 
 
 ## A round bar from a to b (room coords x, y, z with y up), capped.
 func tube(a: Vector3, b: Vector3, r: float, c: Color, sides := 8, lit := false) -> void:
+	if _in_core(a.x - r, b.x + r, a.z - r, b.z + r, minf(a.y, b.y)):
+		return
 	var target := glow if lit else m
 	var A := P(a.x, a.z, a.y)
 	var B := P(b.x, b.z, b.y)
@@ -1626,6 +1660,8 @@ func ramp(x0: float, x1: float, z0: float, z1: float, top: float) -> void:
 
 
 func proxy(x0: float, x1: float, z0: float, z1: float, height: float) -> void:
+	if _in_core(x0, x1, z0, z1, 0.0):
+		return
 	var a := P(x0, z0, 0.0)
 	var b := P(x1, z1, height)
 	col_boxes.append(AABB(a.min(b), a.max(b) - a.min(b)))

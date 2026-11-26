@@ -398,6 +398,15 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 		if i == 0 and apt.get("ground", false):
 			shell_style += 60.0 if apt.get("flagship", false) else 20.0
 		var opening := apt if has_apt and (detailed or not street_front) else {}
+		if i == 0 and not apt.is_empty() and apt.has("core") and not apt.get("ground", false):
+			# The home's street door into its lobby (the bottom tier).
+			var door := Apartments.core_door(apt)
+			if not door.is_empty():
+				if opening.is_empty():
+					opening = {"face": -1, "wins": [door]}
+				else:
+					opening = opening.duplicate()
+					opening["wins"] = (opening.get("wins", []) as Array) + [door]
 		_facade_tier(t, col, wall_kind, shell_style, seed, base, opening)
 		if street_front and detailed:
 			_street_front_proxy(t, apt, col, seed)
@@ -426,7 +435,10 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 			# Ground-floor plinth band on the base tier.
 			if _has_plinth(b, i):
 				var plinth_color := col.darkened(0.3)
+				var dzp := Apartments.door_zone(b.get("apt", {})) if b.get("apt", {}).has("core") else AABB()
 				for section in _plinth_sections(b):
+					if dzp.has_volume() and section.intersects(dzp):
+						continue
 					var p := section.position
 					var e := section.end
 					var p_start := colors.size()
@@ -837,6 +849,14 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 		var hi := Vector3(maxf(a.x, far.x), ay + 0.18, maxf(a.z, far.z))
 		out.append(AABB(lo, hi - lo))
 	out.append_array(features(b)["col"])
+	# A home's tower core (lobby on the ground floor, the lift shaft up to
+	# the home): hollowed out of every box it passes through.
+	if not apt.is_empty() and apt.has("core"):
+		for cut in Apartments.core_cuts(apt):
+			var cut_out: Array[AABB] = []
+			for bx in out:
+				cut_out.append_array(Apartments.subtract(bx, cut))
+			out = cut_out
 	return out
 
 
@@ -851,7 +871,10 @@ static func _clear_of_apt(b: Dictionary, out: Dictionary) -> Dictionary:
 	var keep := AABB(Vector3(float(t[0]) - 4.0, float(apt["y0"]) - 3.0, float(t[1]) - 4.0),
 		Vector3(float(t[2]) - float(t[0]) + 8.0, float(apt["y1"]) - float(apt["y0"]) + 4.0, float(t[3]) - float(t[1]) + 8.0))
 	var res := {"draw": [], "col": [], "col_human": [], "beams": []}
+	var dz := Apartments.door_zone(apt)
 	for d in out["draw"]:
+		if dz.has_volume() and (d[0] as AABB).intersects(dz):
+			continue
 		if not (d[0] as AABB).intersects(keep):
 			res["draw"].append(d)
 	for c in out["col"]:

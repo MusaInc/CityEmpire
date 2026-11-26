@@ -63,6 +63,7 @@ static func place(layout: CityLayout) -> Apartments:
 		best["name"] = spec["name"]
 		best["price"] = spec["price"]
 		best["wins"] = facade_windows(best)
+		best["core"] = make_core(best)
 		var b: Dictionary = best["b"]
 		# Facade geometry needs a building frame, not a circular building→home→building graph.
 		var facade_home := best.duplicate()
@@ -246,6 +247,138 @@ static func facade_windows(c: Dictionary) -> Array:
 				out.append([k, minf(u0, u1), maxf(u0, u1), y0 + float(wd[3]), y0 + float(wd[4])])
 				break
 	return out
+
+
+# ------------------------------------------------------------ the core
+## The tower core that reaches each home from the street (apartment
+## overhaul 2026-11-25: the lift used to be a glass shaft bolted to the
+## outside of the facade with its lobby on the pavement, entering through
+## the open window wall). Measured in the home's face frame (along a, out o
+## – negative inside – and absolute y), so it holds in a building's local
+## or world frame alike (Skyport's records are turned):
+##   shaft   a_c ± SHAFT_HW, o from the room's back wall (o_back) forward
+##           SHAFT_D to the door line o_door, from the ground floor (base)
+##           up to the home's floor;
+##   hall    the enclosed lift hall on the home's floor in front of the
+##           shaft (o_door .. o_hall, HALL_HW either side), the home's front
+##           door in its front wall – carved out of the back of the room;
+##   lobby   on the ground floor, from the shaft's door line out to the
+##           facade of the bottom tier on the same side (o_face0), LOBBY_HW
+##           either side, with the street door in that facade (a_f0 along
+##           the bottom tier's face).
+## a_c is the middle of the widest solid stretch of the back wall (where the
+## home's own layout keeps its front door, between the windows).
+const SHAFT_HW := 1.35
+const SHAFT_D := 2.4
+const HALL_HW := 1.6
+const HALL_D := 2.1
+const LOBBY_HW := 2.6
+const LOBBY_H := 3.6
+const STREET_DOOR_HW := 1.15
+const STREET_DOOR_H := 2.7
+
+
+static func make_core(c: Dictionary) -> Dictionary:
+	var b: Dictionary = c["b"]
+	var tiers: Array = b["tiers"]
+	var k := int(c["face"])
+	var f := face_of(c)
+	var W := float(c["a1"]) - float(c["a0"])
+	var D := float(c["depth"])
+	var H := float(c["y1"]) - float(c["y0"])
+	# Solid stretches of the back wall (low windows only: a penthouse's upper
+	# row sits above the hall).
+	var cuts: Array = []
+	for wd in HomeInteriors.windows_for(int(c["tier"]), W, D, H):
+		if String(wd[0]) == "back" and float(wd[3]) < 2.8:
+			cuts.append(Vector2(float(wd[1]), float(wd[2])))
+	cuts.sort_custom(func(x, y): return x.x < y.x)
+	var best := Vector2(W * 0.5, 0.0)   # (centre, width)
+	var x := 0.4
+	for ct: Vector2 in cuts + [Vector2(W - 0.4, W)]:
+		var w := ct.x - x
+		if w > best.y:
+			best = Vector2((x + ct.x) * 0.5, w)
+		x = maxf(x, ct.y)
+	var xc := clampf(best.x, HALL_HW + 0.5, W - HALL_HW - 0.5)
+	var a_c := float(c["a0"]) + xc
+	var o_back := -D
+	var o_door := o_back + SHAFT_D
+	# The bottom tier's facade on the same side, measured in this face's frame.
+	var t0: Array = tiers[0]
+	var f0 := BuildingMesher._face(t0, k)
+	var o_face0 := ((f0[0] as Vector3) - (f[0] as Vector3)).dot(f[2])
+	var mid0: Vector3 = BuildingMesher._fpt(f, a_c, o_face0, 0.0)
+	var a_f0 := (mid0 - (f0[0] as Vector3)).dot(f0[1])
+	var lobby_hw := minf(LOBBY_HW, minf(a_f0, float(f0[3]) - a_f0) - 0.5)
+	return {"a_c": a_c, "x": xc, "o_back": o_back, "o_door": o_door, "o_hall": o_door + HALL_D,
+		"o_face0": o_face0, "a_f0": a_f0, "base": float(t0[4]), "lobby_hw": maxf(lobby_hw, HALL_HW + 0.2)}
+
+
+## The core's volumes in the building's local frame (for cutting its
+## collision): [lobby, shaft]. Empty when the home has no core.
+static func core_cuts(c: Dictionary) -> Array[AABB]:
+	var out: Array[AABB] = []
+	var k: Dictionary = c.get("core", {})
+	if k.is_empty():
+		return out
+	var f := face_of(c)
+	var a_c: float = k["a_c"]
+	var base: float = k["base"]
+	var lhw: float = k["lobby_hw"]
+	out.append(BuildingMesher._fbox(f, a_c - lhw, a_c + lhw, float(k["o_door"]) - 0.05, float(k["o_face0"]) + 0.4, base - 0.2, base + LOBBY_H))
+	out.append(BuildingMesher._fbox(f, a_c - SHAFT_HW, a_c + SHAFT_HW, float(k["o_back"]), float(k["o_door"]) + 0.05, base - 0.2, float(c["y0"]) + 0.05))
+	return out
+
+
+## The street door cut in the bottom tier's facade: [face, a0, a1, y0, y1].
+static func core_door(c: Dictionary) -> Array:
+	var k: Dictionary = c.get("core", {})
+	if k.is_empty():
+		return []
+	var a: float = k["a_f0"]
+	return [int(c["face"]), a - STREET_DOOR_HW, a + STREET_DOOR_HW, float(k["base"]), float(k["base"]) + STREET_DOOR_H]
+
+
+## Kept clear of features, plinths and awnings: the street door's opening
+## and a few metres in front of it (local frame).
+static func door_zone(c: Dictionary) -> AABB:
+	var k: Dictionary = c.get("core", {})
+	if k.is_empty():
+		return AABB()
+	var f := face_of(c)
+	var a_c: float = k["a_c"]
+	return BuildingMesher._fbox(f, a_c - STREET_DOOR_HW - 0.4, a_c + STREET_DOOR_HW + 0.4, float(k["o_face0"]) - 0.6, float(k["o_face0"]) + 3.0,
+		float(k["base"]) - 1.0, float(k["base"]) + STREET_DOOR_H + 0.8)
+
+
+## A box minus another (axis-aligned): up to six pieces.
+static func subtract(box: AABB, cut: AABB) -> Array[AABB]:
+	var out: Array[AABB] = []
+	if not box.intersects(cut):
+		out.append(box)
+		return out
+	var lo := box.position
+	var hi := box.end
+	var cl := cut.position.max(lo)
+	var ch := cut.end.min(hi)
+	if cl.y > lo.y:
+		out.append(AABB(lo, Vector3(hi.x, cl.y, hi.z) - lo))
+	if ch.y < hi.y:
+		out.append(AABB(Vector3(lo.x, ch.y, lo.z), hi - Vector3(lo.x, ch.y, lo.z)))
+	if cl.x > lo.x:
+		out.append(AABB(Vector3(lo.x, cl.y, lo.z), Vector3(cl.x, ch.y, hi.z) - Vector3(lo.x, cl.y, lo.z)))
+	if ch.x < hi.x:
+		out.append(AABB(Vector3(ch.x, cl.y, lo.z), Vector3(hi.x, ch.y, hi.z) - Vector3(ch.x, cl.y, lo.z)))
+	if cl.z > lo.z:
+		out.append(AABB(Vector3(cl.x, cl.y, lo.z), Vector3(ch.x, ch.y, cl.z) - Vector3(cl.x, cl.y, lo.z)))
+	if ch.z < hi.z:
+		out.append(AABB(Vector3(cl.x, cl.y, ch.z), Vector3(ch.x, ch.y, hi.z) - Vector3(cl.x, cl.y, ch.z)))
+	var keep: Array[AABB] = []
+	for a in out:
+		if a.size.x > 0.005 and a.size.y > 0.005 and a.size.z > 0.005:
+			keep.append(a)
+	return keep
 
 
 ## Local-frame face of the home's tier.

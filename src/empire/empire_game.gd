@@ -3351,14 +3351,17 @@ func _build_elevators() -> void:
 	add_child(root)
 	for home in homes():
 		var h: Dictionary = home["h"]
+		if not h.has("core"):
+			continue
+		# The pavement outside the home's street door (the lobby floor may sit
+		# a step or two above it).
+		var core: Dictionary = h["core"]
+		var outside := Apartments.face_point(h, core["a_c"], float(core["o_face0"]) + 1.4, core["base"])
 		var gy: float
-		if h.has("lift"):
-			gy = float((h["lift"] as Vector3).y)
-		elif String(home.get("district", "")) == "east:skyport":
+		if String(home.get("district", "")) == "east:skyport":
 			gy = SkyportIsland.LAND_Y
 		else:
-			var wc := Apartments.window_center(h) + Apartments.outward(h) * 1.6
-			gy = layout.ground_y(wc.x, wc.z)
+			gy = _kerb_point(outside).y - 0.35
 		var el := ApartmentElevator.build(home, gy)
 		root.add_child(el)
 		elevators[String(home["id"])] = el

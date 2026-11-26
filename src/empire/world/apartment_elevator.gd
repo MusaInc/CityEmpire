@@ -1,36 +1,29 @@
 class_name ApartmentElevator
 extends Node3D
-## Complete, seamless 3D apartment access system for a single apartment building:
-##   * Ground-floor furnished entrance lobby with animated sliding entrance doors,
-##     illuminated nameplate canopy, marble/oak flooring, reception console,
-##     seating bench, planters, mailboxes, directory plaque and warm lighting.
-##   * Architectural glass-and-metal elevator shaft running smoothly from the
-##     ground lobby up to a private upper landing corridor connecting directly
-##     into the apartment interior.
-##   * Working 3D elevator cabin with twin animated sliding doors (cabin +
-##     landings), functional 3D floor-selector panel, live digital floor
-##     indicator (Label3D), interior lighting, handrail, mirror, collision
-##     detection and realistic sounds (door glide, motor hum, floor ticks, chime).
+## The way up to a home, inside its building (apartment overhaul
+## 2026-11-25; the old version was a glass shaft and lobby bolted onto the
+## outside of the facade, entering through the open window wall):
+##   street door (sliding glass, nameplate canopy) in the bottom tier's
+##   facade → a residential lobby running back to the lift: reception desk,
+##   seating, mailboxes, directory, planters, warm light → the lift (call
+##   button, indicator, a car that rides the shaft with you, its doors and the
+##   landing doors working together, floor buttons, chime) → the enclosed lift
+##   hall on the home's floor → the home's front door (swings open as you
+##   reach it) → the apartment. No step of it is a teleport.
+## The layout is Apartments.make_core's (the building's collision is
+## hollowed out along it); every wall here collides on the human layer.
 ##
-## Local coordinate frame (origin at ground lobby floor on the building facade):
-##   +X : along building facade (Apartments.along_dir)
-##   +Y : vertically up (world UP)
-##   +Z : outward from building facade toward street (Apartments.outward)
-##
-## Layout along +Z:
-##   z = 0.0 .. 2.2  : Elevator shaft & cabin (door opens at z = +2.2 on ground,
-##                     and at z = 0.0 on the upper floor into the apartment!)
-##   z = 2.2 .. 6.2  : Furnished Ground Lobby (entrance door at z = +6.2)
-##   Upper floor (y = top_y):
-##     z = 0.0 .. 2.2: Elevator cabin arrives here; back door (z = 0.0) opens
-##                     directly onto the private landing corridor into the
-##                     apartment (z = 0.0 .. -bridge_len)!
+## Local frame: origin on the ground floor at the middle of the lift's door
+## line; +Z towards the lobby / hall (the home's window side), +Y up, +X along.
+##   z = −SHAFT_D .. 0   the shaft (the car), doors at z = 0 on every floor
+##   z = 0 .. lobby_len   the ground lobby, street door at z = lobby_len
+##   z = 0 .. HALL_D      the lift hall at y = top_y, front door at z = HALL_D
 
-const LOBBY_W := 5.8
-const LOBBY_D := 4.0
 const LOBBY_H := 3.4
 const SHAFT_W := 2.5
-const SHAFT_D := 2.2
+const SHAFT_D := Apartments.SHAFT_D
+const HALL_D := Apartments.HALL_D
+const HALL_H := 2.85
 const CAB_W := 2.24
 const CAB_D := 1.96
 const CAB_H := 2.55
@@ -38,6 +31,7 @@ const DOOR_W := 1.48
 const DOOR_H := 2.28
 const DOOR_SPEED := 2.1       # full open/close in ~0.48 s
 const ENTRANCE_SPEED := 1.8
+const FRONT_DOOR_W := 1.0
 
 ## Tier palettes: [wall, floor, trim/accent, wood/panel, metal]
 const TIER_PAL := [
@@ -51,14 +45,12 @@ const TIER_PAL := [
 var home_id := ""
 var home_name := ""
 var tier := 0
-var top_y := 16.0          # local height of apartment floor above ground lobby
+var top_y := 16.0          # the home's floor above the lobby floor
 var top_floor_num := 5
 var top_floor_label := "F05"
-var bridge_len := 0.8      # upper corridor length from z=0 inward into apartment
-
-## World-frame origin & basis (stored on self.global_transform)
-var _out := Vector3.FORWARD
-var _along := Vector3.RIGHT
+var lobby_len := 8.0       # door line to the street door
+var lobby_hw := 2.6
+var street_drop := 0.0     # lobby floor above the pavement outside the door
 
 ## State machine: "idle_g" | "idle_top" | "closing" | "moving" | "opening"
 var state := "idle_g"
@@ -94,6 +86,9 @@ var _cab_front_l: Node3D
 var _cab_front_r: Node3D
 var _cab_back_l: Node3D
 var _cab_back_r: Node3D
+var _front_door: Node3D
+var _front_door_col: StaticBody3D
+var _front_open := 0.0
 var _cab_door_col_f: CollisionShape3D
 var _cab_door_col_b: CollisionShape3D
 var _ind_ground: Label3D
@@ -115,75 +110,65 @@ static func build(home: Dictionary, ground_y: float) -> ApartmentElevator:
 
 func _init_from_home(home: Dictionary, ground_y: float) -> void:
 	var h: Dictionary = home["h"]
+	var core: Dictionary = h["core"]
 	home_id = String(home["id"])
 	home_name = String(home["name"])
 	tier = clampi(int(home["tier"]), 0, 4)
 	name = "Elevator_" + home_id
-	_out = Apartments.outward(h).normalized()
-	_along = Apartments.along_dir(h).normalized()
-	var wc := Apartments.window_center(h)
-	var apt_y := float(h["y0"])
-	var base_xz := Vector3(wc.x, ground_y, wc.z)
-	bridge_len = 0.9
-	if h.has("lift"):
-		# Skyport Penthouse has a setback podium: align shaft with ground lift
-		# and extend the private glazed sky-corridor at top_y back to the window!
-		var lv: Vector3 = h["lift"]
-		var along_off := (lv - wc).dot(_along)
-		var out_off := maxf((lv - wc).dot(_out), 0.0)
-		base_xz = Vector3(wc.x, ground_y, wc.z) + _along * along_off + _out * maxf(out_off - 2.6, 0.0)
-		bridge_len = maxf(out_off - 2.6, 0.0) + 1.1
-	top_y = maxf(apt_y - ground_y, 3.6)
+	var base: float = core["base"]
+	var origin := Apartments.face_point(h, core["a_c"], core["o_door"], base)
+	var out := Apartments.outward(h)
+	var along := Apartments.along_dir(h)
+	if along.cross(Vector3.UP).dot(out) < 0.0:
+		along = -along
+	top_y = float(h["y0"]) - base
+	lobby_len = float(core["o_face0"]) - float(core["o_door"])
+	lobby_hw = float(core["lobby_hw"])
+	street_drop = maxf(0.0, base - ground_y) if not is_nan(ground_y) else 0.0
 	top_floor_num = maxi(int(round(top_y / Apartments.FLOOR)), 1)
 	top_floor_label = "PH" if tier >= 4 else ("F%02d" % top_floor_num)
-	# Local frame: +X = _along, +Y = UP, +Z = _out (right-handed check)
-	var right := _along
-	if right.cross(Vector3.UP).dot(_out) < 0.0:
-		right = -right
-	_along = right
-	transform = Transform3D(Basis(_along, Vector3.UP, _out), base_xz)
+	transform = Transform3D(Basis(along, Vector3.UP, out), origin)
 	_build_geometry()
 	_sync_doors()
 	_update_indicators("G")
 
 
-## World position of the street-side entrance lobby doorway (compatible with home_lift()).
+## The street door, on the pavement (compatible with home_lift()).
 func street_door_world() -> Vector3:
-	return to_global(Vector3(0.0, 0.0, SHAFT_D + LOBBY_D + 0.6))
+	return to_global(Vector3(0.0, -street_drop, lobby_len + 0.8))
 
 
-## World position of the ground lobby elevator call button.
 func ground_call_world() -> Vector3:
-	return to_global(Vector3(0.0, 0.0, SHAFT_D + 0.75))
+	return to_global(Vector3(0.0, 0.0, 0.75))
 
 
-## World position of the upper apartment landing elevator call button.
 func upper_call_world() -> Vector3:
-	return to_global(Vector3(0.0, top_y, -0.75))
+	return to_global(Vector3(0.0, top_y, 0.75))
 
 
-## World position of the cabin interior floor button panel.
 func cabin_panel_world() -> Vector3:
-	return to_global(Vector3(CAB_W * 0.42, cabin_y, SHAFT_D * 0.5))
+	return to_global(Vector3(CAB_W * 0.42, cabin_y, -SHAFT_D * 0.5))
 
 
-## World position of the cabin centre at its current height.
 func cabin_center_world() -> Vector3:
-	return to_global(Vector3(0.0, cabin_y + 0.95, SHAFT_D * 0.5))
+	return to_global(Vector3(0.0, cabin_y + 0.95, -SHAFT_D * 0.5))
 
 
-## True when a world position (player capsule centre) is physically inside the elevator cabin.
+## Where the home's front door is (the hall side), world.
+func front_door_world() -> Vector3:
+	return to_global(Vector3(0.0, top_y, HALL_D))
+
+
 func is_inside_cabin(world_pos: Vector3) -> bool:
 	var lp := to_local(world_pos)
-	return absf(lp.x) < CAB_W * 0.49 and lp.z > 0.05 and lp.z < SHAFT_D - 0.05 and absf(lp.y - (cabin_y + 0.95)) < 1.35
+	return absf(lp.x) < CAB_W * 0.49 and lp.z < -0.05 and lp.z > -SHAFT_D + 0.05 and absf(lp.y - (cabin_y + 0.95)) < 1.35
 
 
-## True when a world position is inside the ground lobby or upper landing.
 func is_inside_lobby(world_pos: Vector3) -> bool:
 	var lp := to_local(world_pos)
-	if absf(lp.x) < LOBBY_W * 0.52 and lp.z > SHAFT_D - 0.1 and lp.z < SHAFT_D + LOBBY_D + 0.2 and lp.y > -0.3 and lp.y < LOBBY_H:
+	if absf(lp.x) < lobby_hw + 0.1 and lp.z > -0.1 and lp.z < lobby_len + 0.2 and lp.y > -0.3 and lp.y < LOBBY_H:
 		return true
-	if absf(lp.x) < SHAFT_W * 0.6 and lp.z > -bridge_len - 0.3 and lp.z < 0.2 and absf(lp.y - (top_y + 0.95)) < 1.8:
+	if absf(lp.x) < Apartments.HALL_HW + 0.1 and lp.z > -0.1 and lp.z < HALL_D + 0.1 and absf(lp.y - (top_y + 0.95)) < 1.8:
 		return true
 	return is_inside_cabin(world_pos)
 
@@ -265,7 +250,7 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 	if player == null:
 		return
 	var p_world := player.global_position
-	var dist_sq := p_world.distance_squared_to(to_global(Vector3(0.0, cabin_y + 1.0, SHAFT_D * 0.5)))
+	var dist_sq := p_world.distance_squared_to(to_global(Vector3(0.0, cabin_y + 1.0, -SHAFT_D * 0.5)))
 	var near := dist_sq < 65.0 * 65.0 or p_world.distance_squared_to(global_position) < 65.0 * 65.0
 	if _lobby_light:
 		_lobby_light.visible = near
@@ -275,7 +260,7 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 		return
 	var lp := to_local(p_world)
 	# 1. Ground entrance sliding glass doors open smoothly on approach.
-	var ent_near := absf(lp.x) < 2.2 and lp.z > SHAFT_D + LOBBY_D - 2.2 and lp.z < SHAFT_D + LOBBY_D + 3.4 and absf(lp.y) < 3.0
+	var ent_near := absf(lp.x) < 2.2 and lp.z > lobby_len - 2.4 and lp.z < lobby_len + 3.4 and lp.y > -street_drop - 1.0 and lp.y < 3.0
 	var ent_target := 1.0 if ent_near else 0.0
 	if absf(_ent_open - ent_target) > 0.005:
 		var was_closed := _ent_open < 0.05 and ent_target > 0.5
@@ -285,7 +270,7 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 		_sync_entrance_doors()
 	# 2. Auto-open elevator doors when the owner walks up to the waiting cabin!
 	if owns and state == "idle_g" and not at_top:
-		var at_g_bay := absf(lp.x) < 1.6 and lp.z > SHAFT_D - 0.1 and lp.z < SHAFT_D + 2.4 and absf(lp.y) < 2.6
+		var at_g_bay := absf(lp.x) < 1.6 and lp.z > -0.1 and lp.z < 2.4 and absf(lp.y) < 2.6
 		var in_cab := is_inside_cabin(p_world)
 		if (at_g_bay or in_cab) and _g_door_open < 0.99:
 			if _g_door_open < 0.05:
@@ -299,7 +284,7 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 				_g_door_open = move_toward(_g_door_open, 0.0, dt * DOOR_SPEED)
 				_sync_doors()
 	elif owns and state == "idle_top" and at_top:
-		var at_t_bay := absf(lp.x) < 1.6 and lp.z > -bridge_len - 1.2 and lp.z < 0.3 and absf(lp.y - top_y) < 2.6
+		var at_t_bay := absf(lp.x) < 1.6 and lp.z > -0.1 and lp.z < HALL_D + 0.4 and absf(lp.y - top_y) < 2.6
 		var in_cab := is_inside_cabin(p_world)
 		if (at_t_bay or in_cab) and _top_door_open < 0.99:
 			if _top_door_open < 0.05:
@@ -312,6 +297,18 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 			if _auto_close_t <= 0.0:
 				_top_door_open = move_toward(_top_door_open, 0.0, dt * DOOR_SPEED)
 				_sync_doors()
+	# 2b. The home's front door (hall side): swings open as you reach it
+	# from either side, if it's yours.
+	var fd_near := owns and absf(lp.x) < 1.4 and lp.z > HALL_D - 1.6 and lp.z < HALL_D + 1.8 and absf(lp.y - top_y) < 2.4
+	var fd_target := 1.0 if fd_near else 0.0
+	if absf(_front_open - fd_target) > 0.004:
+		if _front_open < 0.04 and fd_target > 0.5:
+			Sfx.play("click", -12.0, 0.7)
+		_front_open = move_toward(_front_open, fd_target, dt * 2.2)
+		if _front_door:
+			_front_door.rotation.y = -_front_open * deg_to_rad(96.0)
+		if _front_door_col:
+			_front_door_col.collision_layer = 0 if _front_open > 0.4 else CityWorld.HUMAN_LAYER
 	# 3. Elevator state machine (closing -> moving -> opening).
 	match state:
 		"closing":
@@ -335,7 +332,7 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 				# Clamp gently inside cabin walls while riding so player never clips out.
 				var pl := to_local(p_new)
 				pl.x = clampf(pl.x, -CAB_W * 0.36, CAB_W * 0.36)
-				pl.z = clampf(pl.z, 0.32, SHAFT_D - 0.32)
+				pl.z = clampf(pl.z, -SHAFT_D + 0.32, -0.32)
 				pl.y = cabin_y + 0.95
 				var wp := to_global(pl)
 				player.global_position = wp
@@ -431,8 +428,8 @@ func _sync_doors() -> void:
 	if _top_door_col:
 		_top_door_col.collision_layer = 0 if _top_door_open > 0.72 else CityWorld.HUMAN_LAYER
 	# Cabin doors mirror whichever landing door is currently open.
-	var cf := _g_door_open if not at_top and state != "moving" else 0.0
-	var cb := _top_door_open if at_top and state != "moving" else 0.0
+	var cf := (_top_door_open if at_top else _g_door_open) if state != "moving" else 0.0
+	var cb := 0.0
 	var cfs := cf * (DOOR_W * 0.46)
 	var cbs := cb * (DOOR_W * 0.46)
 	if _cab_front_l:
@@ -457,7 +454,6 @@ func _build_geometry() -> void:
 	var c_trim: Color = pal[2]
 	var c_wood: Color = pal[3]
 	var c_metal: Color = pal[4]
-
 	var arch := BuildingMesher.new()
 	arch._begin({"style": 0})
 	var glass_m := BuildingMesher.new()
@@ -465,143 +461,139 @@ func _build_geometry() -> void:
 	var glow_m := BuildingMesher.new()
 	glow_m._begin({"style": 0})
 	var col_boxes: Array[AABB] = []
-
 	var add_box := func(x0: float, x1: float, z0: float, z1: float, y0: float, y1: float, c: Color, solid := false) -> void:
-		arch.solid(x0, z0, x1, z1, y0, y1, c)
+		arch.solid(minf(x0, x1), minf(z0, z1), maxf(x0, x1), maxf(z0, z1), minf(y0, y1), maxf(y0, y1), c)
 		if solid:
-			col_boxes.append(AABB(Vector3(x0, y0, z0), Vector3(x1 - x0, y1 - y0, z1 - z0)))
-
-	var hw := LOBBY_W * 0.5
-	var z_lob0 := SHAFT_D
-	var z_lob1 := SHAFT_D + LOBBY_D
-	var sw := SHAFT_W * 0.5
-
-	# ==================== 1. GROUND LOBBY ====================
-	# Polished floor slab + subtle entrance doormat recess
-	add_box.call(-hw - 0.12, hw + 0.12, 0.0, z_lob1 + 0.35, -0.18, 0.02, c_floor, true)
-	add_box.call(-1.0, 1.0, z_lob1 - 0.85, z_lob1 - 0.08, 0.02, 0.035, c_trim.darkened(0.25))  # entrance mat
-	# Ceiling slab + exterior illuminated architectural canopy
-	add_box.call(-hw - 0.16, hw + 0.16, 0.0, z_lob1 + 0.16, LOBBY_H, LOBBY_H + 0.24, c_trim, true)
-	add_box.call(-hw - 0.25, hw + 0.25, z_lob1 + 0.12, z_lob1 + 1.35, LOBBY_H - 0.12, LOBBY_H + 0.14, c_trim.darkened(0.1))
-	add_box.call(-hw - 0.28, hw + 0.28, z_lob1 + 1.32, z_lob1 + 1.40, LOBBY_H - 0.14, LOBBY_H + 0.16, c_metal)
-	# Warm ceiling light panels inside lobby + canopy soffit downlights
-	glow_m.solid(-1.6, z_lob0 + 0.9, 1.6, z_lob0 + 1.4, LOBBY_H - 0.04, LOBBY_H, Color(1.0, 0.92, 0.78))
-	glow_m.solid(-1.6, z_lob1 - 1.3, 1.6, z_lob1 - 0.8, LOBBY_H - 0.04, LOBBY_H, Color(1.0, 0.92, 0.78))
-	glow_m.solid(-1.4, z_lob1 + 0.55, 1.4, z_lob1 + 0.85, LOBBY_H - 0.15, LOBBY_H - 0.11, Color(1.0, 0.90, 0.72))
-	# Side walls (solid lower wainscot + glazed upper windows so lobby feels bright & real from street)
-	for sx: float in [-1.0, 1.0]:
-		var x0 := -hw - 0.14 if sx < 0.0 else hw
-		var x1 := -hw if sx < 0.0 else hw + 0.14
-		add_box.call(x0, x1, z_lob0, z_lob1, 0.0, 1.15, c_wall, true)
-		add_box.call(x0, x1, z_lob0, z_lob0 + 0.9, 1.15, LOBBY_H, c_wall, true)
-		add_box.call(x0, x1, z_lob1 - 0.65, z_lob1, 1.15, LOBBY_H, c_wall, true)
-		add_box.call(x0, x1, z_lob0, z_lob1, LOBBY_H - 0.35, LOBBY_H, c_wall, true)
-		glass_m.solid(x0 + 0.04, z_lob0 + 0.9, x1 - 0.04, z_lob1 - 0.65, 1.15, LOBBY_H - 0.35, Color(0.7, 0.82, 0.9))
-		col_boxes.append(AABB(Vector3(x0, 1.15, z_lob0 + 0.9), Vector3(0.14, LOBBY_H - 1.5, z_lob1 - z_lob0 - 1.55)))
-	# Front street facade wall around entrance doorway (door opening x = -1.05..+1.05, y = 0..2.45)
-	add_box.call(-hw, -1.05, z_lob1 - 0.14, z_lob1, 0.0, 0.85, c_trim, true)
-	add_box.call(1.05, hw, z_lob1 - 0.14, z_lob1, 0.0, 0.85, c_trim, true)
-	add_box.call(-hw, -1.05, z_lob1 - 0.12, z_lob1, 2.45, LOBBY_H, c_trim, true)
-	add_box.call(1.05, hw, z_lob1 - 0.12, z_lob1, 2.45, LOBBY_H, c_trim, true)
-	add_box.call(-1.05, 1.05, z_lob1 - 0.14, z_lob1, 2.45, LOBBY_H, c_trim, true)
-	glass_m.solid(-hw + 0.08, z_lob1 - 0.09, -1.08, z_lob1 - 0.04, 0.85, 2.45, Color(0.68, 0.80, 0.88))
-	glass_m.solid(1.08, z_lob1 - 0.09, hw - 0.08, z_lob1 - 0.04, 0.85, 2.45, Color(0.68, 0.80, 0.88))
-	col_boxes.append(AABB(Vector3(-hw, 0.85, z_lob1 - 0.14), Vector3(hw - 1.05, 1.6, 0.14)))
-	col_boxes.append(AABB(Vector3(1.05, 0.85, z_lob1 - 0.14), Vector3(hw - 1.05, 1.6, 0.14)))
-	# Metal doorway surround
-	add_box.call(-1.12, -1.02, z_lob1 - 0.18, z_lob1 + 0.04, 0.0, 2.52, c_metal)
-	add_box.call(1.02, 1.12, z_lob1 - 0.18, z_lob1 + 0.04, 0.0, 2.52, c_metal)
-	add_box.call(-1.12, 1.12, z_lob1 - 0.18, z_lob1 + 0.04, 2.44, 2.54, c_metal)
-	# Inner lobby wall framing the elevator doors (door opening x = -DOOR_W/2 .. +DOOR_W/2)
+			col_boxes.append(AABB(Vector3(minf(x0, x1), minf(y0, y1), minf(z0, z1)), Vector3(absf(x1 - x0), absf(y1 - y0), absf(z1 - z0))))
+	var hw := lobby_hw
+	var L := lobby_len
 	var dhw := DOOR_W * 0.5
-	add_box.call(-hw, -dhw, z_lob0 - 0.14, z_lob0 + 0.04, 0.0, LOBBY_H, c_wall, true)
-	add_box.call(dhw, hw, z_lob0 - 0.14, z_lob0 + 0.04, 0.0, LOBBY_H, c_wall, true)
-	add_box.call(-dhw, dhw, z_lob0 - 0.14, z_lob0 + 0.04, DOOR_H, LOBBY_H, c_wall, true)
-	# Elevator door surround portal (brushed steel / brass)
-	add_box.call(-dhw - 0.12, -dhw, z_lob0 - 0.04, z_lob0 + 0.12, 0.0, DOOR_H + 0.12, c_metal)
-	add_box.call(dhw, dhw + 0.12, z_lob0 - 0.04, z_lob0 + 0.12, 0.0, DOOR_H + 0.12, c_metal)
-	add_box.call(-dhw - 0.12, dhw + 0.12, z_lob0 - 0.04, z_lob0 + 0.12, DOOR_H, DOOR_H + 0.14, c_metal)
-	# Digital floor indicator bezel above ground elevator doors
-	add_box.call(-0.34, 0.34, z_lob0 + 0.04, z_lob0 + 0.13, DOOR_H + 0.22, DOOR_H + 0.50, Color(0.08, 0.09, 0.10))
+	var sw := SHAFT_W * 0.5
+	var ehw := Apartments.STREET_DOOR_HW
+	var T := 0.15
 
-	# ==================== 2. LOBBY FURNITURE & DETAILS ====================
-	# Left side: Reception / Concierge console desk + warm desk lamp + directory plaque
-	add_box.call(-hw + 0.12, -hw + 0.72, z_lob0 + 1.05, z_lob0 + 2.65, 0.02, 0.96, c_wood, true)
-	add_box.call(-hw + 0.08, -hw + 0.78, z_lob0 + 1.0, z_lob0 + 2.7, 0.96, 1.02, c_floor.lightened(0.1))
-	add_box.call(-hw + 0.25, -hw + 0.50, z_lob0 + 1.25, z_lob0 + 1.50, 1.02, 1.32, c_metal)
-	glow_m.solid(-hw + 0.22, z_lob0 + 1.22, -hw + 0.53, z_lob0 + 1.53, 1.32, 1.50, Color(1.0, 0.84, 0.58))
-	# Mailbox bank on inner-left wall beside the elevator
-	add_box.call(-hw + 0.32, -dhw - 0.32, z_lob0 + 0.04, z_lob0 + 0.24, 0.95, 2.05, c_metal.darkened(0.18))
-	for r in 3:
-		for c_i in 3:
-			var mx := -hw + 0.42 + float(c_i) * 0.44
-			var my := 1.04 + float(r) * 0.32
-			add_box.call(mx, mx + 0.36, z_lob0 + 0.23, z_lob0 + 0.26, my, my + 0.24, c_metal)
-	# Right side: Upholstered waiting bench + indoor planters
-	add_box.call(hw - 0.68, hw - 0.12, z_lob0 + 1.15, z_lob0 + 2.75, 0.02, 0.40, c_wood, true)
-	add_box.call(hw - 0.65, hw - 0.14, z_lob0 + 1.18, z_lob0 + 2.72, 0.40, 0.50, c_trim.lightened(0.14))
-	# Two indoor planters flanking the elevator lobby
-	for px: float in [-hw + 0.42, hw - 0.42]:
-		var pz := z_lob1 - 0.52
-		add_box.call(px - 0.24, px + 0.24, pz - 0.24, pz + 0.24, 0.02, 0.58, c_trim, true)
-		add_box.call(px - 0.20, px + 0.20, pz - 0.20, pz + 0.20, 0.58, 0.64, Color(0.24, 0.18, 0.14))
-		add_box.call(px - 0.28, px + 0.28, pz - 0.28, pz + 0.28, 0.64, 1.25, Color(0.20, 0.40, 0.22))
-		add_box.call(px - 0.20, px + 0.20, pz - 0.20, pz + 0.20, 1.25, 1.52, Color(0.24, 0.48, 0.25))
-
-	# ==================== 3. ARCHITECTURAL ELEVATOR SHAFT ====================
-	# Four vertical steel/brass corner columns from ground to top_y + 3.2 m
-	var shaft_top := top_y + 3.1
-	for sx: float in [-sw, sw - 0.14]:
-		for sz: float in [0.0, SHAFT_D - 0.14]:
-			add_box.call(sx, sx + 0.14, sz, sz + 0.14, 0.0, shaft_top, c_trim)
-	# Horizontal structural rings every floor (3.6 m) + glazed panoramic shaft panels
-	var ry := 3.6
-	while ry < shaft_top:
-		add_box.call(-sw, sw, SHAFT_D - 0.12, SHAFT_D, ry - 0.08, ry + 0.08, c_metal)
-		add_box.call(-sw, -sw + 0.10, 0.0, SHAFT_D, ry - 0.08, ry + 0.08, c_metal)
-		add_box.call(sw - 0.10, sw, 0.0, SHAFT_D, ry - 0.08, ry + 0.08, c_metal)
-		ry += 3.6
-	# Panoramic shaft glass (front & sides above lobby roof)
-	glass_m.solid(-sw + 0.12, SHAFT_D - 0.06, sw - 0.12, SHAFT_D - 0.02, LOBBY_H, shaft_top, Color(0.62, 0.76, 0.86))
-	glass_m.solid(-sw + 0.02, 0.12, -sw + 0.06, SHAFT_D - 0.12, LOBBY_H, shaft_top, Color(0.62, 0.76, 0.86))
-	glass_m.solid(sw - 0.06, 0.12, sw - 0.02, SHAFT_D - 0.12, LOBBY_H, shaft_top, Color(0.62, 0.76, 0.86))
-	# Shaft penthouse cap
-	add_box.call(-sw - 0.1, sw + 0.1, -0.05, SHAFT_D + 0.1, shaft_top, shaft_top + 0.35, c_trim)
-
-	# ==================== 4. PRIVATE UPPER LANDING CORRIDOR ====================
-	# Connects elevator back door (z = 0.0) straight into the apartment (z = -bridge_len)
-	var ul_w := SHAFT_W * 0.56
-	add_box.call(-ul_w, ul_w, -bridge_len - 0.15, 0.08, top_y - 0.18, top_y + 0.01, c_floor, true)
-	add_box.call(-ul_w, ul_w, -bridge_len - 0.15, 0.08, top_y + 2.85, top_y + 3.1, c_trim, true)
-	glow_m.solid(-0.65, -bridge_len * 0.65, 0.65, -0.25, top_y + 2.81, top_y + 2.85, Color(1.0, 0.92, 0.78))
-	# Upper landing door portal & surround (at z = 0.0, facing -Z into apartment)
-	add_box.call(-ul_w, -dhw, -0.08, 0.10, top_y, top_y + 2.88, c_wall, true)
-	add_box.call(dhw, ul_w, -0.08, 0.10, top_y, top_y + 2.88, c_wall, true)
-	add_box.call(-dhw, dhw, -0.08, 0.10, top_y + DOOR_H, top_y + 2.88, c_wall, true)
-	add_box.call(-dhw - 0.10, -dhw, -0.14, 0.04, top_y, top_y + DOOR_H + 0.10, c_metal)
-	add_box.call(dhw, dhw + 0.10, -0.14, 0.04, top_y, top_y + DOOR_H + 0.10, c_metal)
-	add_box.call(-dhw - 0.10, dhw + 0.10, -0.14, 0.04, top_y + DOOR_H, top_y + DOOR_H + 0.12, c_metal)
-	add_box.call(-0.34, 0.34, -0.15, -0.06, top_y + DOOR_H + 0.18, top_y + DOOR_H + 0.44, Color(0.08, 0.09, 0.10))
-	# Glass safety balustrades on both sides of the upper private corridor
+	# ==================== 1. GROUND LOBBY (inside the building) ====================
+	add_box.call(-hw - T, hw + T, -0.05, L + 0.05, -0.2, 0.02, c_floor, true)                 # floor
+	add_box.call(-hw - T, hw + T, -0.05, L + 0.05, LOBBY_H, LOBBY_H + 0.2, c_trim.lightened(0.35), true)  # ceiling
 	for sx: float in [-1.0, 1.0]:
-		var bx0 := -ul_w if sx < 0.0 else ul_w - 0.10
-		var bx1 := -ul_w + 0.10 if sx < 0.0 else ul_w
-		add_box.call(bx0, bx1, -bridge_len, 0.0, top_y, top_y + 0.14, c_trim, true)
-		add_box.call(bx0, bx1, -bridge_len, 0.0, top_y + 1.06, top_y + 1.14, c_metal, true)
-		glass_m.solid(bx0 + 0.02, -bridge_len, bx1 - 0.02, 0.0, top_y + 0.14, top_y + 1.06, Color(0.70, 0.84, 0.92))
-		col_boxes.append(AABB(Vector3(bx0, top_y, -bridge_len), Vector3(0.10, 2.6, bridge_len)))
+		add_box.call(sx * hw, sx * (hw + T), 0.0, L, 0.0, LOBBY_H, c_wall, true)                # side walls
+		add_box.call(sx * (hw - 0.02), sx * hw, 0.0, L, 0.0, 0.12, c_trim)                     # skirting
+		add_box.call(sx * (hw - 0.03), sx * hw, 0.0, L, 1.05, 1.1, c_wood)                     # dado rail
+	# Front wall (inside the facade) round the street door.
+	add_box.call(-hw - T, -ehw, L - T, L, 0.0, LOBBY_H, c_wall, true)
+	add_box.call(ehw, hw + T, L - T, L, 0.0, LOBBY_H, c_wall, true)
+	add_box.call(-ehw, ehw, L - T, L, Apartments.STREET_DOOR_H, LOBBY_H, c_wall, true)
+	for ex: float in [-ehw - 0.08, ehw]:
+		add_box.call(ex, ex + 0.08, L - 0.22, L + 0.06, 0.0, Apartments.STREET_DOOR_H + 0.08, c_metal)
+	add_box.call(-ehw - 0.08, ehw + 0.08, L - 0.22, L + 0.06, Apartments.STREET_DOOR_H, Apartments.STREET_DOOR_H + 0.1, c_metal)
+	# Back wall: the lift's landing door.
+	add_box.call(-hw - T, -dhw, -T, 0.0, 0.0, LOBBY_H, c_wall, true)
+	add_box.call(dhw, hw + T, -T, 0.0, 0.0, LOBBY_H, c_wall, true)
+	add_box.call(-dhw, dhw, -T, 0.0, DOOR_H, LOBBY_H, c_wall, true)
+	add_box.call(-dhw - 0.12, -dhw, -0.04, 0.1, 0.0, DOOR_H + 0.12, c_metal)
+	add_box.call(dhw, dhw + 0.12, -0.04, 0.1, 0.0, DOOR_H + 0.12, c_metal)
+	add_box.call(-dhw - 0.12, dhw + 0.12, -0.04, 0.1, DOOR_H, DOOR_H + 0.14, c_metal)
+	add_box.call(-0.34, 0.34, 0.0, 0.09, DOOR_H + 0.22, DOOR_H + 0.5, Color(0.08, 0.09, 0.1))
+	# Floor finish: a runner from the door to the lift, a mat at the door.
+	add_box.call(-0.9, 0.9, 0.4, L - 0.5, 0.02, 0.028, c_trim.lerp(c_floor, 0.4))
+	add_box.call(-1.0, 1.0, L - 1.1, L - 0.2, 0.02, 0.034, Color(0.16, 0.15, 0.14))
+	# Ceiling light panels along the lobby.
+	var n_lamps := maxi(1, int(L / 3.2))
+	for i in n_lamps:
+		var lz := lerpf(1.2, L - 1.2, (float(i) + 0.5) / n_lamps) if n_lamps > 1 else L * 0.5
+		glow_m.solid(-0.9, lz - 0.3, 0.9, lz + 0.3, LOBBY_H - 0.03, LOBBY_H, Color(1.0, 0.93, 0.8))
+	# Mailboxes on the back wall left of the lift, a directory right of it.
+	add_box.call(-hw + 0.25, -dhw - 0.35, 0.0, 0.2, 0.9, 2.0, c_metal.darkened(0.2), true)
+	for r in 3:
+		for ci in 3:
+			var mx := lerpf(-hw + 0.32, -dhw - 0.42, (float(ci) + 0.5) / 3.0)
+			add_box.call(mx - 0.17, mx + 0.17, 0.2, 0.23, 1.0 + r * 0.32, 1.25 + r * 0.32, c_metal)
+	# Reception desk (left) with a lamp; seating (right) with a low table.
+	var rz := clampf(L * 0.45, 2.6, L - 2.2)
+	add_box.call(-hw + 0.1, -hw + 0.75, rz - 0.9, rz + 0.9, 0.0, 1.0, c_wood, true)
+	add_box.call(-hw + 0.06, -hw + 0.82, rz - 0.95, rz + 0.95, 1.0, 1.06, c_floor.lightened(0.15))
+	add_box.call(-hw + 0.25, -hw + 0.45, rz + 0.3, rz + 0.5, 1.06, 1.36, c_metal)
+	glow_m.solid(-hw + 0.2, rz + 0.25, -hw + 0.5, rz + 0.55, 1.36, 1.52, Color(1.0, 0.84, 0.58))
+	if hw > 2.0:
+		add_box.call(hw - 0.7, hw - 0.1, rz - 1.0, rz + 1.0, 0.0, 0.42, c_trim.lightened(0.1), true)
+		add_box.call(hw - 0.7, hw - 0.1, rz - 1.0, rz + 1.0, 0.42, 0.5, c_wood.lightened(0.15))
+		add_box.call(hw - 0.2, hw - 0.1, rz - 1.0, rz + 1.0, 0.5, 0.95, c_trim.lightened(0.1))
+		add_box.call(hw - 1.45, hw - 0.95, rz - 0.35, rz + 0.35, 0.0, 0.42, c_wood, true)
+	# Planters either side of the street door.
+	for px: float in [-hw + 0.45, hw - 0.45]:
+		var pz := L - 0.6
+		add_box.call(px - 0.25, px + 0.25, pz - 0.25, pz + 0.25, 0.0, 0.55, c_trim, true)
+		add_box.call(px - 0.3, px + 0.3, pz - 0.3, pz + 0.3, 0.55, 1.2, Color(0.2, 0.4, 0.22))
+		add_box.call(px - 0.22, px + 0.22, pz - 0.22, pz + 0.22, 1.2, 1.55, Color(0.24, 0.48, 0.25))
+	# Outside: a canopy over the street door, steps down to the pavement.
+	add_box.call(-ehw - 0.5, ehw + 0.5, L + 0.02, L + 1.5, Apartments.STREET_DOOR_H + 0.15, Apartments.STREET_DOOR_H + 0.35, c_trim)
+	glow_m.solid(-ehw, L + 0.5, ehw, L + 1.0, Apartments.STREET_DOOR_H + 0.12, Apartments.STREET_DOOR_H + 0.15, Color(1.0, 0.9, 0.72))
+	if street_drop > 0.04:
+		var steps := clampi(ceili(street_drop / 0.17), 1, 8)
+		for i in steps:
+			var top := -street_drop * float(i) / steps
+			add_box.call(-ehw - 0.3, ehw + 0.3, L + 0.05 + i * 0.32, L + 0.05 + (i + 1) * 0.32, -street_drop - 0.1, top, c_trim.lightened(0.25), true)
+
+	# ==================== 2. SHAFT (inside the building) ====================
+	var shaft_top := top_y + HALL_H + 0.6
+	for sx: float in [-1.0, 1.0]:
+		add_box.call(sx * sw, sx * (sw + T), -SHAFT_D - T, 0.0, -0.4, shaft_top, Color(0.52, 0.52, 0.5), true)
+	add_box.call(-sw - T, sw + T, -SHAFT_D - T, -SHAFT_D, -0.4, shaft_top, Color(0.52, 0.52, 0.5), true)
+	add_box.call(-sw - T, sw + T, -SHAFT_D - T, 0.0, shaft_top, shaft_top + 0.25, Color(0.45, 0.45, 0.44))
+	add_box.call(-sw - T, sw + T, -SHAFT_D - T, 0.0, -0.6, -0.4, Color(0.3, 0.3, 0.3), true)   # pit floor
+	# Between the lobby and the hall: the shaft's front is closed above the
+	# lobby door and below the hall (landing doors only where you get out).
+	add_box.call(-sw - T, sw + T, -T, 0.0, LOBBY_H, top_y - 0.2, Color(0.52, 0.52, 0.5), true)
+	# Guide rails.
+	for sx: float in [-1.0, 1.0]:
+		add_box.call(sx * (sw - 0.08), sx * (sw - 0.02), -SHAFT_D * 0.55, -SHAFT_D * 0.45, -0.4, shaft_top, c_metal)
+
+	# ==================== 3. LIFT HALL on the home's floor ====================
+	var hh := Apartments.HALL_HW
+	var y := top_y
+	var fdw := FRONT_DOOR_W * 0.5
+	add_box.call(-hh - T, hh + T, -0.05, HALL_D + T, y - 0.2, y + 0.02, c_floor, true)
+	add_box.call(-hh - T, hh + T, -0.05, HALL_D + T, y + HALL_H, y + HALL_H + 0.15, c_trim.lightened(0.35), true)
+	for sx: float in [-1.0, 1.0]:
+		add_box.call(sx * hh, sx * (hh + T), -T, HALL_D + T, y, y + HALL_H, c_wall, true)
+		add_box.call(sx * (hh - 0.02), sx * hh, 0.0, HALL_D, y, y + 0.12, c_trim)
+	add_box.call(-hh - T, -dhw, -T, 0.0, y, y + HALL_H, c_wall, true)
+	add_box.call(dhw, hh + T, -T, 0.0, y, y + HALL_H, c_wall, true)
+	add_box.call(-dhw, dhw, -T, 0.0, y + DOOR_H, y + HALL_H, c_wall, true)
+	add_box.call(-dhw - 0.12, -dhw, -0.04, 0.1, y, y + DOOR_H + 0.12, c_metal)
+	add_box.call(dhw, dhw + 0.12, -0.04, 0.1, y, y + DOOR_H + 0.12, c_metal)
+	add_box.call(-dhw - 0.12, dhw + 0.12, -0.04, 0.1, y + DOOR_H, y + DOOR_H + 0.14, c_metal)
+	add_box.call(-0.34, 0.34, 0.0, 0.09, y + DOOR_H + 0.18, y + DOOR_H + 0.44, Color(0.08, 0.09, 0.1))
+	# Front wall with the home's front door.
+	add_box.call(-hh - T, -fdw, HALL_D, HALL_D + T, y, y + HALL_H, c_wall, true)
+	add_box.call(fdw, hh + T, HALL_D, HALL_D + T, y, y + HALL_H, c_wall, true)
+	add_box.call(-fdw, fdw, HALL_D, HALL_D + T, y + 2.2, y + HALL_H, c_wall, true)
+	for fx: float in [-fdw - 0.07, fdw]:
+		add_box.call(fx, fx + 0.07, HALL_D - 0.03, HALL_D + T + 0.03, y, y + 2.27, c_wood.darkened(0.2))
+	add_box.call(-fdw - 0.07, fdw + 0.07, HALL_D - 0.03, HALL_D + T + 0.03, y + 2.2, y + 2.27, c_wood.darkened(0.2))
+	# A console, a mirror, a doormat and a wall light; the door's number.
+	add_box.call(hh - 0.4, hh - 0.02, 0.6, 1.6, y, y + 0.82, c_wood, true)
+	add_box.call(hh - 0.04, hh - 0.02, 0.7, 1.5, y + 1.15, y + 1.95, Color(0.76, 0.82, 0.88))
+	add_box.call(-0.6, 0.6, HALL_D - 0.7, HALL_D - 0.1, y + 0.02, y + 0.035, Color(0.2, 0.17, 0.15))
+	glow_m.solid(-0.7, 0.6, 0.7, 1.4, y + HALL_H - 0.03, y + HALL_H, Color(1.0, 0.93, 0.82))
+	var plaque := Label3D.new()
+	plaque.text = top_floor_label if tier < 4 else "PENTHOUSE"
+	plaque.font_size = 26
+	plaque.pixel_size = 0.0032
+	plaque.modulate = Color(0.95, 0.86, 0.6)
+	plaque.position = Vector3(fdw + 0.35, y + 1.55, HALL_D - 0.01)
+	plaque.rotation.y = PI
+	add_child(plaque)
 
 	arch._end()
 	glass_m._end()
 	glow_m._end()
-
-	_add_mesh("Architecture", arch.arrays(), _mat_vcol(0.42, 0.18), 260.0)
+	_add_mesh("Architecture", arch.arrays(), _mat_vcol(0.5, 0.08), 260.0)
 	_add_mesh("Glass", glass_m.arrays(), _mat_glass(), 220.0, false)
 	_add_mesh("Glow", glow_m.arrays(), _mat_glow(), 220.0, false)
-
 	var body := StaticBody3D.new()
-	body.name = "LobbyCollision"
-	body.collision_layer = CityWorld.HUMAN_LAYER
+	body.name = "CoreCollision"
+	body.collision_layer = CityWorld.HUMAN_LAYER | 1
 	body.collision_mask = 0
 	for bx in col_boxes:
 		var cs := CollisionShape3D.new()
@@ -612,87 +604,92 @@ func _build_geometry() -> void:
 		body.add_child(cs)
 	add_child(body)
 
-	# ==================== 5. ANIMATED SLIDING DOORS ====================
-	# Ground street entrance glass doors (at z = z_lob1 - 0.06)
-	_ent_l = _make_door_leaf("EntDoorL", 1.02, 2.42, 0.05, c_metal, true)
-	_ent_l.position = Vector3(-0.52, 0.02, z_lob1 - 0.06)
+	# ==================== 4. DOORS ====================
+	_ent_l = _make_door_leaf("EntDoorL", ehw, Apartments.STREET_DOOR_H - 0.05, 0.05, c_metal, true)
+	_ent_l.position = Vector3(-ehw * 0.5, 0.02, L - 0.08)
 	add_child(_ent_l)
-	_ent_r = _make_door_leaf("EntDoorR", 1.02, 2.42, 0.05, c_metal, true)
-	_ent_r.position = Vector3(0.52, 0.02, z_lob1 - 0.06)
+	_ent_r = _make_door_leaf("EntDoorR", ehw, Apartments.STREET_DOOR_H - 0.05, 0.05, c_metal, true)
+	_ent_r.position = Vector3(ehw * 0.5, 0.02, L - 0.08)
 	add_child(_ent_r)
-	_ent_col = _make_door_blocker("EntDoorCol", Vector3(2.1, 2.45, 0.14), Vector3(0.0, 1.24, z_lob1 - 0.06))
+	_ent_col = _make_door_blocker("EntDoorCol", Vector3(ehw * 2.0, Apartments.STREET_DOOR_H, 0.14), Vector3(0.0, Apartments.STREET_DOOR_H * 0.5, L - 0.08))
 	add_child(_ent_col)
-
-	# Ground landing elevator doors (at z = z_lob0)
 	var leaf_w := DOOR_W * 0.5
 	_g_door_l = _make_door_leaf("GroundElevDoorL", leaf_w, DOOR_H, 0.05, c_metal, false)
-	_g_door_l.position = Vector3(-leaf_w * 0.5, 0.02, z_lob0)
+	_g_door_l.position = Vector3(-leaf_w * 0.5, 0.02, 0.02)
 	add_child(_g_door_l)
 	_g_door_r = _make_door_leaf("GroundElevDoorR", leaf_w, DOOR_H, 0.05, c_metal, false)
-	_g_door_r.position = Vector3(leaf_w * 0.5, 0.02, z_lob0)
+	_g_door_r.position = Vector3(leaf_w * 0.5, 0.02, 0.02)
 	add_child(_g_door_r)
-	_g_door_col = _make_door_blocker("GroundElevDoorCol", Vector3(DOOR_W, DOOR_H, 0.12), Vector3(0.0, DOOR_H * 0.5, z_lob0))
+	_g_door_col = _make_door_blocker("GroundElevDoorCol", Vector3(DOOR_W, DOOR_H, 0.12), Vector3(0.0, DOOR_H * 0.5, 0.02))
 	add_child(_g_door_col)
-
-	# Upper landing elevator doors (at z = -0.02, y = top_y)
 	_top_door_l = _make_door_leaf("TopElevDoorL", leaf_w, DOOR_H, 0.05, c_metal, false)
-	_top_door_l.position = Vector3(-leaf_w * 0.5, top_y + 0.01, -0.02)
+	_top_door_l.position = Vector3(-leaf_w * 0.5, y + 0.01, 0.02)
 	add_child(_top_door_l)
 	_top_door_r = _make_door_leaf("TopElevDoorR", leaf_w, DOOR_H, 0.05, c_metal, false)
-	_top_door_r.position = Vector3(leaf_w * 0.5, top_y + 0.01, -0.02)
+	_top_door_r.position = Vector3(leaf_w * 0.5, y + 0.01, 0.02)
 	add_child(_top_door_r)
-	_top_door_col = _make_door_blocker("TopElevDoorCol", Vector3(DOOR_W, DOOR_H, 0.12), Vector3(0.0, top_y + DOOR_H * 0.5, -0.02))
+	_top_door_col = _make_door_blocker("TopElevDoorCol", Vector3(DOOR_W, DOOR_H, 0.12), Vector3(0.0, y + DOOR_H * 0.5, 0.02))
 	add_child(_top_door_col)
+	# The home's front door: a hinged leaf (hinge on the left jamb).
+	_front_door = Node3D.new()
+	_front_door.name = "FrontDoor"
+	_front_door.position = Vector3(-fdw, y, HALL_D + T * 0.5)
+	add_child(_front_door)
+	var leaf := MeshInstance3D.new()
+	var lb := BoxMesh.new()
+	lb.size = Vector3(FRONT_DOOR_W, 2.18, 0.06)
+	leaf.mesh = lb
+	leaf.position = Vector3(fdw, 1.09, 0.0)
+	leaf.material_override = _mat_solid(c_wood.darkened(0.1), 0.5, 0.0)
+	_front_door.add_child(leaf)
+	var knob := MeshInstance3D.new()
+	var kb := BoxMesh.new()
+	kb.size = Vector3(0.12, 0.04, 0.16)
+	knob.mesh = kb
+	knob.position = Vector3(FRONT_DOOR_W - 0.1, 1.0, 0.0)
+	knob.material_override = _mat_solid(Color(0.74, 0.57, 0.3), 0.3, 0.8)
+	_front_door.add_child(knob)
+	_front_door_col = _make_door_blocker("FrontDoorCol", Vector3(FRONT_DOOR_W, 2.2, 0.12), Vector3(0.0, y + 1.1, HALL_D + T * 0.5))
+	add_child(_front_door_col)
 
-	# ==================== 6. CALL BUTTONS & SIGNAGE ====================
-	_call_g_mat = _make_call_panel(Vector3(dhw + 0.24, 1.15, z_lob0 + 0.06), 0.0, "▲")
-	_call_top_mat = _make_call_panel(Vector3(-dhw - 0.24, top_y + 1.15, -0.09), PI, "▼")
-
-	# Exterior residence nameplate on the canopy
+	# ==================== 5. BUTTONS, SIGNS, INDICATORS, LIGHT ====================
+	_call_g_mat = _make_call_panel(Vector3(dhw + 0.28, 1.15, 0.03), 0.0, "▲")
+	_call_top_mat = _make_call_panel(Vector3(dhw + 0.28, y + 1.15, 0.03), 0.0, "▼")
 	var sign_lbl := Label3D.new()
 	sign_lbl.text = home_name.to_upper()
-	sign_lbl.font_size = 42
-	sign_lbl.pixel_size = 0.0055
+	sign_lbl.font_size = 40
+	sign_lbl.pixel_size = 0.0045
 	sign_lbl.modulate = Color(1.0, 0.95, 0.84)
 	sign_lbl.outline_size = 8
 	sign_lbl.outline_modulate = Color(0.06, 0.06, 0.08)
-	sign_lbl.position = Vector3(0.0, LOBBY_H + 0.02, z_lob1 + 1.43)
+	sign_lbl.position = Vector3(0.0, Apartments.STREET_DOOR_H + 0.25, L + 1.52)
 	add_child(sign_lbl)
-
-	# Lobby floor directory plaque (left wall beside reception)
 	var dir_lbl := Label3D.new()
-	dir_lbl.text = "DIRECTORY\nG  · LOBBY\n%s · %s" % [top_floor_label, home_name.to_upper()]
+	dir_lbl.text = "RESIDENTS\nG  · LOBBY\n%s · %s" % [top_floor_label, home_name.to_upper()]
 	dir_lbl.font_size = 22
-	dir_lbl.pixel_size = 0.0038
+	dir_lbl.pixel_size = 0.0036
 	dir_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	dir_lbl.modulate = Color(0.95, 0.90, 0.78)
+	dir_lbl.modulate = Color(0.95, 0.9, 0.78)
 	dir_lbl.outline_size = 4
-	dir_lbl.position = Vector3(-hw + 0.16, 1.72, z_lob0 + 1.85)
-	dir_lbl.rotation.y = PI * 0.5
+	dir_lbl.position = Vector3(dhw + 0.95, 1.7, 0.02)
 	add_child(dir_lbl)
-
-	# Digital floor indicators (ground landing & upper landing)
-	_ind_ground = _make_indicator(Vector3(0.0, DOOR_H + 0.36, z_lob0 + 0.145), 0.0)
+	_ind_ground = _make_indicator(Vector3(0.0, DOOR_H + 0.36, 0.1), 0.0)
 	add_child(_ind_ground)
-	_ind_top = _make_indicator(Vector3(0.0, top_y + DOOR_H + 0.31, -0.165), PI)
+	_ind_top = _make_indicator(Vector3(0.0, y + DOOR_H + 0.31, 0.1), 0.0)
 	add_child(_ind_top)
-
-	# Warm lobby lighting (no shadow casting for mobile GPU budget)
+	var lz := InteriorKit.add_lighting_zone(self, AABB(Vector3(-hw, 0.0, 0.0), Vector3(hw * 2.0, LOBBY_H, L)))
+	InteriorKit.room_probe(lz, Color(1.0, 0.92, 0.8), 0.55, 0.2)
 	_lobby_light = OmniLight3D.new()
-	_lobby_light.position = Vector3(0.0, LOBBY_H - 0.45, z_lob0 + LOBBY_D * 0.5)
-	_lobby_light.light_color = Color(1.0, 0.90, 0.74)
-	InteriorKit.tune_light(_lobby_light, 2.65, 7.0)
+	_lobby_light.position = Vector3(0.0, LOBBY_H - 0.45, L * 0.5)
+	_lobby_light.light_color = Color(1.0, 0.9, 0.74)
+	InteriorKit.tune_light(_lobby_light, 2.6, maxf(7.0, L * 0.75))
 	add_child(_lobby_light)
-	InteriorKit.add_lighting_zone(self, AABB(Vector3(-hw, 0, z_lob0), Vector3(LOBBY_W, LOBBY_H, LOBBY_D)))
-	var landing := InteriorKit.add_lighting_zone(self,
-		AABB(Vector3(-ul_w, top_y, -bridge_len), Vector3(ul_w * 2.0, 2.85, bridge_len + 0.12)))
-	var landing_light := OmniLight3D.new()
-	landing_light.position = Vector3(0.0, top_y + 2.63, -bridge_len * 0.5)
-	landing_light.light_color = Color(1.0, 0.94, 0.84)
-	InteriorKit.tune_light(landing_light, 1.9, 3.8)
-	landing.add_child(landing_light)
-
-	# ==================== 7. 3D WORKING ELEVATOR CABIN ====================
+	var hz := InteriorKit.add_lighting_zone(self, AABB(Vector3(-hh, y, 0.0), Vector3(hh * 2.0, HALL_H, HALL_D)))
+	var hall_light := OmniLight3D.new()
+	hall_light.position = Vector3(0.0, y + HALL_H - 0.3, HALL_D * 0.5)
+	hall_light.light_color = Color(1.0, 0.94, 0.84)
+	InteriorKit.tune_light(hall_light, 1.7, 3.8)
+	hz.add_child(hall_light)
 	_build_cabin(c_wood, c_floor, c_metal, c_trim)
 
 
@@ -700,43 +697,31 @@ func _build_cabin(c_wood: Color, c_floor: Color, c_metal: Color, c_trim: Color) 
 	_cabin = Node3D.new()
 	_cabin.name = "ElevatorCabin"
 	add_child(_cabin)
-
 	var cm := BuildingMesher.new()
 	cm._begin({"style": 0})
 	var cg := BuildingMesher.new()
 	cg._begin({"style": 0})
-
 	var chw := CAB_W * 0.5
-	var z0 := (SHAFT_D - CAB_D) * 0.5
+	var z0 := -SHAFT_D * 0.5 - CAB_D * 0.5
 	var z1 := z0 + CAB_D
+	var zc := -SHAFT_D * 0.5
 	var dhw := DOOR_W * 0.5
-
-	# Cabin floor & ceiling slabs
 	cm.solid(-chw, z0, chw, z1, -0.12, 0.02, c_floor.darkened(0.06))
 	cm.solid(-chw, z0, chw, z1, CAB_H, CAB_H + 0.14, c_trim)
-	# Recessed warm LED ceiling panel
 	cg.solid(-chw + 0.25, z0 + 0.25, chw - 0.25, z1 - 0.25, CAB_H - 0.03, CAB_H + 0.01, Color(1.0, 0.94, 0.82))
-	# Side walls (wood/marble panelling + stainless handrail)
 	cm.solid(-chw, z0, -chw + 0.08, z1, 0.02, CAB_H, c_wood)
 	cm.solid(chw - 0.08, z0, chw, z1, 0.02, CAB_H, c_wood)
-	# Brushed metal safety handrails along both side walls
+	cm.solid(-chw, z0, chw, z0 + 0.08, 0.02, CAB_H, c_wood.lightened(0.05))           # back wall
+	cm.solid(-chw + 0.3, z0 + 0.08, chw - 0.3, z0 + 0.1, 1.0, 2.2, Color(0.76, 0.82, 0.88))  # mirror
 	cm.solid(-chw + 0.08, z0 + 0.18, -chw + 0.14, z1 - 0.18, 0.92, 0.97, c_metal)
 	cm.solid(chw - 0.14, z0 + 0.18, chw - 0.08, z1 - 0.18, 0.92, 0.97, c_metal)
-	# Mirror/accent trim strip on left wall
-	cm.solid(-chw + 0.08, z0 + 0.28, -chw + 0.10, z1 - 0.28, 1.12, 2.18, Color(0.76, 0.82, 0.88))
-	# Front & back door jamb frames
-	for fz: float in [z0, z1 - 0.08]:
-		cm.solid(-chw, fz, -dhw, fz + 0.08, 0.02, CAB_H, c_metal)
-		cm.solid(dhw, fz, chw, fz + 0.08, 0.02, CAB_H, c_metal)
-		cm.solid(-dhw, fz, dhw, fz + 0.08, DOOR_H, CAB_H, c_metal)
-	# 3D Floor-selector control panel bezel on right wall
-	cm.solid(chw - 0.12, z0 + 0.65, chw - 0.07, z0 + 1.25, 0.95, 1.55, Color(0.10, 0.11, 0.13))
-	# Indicator bezel above front door inside cabin
-	cm.solid(-0.30, z1 - 0.12, 0.30, z1 - 0.06, DOOR_H + 0.02, DOOR_H + 0.24, Color(0.06, 0.07, 0.09))
-
+	cm.solid(-chw + 0.3, z0 + 0.08, chw - 0.3, z0 + 0.14, 0.92, 0.97, c_metal)
+	cm.solid(-chw, z1 - 0.08, -dhw, z1, 0.02, CAB_H, c_metal)
+	cm.solid(dhw, z1 - 0.08, chw, z1, 0.02, CAB_H, c_metal)
+	cm.solid(-dhw, z1 - 0.08, dhw, z1, DOOR_H, CAB_H, c_metal)
+	cm.solid(chw - 0.12, z1 - 1.2, chw - 0.07, z1 - 0.6, 0.95, 1.55, Color(0.1, 0.11, 0.13))
 	cm._end()
 	cg._end()
-
 	var mi := MeshInstance3D.new()
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, cm.arrays())
@@ -744,7 +729,6 @@ func _build_cabin(c_wood: Color, c_floor: Color, c_metal: Color, c_trim: Color) 
 	mi.material_override = _mat_vcol(0.32, 0.28)
 	mi.visibility_range_end = 180.0
 	_cabin.add_child(mi)
-
 	var gi := MeshInstance3D.new()
 	var gmesh := ArrayMesh.new()
 	gmesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, cg.arrays())
@@ -752,24 +736,16 @@ func _build_cabin(c_wood: Color, c_floor: Color, c_metal: Color, c_trim: Color) 
 	gi.material_override = _mat_glow()
 	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_cabin.add_child(gi)
-
-	# Cabin interior floor buttons (3D glowing discs + labels for G and apartment floor)
-	_btn_g_mat = _make_cabin_button(Vector3(chw - 0.13, 1.15, z0 + 0.95), "G")
-	_btn_top_mat = _make_cabin_button(Vector3(chw - 0.13, 1.38, z0 + 0.95), top_floor_label)
-
-	# Live digital floor indicator inside the cabin
-	_ind_cabin = _make_indicator(Vector3(0.0, DOOR_H + 0.13, z1 - 0.13), PI)
+	_btn_g_mat = _make_cabin_button(Vector3(chw - 0.13, 1.15, z1 - 0.9), "G")
+	_btn_top_mat = _make_cabin_button(Vector3(chw - 0.13, 1.38, z1 - 0.9), top_floor_label)
+	_ind_cabin = _make_indicator(Vector3(0.0, DOOR_H + 0.13, z1 - 0.1), PI)
 	_cabin.add_child(_ind_cabin)
-
-	# Cabin interior light
 	_cabin_light = OmniLight3D.new()
-	_cabin_light.position = Vector3(0.0, CAB_H - 0.25, SHAFT_D * 0.5)
+	_cabin_light.position = Vector3(0.0, CAB_H - 0.25, zc)
 	_cabin_light.light_color = Color(1.0, 0.94, 0.84)
 	InteriorKit.tune_light(_cabin_light, 1.85, 3.8)
 	_cabin.add_child(_cabin_light)
 	InteriorKit.add_lighting_zone(_cabin, AABB(Vector3(-chw, 0.0, z0), Vector3(CAB_W, CAB_H, CAB_D)))
-
-	# Cabin sliding doors (front = toward ground lobby, back = toward upper apartment)
 	var lw := DOOR_W * 0.5
 	_cab_front_l = _make_door_leaf("CabFrontL", lw, DOOR_H, 0.04, c_metal.darkened(0.08), false)
 	_cab_front_l.position = Vector3(-lw * 0.5, 0.02, z1 - 0.04)
@@ -777,32 +753,23 @@ func _build_cabin(c_wood: Color, c_floor: Color, c_metal: Color, c_trim: Color) 
 	_cab_front_r = _make_door_leaf("CabFrontR", lw, DOOR_H, 0.04, c_metal.darkened(0.08), false)
 	_cab_front_r.position = Vector3(lw * 0.5, 0.02, z1 - 0.04)
 	_cabin.add_child(_cab_front_r)
-
-	_cab_back_l = _make_door_leaf("CabBackL", lw, DOOR_H, 0.04, c_metal.darkened(0.08), false)
-	_cab_back_l.position = Vector3(-lw * 0.5, 0.02, z0 + 0.04)
-	_cabin.add_child(_cab_back_l)
-	_cab_back_r = _make_door_leaf("CabBackR", lw, DOOR_H, 0.04, c_metal.darkened(0.08), false)
-	_cab_back_r.position = Vector3(lw * 0.5, 0.02, z0 + 0.04)
-	_cabin.add_child(_cab_back_r)
-
-	# Kinematic collision body for cabin floor, ceiling, side walls & animated door blockers
 	var cbody := AnimatableBody3D.new()
 	cbody.name = "CabinBody"
 	cbody.sync_to_physics = false
 	cbody.collision_layer = CityWorld.HUMAN_LAYER
 	cbody.collision_mask = 0
-	_add_col_box(cbody, Vector3(CAB_W, 0.14, CAB_D), Vector3(0.0, -0.05, SHAFT_D * 0.5))
-	_add_col_box(cbody, Vector3(CAB_W, 0.14, CAB_D), Vector3(0.0, CAB_H + 0.07, SHAFT_D * 0.5))
-	_add_col_box(cbody, Vector3(0.10, CAB_H, CAB_D), Vector3(-chw + 0.05, CAB_H * 0.5, SHAFT_D * 0.5))
-	_add_col_box(cbody, Vector3(0.10, CAB_H, CAB_D), Vector3(chw - 0.05, CAB_H * 0.5, SHAFT_D * 0.5))
-	_cab_door_col_f = _add_col_box(cbody, Vector3(CAB_W, CAB_H, 0.10), Vector3(0.0, CAB_H * 0.5, z1 - 0.04))
-	_cab_door_col_b = _add_col_box(cbody, Vector3(CAB_W, CAB_H, 0.10), Vector3(0.0, CAB_H * 0.5, z0 + 0.04))
+	_add_col_box(cbody, Vector3(CAB_W, 0.14, CAB_D), Vector3(0.0, -0.05, zc))
+	_add_col_box(cbody, Vector3(CAB_W, 0.14, CAB_D), Vector3(0.0, CAB_H + 0.07, zc))
+	_add_col_box(cbody, Vector3(0.1, CAB_H, CAB_D), Vector3(-chw + 0.05, CAB_H * 0.5, zc))
+	_add_col_box(cbody, Vector3(0.1, CAB_H, CAB_D), Vector3(chw - 0.05, CAB_H * 0.5, zc))
+	_add_col_box(cbody, Vector3(CAB_W, CAB_H, 0.1), Vector3(0.0, CAB_H * 0.5, z0 + 0.04))
+	_cab_door_col_f = _add_col_box(cbody, Vector3(CAB_W, CAB_H, 0.1), Vector3(0.0, CAB_H * 0.5, z1 - 0.04))
 	_cabin.add_child(cbody)
 
 
 # ---------------------------------------------------------------- helpers
 func _add_mesh(nm: String, arr: Array, mat: Material, vis_end: float, cast_sh := true) -> void:
-	if arr.is_empty():
+	if arr.is_empty() or arr[Mesh.ARRAY_VERTEX] == null or (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).is_empty():
 		return
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)

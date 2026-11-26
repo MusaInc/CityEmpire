@@ -1522,6 +1522,7 @@ static func _home(b: Dictionary, ti: int, k: int, tier: int, id: String, nm: Str
 		"oy1": y0 + float(spec["sill"]) + float(spec["open_h"]), "depth": depth - Apartments.WALL,
 		"id": id, "tier": tier, "name": nm, "price": 0}
 	c["wins"] = Apartments.facade_windows(c)
+	c["core"] = Apartments.make_core(c)
 	var facade := c.duplicate()
 	facade["b"] = b.duplicate()
 	b["apt"] = facade

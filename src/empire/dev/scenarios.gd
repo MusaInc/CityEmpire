@@ -478,6 +478,94 @@ func scenario_sm() -> void:
 	check(game.smash.state_for(String(best.unit["id"])).get(0, "") == "broken", "remembered as broken")
 
 
+## AP: every home's journey on foot, no teleports: from the pavement in
+## through the street door, down the lobby to the lift, call it, step in,
+## ride up, out into the lift hall, through the front door and into the
+## apartment – the hero steered like a player holding the stick. Fails on
+## any leg that can't be walked. `--sc-only=home_x,…` limits it,
+## `--sc-film=<dir>` saves the hero-camera view in the lobby, the hall and
+## the apartment.
+func scenario_ap() -> void:
+	print("--- AP: street to apartment, every home")
+	var film := String(game.args.get("sc-film", ""))
+	var only := String(game.args.get("sc-only", "")).split(",", false)
+	var e := game.empire
+	e.personal_cash = 9000000.0
+	var p := game.player
+	var w := _Walk.new()
+	w.amount = 0.8
+	for hm: Dictionary in game.homes():
+		var hid := String(hm["id"])
+		if not only.is_empty() and not (hid in only):
+			continue
+		var el: ApartmentElevator = game.elevators.get(hid)
+		if el == null:
+			check(false, "%s has a lift" % hid)
+			continue
+		if not e.owns_property(hid) and String(hm.get("estate", "")) == "":
+			var rec := hm.duplicate()
+			rec.erase("h")
+			e.buy_property(rec)
+		var owned := e.owns_property(hid)
+		if not owned:
+			print("    %s: comes with an estate – skipped" % hid)
+			continue
+		var out := el.global_basis.z.normalized()
+		var street := el.street_door_world() + out * 1.8
+		await stand(street)
+		await wait(0.5)
+		p.bot = w
+		var legs := [["street door", el.to_global(Vector3(0, 0, el.lobby_len - 0.6))],
+			["down the lobby", el.to_global(Vector3(0, 0, 1.4))]]
+		var ok := true
+		for leg: Array in legs:
+			var r := await _walk_to(w, leg[1], 14.0)
+			if not r["ok"]:
+				check(false, "%s: %s (stuck at %s)" % [hid, leg[0], r.get("at", "")])
+				ok = false
+				break
+		if ok and film != "":
+			await _hero_shot(film + "/ap_%s_lobby.png" % hid)
+		if ok:
+			el.call_to(false)
+			await until(func(): return el.state == "idle_g" and el._g_door_open > 0.95, 15.0)
+			var r2 := await _walk_to(w, el.cabin_center_world() - Vector3.UP * 0.95, 8.0)
+			ok = r2["ok"] and el.is_inside_cabin(p.global_position)
+			check(ok, "%s: into the lift car" % hid)
+		if ok:
+			el.ride_to(true)
+			await until(func(): return el.state == "idle_top", 150.0)
+			ok = el.at_top and el.is_inside_cabin(p.global_position)
+			if not ok:
+				print("    ride: state=%s at_top=%s cabin_y=%.2f riding=%s player local=%s" % [el.state, el.at_top, el.cabin_y, el._player_riding, el.to_local(p.global_position)])
+			check(ok, "%s: rode up with the car (%.1f m)" % [hid, el.top_y])
+		if ok:
+			var r3 := await _walk_to(w, el.to_global(Vector3(0, el.top_y, Apartments.HALL_D * 0.5)), 8.0)
+			ok = r3["ok"]
+			check(ok, "%s: out into the lift hall%s" % [hid, "" if ok else " (stuck at %s)" % r3.get("at", "")])
+			if ok and film != "":
+				await _hero_shot(film + "/ap_%s_hall.png" % hid)
+		if ok:
+			var inside := el.to_global(Vector3(0, el.top_y, Apartments.HALL_D + 1.6))
+			var r4 := await _walk_to(w, inside, 10.0)
+			var f := Apartments.to_face(hm["h"], p.global_position)
+			var h: Dictionary = hm["h"]
+			ok = r4["ok"] and f.y > float(h["y0"]) and f.y < float(h["y0"]) + 2.5 and f.x > float(h["a0"]) and f.x < float(h["a1"]) and f.z < -0.3
+			check(ok, "%s: through the front door into the apartment%s" % [hid, "" if ok else " (at %s)" % r4.get("at", p.global_position)])
+			if ok and film != "":
+				w.target = p.global_position
+				await wait(0.8)
+				await _hero_shot(film + "/ap_%s_home.png" % hid)
+		p.bot = null
+		el._player_riding = false
+
+
+func _hero_shot(path: String) -> void:
+	await frames(8)
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(path)
+
+
 func _shot(car: Car, path: String, off: Vector3) -> void:
 	var cam := Camera3D.new()
 	game.add_child(cam)
@@ -1650,6 +1738,8 @@ func _run() -> void:
 		await scenario_ve()
 	if _which.split(",").has("SM"):
 		await scenario_sm()
+	if _which.split(",").has("AP"):
+		await scenario_ap()
 	for k in ["XO", "XA", "XV", "XN", "XD", "XR", "XB", "XC", "XK", "XP", "XF", "XG", "XH", "XI", "XS", "XW"]:
 		if _which.split(",").has(k) or _which.split(",").has("X"):
 			await call("scenario_" + k.to_lower())
