@@ -595,6 +595,14 @@ func _after_start() -> void:
 			mmi.global_position = Vector3.ZERO
 		var eye := base + fwd * 2.0 + Vector3.UP * 2.4 - side * 1.0
 		var look := base + fwd * 10.0 + Vector3.UP * 0.6
+		if args.has("fleet-zoom"):
+			# "--fleet-zoom=k": a rear three-quarter close-up of kind k (as
+			# --carcam=rear34 frames your own car).
+			var zk := int(args["fleet-zoom"])
+			var zat := base + fwd * 10.0 + side * (float(zk) - 3.0) * 6.0
+			zat.y = layout.ground_y(zat.x, zat.z)
+			look = zat + Vector3.UP * 0.7
+			eye = zat + side * 4.4 - fwd * 3.6 + Vector3.UP * 1.6
 		camera.cine = func(_dt: float) -> Array:
 			return [Transform3D(Basis.looking_at(look - eye, Vector3.UP), eye), 70.0]
 	if args.has("carcam") and not empire.vehicles.is_empty():
@@ -1551,7 +1559,10 @@ func _update_indoors() -> void:
 	if atmosphere.rain_fx:
 		atmosphere.rain_fx.sheltered = ceiling < INF
 	var close := camera.cam.global_position.distance_squared_to(player.global_position) < 12.25
-	_hero_fill(1.0 if ceiling < INF else (0.27 if close and driving == "" else 0.0))
+	# (Outdoors the close-up fill fades at night: at full strength it lit the
+	# hero like daylight on a dark street – night rebalance 2026-11-26.)
+	var out_fill := 0.27 * lerpf(1.0, 0.25, atmosphere.night) if atmosphere else 0.27
+	_hero_fill(1.0 if ceiling < INF else (out_fill if close and driving == "" else 0.0))
 
 
 ## Indoors the building shadows the sun and the hero (dark clothes, deep skin

@@ -350,7 +350,7 @@ void fragment() {
 	if (is_paved && v_wn.y > 0.85) {
 		float agg_n = vnoise(p * 0.35) * 0.6 + vnoise(p * 2.1) * 0.4;
 		if (is_road) {
-			emit = albedo * vec3(0.11, 0.14, 0.18) * night;
+			emit = albedo * vec3(0.03, 0.036, 0.05) * night;
 		}
 		if (puddle > 0.02) {
 			vec3 plane_normal = normalize(v_wn);

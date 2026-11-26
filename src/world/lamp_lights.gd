@@ -149,7 +149,7 @@ func _process(dt: float) -> void:
 			var district: String = cand[i][3]
 			l.light_color = Color(1.0, 0.76, 0.52).lerp(Color(0.91, 0.95, 1.0), _lamp_temperature(head, district))
 			l.light_energy = smoothstep(0.24, 0.70, night_level) * float(DISTRICT_ENERGY.get(district, 6.8))
-			l.spot_range = 20.0 if district in ["airport", "docks"] else 17.0
+			l.spot_range = 21.0 if district in ["airport", "docks"] else 19.0
 			l.spot_angle = 56.0 if district in ["cbd", "midtown", "airport"] else 51.0
 			# One local shadow pool on Medium or High. The other lamps
 			# keep the rendered street coverage without extra shadow maps.

@@ -12,7 +12,7 @@ uniform sampler2D screen_mip : hint_screen_texture, filter_linear_mipmap, repeat
 global uniform float night;
 
 uniform float sharpen = 0.54;
-uniform float clarity = 0.18;
+uniform float clarity = 0.0;   // off 2026-11-26: its lod-2 local contrast drew dark rims round silhouettes (cars against sky/road)
 uniform float film_contrast = 0.19;
 uniform float film_toe = 0.006;
 uniform float saturation = 1.08;

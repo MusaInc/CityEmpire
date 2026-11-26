@@ -58,5 +58,5 @@ void fragment() {
 	ROUGHNESS = mix(0.78, 0.35, wet);
 	SPECULAR = mix(0.25, 0.5, wet);
 	BACKLIGHT = col * 0.55;
-	EMISSION = col * max(sky_horizon * 0.06, vec3(0.01, 0.012, 0.014)) * night;
+	EMISSION = col * max(sky_horizon * 0.04, vec3(0.005, 0.006, 0.008)) * night;
 }

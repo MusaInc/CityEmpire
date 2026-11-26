@@ -53,6 +53,9 @@ const PARKED_KEEP := 0.35
 ## Groups with the same look are merged into one surface (fewer draw calls).
 const TRAFFIC_MATS := {
 	"paint": ["paint", Color(1, 1, 1), 0.0, 0.4], "paint2": ["paint2", Color(0.88, 0.88, 0.86), 0.0, 0.4],
+	# Panel gaps take the body colour (the bake's cavity darkens the groove):
+	# black strips aliased into cartoon outlines (2026-11-26).
+	"seam": ["paint", Color(1, 1, 1), 0.0, 0.4],
 	"glass": ["glass", Color(0.05, 0.06, 0.07), 0.0, 0.25],
 	"chrome": ["chrome", Color(0.62, 0.63, 0.66), 0.0, 0.2], "lamp_rev": ["chrome", Color(0.62, 0.63, 0.66), 0.0, 0.2],
 	"plate": ["plate", Color(0.9, 0.88, 0.78), 0.0, 0.6],

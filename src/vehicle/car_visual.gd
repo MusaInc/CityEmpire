@@ -35,6 +35,15 @@ var body: MeshInstance3D
 var wheels: Array[Node3D] = []      # steer pivots
 var _spins: Array[Node3D] = []      # spin nodes under them
 var paint_mat: ShaderMaterial
+## Panel gaps: the body colour in shadow, not black (2026-11-26: the
+## near-black "seam" strips aliased into dashed black outlines round doors,
+## bumpers and the tailgate – the cartoon look).
+var seam_mat: StandardMaterial3D
+const SEAM_SHADE := 0.42
+
+
+static func seam_colour(paint: Color) -> Color:
+	return Color(paint.r * SEAM_SHADE, paint.g * SEAM_SHADE, paint.b * SEAM_SHADE)
 var flares: MeshInstance3D
 var head_lights: Array[SpotLight3D] = []
 var lamp_pos := {}                  # "head"/"tail" -> Array[Vector3] (local, one per side)
@@ -417,6 +426,12 @@ func setup(p_car: Car) -> void:
 			match n:
 				"paint": m = paint_mat
 				"paint2": m = paint2
+				"seam":
+					if seam_mat == null:
+						seam_mat = StandardMaterial3D.new()
+						seam_mat.albedo_color = seam_colour(spec["paint"])
+						seam_mat.roughness = 0.7
+					m = seam_mat
 				"lamp_head": m = head_mat
 				"lamp_tail": m = tail_mat
 				"lamp_rev":
@@ -590,6 +605,8 @@ static func _caliper_mesh() -> Mesh:
 
 func set_paint(c: Color) -> void:
 	paint_mat.set_shader_parameter("base_color", c)
+	if seam_mat:
+		seam_mat.albedo_color = seam_colour(c)
 
 
 ## Where the head and tail lamps are (body-local, one point per side), read

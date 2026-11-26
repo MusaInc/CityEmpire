@@ -1046,7 +1046,7 @@ void fragment() {
 			albedo = mix(albedo, vec3(0.06, 0.065, 0.07), door_frame * detail);
 			albedo = mix(albedo, albedo * 0.58, door * (1.0 - door_frame) * detail);
 			albedo = mix(albedo, vec3(0.76, 0.77, 0.79), push_bar * detail);
-			emit += shop_in * glass * (1.0 - riser) * mix(0.20, 0.88, night) * mix(detail, 1.0, night);
+			emit += shop_in * glass * (1.0 - riser) * mix(0.20, 1.12, night) * mix(detail, 1.0, night);
 			emit += interior_warm * glass * (1.0 - riser) * 0.25 * night * (1.0 - detail);
 			float pier = smoothstep(2.56, 2.64, abs(bay_x - 3.0)) * step(uv.y, 4.59);
 			float fascia = step(3.7, uv.y) * step(uv.y, 4.5) * (1.0 - pier);
