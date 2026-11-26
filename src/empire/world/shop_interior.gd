@@ -73,6 +73,7 @@ var office_pos := Vector3.ZERO
 var walk := {}            # Vector2i cell -> true when free
 
 var _static: Node3D
+var _room_probe: ReflectionProbe
 var _goods: Node3D
 var _labels: Node3D
 var _headers: Array = []     # shelf header Label3Ds (meta "fixture" = [kind, unit])
@@ -222,7 +223,12 @@ func rebuild() -> void:
 	_static = Node3D.new()
 	_static.name = "Static"
 	add_child(_static)
-	InteriorKit.add_lighting_zone(_static, AABB(Vector3(0, 0, -D), Vector3(W, H, D)))
+	var _zone := InteriorKit.add_lighting_zone(_static, AABB(Vector3(0, 0, -D), Vector3(W, H, D)))
+	# The room's own light, seen from the street too (2026-11-26: with the
+	# darker night ambient, shops were black behind their glass from outside –
+	# homes, venues and lobbies already had this probe).
+	InteriorKit.room_probe(_zone, Color(1.0, 0.95, 0.88), 0.66, 0.24)
+	_room_probe = _zone.get_node_or_null("InteriorBounce") as ReflectionProbe
 	_goods = Node3D.new()
 	_goods.name = "Goods"
 	add_child(_goods)
@@ -1771,6 +1777,8 @@ func update_signs(trading: bool, night := false, occupied := false) -> void:
 		_lighting_open = trading or occupied or is_instance_valid(_delivery_worker)
 		for light in _sales_lights:
 			light.light_energy = float(light.get_meta("open_energy")) * (1.0 if _lighting_open else 0.62)
+		if is_instance_valid(_room_probe):
+			_room_probe.ambient_color_energy = 0.66 if _lighting_open else 0.30
 		if _trade_glow:
 			_trade_glow.visible = _lighting_open
 		if is_instance_valid(_sign_light):

@@ -605,6 +605,20 @@ func _after_start() -> void:
 			eye = zat + side * 4.4 - fwd * 3.6 + Vector3.UP * 1.6
 		camera.cine = func(_dt: float) -> Array:
 			return [Transform3D(Basis.looking_at(look - eye, Vector3.UP), eye), 70.0]
+	if args.has("shopcam"):
+		# Captures: the --goto unit (or the starter shop) from the pavement,
+		# looking in through its shopfront (night lighting checks).
+		var shop_u: Dictionary = unit_by_id.get(String(args.get("goto", "")), {})
+		if String(args.get("goto", "")) == "rival" and not empire.rivals.is_empty():
+			shop_u = unit_by_id.get(empire.rivals[0]["unit"], {})
+		if shop_u.is_empty():
+			shop_u = starter_unit()
+		var sf := Premises.outward(shop_u)
+		var sb := Premises.door_point(shop_u)
+		var s_eye := sb + sf * 8.5 + Vector3.UP * 1.9 + sf.cross(Vector3.UP).normalized() * 1.5
+		var s_look := sb - sf * 3.0 + Vector3.UP * 1.6
+		camera.cine = func(_dt: float) -> Array:
+			return [Transform3D(Basis.looking_at(s_look - s_eye, Vector3.UP), s_eye), 62.0]
 	if args.has("carcam") and not empire.vehicles.is_empty():
 		# Captures: a fixed camera on your first car - front34, rear34, side,
 		# side_l, front, rear, nose, tail - for checking the car in the game.
@@ -1561,7 +1575,7 @@ func _update_indoors() -> void:
 	var close := camera.cam.global_position.distance_squared_to(player.global_position) < 12.25
 	# (Outdoors the close-up fill fades at night: at full strength it lit the
 	# hero like daylight on a dark street – night rebalance 2026-11-26.)
-	var out_fill := 0.27 * lerpf(1.0, 0.25, atmosphere.night) if atmosphere else 0.27
+	var out_fill := 0.27 * lerpf(1.0, 0.6, atmosphere.night) if atmosphere else 0.27   # (0.25 left the hero a silhouette by the shops)
 	_hero_fill(1.0 if ceiling < INF else (out_fill if close and driving == "" else 0.0))
 
 
