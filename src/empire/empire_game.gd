@@ -44,6 +44,7 @@ var skyport_play: SkyportPlay
 var venues: Venues   # walk-in showrooms + clothes shops on Skyport
 var vfx: VehicleFx
 var audio: AudioDirector
+var ambience: AmbientScape   # neighbourhood beds, shop doorways, interior reverb
 var sfx: Sfx
 var empire: Empire
 var ui: EmpireUI
@@ -55,6 +56,7 @@ var traffic_bodies: TrafficBodies
 var wrecks: Wrecks
 var street_cars: StreetCars   # stealing cars, lock-up garages
 var career: CareerPlay       # courier runs, shift work, the driver
+var garage: VehicleGarage    # the Vehicle Collection under the city
 var props: Destructibles
 var damage_desk: DamageDesk
 var smash: StorefrontSmash
@@ -211,6 +213,10 @@ func _ready() -> void:
 	add_child(audio)
 	audio.attach_player(player)
 	audio.attach_weather(atmosphere)
+	ambience = AmbientScape.new()
+	ambience.name = "Ambience"
+	add_child(ambience)
+	ambience.setup(self)
 	audio.surface_at = _surface_sound_at
 	sfx.director = audio
 	carry_node = Node3D.new()
@@ -280,6 +286,10 @@ func _ready() -> void:
 	career.name = "CareerPlay"
 	add_child(career)
 	career.setup(self)
+	garage = VehicleGarage.new()
+	garage.name = "VehicleGarage"
+	add_child(garage)
+	garage.setup(self)
 	props = Destructibles.new()
 	props.name = "Destructibles"
 	add_child(props)
@@ -872,6 +882,60 @@ func new_game() -> void:
 	gps.restore()
 	_teleport(door + out * 3.2 + Vector3.UP * 1.0, atan2(-out.x, -out.z) + PI)
 	_tutorial = 0
+	# (No forced "open the map" step: the opening is Nadia's offer instead.)
+	empire.flags["opened_map"] = true
+	if not args.has("autoplay") and not args.has("scenarios") and not args.has("shot"):
+		get_tree().create_timer(4.0, false).timeout.connect(_opening_offer)
+
+
+# ------------------------------------------------------------ the opening
+## Two shops to choose from on Westbank: the cheap corner unit you're
+## standing outside, and a bigger one near the market (more passing trade,
+## more rent) – a real first decision, not a tutorial step.
+func opening_units() -> Array:
+	var cheap := starter_unit()
+	var best := {}
+	var bd := INF
+	var c0 := Premises.door_point(cheap)
+	for u in units:
+		if u["kind"] != "shop" or u["island"] != "west" or u["id"] == cheap["id"] or u.get("flagship", false):
+			continue
+		if float(u["rent"]) < float(cheap["rent"]) * 1.25 or float(u["rent"]) > float(cheap["rent"]) * 2.4:
+			continue
+		var d := Premises.door_point(u).distance_to(c0)
+		if d > 80.0 and d < 600.0 and d < bd:
+			bd = d
+			best = u
+	return [cheap] if best.is_empty() else [cheap, best]
+
+
+func _opening_offer() -> void:
+	if empire == null or not empire.businesses.is_empty() or empire.flags.get("opening_done", false) or state != "play":
+		return
+	ui.open_opening_offer(opening_units())
+
+
+func choose_opening(u: Dictionary) -> void:
+	empire.flags["opening_done"] = true
+	if u.is_empty():
+		empire._note("Nadia: No rush – the TO LET boards are all over Westbank. Ring me when you've found one.", "info")
+		return
+	empire.flags["start_unit"] = String(u["id"])
+	empire.flags["seen_car"] = true
+	gps.set_destination(Premises.door_point(u), String(u.get("shop_name", "Your shop")))
+	empire._note("Nadia: Great – the keys are with the board outside %s. Take a look round before you sign." % String(u.get("shop_name", "the shop")), "good")
+
+
+## Milestone texts from the people round you, and the first sale.
+func _on_sold(_biz: String, amount: float) -> void:
+	if int(empire.stats.get("sales", 0)) == 1 and not empire.flags.get("first_sale", false):
+		empire.flags["first_sale"] = true
+		Sfx.play("chime", 0.0)
+		Settings.haptic(60, 0.7)
+		var b := empire.business(_biz)
+		ui.toast("Your first sale! %s in the till at %s" % [EmpireData.money(amount), b.name if b else "your shop"], "good")
+		get_tree().create_timer(6.0, false).timeout.connect(func():
+			empire._note("Ray from the café next door: Saw your first customer leave smiling. Welcome to the street – keep the shelves full and they'll come back.", "info"))
 
 
 ## The city's shop units as the economy sees them (CityLife's market).
@@ -1058,7 +1122,7 @@ func _connect_empire() -> void:
 			empire.news.append({"day": empire.day, "text": "City500 · " + String(pick[0]), "kind": String(pick[1])})
 		ui.day_report(r)
 		save_game())
-	empire.sold.connect(func(_b, amt): pass)
+	empire.sold.connect(_on_sold)
 	empire.goal_done.connect(func(_g): Sfx.play("chime", -4.0))
 	empire.won.connect(func():
 		Sfx.play("chime", -2.0)
@@ -1797,6 +1861,22 @@ func _update_spot() -> void:
 		if not sk.is_empty() and float(sk["d"]) < best_d:
 			best = sk
 			best_d = float(sk["d"])
+	if garage and not in_vehicle() and not player.stunned:
+		# The Vehicle Collection: a button beside every lift you own (down),
+		# the lift doors in the garage (back up).
+		var gs := garage.spot_near(player.global_position)
+		if not gs.is_empty() and float(gs["d"]) < best_d:
+			best = gs
+			best_d = float(gs["d"])
+		for hid: String in elevators:
+			if not empire.owns_property(hid):
+				continue
+			var el: ApartmentElevator = elevators[hid]
+			var gb := el.ground_call_world() + el.global_basis.x * 1.1
+			var dg := player.global_position.distance_to(gb + Vector3.UP * 0.9)
+			if dg < 1.6 and dg < best_d:
+				best = {"kind": "garage_down", "home": hid, "world": gb}
+				best_d = dg
 	if street_cars and not in_vehicle() and not player.stunned and best_d > 0.9:
 		# Any other car you're standing at: steal it.
 		var sc := street_cars.spot_near(player.global_position)
@@ -2009,6 +2089,10 @@ func spot_prompt() -> Array:
 			return ["DRIVE %s" % String(EmpireData.vehicle_model(v["model"])["name"]).to_upper(), true]
 		"steal_car":
 			return street_cars.prompt(spot)
+		"garage_down":
+			return ["VEHICLE COLLECTION", true]
+		"garage_up":
+			return ["BACK UP TO THE LOBBY", true]
 		"car_boot":
 			var v2 := empire.vehicle(spot["vehicle"])
 			var cargo: Stock = v2["cargo"]
@@ -2227,6 +2311,10 @@ func act() -> void:
 			enter_vehicle(spot["vehicle"], true)
 		"steal_car":
 			street_cars.steal(spot)
+		"garage_down":
+			garage.enter(String(spot["home"]))
+		"garage_up":
+			garage.leave_on_foot()
 		"car_boot":
 			_boot_action(spot["vehicle"])
 
@@ -3766,6 +3854,8 @@ func load_game() -> bool:
 		# (Saved on Skyport Island before it moved: Empire.migrate v6.)
 		var q := SkyportIsland.migrate_point(Vector3(float(pp[0]), float(pp[1]), float(pp[2])))
 		pp = [q.x, q.y, q.z, float(pp[3])]
+	if pp.size() >= 4 and float(pp[1]) < -100.0:
+		pp = []   # (saved in the Vehicle Collection: start up top)
 	var hs := _home_spawn() if not args.has("goto") else {}
 	if not hs.is_empty():
 		# The app starts you in the apartment you were last in.

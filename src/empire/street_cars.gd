@@ -89,7 +89,16 @@ func steal(s: Dictionary) -> void:
 	# Exactly where it stood (no kerb search: you're standing at its door).
 	c.place(Transform3D(xf.basis.orthonormalized(), xf.origin + Vector3.UP * 0.05))
 	c.park_lock = false
-	game.ui.toast("Stolen: %s. Keep it by storing it in a garage." % String(EmpireData.vehicle_model(model).get("name", "car")), "warn")
+	# Witnesses (2026-11-26): seen more often by day. A witnessed car is
+	# wanted – a number-plate camera picks it up if you're still in it a few
+	# minutes on, unless you've got it into a garage first.
+	var h := game.empire.hour()
+	var seen := game.empire.rng.randf() < (0.55 if h > 7.0 and h < 21.0 else 0.25)
+	if seen:
+		v["wanted_at"] = float(game.empire.day) * 1440.0 + game.empire.minute + game.empire.rng.randf_range(4.0, 8.0)
+		game.ui.toast("\"Oi! That's not yours!\" – someone saw you take it. Get it off the street.", "bad")
+	else:
+		game.ui.toast("Stolen: %s. Keep it by storing it in a garage." % String(EmpireData.vehicle_model(model).get("name", "car")), "warn")
 	Settings.haptic(30, 0.4)
 	# Let it settle on its wheels (a car still dropping onto them counts as
 	# moving and the door won't open), then get in.
@@ -122,6 +131,16 @@ func _physics_process(dt: float) -> void:
 		elif (r[2] as Vector3).distance_to(me) > RELEASE_AWAY:
 			(r[0] as Traffic).release(int(r[1]))
 			_releases.remove_at(i)
+	# A wanted car you're still driving: the camera gets you.
+	var now := float(game.empire.day) * 1440.0 + game.empire.minute
+	for v in game.empire.vehicles:
+		if v.has("wanted_at") and String(v.get("stored", "")) == "" and now >= float(v["wanted_at"]):
+			v.erase("wanted_at")
+			if String(v["id"]) == game.driving:
+				var fine := 250.0 + roundf(float(EmpireData.vehicle_model(String(v["model"])).get("price", 6000.0)) * 0.1)
+				game.empire.personal_cash -= fine
+				game.empire._book("personal", -fine, "fine", "Fine: driving a stolen car (ANPR)")
+				game.ui.toast("Caught on a number-plate camera – fined %s" % EmpireData.money(fine), "bad")
 	# Stolen cars you've left behind are towed.
 	for v in game.empire.vehicles.duplicate():
 		if not v.get("stolen", false) or v.get("stored", "") != "" or String(v["id"]) == game.driving:
@@ -184,6 +203,9 @@ func store_current(unit: Dictionary) -> void:
 		return   # (couldn't get out)
 	var was_stolen: bool = v.get("stolen", false)
 	v.erase("stolen")
+	v.erase("wanted_at")   # (off the street in time: got away with it)
+	if was_stolen:
+		v["provenance"] = "stolen"   # (yours to keep and drive – no papers to sell it on)
 	v["stored"] = String(unit.get("name", "Motor Works"))
 	var door := Premises.door_point(unit)
 	v["pos"] = [door.x, door.y, door.z]

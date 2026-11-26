@@ -506,6 +506,8 @@ func buy_wholesale(wholesaler: String, order: Dictionary, price_k := 1.0) -> Str
 	for pid in order:
 		cases += maxi(int(order[pid]), 0)
 	price_k *= Careers.bulk_k(self, cases)   # (bulk buying: 5/10/15% off at 20/60/150 cases)
+	if int(stats.get("cases_bought", 0)) == 0 and cases < 20:
+		_note("Dev at the cash & carry: First order? Next time take 20 cases or more and it's 5% off – 10% at 60.", "info")
 	var cost := 0.0
 	for pid in order:
 		cost += case_price(pid) * float(order[pid]) * price_k
@@ -1240,7 +1242,12 @@ func vehicles_value() -> float:
 func vehicle_value(x: Dictionary) -> float:
 	if x.get("test", false):
 		return 0.0
-	return float(EmpireData.vehicle_model(x["model"]).get("price", 0.0)) * 0.6 * (0.5 + 0.5 * float(x["condition"]))
+	var k := 0.6
+	if x.get("stolen", false) or String(x.get("provenance", "")) == "stolen":
+		# No papers (2026-11-26): a taken car only ever goes for cash at a
+		# chop shop – it can't be laundered into a dealer's price.
+		k = 0.15
+	return float(EmpireData.vehicle_model(x["model"]).get("price", 0.0)) * k * (0.5 + 0.5 * float(x["condition"]))
 
 
 ## Why a vehicle can't be sold now ("" = it can). (Aircraft and boats kept

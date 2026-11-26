@@ -928,7 +928,9 @@ static func garage(ph: Phone, body: VBoxContainer) -> void:
 	var why := e.sell_vehicle_block(veh)
 	if why == "" and inside:
 		why = "Get out first"
-	var sell := confirm_button("Sell · %s" % EmpireData.money(worth), "Confirm sell · %s" % EmpireData.money(worth), func():
+	var hot: bool = veh.get("stolen", false) or String(veh.get("provenance", "")) == "stolen"
+	var sell_word := "Chop shop (no papers)" if hot else "Sell"
+	var sell := confirm_button("%s · %s" % [sell_word, EmpireData.money(worth)], "Confirm · %s" % EmpireData.money(worth), func():
 		var err := g.sell_vehicle(vid)
 		ui.toast(err if err != "" else "Sold for %s" % EmpireData.money(worth), "bad" if err != "" else "good")
 		if err == "":

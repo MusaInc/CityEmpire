@@ -4088,3 +4088,36 @@ func open_club() -> void:
 			open_club(), false, 250)
 		b3.disabled = have or not e.can_afford(float(ud["cost"]))
 		uh.add_child(b3)
+
+
+
+## Nadia the letting agent's call at the start of a new game: two shops on
+## Westbank to choose from, or look around first.
+func open_opening_offer(choices: Array) -> void:
+	var v := _open("Nadia · Westbank Lettings", 980, 420)
+	var intro := S.label("\"Hi – it's Nadia from Westbank Lettings. Two shops have come up you can afford. The corner unit's cheap and quiet; the one by the market costs more but you'll see far more people. Which do you want to look at?\"", 17, S.PAPER)
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	intro.custom_minimum_size = Vector2(900, 90)
+	v.add_child(intro)
+	var h := S.hbox(14)
+	v.add_child(h)
+	for i in choices.size():
+		var u: Dictionary = choices[i]
+		var rec := Premises.record(u)
+		var c := _card(0)
+		(c[0] as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(c[0])
+		var cv: VBoxContainer = c[1]
+		cv.add_child(S.label(String(u.get("shop_name", "Shop")), 22, S.PAPER, "black"))
+		var d := Premises.door_point(u).distance_to(game.player.global_position)
+		cv.add_child(S.label("%s/day rent · %d m² · %s" % [EmpireData.money(float(u["rent"])), int(float(rec.get("size", 0))), _dist_text(d)], 15, S.MUTED))
+		var blurb := S.label("Quiet corner – cheap to run while you learn the trade." if i == 0 else "By the market: more passing trade, but the rent bites until you're busy.", 15, S.PAPER)
+		blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		blurb.custom_minimum_size = Vector2(380, 44)
+		cv.add_child(blurb)
+		cv.add_child(S.button("Show me this one", func():
+			close_panel(true)
+			game.choose_opening(u), i == 0, 260))
+	v.add_child(S.button("I'll look around first", func():
+		close_panel(true)
+		game.choose_opening({}), false, 260))
