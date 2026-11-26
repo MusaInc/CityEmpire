@@ -25,9 +25,22 @@ uniform sampler2D bake_tex : hint_default_white, filter_linear_mipmap, repeat_di
 uniform bool has_bake = false;
 // 0 plain, 1 paint (clearcoat), 2 glass (sky reflections), 3 chrome.
 uniform int finish = 0;
+// Sealed shells (panes on the paint, no cabin): the glass shows a traced
+// cabin (fake_cabin.gdshaderinc). body_min/max: the shell's bounds.
+#include "res://src/world/shaders/fake_cabin.gdshaderinc"
+uniform bool sealed = false;
+uniform vec3 body_min = vec3(-0.9, 0.0, -2.2);
+uniform vec3 body_max = vec3(0.9, 1.5, 2.2);
+varying vec3 v_local;
+varying vec3 v_cam;
 
 void vertex() {
 	float spd = INSTANCE_CUSTOM.x;
+	v_local = VERTEX;
+	{
+		float d0 = mod(INSTANCE_CUSTOM.y + TIME * spd, INSTANCE_CUSTOM.z);
+		v_cam = (inverse(MODEL_MATRIX) * vec4(INV_VIEW_MATRIX[3].xyz, 1.0)).xyz + vec3(0.0, 0.0, d0);
+	}
 	float len = INSTANCE_CUSTOM.z;
 	float d = mod(INSTANCE_CUSTOM.y + TIME * spd, len);
 	// Shrink over the first/last metres so wrapping at the segment ends isn't a pop.
@@ -73,12 +86,25 @@ void fragment() {
 		METALLIC = 0.02;
 		ROUGHNESS = 0.18;
 		SPECULAR = 0.5;
+		if (sealed) {
+			vec3 bmin, bmax;
+			cabin_box(body_min, body_max, bmin, bmax);
+			vec3 dl = normalize(v_local - v_cam);
+			vec3 dw = normalize((INV_VIEW_MATRIX * vec4(-VIEW, 0.0)).xyz);
+			float through;
+			vec3 inside = fake_cabin(v_local, dl, bmin, bmax, cabin_outside(dw, sky_horizon, sky_top, night), through);
+			// The cabin in the light that gets into it (sky level, dimmer at night),
+			// seen through a light tint; the outside world at its own level.
+			float amb = dot(sky_horizon, vec3(0.3, 0.55, 0.15)) * 1.15 + 0.02;
+			ALBEDO = vec3(0.012);
+			EMISSION = mix(inside * amb, inside, through) * vec3(0.80, 0.86, 0.88);
+		}
 	} else if (finish == 3) {
 		METALLIC = 1.0;
 		ROUGHNESS = 0.16;
 		ALBEDO = max(c, vec3(0.55));
 	}
-	EMISSION = tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
+	EMISSION += tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
 	if (finish > 0) {
 		// The city in paint, glass and chrome (fake_reflect.gdshaderinc).
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);

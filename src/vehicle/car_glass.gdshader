@@ -12,6 +12,12 @@ global uniform float wetness;
 #include "res://src/world/shaders/fake_reflect.gdshaderinc"
 
 #include "res://src/vehicle/car_glass_damage.gdshaderinc"
+#include "res://src/world/shaders/fake_cabin.gdshaderinc"
+// Sealed shells (no modelled cabin): opaque, with a traced cabin behind the
+// pane instead of the paint (2026-11-26).
+uniform bool sealed = false;
+uniform vec3 body_min = vec3(-0.9, 0.0, -2.2);
+uniform vec3 body_max = vec3(0.9, 1.5, 2.2);
 
 void fragment() {
 	float cr = glass_crack();
@@ -37,5 +43,17 @@ void fragment() {
 	float glint = pow(sd, 240.0) * 0.58 + pow(sd, 36.0) * 0.055;
 	EMISSION = (env * mix(0.11, 0.68, fres) + vec3(glint)) * (1.0 - night * 0.46);
 	ALPHA = mix(mix(0.30, 0.84, fres), 0.92, cr * 0.85);
+	if (sealed) {
+		vec3 bmin, bmax;
+		cabin_box(body_min, body_max, bmin, bmax);
+		vec3 cam_l = (inverse(MODEL_MATRIX) * vec4(INV_VIEW_MATRIX[3].xyz, 1.0)).xyz;
+		vec3 dl = normalize(v_p - cam_l);
+		vec3 dw = normalize((INV_VIEW_MATRIX * vec4(-VIEW, 0.0)).xyz);
+		float through;
+		vec3 inside = fake_cabin(v_p, dl, bmin, bmax, cabin_outside(dw, sky_horizon, sky_top, night), through);
+		float amb = dot(sky_horizon, vec3(0.3, 0.55, 0.15)) * 1.15 + 0.02;
+		EMISSION += mix(inside * amb, inside, through) * vec3(0.80, 0.86, 0.88) * (1.0 - ALPHA) * 1.6;
+		ALPHA = mix(1.0, 0.92, cr);
+	}
 	ROUGHNESS = mix(ROUGHNESS, 0.5, cr);
 }

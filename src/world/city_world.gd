@@ -1094,6 +1094,12 @@ func _commit_traffic(tools: Dictionary, looks: Dictionary, shader: Shader, front
 		sm.set_shader_parameter("finish", {"paint": 1, "paint2": 1, "glass": 2, "chrome": 3}.get(g, 0))
 		sm.set_shader_parameter("emission", look[2])
 		sm.set_shader_parameter("roughness", look[3])
+		if g == "glass" and sealed and body.size.x > 0.5:
+			# See-through windows on the sealed shell: a traced cabin
+			# (fake_cabin.gdshaderinc), 2026-11-26.
+			sm.set_shader_parameter("sealed", true)
+			sm.set_shader_parameter("body_min", body.position)
+			sm.set_shader_parameter("body_max", body.end)
 		if bake:
 			# The kind's Blender bake on UV2 (VehicleTex): AO in the shut lines,
 			# arches and grille; no sky in the recesses.

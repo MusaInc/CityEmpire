@@ -361,40 +361,114 @@ class Collection:
         self.roughness(sandals.data.materials[0].node_tree.nodes['Principled BSDF'], .74)
 
     def jewellery(self, style, colour, drop):
-        """A skinned necklace with real round wire and a stamped pendant."""
-        mat = self.material('hero_jules_metal_' + style, colour, .32, .67)
-        mesh = bpy.data.meshes.new('JulesAccessory_' + style)
-        torus = []
-        faces = []
-        for j in range(49):
-            angle = math.tau * j / 48
+        """A skinned necklace that lies on the skin (2026-11-26 rebuild).
+
+        The chain's path is projected onto the body – nape, the sides of the
+        neck, the collarbones, the sternum – and sits a hair above it, so it
+        drapes instead of hovering as a fixed oval. Chain cross-sections
+        alternate (link to link), wire radius 1.2–2.0 mm; the pendant is a
+        solid bevelled drop on a bail, lying flat on the chest.
+        """
+        from mathutils.bvhtree import BVHTree
+        mat = self.material('hero_jules_metal_' + style, colour, .28, .67)
+        radius = {'street': .0020, 'day': .0013, 'office': .0012, 'evening': .0014}.get(style, .0013)
+        skins = [o for n, o in self.models.items() if o.type == 'MESH' and
+                 (n in ('Fashion_Torso_Skin', 'Fashion_Crop_Skin') or n.startswith('Face_jules'))]
+        verts, polys = [], []
+        for o in skins:
+            m = o.matrix_world
+            base = len(verts)
+            verts += [m @ v.co for v in o.data.vertices]
+            polys += [[base + i for i in p.vertices] for p in o.data.polygons]
+        tree = BVHTree.FromPolygons(verts, polys)
+        count = 120
+
+        def on_skin(p, lift):
+            c = Vector((0.0, .030, p.z))
+            d = Vector((p.x - c.x, p.y - c.y, 0.0))
+            if d.length < 1e-6:
+                return p
+            d.normalize()
+            hit, normal, _, _ = tree.ray_cast(c + d * .30, -d, .32)
+            return (hit + normal.normalized() * lift) if hit is not None else p
+
+        path = []
+        for j in range(count):
+            angle = math.tau * j / count
             front = (1 + math.cos(angle)) * .5
-            x = .065 * math.sin(angle)
-            y = .036 + (.080 + drop*.22) * math.cos(angle)
-            z = 1.442 - drop * front**3
+            path.append(Vector((.070 * math.sin(angle), .036 + (.090 + drop * .2) * math.cos(angle),
+                                1.448 - drop * front ** 2.6)))
+        for _ in range(3):   # project, relax, project again
+            path = [on_skin(p, radius + .0006) for p in path]
+            path = [(path[j - 1] + path[j] * 2 + path[(j + 1) % count]) / 4 for j in range(count)]
+        path = [on_skin(p, radius + .0006) for p in path]
+        sides = 8
+        chain, faces = [], []
+        for j, p in enumerate(path):
+            t = (path[(j + 1) % count] - path[j - 1]).normalized()
+            up = Vector((0, 0, 1))
+            n1 = t.cross(up).normalized()
+            n2 = t.cross(n1).normalized()
+            # links: alternate rings swell and flatten (a curb chain reads as links)
+            k = 1.18 if j % 2 else .86
+            for i in range(sides):
+                a = math.tau * i / sides
+                chain.append(p + (n1 * math.cos(a) * k + n2 * math.sin(a) / k) * radius)
+            jn = (j + 1) % count
+            for i in range(sides):
+                faces.append((j * sides + i, j * sides + (i + 1) % sides, jn * sides + (i + 1) % sides, jn * sides + i))
+        # Pendant: bail + bevelled drop, flat on the skin under the lowest point.
+        low = min(range(count), key=lambda j: path[j].z)
+        at = path[low]
+        hit, normal, _, _ = tree.ray_cast(at + Vector((0, .2, 0)), Vector((0, -1, 0)), .3)
+        normal = (normal.normalized() if hit is not None else Vector((0, 1, 0)))
+        side = Vector((1, 0, 0))
+        down = normal.cross(side).normalized()
+        if down.z > 0:
+            down = -down
+        size = {'street': .0075, 'evening': .011, 'office': .008}.get(style, .0085)
+        thick = .0022
+        centre = at + down * (size * 1.25) + normal * (thick * .5 + .0004)
+        ring = 24
+        pend0 = len(chain)
+        outline = []
+        for i in range(ring):
+            a = math.tau * i / ring
+            r = size * (1.0 - .28 * max(0.0, -math.cos(a)) ** 2)      # a drop: narrower at the top
+            outline.append(centre + side * math.sin(a) * r * .8 + down * math.cos(a) * r)
+        for layer, (off, shrink) in enumerate(((-thick * .5, .9), (-thick * .2, 1.0), (thick * .2, 1.0), (thick * .5, .9))):
+            for q in outline:
+                chain.append(centre + (q - centre) * shrink + normal * off)
+        for layer in range(3):
+            for i in range(ring):
+                a0 = pend0 + layer * ring
+                faces.append((a0 + i, a0 + (i + 1) % ring, a0 + ring + (i + 1) % ring, a0 + ring + i))
+        faces.append(tuple(range(pend0 + ring - 1, pend0 - 1, -1)))
+        faces.append(tuple(range(pend0 + 3 * ring, pend0 + 4 * ring)))
+        # bail: a small ring through which the chain passes
+        bail0 = len(chain)
+        bail_c = at + down * (size * .2)
+        for j in range(12):
+            a = math.tau * j / 12
+            c = bail_c + down * math.cos(a) * size * .28 + normal * (math.sin(a) * size * .28 + thick * .6)
             for i in range(6):
-                section = math.tau * i / 6
-                width = .0018 if style == 'street' else .0011
-                torus.append((x + width * math.cos(section) * math.sin(angle),
-                              y + width * math.cos(section) * math.cos(angle), z + width * math.sin(section)))
-                if j:
-                    faces.append(((j-1)*6+i, (j-1)*6+(i+1)%6, j*6+(i+1)%6, j*6+i))
-        centre_y = .118 + drop*.22
-        centre_z = 1.435 - drop
-        centre_index = len(torus)
-        torus.extend((.006*math.sin(math.tau*j/12), centre_y, centre_z + .008*math.cos(math.tau*j/12))
-                     for j in range(12))
-        faces.append(tuple(range(centre_index, centre_index+12)))
-        mesh.from_pydata(torus, [], faces)
+                b = math.tau * i / 6
+                chain.append(c + side * math.cos(b) * radius * .9 + (down * math.cos(a) + normal * math.sin(a)) * math.sin(b) * radius * .9)
+        for j in range(12):
+            jn = (j + 1) % 12
+            for i in range(6):
+                faces.append((bail0 + j * 6 + i, bail0 + j * 6 + (i + 1) % 6, bail0 + jn * 6 + (i + 1) % 6, bail0 + jn * 6 + i))
+        mesh = bpy.data.meshes.new('JulesAccessory_' + style)
+        mesh.from_pydata([tuple(v) for v in chain], [], faces)
         mesh.update()
         mesh.materials.append(mat)
         for polygon in mesh.polygons:
-            polygon.use_smooth = len(polygon.vertices) == 4
+            polygon.use_smooth = True
         obj = bpy.data.objects.new(mesh.name, mesh)
         body = self.models['Fashion_Torso_Skin']
         body.users_collection[0].objects.link(obj)
         obj.parent = self.rig
-        obj.matrix_world = body.matrix_world.copy()
+        obj.matrix_parent_inverse = self.rig.matrix_world.inverted()
         weights_from(obj, body)
         deform = obj.modifiers.new('Armature', 'ARMATURE')
         deform.object = self.rig

@@ -83,7 +83,10 @@ float building_age(vec2 p, float seed) {
 	// Softer at the CBD's edge: older stock creeps in towards midtown.
 	a = mix(a, 0.35, q == 0.0 ? smoothstep(240.0, 330.0, distance(p, vec2(560.0, -170.0))) : 0.0);
 	a = clamp(a + (fract(seed * 17.31 + 0.13) - 0.5) * 0.45, 0.0, 1.0);
-	return fract(seed * 3.91 + 0.7) < 0.18 ? a * 0.45 : a;
+	a = fract(seed * 3.91 + 0.7) < 0.18 ? a * 0.45 : a;
+	// (2026-11-26, "make all the buildings dirty": nothing in the city is
+	// showroom-clean – soot, streaks and splash-back start at 0.42.)
+	return mix(0.42, 1.0, a);
 }
 
 void vertex() {

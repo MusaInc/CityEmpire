@@ -38,8 +38,8 @@ def wmat(name, color, rough, tex=None, normal=None):
 
 
 lapel_mat = wmat('hero_lapel', (.14, .15, .17), .55, knit)
-white_mat = wmat('hero_shirt_white', (.86, .87, .88), .6, knit)
-tie_mat = wmat('hero_tie', (.05, .07, .16), .4)
+white_mat = wmat('hero_shirt_white', (.80, .81, .82), .72, knit)   # (.86 glared flat white under the blazer)
+tie_mat = wmat('hero_tie', (.05, .07, .16), .55)
 button_mat = wmat('hero_button', (.82, .8, .76), .35)
 dark_button_mat = wmat('hero_button_dark', (.04, .04, .045), .3)
 
@@ -363,7 +363,7 @@ def tailored_top(name, hem, neck, neck_drop, oval, layer, sleeve_end=None, cuff=
     m.uv_smooth = 'PRESERVE_BOUNDARIES'
     apply(ob, m)
     tailor(ob, layer, cuff=cuff, **kw)
-    drape_top(ob, {'shirt': .0025, 'knit': .0042, 'jacket': .0028, 'skin': .0008}[layer], hem)
+    drape_top(ob, {'shirt': .0042, 'knit': .0060, 'jacket': .0040, 'coat': .0050, 'oversize': .0080, 'skin': .0008}[layer], hem)   # deeper hanging folds (2026-11-26)
     bm = bmesh.new()
     bm.from_mesh(ob.data)
     if neck_curve is None:
@@ -1247,6 +1247,7 @@ def rib_band(name, R_, Z_, h, garment, lean=.0012, ease_top=0.0):
 
 
 SHORT_T = .36       # short sleeves end at ArmFrame t (about mid upper arm)
+OVERSIZE_END = .55  # the oversized tee's dropped sleeve ends at the elbow
 # Tee
 tee, _tR, _tZ = everyday_top('Top_Tee', 'hero_tee', 'shirt', .78, SHORT_T, (1.577, 1.540), .004,
                             sleeve_ease=(.013,.014), tail=.047)
@@ -1634,6 +1635,184 @@ if BODY == 'a':
               + [(1.084, .009)], .012)
     tie_piece('Topx_Blazer_Knot', [(knot_top, .038), (knot_top-.014, .036), (knot_bottom-.003, .022)], .016)
 
+# ---------------------------------------------------------------- variety (2026-11-26)
+# Oversized tee, track jacket and overcoat for Ade, on the same pipeline as
+# the everyday tops (hull + ease, hanging folds, baked seams), so they deform
+# with the rig exactly like the rest of the wardrobe.
+
+def sleeve_stripes(name, garment, t0, t1, mat, width=.0085, gap=.004, lift=.0013):
+    """Two contrast stripes down the outer line of each sleeve (track tops)."""
+    tree = tree_of(garment)
+    parts = []
+    for side, af in frames()[1].items():
+        up = Vector((0, 0, 1))
+        d = (up - af.ax * up.dot(af.ax)).normalized()     # the sleeve's top line
+        w2 = af.ax.cross(d).normalized()
+        for off in (-(gap * .5 + width * .5), gap * .5 + width * .5):
+            P, U = [], []
+            for i in range(25):
+                t = t0 + (t1 - t0) * i / 24
+                c = af.a + af.ax * (t * af.L) + w2 * off
+                hit = tree.ray_cast(c + d * .25, -d)[0]
+                if hit is None:
+                    continue
+                P.append([hit + d * lift + w2 * (k * width * .5) for k in (-1, 1)])
+                U.append([(i / 24 * 3.0, TRIM_ROWS['plain'] + .25 * (.05 + .9 * k)) for k in (0, 1)])
+            if len(P) < 3:
+                continue
+            strip = grid_mesh(name + '_' + side, P, U)
+            face_out(strip, lambda co, c0=af.a, ax=af.ax: (co - c0) - ax * (co - c0).dot(ax))
+            so = strip.modifiers.new('Tape', 'SOLIDIFY')
+            so.thickness = .0008
+            so.offset = -1
+            so.use_rim_only = True
+            apply(strip, so)
+            strip.data.materials.append(mat)
+            weights_from(strip, garment)
+            parts.append(strip)
+    return parts
+
+
+if True:   # both heroes (Jules's coat and track pieces sit on her own neck/hull)
+    # Oversized tee: 4 cm of ease round the body, dropped to the elbow, a
+    # long straight hem worn out over the waistband.
+    over, _oR, _oZ = everyday_top('Top_Oversize', 'hero_oversize', 'oversize', .78, OVERSIZE_END, (1.577, 1.536), .0065,
+                                  hem=PANTS_TOP - .085, tail=.045, sleeve_ease=(.040, .036),
+                                  rough=.88, textile='joggers', texture_name='top_oversize')
+    add(rib_band('Topx_Oversize_Rib', _oR, _oZ, .014, over, lean=.0010), False)
+
+    # Track jacket: tricot jersey, stand collar, zip, rib cuffs and hem,
+    # two contrast stripes down each sleeve.
+    track, _kR, _kZ = everyday_top('Top_Track', 'hero_track', 'knit', 9.0, .929, (1.598, 1.566), .011,
+                                   hem=PANTS_TOP - .010, tail=.02, sleeve_ease=(.026, .021),
+                                   cuff=(.80, .929, lambda sd, a: cuff_radius(sd, a) + .0005),
+                                   rough=.58, textile='shorts', texture_name='top_track')
+    track_parts = [rib_band('Track collar', _kR, _kZ, .034, track, lean=-.0006, ease_top=.002)]
+    for _side in ('l', 'r'):
+        cf, _ = shirt_cuff(_side, .922, 1.002, mat=rib_trim, radius=lambda sd, a: cuff_radius(sd, a) + .0005,
+                           trim_row='rib', btn=False, name='TrackCuff_')
+        weights_from(cf, track)
+        track_parts.append(cf)
+    stripe_mat = material('hero_track_stripe', (.86, .86, .84), .62, TRIM_A, TRIM_N)
+    track_parts += sleeve_stripes('Track stripe', track, .04, .90, stripe_mat)
+    add(join_as('Topx_Track_Trims', track_parts), False)
+    zipper_trim(track, 'Track', 1.585, PANTS_TOP - .02, .008)
+
+    # Overcoat: mid-thigh, over a fine charcoal knit; notch lapels, two
+    # buttons, open below the lower button so the legs walk freely.
+    CT_R = _periodic([STAND_R(a) + .019 for a in _NK_A])
+    CT_Z0 = _periodic([STAND_Z0(a) + .004 for a in _NK_A])
+    CT_HEM = PANTS_TOP - .03
+    CT_BTN = (1.075 + COLLAR_LEVEL, .985 + COLLAR_LEVEL * .8)
+    coat = tailored_top('Top_Coat', CT_HEM, SHIRT_NECK, SHIRT_NECK_DROP, (CT_R(math.pi / 2), CT_R(0), CT_R(math.pi)), 'coat',
+                        sleeve_end=.975, cuff=(.86, .975, lambda sd, a: cuff_radius(sd, a) + .013), neck_cy=NECK_CY,
+                        taper_front=.08, taper_side=.20, sleeve_ease=(.030, .026), sleeve_taper=.09, shoulder_ease=.010)
+    snap_neckline(coat, R=CT_R, Z0=CT_Z0)
+    shirttail(coat, CT_HEM, .335, .325, rows=9, flare=.03)
+    weights_below(coat, CT_HEM)
+    clear_layer(coat, jumper, .007, zmax=1.50)
+    clear_layer(coat, pants, .012, zmax=PANTS_TOP + .05)
+    follow_layer(coat, pants, PANTS_TOP, .12, k_max=.5)
+    _CV_TOP = (.088, 1.452 + COLLAR_LEVEL)
+    _CV_HEM = (.075, CT_HEM - .335)
+
+    def _ct_vw(z):
+        if z >= _CV_TOP[1]:
+            return _CV_TOP[0]
+        if z >= CT_BTN[0]:
+            t = (z - CT_BTN[0]) / (_CV_TOP[1] - CT_BTN[0])
+            return .012 + (_CV_TOP[0] - .012) * t
+        if z >= CT_BTN[1]:
+            return .012
+        t = (CT_BTN[1] - z) / (CT_BTN[1] - _CV_HEM[1])
+        return .012 + (_CV_HEM[0] - .012) * t ** 1.2
+
+    bm = bmesh.new()
+    bm.from_mesh(coat.data)
+    iso_cut(bm, lambda co: max(abs(co.x) - _ct_vw(co.z), .022 - (co.y - NECK_CY) * FRONT))
+    bm.to_mesh(coat.data)
+    bm.free()
+    coat.data.update()
+    pack_uvs(coat)
+    _cn, _ca = bake_detail(coat, 'top_coat', 1024, seams_fn(lambda a: CT_HEM - .33),
+                           lambda P, N, H: plain_albedo(P, N, H, 'shorts', grain=.82))
+    coat_mat = material('hero_coat', (.20, .19, .18), .86, _ca, _cn)
+    coat_mat.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = 1.0
+    finish(coat, [coat_mat], rim=.0045)
+    add(coat)
+    ctree = tree_of(coat)
+
+    def coat_lapel(sx):
+        P, U = [], []
+        n_s, n_w = 22, 5
+        for i in range(n_w):
+            t = i / (n_w - 1)
+            row, urow = [], []
+            for k in range(n_s + 1):
+                s_ = k / n_s
+                z = CT_BTN[0] + (_CV_TOP[1] - CT_BTN[0]) * s_
+                w = .088 * min(1.0, s_ / .8) ** .9
+                if s_ > .9:
+                    w *= 1 - .45 * (s_ - .9) / .1 * t
+                x_edge = _ct_vw(z)
+                x = sx * (x_edge + w * t - .0008)
+                sample_x = sx * (x_edge + max(.007, w * t))
+                hit = ctree.ray_cast(Vector((sample_x, NECK_CY + FRONT * .4, z)), Vector((0, -FRONT, 0)))
+                depth = hit[0].y if hit[0] is not None and (hit[0].y - NECK_CY) * FRONT > .028 else NECK_CY + FRONT * .12
+                roll = .004 * (1 - t) ** 2 + .006
+                row.append(Vector((x, depth + FRONT * roll, z)))
+                urow.append((s_ * .45 / .30, TRIM_ROWS['plain'] + .25 * (.05 + .9 * t)))
+            P.append(row)
+            U.append(urow)
+        ob = grid_mesh('coat lapel', P, U)
+        face_out(ob, lambda c: Vector((0, FRONT, 0)))
+        so = ob.modifiers.new('Cloth', 'SOLIDIFY')
+        so.thickness = .0026
+        so.offset = -1
+        so.use_rim_only = True
+        apply(ob, so)
+        crisp(ob)
+        ob.data.materials.append(coat_mat)
+        weights_from(ob, coat)
+        return ob
+
+    _cgap = math.atan2(_CV_TOP[0], CT_R(0)) + .1
+    cst, clf, _, _, _ = shirt_collar('Top_Coat', gap=_cgap, leaf_w=(.040, .048), spread=.12, mat=coat_mat, garment=coat,
+                                     R=CT_R, Z0=CT_Z0, H=_periodic([.018 for a in _NK_A]), closed=False, button=False)
+    reweight(cst)
+    weights_from(cst, coat, lambda co: .85)
+    weights_from(clf, coat)
+    coat_parts = [cst, clf, coat_lapel(-1), coat_lapel(1)]
+    for bz in CT_BTN:
+        h = ctree.ray_cast(Vector((0, NECK_CY + FRONT * .4, bz - .012)), Vector((0, -FRONT, 0)))
+        b = button_mesh('cbtn', (h[0] if h[0] is not None else Vector((0, .13, bz))) + Vector((0, FRONT * .004, 0)),
+                        Vector((0, FRONT, 0)), r=.011, h=.0035, mat=dark_button_mat)
+        weights_from(b, coat)
+        coat_parts.append(b)
+    add(join_as('Topx_Coat_Collar', coat_parts), False)
+    # The knit inside the V: the jumper's front panel and its crew rib, in
+    # its own charcoal (not the coat's colour).
+    knit_front = jumper.copy()
+    knit_front.data = jumper.data.copy()
+    bpy.context.collection.objects.link(knit_front)
+    knit_front.name = knit_front.data.name = 'Topx_Coat_Knit'
+    bm = bmesh.new()
+    bm.from_mesh(knit_front.data)
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if abs(f.calc_center_median().x) > .14
+                               or (f.calc_center_median().y - NECK_CY) * FRONT < -.01
+                               or f.calc_center_median().z < CT_BTN[1] - .06], context='FACES')
+    bm.to_mesh(knit_front.data)
+    bm.free()
+    knit_front.data.update()
+    knit_mat = material('hero_coat_knit', (.085, .087, .095), .92)   # plain: the trim atlas doesn't map onto the jumper's UVs
+    knit_front.data.materials.clear()
+    knit_front.data.materials.append(knit_mat)
+    add(knit_front, False)
+    knit_rib = rib_band('Topx_Coat_KnitRib', _jR, _jZ, .015, jumper, lean=.0014)
+    knit_rib.data.materials.clear()
+    knit_rib.data.materials.append(knit_mat)
+    add(knit_rib, False)
+
 # ---------------------------------------------------------------- trouser waistband
 # A finished 3.6 cm band round the trousers' cut top (it was a raw edge),
 # topstitched, with seven belt loops and the fly button. Follows the trousers.
@@ -1720,7 +1899,7 @@ band_mat.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = 1.0
 _wbo = waistband(pants)
 add(_wbo, False)
 for top in tops + loose_tops:
-    if top.name in ('Top_Shirt', 'Top_Blazer'):
+    if top.name in ('Top_Shirt', 'Top_Blazer', 'Top_Coat'):
         continue
     if top in tops:
         fit_over_waist(top, pants, _wbo, True, .004)
@@ -1736,6 +1915,51 @@ add_short_skin()
 fit_over_waist(shirt, chinos, _wbo, True, .004)
 if BODY == 'a':
     fit_over_waist(blazer, chinos, _wbo, False, .009)
+fit_over_waist(coat, chinos, _wbo, False, .012)
+
+
+def leg_stripes(name, garment, mat, width=.0085, gap=.004, lift=.0013):
+    """Two contrast stripes down the outer seam of each trouser leg."""
+    tree = tree_of(garment)
+    parts = []
+    for side in ('l', 'r'):
+        sx = -1 if side == 'l' else 1
+        hip, knee, ankle = J['thigh_' + side], J['shin_' + side], J['foot_' + side]
+        for off in (-(gap * .5 + width * .5), gap * .5 + width * .5):
+            P, U = [], []
+            for i in range(31):
+                z = PANTS_TOP - .03 - (PANTS_TOP - .03 - (ankle.z + .06)) * i / 30
+                c = hip.lerp(knee, (hip.z - z) / (hip.z - knee.z)) if z > knee.z else knee.lerp(ankle, (knee.z - z) / (knee.z - ankle.z))
+                c = Vector((c.x, c.y + off, z))
+                hit = tree.ray_cast(c + Vector((sx * .3, 0, 0)), Vector((-sx, 0, 0)))[0]
+                if hit is None:
+                    continue
+                P.append([hit + Vector((sx * lift, k * width * .5, 0)) for k in (-1, 1)])
+                U.append([(i / 30 * 4.0, TRIM_ROWS['plain'] + .25 * (.05 + .9 * k)) for k in (0, 1)])
+            if len(P) < 3:
+                continue
+            strip = grid_mesh(name + side, P, U)
+            face_out(strip, lambda co, sx=sx: Vector((sx, 0, 0)))
+            so = strip.modifiers.new('Tape', 'SOLIDIFY')
+            so.thickness = .0008
+            so.offset = -1
+            so.use_rim_only = True
+            apply(strip, so)
+            strip.data.materials.append(mat)
+            weights_from(strip, garment)
+            parts.append(strip)
+    return parts
+
+
+if True:
+    # Track pants: the joggers with the track jacket's two stripes per leg.
+    _jog = next(o for o in wardrobe if o.name == 'Lower_joggers')
+    trackpants = _jog.copy()
+    trackpants.data = _jog.data.copy()
+    bpy.context.collection.objects.link(trackpants)
+    trackpants.name = trackpants.data.name = 'Lower_track'
+    add(trackpants, False)
+    add(join_as('Lower_track_Stripes', leg_stripes('Track leg stripe', trackpants, stripe_mat)), False)
 finish_trainer(shoes)
 for component in trainer_construction(shoes):
     add(component,False)
@@ -1745,6 +1969,7 @@ if lace_mesh is not None:
 # Keep the high-resolution tailoring through fit, transfer and baking. The
 # final render shells keep the openings and remove interior density.
 shells = [(tee, .59), (polo, .59), (shirt, .58), (jumper, .57), (bomber, .62)]
+shells.extend([(over, .59), (track, .60), (coat, .60), (knit_front, .66)])
 if BODY == 'a':
     shells.extend([(blazer, .60), (sfront, .66)])
 for garment_, ratio in shells:

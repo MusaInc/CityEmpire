@@ -301,7 +301,11 @@ def raise_socks(collection):
     knit = old.data.materials[0]
     collection.meshes.remove(old)
     bpy.data.objects.remove(old, do_unlink=True)
-    socks = collection.clone('Fashion_Legs', name)
+    # Knitted over the LARGER of the two leg skins it is worn with: the biker
+    # legs (sports bottoms) stand 1.5-6 mm proud of the plain legs round the
+    # ankle, and a sock knitted on the plain legs vanished under them.
+    donor = 'Fashion_Biker_Legs' if 'Fashion_Biker_Legs' in collection.models else 'Fashion_Legs'
+    socks = collection.clone(donor, name)
     collection.cut(socks, lambda p: min(p.z - .055, .236 - p.z), .0025)
     socks.data.materials.clear()
     socks.data.materials.append(knit)
@@ -314,9 +318,12 @@ def raise_socks(collection):
         centre = ankle.lerp(knee, (p.z - ankle.z) / (knee.z - ankle.z))
         radial = Vector((p.x-centre.x, p.y-centre.y, 0)).normalized()
         cuff = smooth(.218, .230, p.z)
-        # Taper cleanly inward inside the shoe collar (z < 0.11) so socks never poke through high-tops!
-        in_shoe = 1.0 - smooth(.085, .122, p.z)
-        return radial * ((.0032 + .0016 * cuff) * (1.0 - in_shoe) - .0055 * in_shoe)
+        # Tucked in only below the LOW trainer's collar (~7 cm): tucked from
+        # 12 cm the low trainers showed a band of bare ankle under a floating
+        # sock (2026-11-26). The high-tops are opened round the ankle
+        # (jules_finish) to take the sock's 3 mm.
+        in_shoe = 1.0 - smooth(.052, .074, p.z)
+        return radial * ((.0032 + .0016 * cuff) * (1.0 - in_shoe) - .0040 * in_shoe)
 
     adjust_basis(socks, knit_clearance)
 

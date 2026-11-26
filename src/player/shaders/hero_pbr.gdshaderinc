@@ -33,7 +33,7 @@ global uniform float night;
 // Separation from dark streets: a light rim from every light (stronger at
 // night), and at night a faint cool edge where the body turns away from the
 // camera. Edges only – the hero never glows.
-uniform float rim_strength = 0.3;
+uniform float rim_strength = 0.12;   // (0.3 read as a plastic edge on every garment – 2026-11-26)
 uniform float night_edge = 0.07;
 void vertex() {
     float freedom = UV2.x;
@@ -111,12 +111,13 @@ void fragment() {
     // Realistic human skin: warm dermal subsurface scatter, soft peach-fuzz grazing lift, rain-wet sheen.
     float skin_ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
     float skin_fres = pow(max(1.0 - skin_ndv, 0.0001), 3.6);
-    SPECULAR = mix(mix(0.24, 0.28, surface_definition), 0.52, wet_k * 0.7);
+    SPECULAR = mix(mix(0.21, 0.24, surface_definition), 0.52, wet_k * 0.7);
+    ROUGHNESS = max(ROUGHNESS, mix(0.62, 0.30, wet_k));   // dry skin is never glossy
     CLEARCOAT = wet_k * 0.42;
     CLEARCOAT_ROUGHNESS = mix(0.22, 0.09, wet_k);
     ALBEDO = ALBEDO * vec3(1.01, 0.995, 0.98) * (1.0 - 0.05 * wet_k) + ALBEDO * vec3(0.052, 0.038, 0.030) * skin_fres;
     BACKLIGHT = ALBEDO * vec3(0.42, 0.14, 0.062);
-    EMISSION += ALBEDO * mix(mix(0.020, 0.012, surface_definition), 0.010, night);
+    EMISSION += ALBEDO * mix(0.006, 0.004, night);   // (0.02 flattened the shading into plastic)
 #elif defined(EYE)
     // Wet dome cornea with crisp twin catchlights + subtle lower-meniscus moisture sheen.
     SPECULAR = mix(0.36, 0.72, iris);
@@ -150,8 +151,11 @@ void fragment() {
     float ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
     float cloth_sheen = pow(max(1.0 - ndv, 0.0001), 3.8) * (1.0 - wetness * 0.55) * (1.0 - metallic);
     float is_silk = (1.0 - smoothstep(0.46, 0.60, surface_roughness)) * (1.0 - metallic);
-    ALBEDO += vec3(0.032) * cloth_sheen + ALBEDO * 0.08 * cloth_sheen * is_silk;
-    SPECULAR = mix(mix(0.20, 0.38, is_silk), 0.72, metallic);
+    // Fibre sheen tinted by the cloth itself (a flat grey lift read as
+    // plastic); woven cotton/wool stays matte, silk a soft lustre.
+    ALBEDO += ALBEDO * 0.10 * cloth_sheen + vec3(0.010) * cloth_sheen + ALBEDO * 0.06 * cloth_sheen * is_silk;
+    SPECULAR = mix(mix(0.13, 0.30, is_silk), 0.72, metallic);
+    ROUGHNESS = mix(max(ROUGHNESS, 0.74), ROUGHNESS, max(is_silk, metallic)) ;
     if (is_silk > 0.05) {
         ANISOTROPY = 0.25 * is_silk;
         ANISOTROPY_FLOW = vec2(0.0, 1.0);
@@ -166,7 +170,7 @@ void fragment() {
     }
 #endif
 #ifndef EYE
-    RIM = rim_strength * (1.0 + night);
+    RIM = rim_strength * (1.0 + 0.35 * night);
 #endif
     RIM_TINT = 0.4;
     if (FRONT_FACING) {

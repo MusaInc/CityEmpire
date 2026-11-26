@@ -42,6 +42,7 @@ const WEAVE_PATH := "res://assets/models/fabric_weave_normal.png"
 const FABRIC_DETAIL := {"hero_shirt": [30.0, 0.35], "hero_shirt_trim": [6.0, 0.25], "hero_tee": [30.0, 0.3],
 	"hero_polo": [27.0, 0.32], "hero_knit": [26.0, 0.38], "hero_rib": [9.0, 0.17], "hero_blazer": [54.0, 0.29],
 	"hero_fleece": [38.0, 0.24], "hero_bomber": [48.0, 0.21],
+	"hero_oversize": [28.0, 0.34], "hero_track": [46.0, 0.17], "hero_coat": [52.0, 0.34], "hero_coat_knit": [26.0, 0.36], "hero_shirt_white": [30.0, 0.35],
 	"hero_jeans": [41.0, 0.32], "hero_joggers": [37.0, 0.24], "hero_shorts": [43.0, 0.21], "hero_chino": [36.0, 0.27], "hero_cargo": [42.0, 0.22],
 	"hero_cap": [27.0, 0.3], "hero_beanie": [14.0, 0.28], "hero_trainer_panels": [40.0, 0.15],
 	"hero_skin": [26.0, 0.18, PORE_PATH], "hero_skin_body": [32.0, 0.14, PORE_PATH]}
@@ -252,6 +253,14 @@ var _hard_lead := "l"
 const RELEASE_TIME := 0.42
 ## Foot planting (see _plant_feet).
 const ANKLE_H := 0.05      # ankle pivot above the sole
+## Heeled shoes (2026-11-26): the foot stands pitched onto the ball by
+## heel_pitch (rad) and the ankle rides heel_rise higher (BALL·sin pitch, so
+## the ball stays on the ground) – legs, hips and steps solve to it as they
+## do to any ankle height. Shoes and bare-foot "Heel" shapes are modelled for
+## the same pitch (tools/blender/heeled_shoes.py).
+const HEELS := {"pumps": 0.30, "eveningstraps": 0.40}
+var heel_pitch := 0.0
+var ankle_h := ANKLE_H
 const LEG_LEN := 0.89      # thigh + shin
 const BALL := 0.13         # ankle → ball of the foot (toe-off pivot)
 var _stance_w := {"l": -1.0, "r": -1.0}  # stance progress 0..1 from the gait, -1 = swing
@@ -500,7 +509,7 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 				reference = Color(0.22, 0.24, 0.26)
 			# Skin-tight tops, the face and its parts: tints are relative to
 			# the authored colour (the shop colour replaces it exactly).
-			"hero_top", "hero_top_collar", "hero_bandana", "hero_tee", "hero_knit", "hero_shirt", "hero_shirt_trim", "hero_polo", "hero_blazer", "hero_fleece", "hero_bomber":
+			"hero_top", "hero_top_collar", "hero_bandana", "hero_tee", "hero_knit", "hero_shirt", "hero_shirt_trim", "hero_polo", "hero_blazer", "hero_fleece", "hero_bomber", "hero_oversize", "hero_track", "hero_coat":
 				region = "suit"
 				reference = source.albedo_color
 			# Ribbing and satin lapels: the same colour, a shade deeper.
@@ -606,6 +615,23 @@ func set_suit_color(c: Color) -> void:
 
 
 ## Dresses the hero in a Shop.look(): region colours and the headwear.
+## How much higher the ankle (and the pelvis) rides in heeled shoes.
+func heel_rise() -> float:
+	return BALL * sin(heel_pitch)
+
+
+func set_heel(pitch: float) -> void:
+	heel_pitch = pitch
+	ankle_h = ANKLE_H + heel_rise()
+	if _gait:
+		_gait.ankle_h = ankle_h
+	# Bare feet in strappy heels: the toes bend flat at the ball (shape key).
+	for mi in _hero_meshes:
+		var k := (mi as MeshInstance3D).find_blend_shape_by_name("Heel") if mi is MeshInstance3D and (mi as MeshInstance3D).mesh else -1
+		if k >= 0:
+			(mi as MeshInstance3D).set_blend_shape_value(k, clampf(pitch / 0.40, 0.0, 1.0))
+
+
 func apply_look(look: Dictionary) -> void:
 	if String(look.get("body", "a")) != body_type and skeleton != null:
 		_swap_body(String(look.get("body", "a")))
@@ -689,6 +715,7 @@ func _show_variants() -> void:
 	var fitted_denim := body_type == "b" and lower in ["jeans", "fitjeans", "widejeans"]
 	var cropped := body_type == "b" and lower in CROPPED_TROUSERS
 	var bare_shoe := footwear in ["sandals", "eveningstraps"]
+	set_heel(float(HEELS.get(footwear, 0.0)) if body_type == "b" else 0.0)
 	var sports_bottom := lower in ["bikershorts", "sprintshorts"]
 	var crop_top := cut in ["fashion_crop", "fashion_ribcrop", "fashion_zipcrop", "fashion_crossbra"]
 	var barefoot_legs := bare_shoe and (bare_legs or lower == "shorts")
@@ -725,7 +752,7 @@ func _show_variants() -> void:
 			mi.visible = look_state.get("bare_hands", false)
 		elif n == "Courier_Waistband":
 			# Belt loops have no visible surface under a top worn over the waist.
-			mi.visible = not fitted_denim and not bare_legs and not cut.begins_with("fashion_") and cut not in ["tee", "polo", "jumper", "hoodie", "blazer", "bomber"]
+			mi.visible = not fitted_denim and not bare_legs and not cut.begins_with("fashion_") and cut not in ["tee", "polo", "jumper", "hoodie", "blazer", "bomber", "oversize", "track", "coat"]
 		elif n == "Courier_Cargo" or n.begins_with("Cargo_gusset"):
 			mi.visible = lower == "cargo"
 		elif n == "Courier_Chinos":
@@ -771,7 +798,7 @@ func _show_variants() -> void:
 		elif n == "Fashion_Slip":
 			mi.visible = bare_legs and lower != "tailoredshorts"
 		elif n.begins_with("Skin_Arms_"):
-			mi.visible = n.to_lower() == "skin_arms_" + cut and (cut in ["tee", "polo", "tq", "short", "vest"] or look_state.get("bare_hands", false))
+			mi.visible = n.to_lower() == "skin_arms_" + cut and (cut in ["tee", "polo", "tq", "short", "vest", "oversize"] or look_state.get("bare_hands", false))
 		elif n.begins_with("Face_"):
 			mi.visible = n == "Face_" + face and mask != "courier"
 			if mi.visible:
@@ -1529,7 +1556,7 @@ func debug_state() -> Dictionary:
 			var p := (bones["foot_" + sd] as Node3D).global_position
 			var hit := _ground_hit(space, p)
 			if not hit.is_empty():
-				gap = maxf(gap, absf(p.y - (hit.position as Vector3).y - ANKLE_H))
+				gap = maxf(gap, absf(p.y - (hit.position as Vector3).y - ankle_h))
 	var hand_off := -1.0
 	if player.line_state == Player.Line.ATTACHED and player.s.taut:
 		var sh := (bones["upper_arm_" + web_side] as Node3D).global_position
@@ -2121,7 +2148,7 @@ func _update_animated(dt: float) -> void:
 		q["chest"] = (q["chest"] as Quaternion).slerp(_ry(0.08) * _rx(-0.06), iw * 0.5)
 	# Hip bob (running) – the pelvis rides up and down over the stance leg.
 	(bones["hips"] as Node3D).position.y = lerpf((bones["hips"] as Node3D).position.y,
-		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop, 1.0 - exp(-20.0 * dt))
+		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop + (heel_rise() if grounded else 0.0), 1.0 - exp(-20.0 * dt))
 	(bones["hips"] as Node3D).position.x = lerpf((bones["hips"] as Node3D).position.x, _hip_shift, 1.0 - exp(-12.0 * dt))
 	if not _gait_live and _gait.active:
 		_gait.reset()  # next time on the feet, start from where they are
@@ -2604,7 +2631,7 @@ func _plant_feet(dt: float) -> void:
 			var st: Array = _settle[sd]
 			st[0] = minf(float(st[0]) + dt / SETTLE_TIME, 1.0)
 			var e := smoothstep(0.0, 1.0, st[0])
-			var gy: float = (hit.position as Vector3).y + ANKLE_H if not hit.is_empty() else (st[1] as Vector3).y
+			var gy: float = (hit.position as Vector3).y + ankle_h if not hit.is_empty() else (st[1] as Vector3).y
 			var rest := Vector3(fk.x, gy, fk.z)
 			desired = (st[1] as Vector3).lerp(rest, e) + Vector3.UP * sin(PI * st[0]) * 0.07
 			_toe[sd] = sin(PI * st[0]) * 0.25
@@ -2619,7 +2646,7 @@ func _plant_feet(dt: float) -> void:
 				_plant.erase(sd)  # outran the foot: let it go and re-plant
 		if w >= 0.0 and not hit.is_empty():
 			if not _plant.has(sd):
-				_plant[sd] = [Vector3(fk.x, (hit.position as Vector3).y + ANKLE_H, fk.z), hit.normal]
+				_plant[sd] = [Vector3(fk.x, (hit.position as Vector3).y + ankle_h, fk.z), hit.normal]
 			var lock: Vector3 = _plant[sd][0]
 			n = _plant[sd][1]
 			# The heel rolls up about the ball of the foot: for toe-off, and
@@ -2639,7 +2666,7 @@ func _plant_feet(dt: float) -> void:
 		elif w > -2.0:
 			_plant.erase(sd)
 			if not hit.is_empty():
-				var gy: float = (hit.position as Vector3).y + ANKLE_H
+				var gy: float = (hit.position as Vector3).y + ankle_h
 				# Reach down for the ground before contact (a forward-swung leg
 				# holds the ankle high), so the lock lands where the foot is.
 				desired.y = lerpf(desired.y, gy, smoothstep(0.75, 1.0, _swing_w[sd]))
@@ -2682,7 +2709,7 @@ func _plant_feet(dt: float) -> void:
 			var f := _plant_heading(sd, n) if _plant.has(sd) else (_facing - n * _facing.dot(n)).normalized()
 			if f.length_squared() < 0.5:
 				continue
-			var want := Basis.looking_at(f, n) * Basis(Vector3.RIGHT, _heel[sd] - _toe[sd])
+			var want := Basis.looking_at(f, n) * Basis(Vector3.RIGHT, _heel[sd] - _toe[sd] - heel_pitch)
 			var shin_b := (bones["shin_" + sd] as Node3D).global_basis.orthonormalized()
 			var local := (shin_b.inverse() * want).get_rotation_quaternion()
 			_set_bone("foot_" + sd, (_rot["foot_" + sd] as Quaternion).slerp(local, wik * _flat[sd]))
@@ -2754,12 +2781,12 @@ func _plant_gait(dt: float) -> void:
 			var fh := (f.heading - n * f.heading.dot(n)).normalized()
 			if fh.length_squared() < 0.5:
 				continue
-			want = Basis.looking_at(fh, n) * Basis(Vector3.RIGHT, f.heel - f.toe)
+			want = Basis.looking_at(fh, n) * Basis(Vector3.RIGHT, f.heel - f.toe - heel_pitch)
 		else:
 			var fh := Vector3(f.heading.x, 0.0, f.heading.z).normalized()
 			if fh.length_squared() < 0.5:
 				continue
-			want = Basis.looking_at(fh, Vector3.UP) * Basis(Vector3.RIGHT, f.pitch)
+			want = Basis.looking_at(fh, Vector3.UP) * Basis(Vector3.RIGHT, f.pitch - heel_pitch)
 		var shin_b := (bones["shin_" + sd] as Node3D).global_basis.orthonormalized()
 		var local := (shin_b.inverse() * want).get_rotation_quaternion()
 		if not f.planted and f.world_k < 1.0:
@@ -2791,7 +2818,7 @@ func _plant_both(trail_toe: float) -> void:
 		var tr := "r" if _hard_lead == "l" else "l"
 		var hip := (bones["thigh_" + tr] as Node3D).global_position
 		var back := hip - _facing * 0.4
-		_plant[tr] = [Vector3(back.x, player.global_position.y - 0.9 + ANKLE_H, back.z), Vector3.UP]
+		_plant[tr] = [Vector3(back.x, player.global_position.y - 0.9 + ankle_h, back.z), Vector3.UP]
 
 
 ## Heading of a planted foot: it keeps the direction it landed in while the
@@ -3365,7 +3392,7 @@ func _pose_vehicle_access(dt: float) -> void:
 		var ground := _ground_hit(space, ankle, 0.28)
 		if ground.is_empty() or (ground["normal"] as Vector3).y < 0.72:
 			continue
-		ankle.y = (ground["position"] as Vector3).y + ANKLE_H
+		ankle.y = (ground["position"] as Vector3).y + ankle_h
 		var direction := ankle - (bones["thigh_" + sd] as Node3D).global_position
 		var knee := Vector3(-0.08 if sd == "l" else 0.08, 0.0, -1.0)
 		var solved := _two_bone(hips, direction.normalized(), direction.length(), knee, 0.45, 0.44, -1.0)
@@ -3458,7 +3485,7 @@ func _fit_cabin_feet(weight: float) -> void:
 			var bone: String = ("thigh_" if i == 0 else "shin_") + sd
 			_set_bone(bone, (_rot[bone] as Quaternion).slerp(solved[i], weight))
 		var foot := bones["foot_" + sd] as Node3D
-		var flat := Quaternion((foot.get_parent() as Node3D).global_basis.orthonormalized().inverse() * _body_basis)
+		var flat := Quaternion((foot.get_parent() as Node3D).global_basis.orthonormalized().inverse() * _body_basis * Basis(Vector3.RIGHT, -heel_pitch))
 		_set_bone("foot_" + sd, (_rot["foot_" + sd] as Quaternion).slerp(flat, weight))
 
 

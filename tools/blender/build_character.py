@@ -1210,7 +1210,17 @@ for cut in ['Tee','Polo']:
     arm_skin, _ = part('Skin_Arms_' + cut, arm_faces, RB, weights)
     arm_skin.data.materials.append(armskin)
     skin_arms.append(arm_skin)
-for cut in ('Jumper', 'Hoodie', 'Bomber', 'Long') + (('Blazer',) if BODY == 'a' else ()):
+if True:
+    # The oversized tee's elbow-length sleeves: forearm skin from inside them.
+    def inside_over(j):
+        p = RB[j]
+        arm = frames()[1]['l' if p.x < 0 else 'r']
+        tt, _, radius = arm.polar(p)
+        return tt > OVERSIZE_END - .047 and radius < .105 and wsum(j, 'hand_l', 'hand_r') < .35
+    arm_skin, _ = part('Skin_Arms_Oversize', [i for i in body if all(inside_over(j) for j in bf[i])], RB, weights)
+    arm_skin.data.materials.append(armskin)
+    skin_arms.append(arm_skin)
+for cut in ('Jumper', 'Hoodie', 'Bomber', 'Long', 'Track', 'Coat') + (('Blazer',) if BODY == 'a' else ()):
     wrist_skin = next(o for o in skin_arms if o.name == 'Skin_Arms_Shirt')
     copy = wrist_skin.copy()
     copy.data = wrist_skin.data.copy()
@@ -1232,11 +1242,11 @@ for side in ('l','r'):
         all_meshes.append(pocket)
 
 for ob in all_meshes:
-    if ob.name in ('Courier_Cargo','Courier_Chinos','Lower_jeans','Lower_joggers','Lower_fitjeans','Lower_leggings','Lower_widejeans','Lower_bikershorts'):
+    if ob.name in ('Courier_Cargo','Courier_Chinos','Lower_jeans','Lower_joggers','Lower_track','Lower_fitjeans','Lower_leggings','Lower_widejeans','Lower_bikershorts'):
         bend_corrective(ob,'Knee')
-    elif ob.name in ('Top_Shirt','Top_Hoodie','Top_Bomber','Top_Jumper','Top_Blazer','Top_Fashion_Racer','Top_Fashion_Pullover'):
+    elif ob.name in ('Top_Shirt','Top_Hoodie','Top_Bomber','Top_Jumper','Top_Blazer','Top_Fashion_Racer','Top_Fashion_Pullover','Top_Oversize','Top_Track','Top_Coat'):
         bend_corrective(ob,'Elbow')
-    if BODY=='b' and (ob.name in ('Top_Vest','Skin_Arms_Vest','Top_Hoodie','Top_Bomber','Top_Blazer',
+    if BODY=='b' and (ob.name in ('Top_Vest','Skin_Arms_Vest','Top_Hoodie','Top_Bomber','Top_Blazer','Top_Oversize','Top_Track','Top_Coat',
                                   'Top_Tee','Top_Shirt','Top_Jumper','Topx_Hoodie_Fold','Top_Polo','Fashion_Torso_Skin',
                                   'Fashion_Crop_Skin')
                       or ob.name.startswith(('Top_Fashion_','Topx_Fashion_')) and 'Skirt' not in ob.name):
@@ -1348,6 +1358,16 @@ refine_wardrobe(rig, all_meshes, identity)
 if identity == "jules":
     build_jules_collection(rig, all_meshes)
     finish_jules_collection(Collection(rig, all_meshes), TEX)
+    from heeled_shoes import build_heels
+    build_heels(all_meshes, J)
+    # The overcoat and oversized tee are fitted over the block trousers;
+    # Jules's denims are wider at the hip and pushed through the coat's
+    # skirt (2026-11-26). Clear both tops over every wide bottom.
+    _by = {o.name: o for o in all_meshes}
+    for _top in ('Top_Coat', 'Top_Oversize'):
+        for _low in ('Lower_relaxeddenim', 'Lower_widejeans', 'Lower_fitjeans', 'Lower_track'):
+            if _top in _by and _low in _by:
+                clear_layer(_by[_top], _by[_low], .010 if _top == 'Top_Coat' else .007, zmax=PANTS_TOP + .05)
 # Retain editable meshes, original garment UVs, weights and material nodes.
 for im in bpy.data.images:
     if im.source=='FILE':im.pack()

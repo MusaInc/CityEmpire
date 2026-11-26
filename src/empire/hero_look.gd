@@ -5,14 +5,16 @@ extends RefCounted
 const CHARACTERS := [["a", "Ade"], ["b", "Jules"]]
 const IDENTITIES := {"a": "hero_ade", "b": "hero_jules"}
 const TOPS := [["top_tee", "T-Shirt"], ["top_polo", "Polo"], ["top_shirt", "Shirt"], ["top_jumper", "Jumper"],
-	["top_hoodie", "Hoodie"], ["top_long", "Base Layer"], ["top_bomber", "Bomber Jacket"]]
+	["top_hoodie", "Hoodie"], ["top_long", "Base Layer"], ["top_bomber", "Bomber Jacket"],
+	["top_oversize", "Oversized Tee"], ["top_track", "Track Jacket"], ["top_blazer", "Suit Jacket"], ["top_coat", "Overcoat"]]
 const LOWER_CUTS := [["auto", "Match top"], ["cargo", "Cargo"], ["chinos", "Chinos"],
-	["jeans", "Jeans"], ["joggers", "Joggers"], ["shorts", "Shorts"]]
+	["jeans", "Jeans"], ["joggers", "Joggers"], ["track", "Track Pants"], ["shorts", "Shorts"]]
 const FASHION_TOPS := [["top_fashion_ribcrop", "Cropped Rib Cardigan"], ["top_fashion_zipcrop", "Cropped Zip Hoodie"],
-	["top_fashion_tailoredknit", "Tailored V-Neck"], ["top_fashion_crossbra", "Crossback Sports Top"]]
+	["top_fashion_tailoredknit", "Tailored V-Neck"], ["top_fashion_crossbra", "Crossback Sports Top"],
+	["top_oversize", "Oversized Tee"], ["top_track", "Track Jacket"], ["top_coat", "Overcoat"]]
 const DRESSES := [["top_fashion_cowldress", "Satin Slit Gown"]]
 const FASHION_BOTTOMS := [["relaxeddenim", "Relaxed Denim"], ["utilitymini", "Utility Mini"],
-	["beltedmini", "Belted Mini"], ["sprintshorts", "Training Shorts"]]
+	["beltedmini", "Belted Mini"], ["sprintshorts", "Training Shorts"], ["track", "Track Pants"]]
 const FOOTWEAR := [["streettrainers", "Low Trainers"], ["highstreet", "High Tops"],
 	["pumps", "Pumps"], ["eveningstraps", "Evening Heels"]]
 const ACCESSORIES := [["none", "None"], ["day", "Gold Pendant"], ["street", "Silver Chain"],
@@ -83,8 +85,6 @@ static func top_for(body: String, id: String) -> String:
 		if id in ["top_fashion_pullover", "top_fashion_bodysuit", "top_fashion_crop"]:
 			return "top_fashion_crossbra"
 		return "top_fashion_ribcrop"
-	if body != "b" and id == "top_blazer":
-		return "top_shirt"
 	if body != "b" and id.begins_with("top_fashion_"):
 		return DEFAULT["top"]
 	return id
@@ -128,6 +128,9 @@ static func current(flags: Dictionary) -> Dictionary:
 			"top_fashion_tailoredknit": ["beltedmini", "pumps"],
 			"top_fashion_crossbra": ["sprintshorts", "streettrainers"],
 			"top_fashion_cowldress": ["relaxeddenim", "eveningstraps"],
+			"top_oversize": ["relaxeddenim", "streettrainers"],
+			"top_track": ["track", "streettrainers"],
+			"top_coat": ["relaxeddenim", "pumps"],
 		}
 		d["head"] = "head_bare"
 		var pairing: Array = defaults[d["top"]]
@@ -187,7 +190,7 @@ static func build(selection: Dictionary) -> Dictionary:
 	look["bare_hands"] = true
 	var lower: String = l["trousers"]
 	if lower == "auto":
-		lower = "chinos" if top in ["top_shirt", "top_blazer"] else "cargo"
+		lower = "chinos" if top in ["top_shirt", "top_blazer", "top_coat"] else ("track" if top == "top_track" else "cargo")
 		if top == "top_fashion_bodysuit":
 			lower = "leggings"
 	look["trousers"] = "dress" if is_dress(top) else lower

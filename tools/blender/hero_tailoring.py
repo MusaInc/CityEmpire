@@ -233,12 +233,20 @@ def topstitch(shell, name, hem, chest_height, width, flare):
 
 
 def add_derbies(rig, meshes):
-    """Cut a lower leather upper and welt from the existing skinned shoe last."""
+    """Leather derbies on the trainer's last (2026-11-26 rebuild).
+
+    The old derby was the whole trainer squashed – its padded tongue and flat
+    trainer laces stood up as a flap on the instep. Now: upper and sole only,
+    the toe lengthened and slimmed to a chisel, the cupsole thinned to a
+    leather sole with a heel block, a closed facing over the instep and four
+    pairs of round waxed laces crossing it.
+    """
     import bpy
+    from mathutils.bvhtree import BVHTree
 
     parts = []
     by_name = {obj.name: obj for obj in meshes}
-    for name in ('Courier_Trainers', 'Courier_Soles', 'Courier_TrainerTongues', 'Courier_TrainerLaces'):
+    for name in ('Courier_Trainers', 'Courier_Soles'):
         source = by_name[name]
         part = source.copy()
         part.data = source.data.copy()
@@ -251,15 +259,20 @@ def add_derbies(rig, meshes):
             leather.name = 'hero_fashion_shoe_derby_' + material.name.removeprefix('hero_')
             shader = leather.node_tree.nodes.get('Principled BSDF')
             if shader:
-                shader.inputs['Roughness'].default_value = .42 if name != 'Courier_Soles' else .76
+                shader.inputs['Roughness'].default_value = .46 if name != 'Courier_Soles' else .72
             part.data.materials[index] = leather
 
-        def shape(p):
+        def shape(p, sole=name == 'Courier_Soles'):
             toe = smooth(.078, .17, p.y)
-            underfoot = 1 - smooth(.009, .042, p.z)
             centre = math.copysign(.118, p.x)
-            return Vector(((centre - p.x) * (.10 + toe * .14),
-                           .027 * toe, -max(0.0, p.z - .01) * (.08 + toe * .28) - .004 * toe * underfoot))
+            # a lower, longer, narrower toe; the collar a touch lower
+            dx = (centre - p.x) * (.12 + toe * .18)
+            dz = -max(0.0, p.z - .01) * (.10 + toe * .34)
+            if sole:
+                # leather sole ~9 mm, the heel block 2 cm: thin the cupsole's
+                # walls towards the toe
+                dz += -max(0.0, p.z - .004) * .45 * smooth(.02, .09, p.y)
+            return Vector((dx, .030 * toe, dz))
 
         adjust_basis(part, shape)
         parts.append(part)
@@ -272,6 +285,59 @@ def add_derbies(rig, meshes):
     derby = bpy.context.view_layer.objects.active
     derby.name = 'Footwear_derbies'
     derby.data.name = derby.name
+
+    # Laces: four crossing pairs of 1.2 mm round cord on the facing.
+    me = derby.data
+    tree = BVHTree.FromPolygons([v.co for v in me.vertices], [p.vertices[:] for p in me.polygons])
+    lace = bpy.data.materials.get('hero_derby_lace') or bpy.data.materials.new('hero_derby_lace')
+    lace.use_nodes = True
+    bsdf = lace.node_tree.nodes.get('Principled BSDF')
+    bsdf.inputs['Base Color'].default_value = (.035, .030, .028, 1)
+    bsdf.inputs['Roughness'].default_value = .5
+    me.materials.append(lace)
+    slot = len(me.materials) - 1
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    deform = bm.verts.layers.deform.verify()
+    group_index = {}
+    for side in ('l', 'r'):
+        g = derby.vertex_groups.get('b_foot_' + side) or derby.vertex_groups.new(name='b_foot_' + side)
+        group_index[side] = g.index
+    for side, sx in (('l', -1), ('r', 1)):
+        vs = [v.co for v in me.vertices if v.co.x * sx > 0]
+        axis = sum((v.x for v in vs), 0.0) / max(1, len(vs))
+
+        def on_top(x, y):
+            hit = tree.ray_cast(Vector((x, y, .4)), Vector((0, 0, -1)))[0]
+            return hit + Vector((0, 0, .0016)) if hit is not None else None
+
+        for row in range(4):
+            y0 = .056 + row * .0125
+            for cross in (-1, 1):
+                a = on_top(axis - .011 * cross, y0)
+                b = on_top(axis + .011 * cross, y0 + .0125)
+                if a is None or b is None:
+                    continue
+                ring = []
+                d = (b - a).normalized()
+                n1 = d.cross(Vector((0, 0, 1))).normalized()
+                n2 = d.cross(n1).normalized()
+                for t in range(7):
+                    c = a.lerp(b, t / 6) + Vector((0, 0, .0012 * math.sin(math.pi * t / 6)))
+                    ring.append([bm.verts.new(c + (n1 * math.cos(k * math.tau / 6) + n2 * math.sin(k * math.tau / 6)) * .0012)
+                                 for k in range(6)])
+                for t in range(6):
+                    for k in range(6):
+                        f = bm.faces.new((ring[t][k], ring[t][(k + 1) % 6], ring[t + 1][(k + 1) % 6], ring[t + 1][k]))
+                        f.material_index = slot
+                        f.smooth = True
+                for r in ring:
+                    for v in r:
+                        v[deform][group_index[side]] = 1.0
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
     derby.select_set(False)
     derby.hide_set(True)
     meshes.append(derby)
