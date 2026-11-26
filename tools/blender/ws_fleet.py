@@ -430,6 +430,13 @@ def build_traffic(name):
     dec.ratio = min(1.0, 1200.0 / max(tris, 1))
     bpy.context.view_layer.objects.active = lo
     bpy.ops.object.modifier_apply(modifier=dec.name)
+    # (No zero-area triangles: Blender merges them on re-import and the
+    # texture pipeline's geometry check then rejects the file.)
+    bm = bmesh.new()
+    bm.from_mesh(lo.data)
+    bmesh.ops.dissolve_degenerate(bm, dist=1e-5, edges=bm.edges[:])
+    bm.to_mesh(lo.data)
+    bm.free()
     lo.data.validate(clean_customdata=False)
     kit.export(name + "_lod1.glb", [lo])
     print("FLEET", name, "lod1 tris", sum(len(p.vertices) - 2 for p in lo.data.polygons))

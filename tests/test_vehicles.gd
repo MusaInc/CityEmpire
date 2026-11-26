@@ -52,7 +52,12 @@ func test_traffic_lod_keeps_window_finish(t) -> void:
 			var m := mesh.surface_get_material(i)
 			if m.resource_name.begins_with("glass"):
 				windows.append(m.resource_name)
-		t.check(windows == ["glass_clear" if model == "kestrel" else "glass"], "%s has its authored glazing" % model)
+		# (2026-11-26: the traffic fleet has real cabins – clear glass cut
+		# through; the van's cargo doors stay sealed behind the cab bulkhead.)
+		var want: Array[String] = ["glass_clear"] if model == "kestrel" else ["glass_clear", "glass"]
+		windows.sort()
+		want.sort()
+		t.check(windows == want, "%s has its authored glazing (%s)" % [model, windows])
 	# A fallback body can lack glazing. Every emitted box must still use
 	# the lane shader when Traffic builds its moving instances.
 	var paint_only := ArrayMesh.new()

@@ -824,6 +824,7 @@ static func garage(ph: Phone, body: VBoxContainer) -> void:
 	var e := g.empire
 	var mine: Array = e.vehicles.filter(func(x): return not x.get("test", false))
 	var v := scroller(body, 20)
+	_lockup_card(ph, v)
 	if mine.is_empty():
 		v.add_child(G.para("You don't own anything with wheels, wings or a hull yet.", "body"))
 		v.add_child(G.button("Browse the showrooms", func(): Phone.st("market")["cat"] = "vehicles"; ph.go("market"), "filled", "large"))
@@ -835,6 +836,7 @@ static func garage(ph: Phone, body: VBoxContainer) -> void:
 		if String(x["id"]) == sel:
 			veh = x
 	var vid := String(veh["id"])
+	var in_lockup := String(veh.get("stored", "")) != ""
 	var md := EmpireData.vehicle_model(String(veh["model"]))
 	var cls := String(md.get("class", "car"))
 	var wide := width(ph) > 980.0
@@ -890,7 +892,14 @@ static func garage(ph: Phone, body: VBoxContainer) -> void:
 	fb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	fb.disabled = inside
 	acts.add_child(fb)
-	if cls == "car":
+	if cls == "car" and in_lockup:
+		var tb := G.button("Take out of the lock-up", func():
+			var err := g.street_cars.take_out(vid)
+			ui.toast(err if err != "" else "It's out at the kerb", "bad" if err != "" else "good")
+			ph.refresh(), "filled", "regular", null, "truck")
+		tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		acts.add_child(tb)
+	elif cls == "car":
 		var q := g.delivery_quote(vid)
 		var db := G.button("Deliver · %s" % EmpireData.money(float(q["fee"])) if q["ok"] else String(q["why"]), func():
 			var err := g.deliver_vehicle(vid)
@@ -1492,3 +1501,43 @@ static func more(ph: Phone, body: VBoxContainer) -> void:
 		gd.add_child(b)
 	v.add_child(gd)
 	v.add_child(G.button("Back to the city", func(): ph.ui.close_panel(true), "gray", "large", null, "back"))
+
+
+## Your lock-up (StreetCars): buy one, extend it, and what's in it.
+static func _lockup_card(ph: Phone, v: VBoxContainer) -> void:
+	var g := ph.game
+	var sc: StreetCars = g.street_cars
+	if sc == null:
+		return
+	var card := G.card(18, 0, G.CARD)
+	v.add_child(card[0])
+	var col: VBoxContainer = card[1]
+	var slots := sc.lockup_slots()
+	col.add_child(G.text("Lock-up garage", "title3"))
+	if slots == 0:
+		col.add_child(G.para("Keep cars off the street – including ones you've taken. Holds %d cars; use it at any Motor Works: stop at the door and Store in garage." % StreetCars.LOCKUP_SLOTS, "footnote"))
+		var b := G.button("Buy a lock-up · %s" % EmpireData.money(StreetCars.LOCKUP_PRICE), func():
+			var err := sc.buy_lockup()
+			ph.ui.toast(err if err != "" else "Lock-up bought – store cars at any Motor Works", "bad" if err != "" else "good")
+			ph.refresh(), "filled", "regular", null, "vehicles")
+		b.disabled = not g.empire.can_afford(StreetCars.LOCKUP_PRICE)
+		col.add_child(b)
+		return
+	var inside := sc.stored()
+	col.add_child(G.para("%d of %d spaces used · stop at any Motor Works door to store the car you're in" % [inside.size(), slots], "footnote"))
+	for x in inside:
+		var md := EmpireData.vehicle_model(String(x["model"]))
+		var row := G.hbox(10)
+		row.add_child(G.para(String(md.get("name", x["model"])), "body"))
+		var tb := G.button("Take out", func():
+			var err := sc.take_out(String(x["id"]))
+			ph.ui.toast(err if err != "" else "It's out at the kerb", "bad" if err != "" else "good")
+			ph.refresh(), "gray", "small", null, "truck")
+		row.add_child(tb)
+		col.add_child(row)
+	var ext := G.button("Add %d spaces · %s" % [StreetCars.LOCKUP_SLOTS, EmpireData.money(StreetCars.LOCKUP_EXTEND)], func():
+		var err := sc.buy_lockup()
+		ph.ui.toast(err if err != "" else "Lock-up extended", "bad" if err != "" else "good")
+		ph.refresh(), "gray", "regular", null, "vehicles")
+	ext.disabled = not g.empire.can_afford(StreetCars.LOCKUP_EXTEND)
+	col.add_child(ext)
