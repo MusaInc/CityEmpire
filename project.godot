@@ -5,7 +5,7 @@ config_version=5
 
 config/name="WORLDSTATE"
 config/description="Open-world business life sim: start as the worker, become the owner, build the empire, climb the City500. Musa Studios."
-config/version="0.14.0"
+config/version="0.15.0"
 run/main_scene="res://scenes/boot.tscn"
 config/features=PackedStringArray("4.5", "Mobile")
 config/icon="res://assets/icon_1024.png"
