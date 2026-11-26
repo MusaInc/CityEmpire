@@ -148,8 +148,8 @@ func _process(dt: float) -> void:
 			l.look_at(l.global_position + Vector3.DOWN + roadward * 0.18, Vector3.FORWARD)
 			var district: String = cand[i][3]
 			l.light_color = Color(1.0, 0.76, 0.52).lerp(Color(0.91, 0.95, 1.0), _lamp_temperature(head, district))
-			l.light_energy = smoothstep(0.24, 0.70, night_level) * float(DISTRICT_ENERGY.get(district, 6.8))
-			l.spot_range = 21.0 if district in ["airport", "docks"] else 19.0
+			l.light_energy = smoothstep(0.24, 0.70, night_level) * float(DISTRICT_ENERGY.get(district, 8.2))
+			l.spot_range = 22.0 if district in ["airport", "docks"] else 20.5
 			l.spot_angle = 56.0 if district in ["cbd", "midtown", "airport"] else 51.0
 			# One local shadow pool on Medium or High. The other lamps
 			# keep the rendered street coverage without extra shadow maps.
@@ -159,7 +159,8 @@ func _process(dt: float) -> void:
 			l.visible = false
 
 
-const DISTRICT_ENERGY := {"suburb": 5.8, "georgian": 5.8, "docks": 7.4, "cbd": 8.2, "airport": 8.0}
+## (+20% 2026-11-26: "street lights need to do slightly better in lighting up the street")
+const DISTRICT_ENERGY := {"suburb": 7.0, "georgian": 7.0, "docks": 8.9, "cbd": 9.8, "airport": 9.6}
 const DISTRICT_TEMPERATURE := {"suburb": 0.15, "georgian": 0.20, "waterfront": 0.38,
 	"midtown": 0.54, "cbd": 0.72, "docks": 0.37, "airport": 0.77}
 

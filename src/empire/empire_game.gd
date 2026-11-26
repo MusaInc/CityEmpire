@@ -624,6 +624,26 @@ func _after_start() -> void:
 		var s_look := sb - sf * 3.0 + Vector3.UP * 1.6
 		camera.cine = func(_dt: float) -> Array:
 			return [Transform3D(Basis.looking_at(s_look - s_eye, Vector3.UP), s_eye), 62.0]
+	if args.has("shopfronts"):
+		# Captures: the decorative shopfront bay nearest you (ShopfrontKit),
+		# looking along its street ("--shopfronts=n": the n-th nearest).
+		var bays: Array = []
+		for w2 in [world, world.mainland]:
+			if w2 == null:
+				continue
+			for k in (w2 as CityWorld)._loaded:
+				for b in (w2 as CityWorld)._by_chunk.get(k, []):
+					for it in ShopfrontKit.bays_for([b], layout):
+						if String(it[0]).begins_with("bay"):
+							bays.append(it[1])
+		var me := player.global_position
+		bays.sort_custom(func(a, b): return (a as Transform3D).origin.distance_to(me) < (b as Transform3D).origin.distance_to(me))
+		if not bays.is_empty():
+			var bx: Transform3D = bays[mini(int(args["shopfronts"]), bays.size() - 1)]
+			var s_eye := bx * Vector3(-3.5, 1.75, 6.5)
+			var s_look := bx * Vector3(4.0, 2.1, 0.0)
+			camera.cine = func(_dt: float) -> Array:
+				return [Transform3D(Basis.looking_at(s_look - s_eye, Vector3.UP), s_eye), 60.0]
 	if args.has("carcam") and not empire.vehicles.is_empty():
 		# Captures: a fixed camera on your first car - front34, rear34, side,
 		# side_l, front, rear, nose, tail - for checking the car in the game.

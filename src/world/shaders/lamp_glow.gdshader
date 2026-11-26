@@ -45,5 +45,5 @@ void fragment() {
 	} else {
 		a = pow(clamp(1.0 - r, 0.0, 1.0), 3.0) * (0.9 + 0.5 * rain);
 	}
-	ALBEDO = glow * a * smoothstep(0.25, 0.7, night);
+	ALBEDO = glow * a * smoothstep(0.25, 0.7, night) * 1.2;   // (+20%, 2026-11-26)
 }

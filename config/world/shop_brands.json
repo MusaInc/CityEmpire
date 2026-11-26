@@ -1,0 +1,229 @@
+{
+ "_doc": "Fictional businesses on the decorative shopfronts (ShopfrontKit). Index = cell in assets/world/shop_brands.png (2 columns x 16 rows, 1024x128 each, row-major).",
+ "brands": [
+  {
+   "name": "HARLOW & SONS BAKERS",
+   "trade": "bakery",
+   "bg": "#3b2416",
+   "fg": "#f0d8a8",
+   "font": "assets/fonts/brand/PlayfairDisplay.ttf"
+  },
+  {
+   "name": "Kettle & Crumb",
+   "trade": "cafe",
+   "bg": "#1f3a33",
+   "fg": "#f4ead2",
+   "font": "assets/fonts/brand/Lobster-Regular.ttf"
+  },
+  {
+   "name": "NORTHGATE PHARMACY",
+   "trade": "pharmacy",
+   "bg": "#f4f6f2",
+   "fg": "#1d7a4a",
+   "font": "assets/fonts/outfit_bold.ttf"
+  },
+  {
+   "name": "VOLT MOBILE",
+   "trade": "electronics",
+   "bg": "#121418",
+   "fg": "#3ad1ff",
+   "font": "assets/fonts/brand/Righteous-Regular.ttf"
+  },
+  {
+   "name": "Brightside Opticians",
+   "trade": "optician",
+   "bg": "#eef1f4",
+   "fg": "#24396b",
+   "font": "assets/fonts/brand/PlayfairDisplay.ttf"
+  },
+  {
+   "name": "FENWICK BOOKS",
+   "trade": "books",
+   "bg": "#4a1d22",
+   "fg": "#e9d9b4",
+   "font": "assets/fonts/brand/AbrilFatface-Regular.ttf"
+  },
+  {
+   "name": "Petal & Stem",
+   "trade": "florist",
+   "bg": "#e8efe2",
+   "fg": "#2f5a2e",
+   "font": "assets/fonts/brand/Pacifico-Regular.ttf"
+  },
+  {
+   "name": "MASON HARDWARE",
+   "trade": "hardware",
+   "bg": "#9e2b1e",
+   "fg": "#f6efe2",
+   "font": "assets/fonts/brand/BebasNeue-Regular.ttf"
+  },
+  {
+   "name": "THE CUT ROOM",
+   "trade": "barber",
+   "bg": "#101012",
+   "fg": "#e7e2d6",
+   "font": "assets/fonts/brand/Oswald.ttf"
+  },
+  {
+   "name": "Aurelia Jewellers",
+   "trade": "jeweller",
+   "bg": "#0f1a2a",
+   "fg": "#d8b86a",
+   "font": "assets/fonts/brand/PlayfairDisplay.ttf"
+  },
+  {
+   "name": "MARKET DELI",
+   "trade": "deli",
+   "bg": "#2b3a1e",
+   "fg": "#f1e6c4",
+   "font": "assets/fonts/brand/BebasNeue-Regular.ttf"
+  },
+  {
+   "name": "NEWS & BOOZE",
+   "trade": "newsagent",
+   "bg": "#1b4d8a",
+   "fg": "#ffffff",
+   "font": "assets/fonts/brand/BebasNeue-Regular.ttf"
+  },
+  {
+   "name": "SUDS LAUNDERETTE",
+   "trade": "laundry",
+   "bg": "#58b8d6",
+   "fg": "#ffffff",
+   "font": "assets/fonts/brand/Righteous-Regular.ttf"
+  },
+  {
+   "name": "CALDER ESTATES",
+   "trade": "estate",
+   "bg": "#ffffff",
+   "fg": "#1f2a44",
+   "font": "assets/fonts/inter/Inter-Bold.ttf"
+  },
+  {
+   "name": "Halden Building Society",
+   "trade": "bank",
+   "bg": "#0c3b5e",
+   "fg": "#ffffff",
+   "font": "assets/fonts/outfit_bold.ttf"
+  },
+  {
+   "name": "Lumen Lighting",
+   "trade": "homeware",
+   "bg": "#f2ede4",
+   "fg": "#3a3632",
+   "font": "assets/fonts/outfit_bold.ttf"
+  },
+  {
+   "name": "THREADS",
+   "trade": "clothing",
+   "bg": "#151515",
+   "fg": "#ffffff",
+   "font": "assets/fonts/brand/Oswald.ttf"
+  },
+  {
+   "name": "Saffron House",
+   "trade": "restaurant",
+   "bg": "#7a2b12",
+   "fg": "#f7d27a",
+   "font": "assets/fonts/brand/Lobster-Regular.ttf"
+  },
+  {
+   "name": "PIXEL ARCADE",
+   "trade": "electronics",
+   "bg": "#2a0f44",
+   "fg": "#ff5ad1",
+   "font": "assets/fonts/brand/Righteous-Regular.ttf"
+  },
+  {
+   "name": "Greenleaf Grocers",
+   "trade": "grocer",
+   "bg": "#2e6b2a",
+   "fg": "#fff6d8",
+   "font": "assets/fonts/brand/Pacifico-Regular.ttf"
+  },
+  {
+   "name": "BLAKE & CO. TAILORS",
+   "trade": "clothing",
+   "bg": "#1c2230",
+   "fg": "#d9c79a",
+   "font": "assets/fonts/brand/PlayfairDisplay.ttf"
+  },
+  {
+   "name": "Moka",
+   "trade": "cafe",
+   "bg": "#e7dccb",
+   "fg": "#5a3825",
+   "font": "assets/fonts/brand/Pacifico-Regular.ttf"
+  },
+  {
+   "name": "KINGSWAY CYCLES",
+   "trade": "sport",
+   "bg": "#f2c230",
+   "fg": "#151515",
+   "font": "assets/fonts/brand/BebasNeue-Regular.ttf"
+  },
+  {
+   "name": "Wren & Wilde",
+   "trade": "homeware",
+   "bg": "#3c4a3a",
+   "fg": "#efe6d2",
+   "font": "assets/fonts/brand/AbrilFatface-Regular.ttf"
+  },
+  {
+   "name": "CORNER STORE",
+   "trade": "newsagent",
+   "bg": "#c9302c",
+   "fg": "#ffffff",
+   "font": "assets/fonts/outfit_bold.ttf"
+  },
+  {
+   "name": "Rosie's Sweets",
+   "trade": "sweets",
+   "bg": "#f6c6d6",
+   "fg": "#7a1f43",
+   "font": "assets/fonts/brand/Lobster-Regular.ttf"
+  },
+  {
+   "name": "ATLAS TRAVEL",
+   "trade": "travel",
+   "bg": "#0b6a8a",
+   "fg": "#ffffff",
+   "font": "assets/fonts/brand/Righteous-Regular.ttf"
+  },
+  {
+   "name": "Ivory Dental",
+   "trade": "pharmacy",
+   "bg": "#ffffff",
+   "fg": "#2a7aa8",
+   "font": "assets/fonts/outfit_bold.ttf"
+  },
+  {
+   "name": "HOLLOWAY GALLERY",
+   "trade": "gallery",
+   "bg": "#ececec",
+   "fg": "#121212",
+   "font": "assets/fonts/brand/PlayfairDisplay.ttf"
+  },
+  {
+   "name": "FRESH CATCH",
+   "trade": "fish",
+   "bg": "#123a5a",
+   "fg": "#e8f2f6",
+   "font": "assets/fonts/brand/BebasNeue-Regular.ttf"
+  },
+  {
+   "name": "NOVA FITNESS",
+   "trade": "sport",
+   "bg": "#0f0f12",
+   "fg": "#c6ff3a",
+   "font": "assets/fonts/brand/Oswald.ttf"
+  },
+  {
+   "name": "The Tin Kettle",
+   "trade": "cafe",
+   "bg": "#6d7a82",
+   "fg": "#ffffff",
+   "font": "assets/fonts/brand/AbrilFatface-Regular.ttf"
+  }
+ ]
+}
