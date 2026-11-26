@@ -152,5 +152,6 @@ static func build(img: Image, rect: Rect2, max_depth: float) -> MeshInstance3D:
 	m.shader = load("res://src/world/shaders/island_ground.gdshader")
 	mi.material_override = m
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.layers = WaterMirror.LAYER   # (under the mirror plane: never reflected)
 	mi.visibility_range_end = 2400.0
 	return mi

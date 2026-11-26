@@ -158,6 +158,6 @@ void fragment() {
 		float broad_shimmer = smoothstep(0.72, 0.99, fhash) * pow(sd, 15.0) * 0.055;
 		vec3 flake_col = mix(base, vec3(1.0), 0.68) * (fine_sparkle + broad_shimmer) * resolve * flake * metallic * (1.0 - wear);
 		vec3 sun_hi = (vec3(glint * coat_k) + flake_col) * (1.0 - night) * bake_ao * (1.0 - chip);
-		EMISSION = env_refl * env_w * mix(1.0, 0.45, night) + sun_hi;
+		EMISSION = env_refl * env_w * mix(1.0, 0.45, night) * fake_keep() + sun_hi;
 	}
 }

@@ -5,6 +5,14 @@
 // street with lamp dots below. `wp` (world position) slides the skyline as
 // things move, so reflections travel across bodywork and facades.
 
+// Real reflections (2026-11-26): when CityReflections' probes are live
+// (Medium/High), the engine's own PBR reflection shows the real city –
+// Schlick Fresnel and roughness-dependent blur included – so these fakes
+// drop to a faint fill (fake_keep) instead of painting a generic skyline
+// over it. On Low (refl_probe 0) they carry the look as before.
+global uniform float refl_probe;
+float fake_keep() { return mix(1.0, 0.2, clamp(refl_probe, 0.0, 1.0)); }
+
 float fr_h(float x) { return fract(sin(x * 127.1) * 43758.5453); }
 float fr_h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 

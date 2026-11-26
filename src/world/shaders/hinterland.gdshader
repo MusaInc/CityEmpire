@@ -22,7 +22,10 @@ float vnoise(vec2 p) {
 }
 float fbm(vec2 p) { return vnoise(p) * 0.5 + vnoise(p * 2.1) * 0.3 + vnoise(p * 4.3) * 0.2; }
 
+#include "res://src/world/shaders/mirror_clip.gdshaderinc"
+
 void vertex() {
+	mirror_clip_vertex(VERTEX, MODEL_MATRIX, INV_VIEW_MATRIX);
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_wn = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }

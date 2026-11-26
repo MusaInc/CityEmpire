@@ -59,6 +59,9 @@ func _ready() -> void:
 	material_override = mat
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	extra_cull_margin = 16384.0  # the vertex shader ignores the transform
+	# (Full screen in every camera that sees it: not in the water mirror's,
+	# where it painted over the whole reflection.)
+	layers = WaterMirror.LAYER
 	ignore_occlusion_culling = true
 	var settings := get_node_or_null("/root/Settings")
 	if settings:

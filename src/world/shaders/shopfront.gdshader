@@ -184,9 +184,9 @@ void fragment() {
 		// a little grime at the glass's foot and edges
 		float dirt = (1.0 - smoothstep(0.64, 1.0, v_local.y)) * 0.35 * age;
 		ALBEDO = vec3(0.02);
-		ROUGHNESS = 0.08;
+		ROUGHNESS = mix(0.08, 0.035, refl_probe);
 		METALLIC = 0.1;
 		SPECULAR = 0.5;
-		EMISSION = inside * roomlight * (1.0 - k) * (1.0 - dirt) * mix(vec3(1.0), vec3(1.0, 0.86, 0.66), lit) + env * k * (1.0 - 0.5 * night);
+		EMISSION = inside * roomlight * (1.0 - k) * (1.0 - dirt) * mix(vec3(1.0), vec3(1.0, 0.86, 0.66), lit) + env * k * (1.0 - 0.5 * night) * fake_keep();
 	}
 }

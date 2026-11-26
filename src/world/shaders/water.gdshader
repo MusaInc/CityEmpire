@@ -35,6 +35,11 @@ global uniform vec3 sky_horizon;
 global uniform vec3 sun_dir;
 global uniform float rain;
 global uniform float night;
+// Planar mirror (WaterMirror, 2026-11-26): the real scene reflected in the
+// water plane, and the view-projection of the camera that rendered it.
+global uniform sampler2D mirror_tex : filter_linear, repeat_disable;
+global uniform mat4 mirror_vp;
+global uniform float mirror_on;
 #include "res://src/world/shaders/fake_reflect.gdshaderinc"
 
 varying vec3 v_world;
@@ -236,6 +241,23 @@ void fragment() {
 			cr += lcol * col_core * band_y * (0.25 + 0.75 * ripple_glint) * night * 0.4 * (1.0 - smoothstep(250.0, 900.0, dist));
 		}
 		refl = mix(sky, cr, urban_w * mix(0.60, 0.92, night) * (1.0 - 0.52 * blow));
+	}
+	// The real reflection: this point of the plane as the mirrored camera
+	// saw it, nudged by the wave slope (more far off, where a pixel spans
+	// many waves) – towers, bridges, boats, the sun's and moon's paths and
+	// the lights at night. Fades to the sky/skyline fallback at the edges
+	// of the mirror's view and far out.
+	if (mirror_on > 0.5 && dist < 2600.0) {
+		vec2 bend = slope * (0.9 + dist * 0.0035) * (1.0 + blow);
+		vec4 cpos = mirror_vp * vec4(v_world.x + bend.x, -1.6, v_world.z + bend.y, 1.0);
+		if (cpos.w > 0.01) {
+			vec2 muv = cpos.xy / cpos.w * vec2(0.5, -0.5) + 0.5;
+			vec2 edge = smoothstep(vec2(0.0), vec2(0.06), muv) * smoothstep(vec2(0.0), vec2(0.06), 1.0 - muv);
+			float mw = edge.x * edge.y * (1.0 - smoothstep(1800.0, 2600.0, dist));
+			// (The mirror is the finished, tonemapped image: back to linear.)
+			vec3 mcol = pow(texture(mirror_tex, muv).rgb, vec3(2.2)) * 1.12;
+			refl = mix(refl, mcol, mw * (1.0 - 0.35 * blow));
+		}
 	}
 
 	// Body: crests the light shines through go turquoise, troughs deep.

@@ -12,6 +12,7 @@ render_mode diffuse_burley;
 
 global uniform float wetness;
 global uniform float puddles;
+global uniform float refl_probe;
 global uniform float rain;
 global uniform float night;
 global uniform vec3 sky_horizon;
@@ -130,7 +131,10 @@ vec3 shore_look(vec3 c, vec2 p, float y, float fp, float near, float tone, vec3 
 	return albedo;
 }
 
+#include "res://src/world/shaders/mirror_clip.gdshaderinc"
+
 void vertex() {
+	mirror_clip_vertex(VERTEX, MODEL_MATRIX, INV_VIEW_MATRIX);
 	v_kind = floor(COLOR.a * 8.0);   // (kinds stored as (k + 0.5) / 8: an alpha of 0 is dropped)
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_wn = (MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz;
@@ -370,7 +374,7 @@ void fragment() {
 			}
 			vec3 rain_sky = mix(sky_horizon * mix(0.6, 0.18, clamp(rain * 1.6, 0.0, 1.0)), max(sky_horizon * 0.33, vec3(0.040, 0.047, 0.060)), night);
 			float hemisphere = mix(0.42, 1.0, smoothstep(-0.04, 0.22, reflected.y));
-			emit += rain_sky * puddle * grazing * hemisphere * ripple * (is_road ? 1.0 : 0.72);
+			emit += rain_sky * puddle * grazing * hemisphere * ripple * (is_road ? 1.0 : 0.72) * mix(1.0, 0.3, refl_probe);
 		}
 		if (surface_wet > 0.18 && night > 0.24 && v_dist < 58.0) {
 			vec3 glint = vec3(0.0);

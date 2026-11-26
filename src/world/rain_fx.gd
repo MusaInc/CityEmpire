@@ -30,6 +30,7 @@ func _ready() -> void:
 		mm.set_instance_transform(i, Transform3D(Basis(), Vector3(rng.randf() * BOX.x, rng.randf() * BOX.y, rng.randf() * BOX.z)))
 	multimesh = mm
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	layers = WaterMirror.LAYER   # (streaks round the camera, not in mirrors)
 	custom_aabb = AABB(Vector3(-1e5, -1e4, -1e5), Vector3(2e5, 2e4, 2e5))  # (placed by the shader)
 	visible = false
 

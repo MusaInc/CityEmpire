@@ -25,6 +25,9 @@ global uniform float wetness;
 // Standing water that outlasts the rain (leftover puddles on dry, sunny
 // streets); the atmosphere keeps it >= wetness.
 global uniform float puddles;
+// Live reflection probes (CityReflections): puddles and wet tarmac mirror
+// the real street through the PBR specular, the painted sky steps back.
+global uniform float refl_probe;
 global uniform float rain;
 global uniform vec3 sky_top;
 global uniform vec3 sky_horizon;
@@ -97,7 +100,10 @@ vec4 road_sample(vec2 p) {
 	return vec4(dot(xs, wt), tn.y, z, dot(vec4(t00.w, t10.w, t01.w, t11.w), wt));
 }
 
+#include "res://src/world/shaders/mirror_clip.gdshaderinc"
+
 void vertex() {
+	mirror_clip_vertex(VERTEX, MODEL_MATRIX, INV_VIEW_MATRIX);
 	v_up = NORMAL.y;
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_wn = (MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz;
@@ -617,7 +623,7 @@ void fragment() {
 		puddle *= 1.0 - smoothstep(125.0, 250.0, camera_distance);
 		albedo *= (1.0 - (asphalt ? 0.32 : 0.14) * surface_wet) * (1.0 - 0.06 * puddle);
 		rough = mix(rough, asphalt ? 0.34 : 0.58, surface_wet);
-		rough = mix(rough, 0.06, puddle);
+		rough = mix(rough, mix(0.06, 0.025, refl_probe), puddle);
 	} else if (!shore && flat_top && grass) {
 		albedo *= 1.0 - wetness * 0.11;
 	}
@@ -675,7 +681,7 @@ void fragment() {
 			float sd_wet = pow(max(dot(reflected, normalize(sun_dir)), 0.0), 64.0) * (1.0 - night) * mix(0.26, 0.9, puddle * (1.0 - clamp(rain * 1.6, 0.0, 1.0)));
 			float hemisphere = mix(0.45, 1.0, smoothstep(-0.04, 0.22, reflected.y));
 			float sheet = max(puddle * 0.88, surface_wet * 0.10 * (0.4 + 0.6 * wheel_tracks));
-			EMISSION += (rain_sky * mix(0.10, 0.72, fres) + vec3(sd_wet)) * sheet * hemisphere * ripple;
+			EMISSION += (rain_sky * mix(0.10, 0.72, fres) * mix(1.0, 0.3, refl_probe) + vec3(sd_wet)) * sheet * hemisphere * ripple;
 		}
 		if (surface_wet > 0.16 && night > 0.20 && camera_distance < 62.0) {
 			vec3 glint = vec3(0.0);
@@ -718,7 +724,7 @@ void fragment() {
 			vec3 reflected = reflect(-to_eye, plane_normal);
 			vec3 rain_sky = mix(sky_horizon * 0.12, max(sky_horizon * 0.22, vec3(0.028, 0.034, 0.046)), night);
 			float hemisphere = mix(0.42, 1.0, smoothstep(-0.04, 0.22, reflected.y));
-			EMISSION += rain_sky * puddle * grazing * hemisphere * 0.30;
+			EMISSION += rain_sky * puddle * grazing * hemisphere * 0.30 * mix(1.0, 0.3, refl_probe);
 		}
 	}
 	if (rain > 0.02 && !shore && flat_top && (asphalt || pave)) {

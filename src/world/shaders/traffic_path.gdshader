@@ -144,7 +144,7 @@ void fragment() {
 			float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), finish == 2 ? 3.0 : 4.0);
 			float k = finish == 1 ? mix(0.09, 0.36, fres) : (finish == 2 ? mix(0.11, 0.48, fres) : 0.65);
 			float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 220.0 : 300.0) * (finish == 1 ? 0.9 : 0.75);
-			EMISSION += (env * k + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night) * bk.r;
+			EMISSION += (env * k * fake_keep() + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night) * bk.r;
 		} else {
 			// Far-LOD lightweight sky sheen (skips INV_VIEW_MATRIX & procedural skyline reflection).
 			float fres_far = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);

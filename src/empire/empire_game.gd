@@ -336,16 +336,29 @@ func _ready() -> void:
 			clouds.cover = float(skym.get_shader_parameter("cloud_cover"))
 			clouds.dark = float(skym.get_shader_parameter("cloud_dark"))
 		get_tree().process_frame.connect(_cloud_sync)
-	# City reflections in glass, paint and wet streets (off on Low).
-	# (The probe is replaced by fake reflections in the shaders: kept for
-	# comparisons with --probe; it re-rendered the city 6 times per capture.)
-	if args.has("probe"):
+	# Real reflections (overhaul 2026-11-26; off on Low, and with
+	# --noreflect for comparisons): probes that follow you for glass, paint,
+	# chrome and wet streets, and a planar mirror for the water.
+	if not args.has("noreflect"):
 		var refl := CityReflections.new()
 		refl.name = "CityReflections"
 		add_child(refl)
 		refl.view_fn = func() -> Vector3:
 			var c := get_viewport().get_camera_3d()
 			return c.global_position if c else player.global_position
+		refl.indoor_fn = func() -> float:
+			var c := get_viewport().get_camera_3d()
+			return InteriorKit.camera_weight(get_tree(), c.global_position) if c else 0.0
+		refl.light_fn = func() -> Vector3:
+			return Vector3(atmosphere.night if atmosphere else 0.0, atmosphere.wetness if atmosphere else 0.0,
+				clampf(atmosphere.hour / 24.0, 0.0, 1.0) if atmosphere else 0.0)
+		var mirror := WaterMirror.new()
+		mirror.name = "WaterMirror"
+		mirror.water_fn = layout.is_water
+		add_child(mirror)
+	else:
+		RenderingServer.global_shader_parameter_set("refl_probe", 0.0)
+		RenderingServer.global_shader_parameter_set("mirror_on", 0.0)
 
 	if args.has("save"):
 		save_path = String(args["save"])

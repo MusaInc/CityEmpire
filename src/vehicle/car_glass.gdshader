@@ -41,7 +41,7 @@ void fragment() {
 	float fres = pow(1.0 - facing, 4.2);
 	float sd = max(dot(r, normalize(sun_dir)), 0.0);
 	float glint = pow(sd, 240.0) * 0.58 + pow(sd, 36.0) * 0.055;
-	EMISSION = (env * mix(0.11, 0.68, fres) + vec3(glint)) * (1.0 - night * 0.46);
+	EMISSION = (env * mix(0.11, 0.68, fres) * fake_keep() + vec3(glint)) * (1.0 - night * 0.46);
 	ALPHA = mix(mix(0.30, 0.84, fres), 0.92, cr * 0.85);
 	if (sealed) {
 		vec3 bmin, bmax;

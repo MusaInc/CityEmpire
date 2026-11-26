@@ -51,6 +51,9 @@ common/max_physics_steps_per_frame=4
 
 renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="mobile"
+reflections/reflection_atlas/reflection_size=256
+reflections/reflection_atlas/reflection_size.mobile=256
+reflections/reflection_atlas/reflection_count=12
 renderer/rendering_method.web="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 anti_aliasing/quality/msaa_3d=1
@@ -97,6 +100,22 @@ wetness={
 puddles={
 "type": "float",
 "value": 0.7
+}
+refl_probe={
+"type": "float",
+"value": 0.0
+}
+mirror_on={
+"type": "float",
+"value": 0.0
+}
+mirror_vp={
+"type": "mat4",
+"value": Projection(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+}
+mirror_tex={
+"type": "sampler2D",
+"value": ""
 }
 rain={
 "type": "float",

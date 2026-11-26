@@ -89,7 +89,10 @@ float building_age(vec2 p, float seed) {
 	return mix(0.42, 1.0, a);
 }
 
+#include "res://src/world/shaders/mirror_clip.gdshaderinc"
+
 void vertex() {
+	mirror_clip_vertex(VERTEX, MODEL_MATRIX, INV_VIEW_MATRIX);
 	v_kind = floor(COLOR.a * 8.0 + 0.5);
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	v_wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -829,7 +832,9 @@ void fragment() {
 				rm *= curtain ? (tint * 2.2 + 0.15) : vec3(0.85, 0.88, 0.9);
 				interior = mix(interior, rm * 0.64, detail * 0.83);
 			}
-			gcol = mix(interior, refl, curtain ? 0.38 + 0.60 * fres : 0.24 + 0.70 * fres);
+			// (Real reflections live: the pane's colour is the room behind it and
+			// its coating; the probe's specular reflection does the mirroring.)
+			gcol = mix(interior, refl * fake_keep(), curtain ? 0.38 + 0.60 * fres : 0.24 + 0.70 * fres);
 			// Crisp sun glint on architectural glazing.
 			float sun_g = pow(max(dot(r, normalize(sun_dir)), 0.0), 140.0) * (1.0 - night) * (curtain ? 0.65 : 0.42);
 			gcol += vec3(1.0, 0.96, 0.88) * sun_g;
@@ -918,7 +923,7 @@ void fragment() {
 		}
 		albedo = mix(framed, gcol, glass);
 		float pane_coverage = glass * (punched ? mix(1.0, clear_pane, detail) : 1.0);
-		rough = mix(0.86, 0.12 + 0.06 * rnd, pane_coverage);
+		rough = mix(0.86, mix(0.12 + 0.06 * rnd, 0.03 + 0.05 * rnd, refl_probe), pane_coverage);   // (float glass: near-mirror once it reflects the real city; panes vary a touch)
 		metal = mix(0.0, 0.06, pane_coverage);
 		// Real relief for the light: the inner 15 cm round a punched window is
 		// its reveal (wall facing into the opening), the sill below tilts up

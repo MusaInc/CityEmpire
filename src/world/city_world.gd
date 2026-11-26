@@ -1977,6 +1977,7 @@ func _build_water() -> void:
 	mi.mesh = mesh
 	mi.material_override = water_mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.layers = WaterMirror.LAYER   # (not in its own reflection)
 	add_child(mi)
 
 
