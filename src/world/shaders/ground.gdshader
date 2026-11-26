@@ -110,7 +110,10 @@ float street_age(vec2 p) {
 	else if (p.y >= 260.0 && p.x < 560.0) a = 0.85;
 	else if (p.x > 780.0 || p.y < -540.0 || p.y > 520.0) a = 0.55;
 	else if (distance(p, vec2(560.0, -170.0)) < 330.0) a = mix(0.22, 0.42, smoothstep(240.0, 330.0, distance(p, vec2(560.0, -170.0))));
-	return clamp(a + (vnoise(p / 70.0) - 0.5) * 0.5, 0.0, 1.0);
+	a = clamp(a + (vnoise(p / 70.0) - 0.5) * 0.5, 0.0, 1.0);
+	// (2026-11-26, "make all the streets dirty": even the kept-up core
+	// carries a working city's grime – the scale starts at 0.45.)
+	return mix(0.45, 1.0, a);
 }
 
 // The closest real lamp heads supply a small rough reflection. Locate
@@ -325,6 +328,7 @@ void fragment() {
 				albedo = mix(albedo, vec3(0.068, 0.066, 0.064) * (0.88 + 0.24 * mh_grid), mh_lid * 0.85);
 				albedo *= 1.0 - 0.42 * mh_rim;
 				rough = mix(rough, 0.54, mh_lid * 0.7);
+				vec3 pre_paint = albedo;
 				// Paint: centre line (double yellow on boulevards, dashed white on
 				// streets), zebra crossings and stop lines at every junction mouth.
 				vec3 white = vec3(0.69, 0.67, 0.61);
@@ -409,6 +413,15 @@ void fragment() {
 				albedo = mix(albedo, white * wear, max(bay_edge, bay_tick) * 0.9);
 				paint_coverage = max(max(max(centre, divider), max(edge, arrow)),
 					max(max(max(zebra, stop), max(giveway, ghost)), max(max(ring_edge, apron_line), max(bay_edge, bay_tick))));
+				// Worn-through paint (2026-11-26): the markings come away in
+				// patches – bare asphalt showing through in blotches of a few cm to
+				// a metre, worst where tyres run – and what's left is grimed.
+				float blot = vnoise(p * 0.62 + 17.0) * 0.55 + vnoise(p * 2.3 + 5.0) * 0.30 + vnoise(p * 9.1 + 2.0) * 0.15;
+				float lost = smoothstep(0.50 - 0.22 * sa, 0.66 - 0.18 * sa, blot);
+				lost = max(lost, smoothstep(0.62, 0.95, vnoise(p * 23.0 + 11.0)) * 0.55);   // fine chips
+				float keep = 1.0 - lost * (0.75 + 0.25 * sa);
+				albedo = mix(pre_paint, mix(albedo, albedo * vec3(0.80, 0.78, 0.74), 0.25 + 0.35 * sa), keep);
+				paint_coverage *= keep;
 				rough = mix(rough, 0.7, max(max(centre, edge), max(max(zebra, stop), max(giveway, ring_edge))));
 			}
 			}

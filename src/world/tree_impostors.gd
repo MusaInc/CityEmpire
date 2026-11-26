@@ -67,7 +67,11 @@ static func place(root: Node3D, by_species: Dictionary, begin: float, end: float
 		mi.name = "TreeImpostors_" + sp
 		mi.multimesh = mm
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.visibility_range_begin = begin
-		mi.visibility_range_begin_margin = 20.0 if begin > 0.0 else 0.0
+		# Fades in over the band the real trees fade out in (TreeKit.FADE before
+		# their `ends_at`, which callers pass as begin + 20).
+		var fb := begin + 20.0
+		mi.visibility_range_begin = maxf(0.0, fb - TreeKit.FADE - 4.0) if begin > 0.0 else 0.0
+		if begin > 0.0:
+			mi.set_instance_shader_parameter("lod_fade_in", Vector2(fb - TreeKit.FADE, fb))
 		mi.visibility_range_end = end
 		root.add_child(mi)

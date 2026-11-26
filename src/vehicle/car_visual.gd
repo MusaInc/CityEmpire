@@ -363,6 +363,7 @@ static func _wheel_finish(name: String, offroad: bool, model := "") -> Material:
 
 
 var has_clear_cabin := false
+static var _sealed_glass := {}   # body kind -> its traced-cabin glass
 var cabin_profile: Dictionary
 var driver_seat := Vector3.ZERO
 
@@ -446,6 +447,22 @@ func setup(p_car: Car) -> void:
 					m = beacon_mat
 				_: m = body_finish(n, String(spec["body"]))
 			body.set_surface_override_material(i, m)
+		if not has_clear_cabin and mesh:
+			# Sealed shells (no modelled cabin): the glass traces one
+			# (fake_cabin.gdshaderinc) instead of showing the paint behind it.
+			# One material per body kind (bounds differ), shared by its cars.
+			for i in mesh.get_surface_count():
+				var gm := body.get_surface_override_material(i) as ShaderMaterial
+				if gm and gm.shader == GLASS_SHADER:
+					var key := String(spec["body"])
+					if not _sealed_glass.has(key):
+						var sg := gm.duplicate() as ShaderMaterial
+						var bb := mesh.get_aabb()
+						sg.set_shader_parameter("sealed", true)
+						sg.set_shader_parameter("body_min", bb.position)
+						sg.set_shader_parameter("body_max", bb.end)
+						_sealed_glass[key] = sg
+					body.set_surface_override_material(i, _sealed_glass[key])
 	cabin_profile = VehicleAccess.geometry(car)
 	driver_seat = cabin_profile["seat"]
 	# Wheels.

@@ -1325,13 +1325,15 @@ func _make_groups(meshes: Array, far_meshes: Array, mid_meshes: Array) -> void:
 				if old:
 					var sm := ShaderMaterial.new()
 					var finish_v = old.get_shader_parameter("finish")
-					var is_glass := not far and finish_v != null and int(finish_v) == 2
+					var is_sealed := bool(old.get_shader_parameter("sealed")) if old.get_shader_parameter("sealed") != null else false
+					# (sealed shells: opaque glass with the traced cabin in PATH_SHADER)
+					var is_glass := not far and finish_v != null and int(finish_v) == 2 and not is_sealed
 					sm.shader = PATH_BEAM_SHADER if old.shader == CityWorld.BEAM_SHADER else \
 						(PATH_AO_SHADER if old.shader == CityWorld.AO_SHADER else \
 						(preload("res://src/world/shaders/traffic_path_glass.gdshader") if is_glass else PATH_SHADER))
 					# ("finish" was missing: moving cars lost their clear-coat
 					# paint, glass reflections and chrome – plain plastic.)
-					for p in ["tint", "use_instance_color", "emission", "roughness", "finish"]:
+					for p in ["tint", "use_instance_color", "emission", "roughness", "finish", "sealed", "body_min", "body_max"]:
 						sm.set_shader_parameter(p, old.get_shader_parameter(p))
 					if not far and old.get_shader_parameter("has_bake"):
 						sm.set_shader_parameter("bake_tex", old.get_shader_parameter("bake_tex"))

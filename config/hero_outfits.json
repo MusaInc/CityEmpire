@@ -30,7 +30,8 @@
         "trousers": "chinos",
         "top_col": "#a3b5c4",
         "pants_col": "#81715f",
-        "shoes": "shoes_blackout"
+        "shoes": "shoes_blackout",
+        "footwear": "derbies"
       }
     },
     {
@@ -42,6 +43,52 @@
         "top_col": "#506378",
         "pants_col": "#252933",
         "shoes": "shoes_classic"
+      }
+    },
+    {
+      "id": "ade_suit",
+      "name": "Suit",
+      "look": {
+        "top": "top_blazer",
+        "trousers": "chinos",
+        "top_col": "#1f2533",
+        "pants_col": "#1f2533",
+        "shoes": "shoes_blackout",
+        "footwear": "derbies"
+      }
+    },
+    {
+      "id": "ade_coat",
+      "name": "Overcoat",
+      "look": {
+        "top": "top_coat",
+        "trousers": "chinos",
+        "top_col": "#b08a5e",
+        "pants_col": "#2b2d33",
+        "shoes": "shoes_blackout",
+        "footwear": "derbies"
+      }
+    },
+    {
+      "id": "ade_tracksuit",
+      "name": "Tracksuit",
+      "look": {
+        "top": "top_track",
+        "trousers": "track",
+        "top_col": "#16181d",
+        "pants_col": "#16181d",
+        "shoes": "shoes_classic"
+      }
+    },
+    {
+      "id": "ade_oversized",
+      "name": "Oversized",
+      "look": {
+        "top": "top_oversize",
+        "trousers": "cargo",
+        "top_col": "#d8d2c4",
+        "pants_col": "#2f3330",
+        "shoes": "shoes_gum"
       }
     }
   ],
@@ -109,6 +156,45 @@
         "pants_col": "#71152e",
         "shoes": "shoes_gold",
         "accessory": "evening"
+      }
+    },
+    {
+      "id": "jules_coat",
+      "name": "Overcoat",
+      "look": {
+        "top": "top_coat",
+        "trousers": "relaxeddenim",
+        "footwear": "pumps",
+        "top_col": "#c3a27a",
+        "pants_col": "#2a3040",
+        "shoes": "shoes_blackout",
+        "accessory": "office"
+      }
+    },
+    {
+      "id": "jules_tracksuit",
+      "name": "Tracksuit",
+      "look": {
+        "top": "top_track",
+        "trousers": "track",
+        "footwear": "streettrainers",
+        "top_col": "#5b2a36",
+        "pants_col": "#5b2a36",
+        "shoes": "shoes_classic",
+        "accessory": "street"
+      }
+    },
+    {
+      "id": "jules_oversized",
+      "name": "Oversized",
+      "look": {
+        "top": "top_oversize",
+        "trousers": "relaxeddenim",
+        "footwear": "highstreet",
+        "top_col": "#2a2a2e",
+        "pants_col": "#7a8fa6",
+        "shoes": "shoes_blackout",
+        "accessory": "street"
       }
     }
   ]

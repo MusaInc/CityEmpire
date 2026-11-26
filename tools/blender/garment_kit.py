@@ -27,7 +27,10 @@ from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
 from mathutils.kdtree import KDTree
 
-EASE_LAYER = {'skin': .004, 'shirt': .010, 'knit': .013, 'jacket': .020}
+# (2026-11-26: worn, not moulded – a regular casual fit carries ~10 cm of
+# chest ease round the body, a relaxed knit ~14 cm, a jacket over a layer
+# more; the old 1.0/1.3/2.0 cm read as shrink-wrapped.)
+EASE_LAYER = {'skin': .004, 'shirt': .015, 'knit': .020, 'jacket': .027, 'coat': .034, 'oversize': .040}
 
 
 def armw(j):

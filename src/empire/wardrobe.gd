@@ -10,6 +10,7 @@ extends RefCounted
 const PRICES := {
 	"top_tee": 18, "top_polo": 28, "top_hoodie": 45, "top_jumper": 40, "top_long": 24,
 	"top_shirt": 120, "top_blazer": 480,
+	"top_oversize": 35, "top_track": 85, "top_coat": 640, "track": 60,
 	"shoes_classic": 55, "shoes_blackout": 60, "shoes_gum": 70,
 	"shoes_royal": 260, "shoes_volt": 320, "shoes_gold": 900,
 	"head_cap": 15, "head_beanie": 14, "head_phones": 350,
@@ -20,21 +21,22 @@ const PRICES := {
 	"street": 89, "office": 140, "evening": 230,
 }
 const JULES_STOCK := {
-	"clothes_everyday": ["top_fashion_zipcrop", "utilitymini", "highstreet", "street",
+	"clothes_everyday": ["top_fashion_zipcrop", "utilitymini", "highstreet", "street", "top_oversize", "top_track", "track",
 		"top_fashion_crossbra", "sprintshorts"],
-	"clothes_premium": ["top_fashion_tailoredknit", "beltedmini", "pumps", "office",
+	"clothes_premium": ["top_fashion_tailoredknit", "beltedmini", "pumps", "office", "top_coat",
 		"top_fashion_cowldress", "eveningstraps", "evening"],
 	"clothes_boutique": ["top_fashion_zipcrop", "utilitymini", "highstreet", "street",
 		"top_fashion_tailoredknit", "beltedmini", "pumps", "office"],
 }
 const STORES := {
 	"clothes_everyday": {"name": "Threadline", "items": ["top_tee", "top_polo", "top_hoodie", "top_jumper", "top_long",
+		"top_oversize", "top_track", "track",
 		"shoes_classic", "shoes_blackout", "shoes_gum", "head_cap", "head_beanie"]},
-	"clothes_premium": {"name": "Maison Arden", "items": ["top_shirt", "shoes_royal", "shoes_volt", "shoes_gold",
+	"clothes_premium": {"name": "Maison Arden", "items": ["top_shirt", "top_blazer", "top_coat", "shoes_royal", "shoes_volt", "shoes_gold",
 		"head_phones", "face_shades"]},
 	# The city's independent boutiques (CityLife firms of type "clothing"):
 	# a mid-range edit of both; the name is the boutique's (boutique_name).
-	"clothes_boutique": {"name": "Boutique", "items": ["top_tee", "top_polo", "top_jumper", "top_long", "top_shirt",
+	"clothes_boutique": {"name": "Boutique", "items": ["top_tee", "top_polo", "top_jumper", "top_long", "top_shirt", "top_oversize", "top_coat",
 		"shoes_classic", "shoes_gum", "shoes_royal", "head_cap", "head_beanie", "face_shades"]},
 }
 ## The boutique you're in (its name on receipts and the store screen).

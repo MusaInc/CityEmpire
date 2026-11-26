@@ -227,9 +227,13 @@ def fit_skirt_motion(skirt, waist, hem):
         depth = p.y-.015
         # A round section cuts across the fronts of the individual thighs.
         # Add width between the front crease and the existing side seam.
-        seat = math.exp(-((p.z-.779)/.108)**2)
+        # Room for the thighs that grows from the hip and HOLDS to the hem (an
+        # A-line). It was a bump peaking at mid-thigh (z .78) and fading by
+        # the hem, so short skirts bowed out and came back in – a balloon
+        # (2026-11-26).
+        seat = smooth(.93, .76, p.z)
         panel = min(1, abs(depth)/.079)
-        p.y += math.copysign(seat*panel*(.046 if depth>0 else .022),depth)
+        p.y += math.copysign(seat*panel*(.026 if depth*FRONT>0 else .010),depth)
         side = max(0,min(1,(abs(p.x)-.025)/.112))
         below_hip = max(0,min(1,(.966-p.z)/.232))
         share = (.36 if short else .23)*below_hip*side

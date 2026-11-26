@@ -26,6 +26,12 @@ uniform bool is_tail_lamp = false;
 uniform bool is_far_lod = false;
 uniform sampler2D lane_tex : filter_nearest, repeat_disable;
 
+#include "res://src/world/shaders/fake_cabin.gdshaderinc"
+uniform bool sealed = false;
+uniform vec3 body_min = vec3(-0.9, 0.0, -2.2);
+uniform vec3 body_max = vec3(0.9, 1.5, 2.2);
+varying vec3 v_local;
+varying vec3 v_cam;
 varying float v_braking;
 varying float v_dist;
 
@@ -68,6 +74,8 @@ void vertex() {
 		bool loop = hd.y > 0.5;
 		vec3 pos;
 		mat3 B = traffic_frame(lane_tex, base, n, loop, s, pos);
+		v_local = VERTEX;
+		v_cam = transpose(B) * (INV_VIEW_MATRIX[3].xyz - pos);
 		vec3 world = pos + B * VERTEX;
 		VERTEX = (VIEW_MATRIX * vec4(world, 1.0)).xyz;
 		NORMAL = normalize(mat3(VIEW_MATRIX) * (B * NORMAL));
@@ -111,6 +119,18 @@ void fragment() {
 		EMISSION = vec3(1.0, 0.04, 0.02) * (3.4 + 2.8 * night);
 	} else {
 		EMISSION = tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
+	}
+	if (finish == 2 && sealed && v_dist < 220.0) {
+		// See-through windows on sealed shells: the traced cabin (2026-11-26).
+		vec3 bmin, bmax;
+		cabin_box(body_min, body_max, bmin, bmax);
+		vec3 dl = normalize(v_local - v_cam);
+		vec3 dw = normalize((INV_VIEW_MATRIX * vec4(-VIEW, 0.0)).xyz);
+		float through;
+		vec3 inside = fake_cabin(v_local, dl, bmin, bmax, cabin_outside(dw, sky_horizon, sky_top, night), through);
+		float amb = dot(sky_horizon, vec3(0.3, 0.55, 0.15)) * 1.15 + 0.02;
+		ALBEDO = vec3(0.012);
+		EMISSION += mix(inside * amb, inside, through) * vec3(0.80, 0.86, 0.88);
 	}
 	if (finish > 0) {
 		if (!is_far_lod && v_dist < 140.0) {

@@ -7,6 +7,7 @@ global uniform float wetness;
 global uniform float rain;
 global uniform vec3 sun_dir;
 global uniform float night;
+#include "res://src/world/shaders/lod_fade.gdshaderinc"
 
 varying vec3 crown_normal;
 varying float crown_height;
@@ -14,6 +15,7 @@ varying float radial_out;
 varying flat float tree_tone;
 
 void vertex() {
+	v_lod_d = lod_fade_dist(MODEL_MATRIX, INV_VIEW_MATRIX);
 	// The cards have crown normals baked in Blender. Keep their light
 	// direction consistent on either side of a card.
 	crown_normal = normalize(MODEL_NORMAL_MATRIX * NORMAL);
@@ -36,6 +38,9 @@ void vertex() {
 }
 
 void fragment() {
+	if (lod_fade_discard(FRAGCOORD.xy)) {
+		discard;
+	}
 	vec4 leaf = texture(foliage, UV);
 	ALPHA = leaf.a;
 	ALPHA_SCISSOR_THRESHOLD = 0.34;

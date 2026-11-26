@@ -7,6 +7,9 @@ const SPECIES_TINT := {
 	"pine": Vector3(0.74, 0.94, 0.86),
 }
 const CANOPY := preload("res://src/world/shaders/tree_canopy.gdshader")
+const BARK := preload("res://src/world/shaders/tree_bark.gdshader")
+## Width of the dithered cross-fade between levels (lod_fade.gdshaderinc).
+const FADE := 14.0
 const LOD_CELL := 96.0
 static var _meshes := {}
 
@@ -45,9 +48,16 @@ static func _load_mesh(species: String, lod: String) -> ArrayMesh:
 				canopy.set_shader_parameter("species_tint", SPECIES_TINT.get(species, Vector3.ONE))
 				material = canopy
 			elif source:
-				var bark := source.duplicate() as StandardMaterial3D
-				bark.roughness = maxf(bark.roughness, 0.88)
-				bark.metallic = 0.0
+				# Bark on a shader with the canopy's dithered LOD fade.
+				var bark := ShaderMaterial.new()
+				bark.shader = BARK
+				if source.albedo_texture:
+					bark.set_shader_parameter("albedo_tex", source.albedo_texture)
+				bark.set_shader_parameter("albedo_color", source.albedo_color)
+				if source.normal_enabled and source.normal_texture:
+					bark.set_shader_parameter("normal_tex", source.normal_texture)
+					bark.set_shader_parameter("has_normal", true)
+				bark.set_shader_parameter("roughness", maxf(source.roughness, 0.88))
 				material = bark
 			var geometry := SurfaceTool.new()
 			geometry.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -105,15 +115,20 @@ static func instance_batch(parent: Node3D, species: String, placements: Array, e
 
 
 static func _add_lods(parent: Node3D, placements: Array, far_mesh: Mesh, near_mesh_resource: Mesh, ends_at: float, detail_range: float) -> void:
+	# Levels overlap over a FADE band and cross-dissolve there (dithered,
+	# lod_fade.gdshaderinc) instead of swapping: no tree changes or appears
+	# in front of you (2026-11-26). The far level fades out over the last
+	# FADE metres before `ends_at`, where the impostors fade in.
 	var far := _instance_lod(parent, placements, far_mesh)
 	far.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	far.visibility_range_end = ends_at
-	far.visibility_range_end_margin = 16.0
+	far.visibility_range_end = ends_at + 4.0
+	far.set_instance_shader_parameter("lod_fade_out", Vector2(ends_at - FADE, ends_at))
 	if near_mesh_resource != null:
-		far.visibility_range_begin = detail_range
-		far.visibility_range_begin_margin = 10.0
+		far.visibility_range_begin = maxf(0.0, detail_range - FADE * 0.5 - 4.0)
+		far.set_instance_shader_parameter("lod_fade_in", Vector2(detail_range - FADE * 0.5, detail_range + FADE * 0.5))
 		var near := _instance_lod(parent, placements, near_mesh_resource)
-		near.visibility_parent = near.get_path_to(far)
+		near.visibility_range_end = detail_range + FADE * 0.5 + 4.0
+		near.set_instance_shader_parameter("lod_fade_out", Vector2(detail_range - FADE * 0.5, detail_range + FADE * 0.5))
 
 
 static func _instance_lod(parent: Node3D, placements: Array, lod: Mesh) -> MultiMeshInstance3D:

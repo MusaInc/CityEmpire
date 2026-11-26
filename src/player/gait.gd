@@ -21,6 +21,9 @@ extends RefCounted
 ## pelvis, spine and arms.
 
 const ANKLE_H := 0.05
+## Ankle pivot above the ground for this wearer: ANKLE_H, plus the heel
+## rise in heeled shoes (CharacterRig.set_heel).
+var ankle_h := ANKLE_H
 const LEG_LEN := 0.89
 const BALL := 0.13
 const HEEL := 0.066
@@ -150,7 +153,7 @@ func begin(ankles: Dictionary, facing: Vector3, ground: Callable, vel: Vector3) 
 		var u := _u(f)
 		f.ease = Vector3.ZERO
 		var gh: Dictionary = ground.call(a)
-		var high := not gh.is_empty() and a.y - (gh.position as Vector3).y - ANKLE_H > 0.05
+		var high := not gh.is_empty() and a.y - (gh.position as Vector3).y - ankle_h > 0.05
 		if moving and high:
 			# Landing on the run with this foot still in the air: it comes
 			# down in a quick step instead of being dragged onto the ground.
@@ -191,7 +194,7 @@ func _style(s: float) -> void:
 func _plant_at(f: Foot, a: Vector3, ground: Callable) -> void:
 	var hit := _sole_hit(ground, a, f.heading, everyday)
 	f.planted = true
-	f.pos = Vector3(a.x, (hit.position as Vector3).y + ANKLE_H, a.z) if not hit.is_empty() else a
+	f.pos = Vector3(a.x, (hit.position as Vector3).y + ankle_h, a.z) if not hit.is_empty() else a
 	f.normal = hit.normal if not hit.is_empty() else Vector3.UP
 	f.cur = f.pos
 	f.w = 0.0
@@ -303,8 +306,8 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				a = _roll(f.pos, f.heading, f.normal, f.toe)
 			# Track the ankle around the planted shoe heel during loading.
 			if everyday and f.heel > 0.0:
-				a += f.normal * (HEEL * sin(f.heel) + ANKLE_H * (cos(f.heel) - 1.0))
-				a -= f.heading * (ANKLE_H * sin(f.heel) + HEEL * (1.0 - cos(f.heel)))
+				a += f.normal * (HEEL * sin(f.heel) + ankle_h * (cos(f.heel) - 1.0))
+				a -= f.heading * (ankle_h * sin(f.heel) + HEEL * (1.0 - cos(f.heel)))
 			f.cur = a
 			_pivot(f, facing, dt)
 			# Lift: the clock says so, or the body has run away from the foot
@@ -372,7 +375,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 					break
 				land += end_dir * 0.07
 			if not hit.is_empty():
-				land.y = (hit.position as Vector3).y + ANKLE_H
+				land.y = (hit.position as Vector3).y + ankle_h
 				f.target_n = hit.normal
 			var sharp := _accel_h.length() > 2.5 or braking_plant
 			if f.w < 0.85 or f.target == Vector3.ZERO:
@@ -430,7 +433,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				p.y = minf(p.y, hip.y - sqrt(FOLD_MIN * FOLD_MIN - rh * rh))
 			var g := _sole_hit(ground, p, f.heading, everyday)
 			if not g.is_empty():
-				p.y = maxf(p.y, (g.position as Vector3).y + ANKLE_H + 0.01 * sin(PI * f.w))
+				p.y = maxf(p.y, (g.position as Vector3).y + ankle_h + 0.01 * sin(PI * f.w))
 			f.cur = p
 			# Foot pitch: toes stay pointed after the push-off, then come up
 			# to meet the ground (heel first walking, flat-ish running).
@@ -465,7 +468,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				else:
 					var h := _sole_hit(ground, f.cur + Vector3.UP * 0.3, f.heading, everyday)
 					if not h.is_empty():
-						f.pos.y = (h.position as Vector3).y + ANKLE_H
+						f.pos.y = (h.position as Vector3).y + ankle_h
 						f.normal = h.normal
 				f.cur = f.pos
 				f.w = 0.0
@@ -567,7 +570,7 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 		var hit: Dictionary = _sole_hit(ground, rest + Vector3.UP * 0.3, facing, true) if everyday \
 				else ground.call(rest + Vector3.UP * 0.3)
 		if not hit.is_empty():
-			rest.y = (hit.position as Vector3).y + ANKLE_H
+			rest.y = (hit.position as Vector3).y + ankle_h
 		var e := smoothstep(0.0, 1.0, f.w)
 		var p := f.from.lerp(rest, e)
 		p.y = lerpf(f.from.y, rest.y, e) + sin(PI * f.w) * (0.035 if f.quick else 0.06)
