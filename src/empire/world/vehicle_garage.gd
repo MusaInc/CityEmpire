@@ -33,6 +33,7 @@ var _shutter: Node3D
 var _shutter_open := 0.0
 var _lights: Array[Light3D] = []
 var _built_for := -1
+var _plaques: Array[Label3D] = []
 
 
 func setup(g: EmpireGame) -> void:
@@ -54,8 +55,9 @@ func bay_xf(i: int) -> Transform3D:
 	var side := -1.0 if i % 2 == 0 else 1.0
 	var z := LOBBY + BAY_W * (float(i / 2) + 0.5)
 	var x := side * (AISLE * 0.5 + BAY_D * 0.5)
-	# reversed in: the car's front (-Z local of a Car) faces the aisle
-	var b := Basis(Vector3.UP, PI * 0.5 if side < 0.0 else -PI * 0.5)
+	# Reversed in, front on show: a Car's front is its local -Z, turned to
+	# face the aisle (+X on the left row, -X on the right).
+	var b := Basis(Vector3.UP, -PI * 0.5 if side < 0.0 else PI * 0.5)
 	return Transform3D(b, Vector3(x, 0.05, z))
 
 
@@ -83,6 +85,8 @@ func enter(home_id: String) -> void:
 		_build(need)
 	_set_visible(true)
 	inside = true
+	for p in _plaques:
+		p.text = ""
 	for i in cars.size():
 		var v: Dictionary = cars[i][0]
 		var c: Car = cars[i][1]
@@ -102,17 +106,28 @@ func enter(home_id: String) -> void:
 		c.angular_velocity = Vector3.ZERO
 		var xf := global_transform * bay_xf(i)
 		c.place(xf)
+		if i < _plaques.size():
+			_plaques[i].text = String(EmpireData.vehicle_model(String(v["model"])).get("name", "")).to_upper()
 		c.park_lock = true
 		v["pos"] = [xf.origin.x, xf.origin.y, xf.origin.z]
 		v["yaw"] = xf.basis.get_euler().y
+	game.player.kill_plane_floor = ORIGIN.y - 30.0   # (below the world on purpose)
 	game._teleport(to_global(Vector3(0.0, 1.0, 2.2)), PI)
 	game.ui.toast("Vehicle Collection · %d car%s · drive up the ramp to leave" % [cars.size(), "" if cars.size() == 1 else "s"], "info")
 	Sfx.play("bell", -8.0)
 
 
+## Leaving by the lift (EmpireGame.arrive_from_garage places you).
+func leave_quietly() -> void:
+	inside = false
+	game.player.kill_plane_floor = INF
+	_set_visible(false)
+
+
 ## Back up the lift on foot, to the lobby you came down from.
 func leave_on_foot() -> void:
 	inside = false
+	game.player.kill_plane_floor = INF
 	_set_visible(false)
 	var home := game.home_by_id(from_home)
 	var el: ApartmentElevator = game.elevators.get(from_home)
@@ -135,6 +150,7 @@ func _exit_by_road(c: Car) -> void:
 		return
 	var xf: Transform3D = r["xf"]
 	c.place(Transform3D(xf.basis, xf.origin + xf.basis.y * 0.35), -xf.basis.z * 6.0)
+	game.player.kill_plane_floor = INF
 	inside = false
 	_set_visible(false)
 	game.chase.set_target(c, true)
@@ -223,11 +239,27 @@ func _build(n: int) -> void:
 	_col.name = "Collision"
 	_col.collision_layer = 1 | (1 << 1)
 	add_child(_col)
-	var floor_m := _mat(Color(0.16, 0.165, 0.17), 0.22, 0.15)      # polished concrete
+	var floor_m := _mat(Color(0.13, 0.135, 0.14), 0.12, 0.2)      # polished resin
 	var wall_m := _mat(Color(0.82, 0.81, 0.78), 0.6)
 	var dark_m := _mat(Color(0.07, 0.075, 0.08), 0.5)
 	var line_m := _mat(Color(0.92, 0.9, 0.85), 0.5)
 	var led_m := _mat(Color(0.9, 0.95, 1.0), 0.4, 0.0, Color(0.85, 0.92, 1.0))
+	var panel_m := _mat(Color(0.95, 0.93, 0.88), 0.5, 0.0, Color(0.55, 0.5, 0.42))
+	var pool_m := StandardMaterial3D.new()
+	pool_m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pool_m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	pool_m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	pool_m.albedo_color = Color(1.0, 0.92, 0.78, 0.22)
+	var grad := GradientTexture2D.new()
+	grad.fill = GradientTexture2D.FILL_RADIAL
+	grad.fill_from = Vector2(0.5, 0.5)
+	grad.fill_to = Vector2(0.5, 0.0)
+	var gg := Gradient.new()
+	gg.set_color(0, Color(1, 1, 1, 1))
+	gg.set_color(1, Color(1, 1, 1, 0))
+	grad.gradient = gg
+	pool_m.albedo_texture = grad
+	_plaques.clear()
 	var warm_m := _mat(Color(1.0, 0.9, 0.75), 0.4, 0.0, Color(1.0, 0.86, 0.66))
 	var L := ramp_start()
 	var W := AISLE + BAY_D * 2.0 + 1.0
@@ -240,6 +272,14 @@ func _build(n: int) -> void:
 	# lift doors (brushed steel) in the back wall, and a lobby carpet
 	_box(_vis, Vector3(2.2, 2.5, 0.06), Vector3(0, 1.25, 0.02), _mat(Color(0.6, 0.62, 0.64), 0.3, 0.9))
 	_box(_vis, Vector3(6.0, 0.02, 3.6), Vector3(0, 0.01, 2.2), _mat(Color(0.18, 0.08, 0.06), 0.9))
+	# the lobby lounge: a leather sofa, low table and two planters
+	var leather := _mat(Color(0.12, 0.07, 0.05), 0.45)
+	_box(_vis, Vector3(2.2, 0.42, 0.85), Vector3(-2.6, 0.21, 3.2), leather, true)
+	_box(_vis, Vector3(2.2, 0.5, 0.2), Vector3(-2.6, 0.62, 3.55), leather)
+	_box(_vis, Vector3(1.0, 0.36, 0.6), Vector3(-2.6, 0.18, 2.2), _mat(Color(0.2, 0.17, 0.14), 0.3, 0.2))
+	for px: float in [-3.2, 3.2]:
+		_box(_vis, Vector3(0.6, 0.6, 0.6), Vector3(px, 0.3, 0.6), _mat(Color(0.15, 0.15, 0.16), 0.5))
+		_box(_vis, Vector3(0.5, 0.9, 0.5), Vector3(px, 1.05, 0.6), _mat(Color(0.14, 0.3, 0.12), 0.9))
 	var sign := Label3D.new()
 	sign.text = "VEHICLE COLLECTION"
 	sign.font_size = 72
@@ -265,11 +305,34 @@ func _build(n: int) -> void:
 		num.rotation.y = -PI * 0.5 if side > 0.0 else PI * 0.5   # (facing into the aisle, readable)
 		_vis.add_child(num)
 		_box(_vis, Vector3(0.5, 0.04, BAY_W - 0.6), Vector3(xf.origin.x, H - 0.03, zc), warm_m)
+		# backlit feature wall behind each car, a plaque with its name
+		_box(_vis, Vector3(0.06, 1.6, BAY_W - 0.7), Vector3(side * (W * 0.5 - 0.04), 1.25, zc), panel_m)
+		var pl := Label3D.new()
+		pl.font_size = 64
+		pl.pixel_size = 0.004
+		pl.modulate = Color(0.85, 0.72, 0.45)
+		pl.position = Vector3(side * (AISLE * 0.5 - 0.15), 0.12, zc)
+		pl.rotation = Vector3(-PI * 0.5, -PI * 0.5 if side > 0.0 else PI * 0.5, 0.0)
+		_vis.add_child(pl)
+		_plaques.append(pl)
+		# a soft pool of light on the floor in front of each car (emissive:
+		# no per-bay lights – mobile pays for every light on a mesh)
+		var pool := MeshInstance3D.new()
+		var pm := PlaneMesh.new()
+		pm.size = Vector2(BAY_D * 0.9, BAY_W * 0.85)
+		pool.mesh = pm
+		pool.material_override = pool_m
+		pool.position = Vector3(xf.origin.x, 0.015, zc)
+		pool.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_vis.add_child(pool)
 		if i % 2 == 0:
 			for sx: float in [-1.0, 1.0]:
 				_box(_vis, Vector3(0.5, H, 0.5), Vector3(sx * (AISLE * 0.5 + BAY_D + 0.2), H * 0.5, zc - BAY_W * 0.5), wall_m, true)
-	# aisle light strip
-	_box(_vis, Vector3(0.3, 0.04, L - LOBBY), Vector3(0, H - 0.03, (L + LOBBY) * 0.5), led_m)
+	# aisle: two light strips either side of a coffer
+	for ax: float in [-1.6, 1.6]:
+		_box(_vis, Vector3(0.12, 0.04, L - LOBBY), Vector3(ax, H - 0.03, (L + LOBBY) * 0.5), led_m)
+	_box(_vis, Vector3(3.0, 0.25, L - LOBBY), Vector3(0, H - 0.12, (L + LOBBY) * 0.5), dark_m)
+	# (No ReflectionProbe: from down here it rendered the whole city into its cubemap.)
 	# lights: a few soft omnis for the showroom look (mobile: <= 8 per object)
 	var k := 0
 	for z in range(int(LOBBY), int(L), 10):

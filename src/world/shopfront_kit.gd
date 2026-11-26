@@ -78,6 +78,9 @@ static func bays_for(buildings: Array, layout: CityLayout = null) -> Array:
 		# An enterable ground floor (Premises) keeps its own stretch of the
 		# frontage; the rest of the ground floor is still decorative shops.
 		var unit: Dictionary = b.get("apt", {}) if b.get("apt", {}).get("ground", false) else {}
+		# An apartment tower's street door into its lobby stays clear and
+		# obvious (2026-11-26: shopfronts were built across it).
+		var home_door: Array = Apartments.core_door(b["apt"]) if b.get("apt", {}).has("core") and not b.get("apt", {}).get("ground", false) else []
 		var t: Array = b["tiers"][0]
 		if float(t[5]) - float(t[4]) < 5.2 or not BuildingMesher._on_ground(b, t):
 			continue
@@ -103,6 +106,9 @@ static func bays_for(buildings: Array, layout: CityLayout = null) -> Array:
 					continue
 				var span := BuildingMesher._fbox(face, a0, a0 + BAY, 0.0, 0.6, base, base + 4.7)
 				if avoid.any(func(o: AABB) -> bool: return o.intersects(span)):
+					continue
+				if not home_door.is_empty() and int(home_door[0]) == side \
+						and a0 < float(home_door[2]) + 1.5 and a0 + BAY > float(home_door[1]) - 1.5:
 					continue
 				if not unit.is_empty() and int(unit.get("face", -1)) == side \
 						and a0 < float(unit["a1"]) + 0.4 and a0 + BAY > float(unit["a0"]) - 0.4:

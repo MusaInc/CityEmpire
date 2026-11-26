@@ -163,6 +163,9 @@ var ground_fn: Callable
 ## On foot (everyday): bends the stick's direction (world, length kept), e.g.
 ## into the middle of a doorway you're walking at.
 var steer_fn: Callable
+## A place deliberately below the world (the Vehicle Collection under the
+## city): its own floor for the fall-out-of-the-world check. INF = the usual.
+var kill_plane_floor := INF
 var stagger_t := 0.0  # > 0 while staggering back off a wall (no stick)
 var _stagger_cool := 0.0
 ## Long reach (humans only): the higher you are and the faster you fall, the
@@ -524,7 +527,7 @@ func _physics_process(dt: float) -> void:
 		air_time = 0.0
 	else:
 		air_time += dt
-	if global_position.y < params.kill_plane_y:
+	if global_position.y < (params.kill_plane_y if is_inf(kill_plane_floor) else kill_plane_floor):
 		respawn()
 
 

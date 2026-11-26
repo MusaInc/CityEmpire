@@ -792,6 +792,16 @@ func scenario_ga() -> void:
 	check(game.player.global_position.distance_to(game.garage.global_position) < 20.0, "you're down in the garage")
 	if film != "":
 		await _hero_shot(film + "/garage_lobby.png")
+	# Walk down the aisle like a player.
+	var gw := _Walk.new()
+	gw.amount = 0.8
+	game.player.bot = gw
+	var start_p := game.player.global_position
+	var aim := game.garage.to_global(Vector3(0.0, 0.0, VehicleGarage.LOBBY + 9.0))
+	gw.target = aim
+	var wr := await _walk_to(gw, aim, 12.0)
+	game.player.bot = null
+	check(wr["ok"], "you can walk round the garage (moved %.1f m)" % start_p.distance_to(game.player.global_position))
 	# Drive the nearest one up the ramp.
 	var vid := String(e.vehicles[-1]["id"])
 	game.enter_vehicle(vid)

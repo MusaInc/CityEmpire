@@ -659,6 +659,16 @@ func _after_start() -> void:
 			var s_look := bx * Vector3(4.0, 2.1, 0.0)
 			camera.cine = func(_dt: float) -> Array:
 				return [Transform3D(Basis.looking_at(s_look - s_eye, Vector3.UP), s_eye), 60.0]
+	if args.has("homedoor"):
+		# Captures: an apartment tower's street entrance from across the pavement.
+		var hel: ApartmentElevator = elevators.get(String(args["homedoor"]), elevators.values()[0] if not elevators.is_empty() else null)
+		if hel:
+			var hd := hel.street_door_world()
+			var ho := hel.global_basis.z
+			var h_eye := hd + ho * 9.0 + hel.global_basis.x * 2.5 + Vector3.UP * 1.8
+			var h_look := hd + Vector3.UP * 2.2
+			camera.cine = func(_dt: float) -> Array:
+				return [Transform3D(Basis.looking_at(h_look - h_eye, Vector3.UP), h_eye), 62.0]
 	if args.has("carcam") and not empire.vehicles.is_empty():
 		# Captures: a fixed camera on your first car - front34, rear34, side,
 		# side_l, front, rear, nose, tail - for checking the car in the game.
@@ -2070,10 +2080,7 @@ func spot_prompt() -> Array:
 			var el_t: ApartmentElevator = elevators.get(spot["home"])
 			return ["CALL ELEVATOR TO %s" % (el_t.top_floor_label if el_t else "APARTMENT"), true]
 		"elev_select":
-			var el_s: ApartmentElevator = elevators.get(spot["home"])
-			if bool(spot.get("to_top", true)):
-				return ["PRESS [%s] · %s" % [el_s.top_floor_label if el_s else "UP", String(home_by_id(spot["home"]).get("name", "APARTMENT")).to_upper()], true]
-			return ["PRESS [G] · GROUND LOBBY", true]
+			return ["CHOOSE A FLOOR", true]
 		"home_down":
 			return ["CALL ELEVATOR TO STREET", true]
 		"home_bed":
@@ -2092,7 +2099,7 @@ func spot_prompt() -> Array:
 		"garage_down":
 			return ["VEHICLE COLLECTION", true]
 		"garage_up":
-			return ["BACK UP TO THE LOBBY", true]
+			return ["LIFT · CHOOSE A FLOOR", true]
 		"car_boot":
 			var v2 := empire.vehicle(spot["vehicle"])
 			var cargo: Stock = v2["cargo"]
@@ -2286,9 +2293,7 @@ func act() -> void:
 				Sfx.play("click", -5.0)
 				el_u.call_to(true)
 		"elev_select":
-			var el_c: ApartmentElevator = elevators.get(spot["home"])
-			if el_c:
-				el_c.ride_to(bool(spot.get("to_top", true)))
+			ui.open_lift_floors(String(spot["home"]), false)
 		"home_down":
 			var el_d: ApartmentElevator = elevators.get(spot["home"])
 			if el_d:
@@ -2314,7 +2319,7 @@ func act() -> void:
 		"garage_down":
 			garage.enter(String(spot["home"]))
 		"garage_up":
-			garage.leave_on_foot()
+			ui.open_lift_floors(garage.from_home, true)
 		"car_boot":
 			_boot_action(spot["vehicle"])
 
@@ -3577,12 +3582,84 @@ func _tick_elevators(dt: float) -> void:
 		el.tick(dt, player, owns)
 		if el.is_riding():
 			riding = true
+			_riding_el = el
 	if riding and not _elev_riding:
 		_elev_riding = true
 		player.scripted = true
+		_face_lift_doors(_riding_el)
 	elif not riding and _elev_riding:
 		_elev_riding = false
 		player.scripted = false
+		_face_lift_doors(_riding_el)   # (doors open: the camera's behind you, looking out)
+
+
+var _riding_el: ApartmentElevator
+
+
+## Character and camera face out through the lift's doors (riding, arriving).
+func _face_lift_doors(el: ApartmentElevator) -> void:
+	if el == null or not is_instance_valid(el):
+		return
+	var out := el.global_basis.z
+	out.y = 0.0
+	out = out.normalized()
+	rig.set_facing(out)
+	camera.face(atan2(-out.x, -out.z))
+
+
+## Inside the cabin: the floor buttons (2026-11-26) – up to the apartment,
+## the lobby, or down to the Vehicle Collection.
+func lift_floors(hid: String) -> Array:
+	var el: ApartmentElevator = elevators.get(hid)
+	if el == null:
+		return []
+	var home := home_by_id(hid)
+	return [["▲  %s · %s" % [String(home.get("name", "Apartment")), el.top_floor_label], "top", el.at_top],
+		["●  Lobby · G", "lobby", not el.at_top],
+		["▼  Vehicle Collection", "garage", false]]
+
+
+func choose_floor(hid: String, which: String) -> void:
+	var el: ApartmentElevator = elevators.get(hid)
+	if el == null:
+		return
+	match which:
+		"top":
+			el.ride_to(true)
+		"lobby":
+			el.ride_to(false)
+		"garage":
+			# Doors close, the cabin hums down, and they open on the garage.
+			el._start_close()
+			Sfx.play("elev_hum", -12.0)
+			player.scripted = true
+			_face_lift_doors(el)
+			get_tree().create_timer(1.8, false).timeout.connect(func():
+				player.scripted = false
+				garage.enter(hid))
+
+
+## From the garage's lift back up: arrive in the real cabin at that floor.
+func arrive_from_garage(hid: String, to_top: bool) -> void:
+	var el: ApartmentElevator = elevators.get(hid)
+	if el == null:
+		return
+	garage.leave_quietly()
+	if to_top:
+		el.snap_to_top(player)
+	else:
+		el.at_top = false
+		el.target_top = false
+		el.cabin_y = 0.0
+		el.state = "idle_g"
+		el._g_door_open = 1.0
+		el._top_door_open = 0.0
+		el._cabin.position.y = 0.0
+		el._sync_doors()
+	var out := el.global_basis.z
+	_teleport(el.cabin_center_world() + Vector3.UP * 0.1, atan2(-out.x, -out.z))
+	_face_lift_doors(el)
+	Sfx.play("chime", -7.0)
 
 
 ## Street door of a home's tower (below its window, on the pavement).

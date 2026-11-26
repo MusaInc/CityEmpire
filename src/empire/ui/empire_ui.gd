@@ -4121,3 +4121,27 @@ func open_opening_offer(choices: Array) -> void:
 	v.add_child(S.button("I'll look around first", func():
 		close_panel(true)
 		game.choose_opening({}), false, 260))
+
+
+
+## The lift's floor buttons: from the cabin (apartment / lobby / Vehicle
+## Collection) or from the garage's lift (lobby / apartment).
+func open_lift_floors(hid: String, from_garage: bool) -> void:
+	var v := _open("Lift", 560, 300)
+	if from_garage:
+		var home := game.home_by_id(hid)
+		v.add_child(S.button("▲  %s" % String(home.get("name", "Your apartment")), func():
+			close_panel(true)
+			game.arrive_from_garage(hid, true), true, 480))
+		v.add_child(S.button("▲  Lobby · G", func():
+			close_panel(true)
+			game.arrive_from_garage(hid, false), false, 480))
+		return
+	for f in game.lift_floors(hid):
+		var which: String = f[1]
+		var here: bool = f[2]
+		var b := S.button(String(f[0]) + ("   (you're here)" if here else ""), func():
+			close_panel(true)
+			game.choose_floor(hid, which), which == "garage", 480)
+		b.disabled = here
+		v.add_child(b)
