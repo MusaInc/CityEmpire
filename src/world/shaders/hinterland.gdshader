@@ -7,6 +7,7 @@ render_mode diffuse_burley, specular_disabled;
 
 global uniform float night;
 global uniform vec3 sky_horizon;
+global uniform vec3 sky_top;
 global uniform float wetness;
 
 varying vec3 v_world;
@@ -68,13 +69,20 @@ void fragment() {
 	float gz = fbm((p + vec2(0.0, e)) * 0.045) - s0;
 	float dist = length(v_world - CAMERA_POSITION_WORLD);
 	// (Far off the fine relief only shimmers: fade it.)
-	float amp = 6.0 * (0.4 + 0.6 * clamp(rocky + forest_k * 0.6, 0.0, 1.0)) * (1.0 - 0.75 * smoothstep(1800.0, 5000.0, dist));
+	float amp = 6.0 * (0.4 + 0.6 * clamp(rocky + forest_k * 0.6, 0.0, 1.0)) * (1.0 - 0.85 * smoothstep(1200.0, 3500.0, dist));
 	vec3 wn = normalize(v_wn - vec3(gx, 0.0, gz) * amp);
 	NORMAL = normalize((VIEW_MATRIX * vec4(wn, 0.0)).xyz);
 	// Aerial perspective on top of the scene fog: distant ranges lose
 	// contrast and go blue-grey toward the horizon colour.
-	float haze = (1.0 - exp(-dist / 11000.0)) * 0.32 * (1.0 - night);
-	vec3 emit = sky_horizon * haze * 0.55;
+	// (2026-11-26: the far ranges read too sharp, "pasted on". Real air
+	// thickens with distance: colour and contrast drain into a pale blue-grey
+	// sky tone – most at the valley floors, a little less on high summits –
+	// and it stays at night, so the ranges sit back behind the city.)
+	float haze = (1.0 - exp(-dist / 4200.0)) * 0.8 * mix(1.0, 0.82, smoothstep(250.0, 1100.0, y));
+	float lum = dot(c, vec3(0.3, 0.59, 0.11));
+	c = mix(c, vec3(lum), haze * 0.65);
+	vec3 air = mix(sky_horizon, mix(sky_horizon, sky_top, 0.3), 0.5) * mix(1.0, 0.6, night);
+	vec3 emit = air * haze * 0.95;
 	// Subtle distant foothill town & coastal settlement light clusters at night
 	// along low gentle slopes so the bay horseshoe feels alive after dark.
 	if (night > 0.15 && y > 3.5 && y < 225.0 && slope < 0.38) {

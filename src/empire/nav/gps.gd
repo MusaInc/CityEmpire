@@ -192,6 +192,12 @@ func _process(dt: float) -> void:
 		_reroute()
 		return
 	if points.size() < 2:
+		# (2026-11-26: a failed plan – "You're too far from any road", made
+		# in the garage below the city or deep in a building – was never
+		# tried again, so "No route" stayed up on the road. Retry every few
+		# seconds until there's a route.)
+		if message != "" and ready_net():
+			_reroute()
 		return
 	_track(here, 0.25)
 

@@ -358,7 +358,8 @@ func _apply(dt: float, instant: bool) -> void:
 		# (Night rebalance 2026-11-26: 0.56 near-white lit the city like an
 		# overcast day; the moon is a cool key a quarter of that.)
 		sun.light_color = Color(0.64, 0.74, 1.0)
-		sun.light_energy = 0.22 * (1.0 - smoothstep(-12.0, -3.0, el))
+		# (Brighter again 2026-11-26 – "still too dark outside": 0.34.)
+		sun.light_energy = 0.34 * (1.0 - smoothstep(-12.0, -3.0, el))
 		sky_mat.set_shader_parameter("sun_glow", 0.28)
 		sky_mat.set_shader_parameter("disc_size", 0.999984)
 		sky_mat.set_shader_parameter("disc_k", 2.4)
@@ -366,7 +367,8 @@ func _apply(dt: float, instant: bool) -> void:
 	var punch := float(w["punch"])
 	var hz := float(w["haze"])
 	var warm := float(w["warm"])
-	sun.light_energy *= (1.0 - 0.72 * overcast) * lerpf(1.0, float(w["sun"]), day_light)
+	# (At night cloud lit by the city's glow barely dims the moon's fill.)
+	sun.light_energy *= (1.0 - lerpf(0.72, 0.35, night) * overcast) * lerpf(1.0, float(w["sun"]), day_light)
 	sun.light_energy *= 1.0 - 0.18 * cloud_softness * day_light
 	# Dawn mist: on calm mornings a low fog lies in the streets and over the
 	# water and burns off by mid-morning (less if it's windy and wet).
@@ -426,7 +428,9 @@ func _apply(dt: float, instant: bool) -> void:
 	# rebalance 2026-11-26: 0.48 all night read as daylight under a black
 	# sky); visibility comes from lamps, headlights, shopfronts, windows and
 	# the moon. Civil twilight (-6..2°) carries the transition.
-	env.ambient_light_energy = _rampf(el, [[-15.0, 0.13], [-8.0, 0.16], [-3.0, 0.27], [2.0, 0.46], [20.0, 0.52]]) \
+	# (2026-11-26 later: 0.13 at deep night was too dark – 0.21: you can see
+	# the street between lamps, the sky still reads night.)
+	env.ambient_light_energy = _rampf(el, [[-15.0, 0.24], [-8.0, 0.26], [-3.0, 0.31], [2.0, 0.46], [20.0, 0.52]]) \
 		* (1.0 + 0.14 * overcast + 0.06 * hz * day_light) + fl * 2.0
 	var direct_daylight := day_light * (1.0 - overcast)
 	env.ambient_light_energy *= 1.0 + 0.08 * direct_daylight
@@ -442,7 +446,7 @@ func _apply(dt: float, instant: bool) -> void:
 		_interior_poll = 0.10
 		_interior_target = InteriorKit.camera_weight(get_tree(), cam.global_position) if cam else 0.0
 	_interior_mix = lerpf(_interior_mix, _interior_target, 1.0 if instant else 1.0 - exp(-dt * 3.8))
-	var street_exposure := lerpf(1.02, 1.09, night) * lerpf(1.0, 1.08, overcast) * (1.0 + 0.03 * hz * day_light)
+	var street_exposure := lerpf(1.02, 1.3, night) * lerpf(1.0, 1.08, overcast) * (1.0 + 0.03 * hz * day_light)
 	env.tonemap_exposure = lerpf(street_exposure, 1.13, _interior_mix)
 	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
 	var hk := lerpf(1.0, 0.58, hz)

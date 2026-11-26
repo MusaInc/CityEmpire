@@ -651,7 +651,7 @@ void fragment() {
 	// Low, diffuse city-sky bounce fills the gaps between streetlamps.
 	// Limit it to road tops so vegetation, retaining walls and sand stay dark.
 	if (asphalt && has_streets && flat_top && !shore) {
-		EMISSION = albedo * vec3(0.035, 0.042, 0.058) * night;   // (was 0.13-0.20: lit every street evenly)
+		EMISSION = albedo * vec3(0.075, 0.085, 0.11) * night;   // (was 0.13-0.20: lit every street evenly; 0.035 left the road black between lamps)
 		if (puddle > 0.02 || surface_wet > 0.25) {
 			// Water sheets reflect the sky and bright horizon along the road grade.
 			// Foreground puddles pick up expanding concentric raindrop ripples.
