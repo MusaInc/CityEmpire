@@ -17,6 +17,7 @@ instance uniform float look = 0.0;
 instance uniform float seed = 0.0;
 instance uniform vec3 shirt = vec3(0.4, 0.5, 0.7);
 instance uniform float apron = 0.0;
+instance uniform vec3 apron_col = vec3(0.12, 0.42, 0.33);   // (uniform by business level: ShopPerson.set_uniform)
 
 varying vec3 v_col;
 varying float v_rough;
@@ -91,7 +92,7 @@ void fragment() {
 	}
 	vec3 c = v_col;
 	if (v_part == 4 && apron > 0.5 && v_front < -0.06) {
-		c = vec3(0.12, 0.42, 0.33);  // staff apron (the studio's green)
+		c = apron_col;  // staff apron (the studio's green, or your brand's)
 	}
 	ALBEDO = person_cloth(c, v_surface, 1.0 - smoothstep(7.0, 23.0, length(VERTEX)), v_part);
 	SPECULAR = v_part == 1 || v_part == 3 ? 0.32 : 0.24;

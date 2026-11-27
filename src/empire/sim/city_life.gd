@@ -65,6 +65,7 @@ static func new_day(e: Empire) -> void:
 	if e.rng.randf() < float(cfg().get("event_chance", 0.6)):
 		_roll_event(e)
 	_rivals_day(e)
+	_rivals_react(e)
 	_firms_day(e)
 
 
@@ -396,6 +397,42 @@ static func rivals_near(e: Empire, b: Business) -> int:
 		if _dist(rv["pos"], b.premises.get("pos", [])) < r:
 			n += 1
 	return n
+
+
+## How hard the rivals near b compete (2026-11-27): each counts 1, more in
+## a price war (you undercut them: they match and advertise – 1.5 for a few
+## days) or when you're dear next to them (1.3: shoppers walk over).
+static func rival_pressure(e: Empire, b: Business) -> float:
+	var r := float(EmpireData.economy().get("competition_radius", 140.0))
+	var n := 0.0
+	for rv in e.rivals:
+		if _dist(rv["pos"], b.premises.get("pos", [])) < r:
+			n += 1.5 if int(rv.get("war_until", 0)) >= e.day else (1.3 if price_ratio(b) > 1.2 else 1.0)
+	return n
+
+
+## b's shelf prices against the recommended prices (1 = RRP).
+static func price_ratio(b: Business) -> float:
+	var tot := 0.0
+	var n := 0
+	for pid in b.stocked_products():
+		tot += b.price(pid) / maxf(EmpireData.rrp(pid), 0.01)
+		n += 1
+	return tot / n if n > 0 else 1.0
+
+
+## Rivals answer your prices once a day: undercut a QuikSave by 8%+ and it
+## starts a price war against that shop.
+static func _rivals_react(e: Empire) -> void:
+	var r := float(EmpireData.economy().get("competition_radius", 140.0))
+	for rv in e.rivals:
+		if int(rv.get("war_until", 0)) >= e.day:
+			continue
+		for b: Business in e.businesses:
+			if _dist(rv["pos"], b.premises.get("pos", [])) < r and price_ratio(b) < 0.92 and b.stocked_products().size() >= 3:
+				rv["war_until"] = e.day + 3
+				_headline(e, "%s is matching %s's prices – a price war for three days." % [rv["name"], b.name], "warn")
+				break
 
 
 ## Buys a rival store: it becomes your business (freehold, its regulars

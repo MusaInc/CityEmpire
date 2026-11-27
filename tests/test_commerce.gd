@@ -271,3 +271,16 @@ func test_bought_out_rival_arrives_fitted_out(t) -> void:
 	e.rivals.append({"unit": u["id"], "district": u["district"], "pos": u["pos"], "price": 8000.0, "name": "QuikSave Midtown", "opened": 1})
 	var b := CityLife.buy_out(e, u)
 	t.check(b != null and b.level == 2, "an acquired chain store starts Established")
+
+
+func test_rivals_answer_undercutting_with_a_price_war(t) -> void:
+	var e := _game()
+	var b := _shop(e, 1)
+	_stock_shop(e, b)
+	e.rivals.append({"unit": "zz", "district": b.district_key(), "pos": b.premises["pos"], "price": 8000.0, "name": "QuikSave Test", "opened": 1})
+	var calm := e.competitors_near(b)
+	for pid in b.stocked_products():
+		b.set_price(pid, EmpireData.rrp(pid) * 0.8)
+	CityLife._rivals_react(e)
+	t.check(int(e.rivals.back().get("war_until", 0)) >= e.day, "undercutting starts a price war")
+	t.check(e.competitors_near(b) > calm, "and the rival bites harder")

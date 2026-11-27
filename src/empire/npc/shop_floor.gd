@@ -408,6 +408,8 @@ func sync_staff() -> void:
 			p.floor_ok = _walkable
 			p.position = room.rack_pos if e["role"] != "cashier" else room.till_staff[0]
 			room.add_child(p)
+			if biz.level >= 2 and empire:
+				p.set_uniform(biz.level, Company.colours(empire))
 			p.say(String(e["name"]).get_slice(" ", 0), Color(0.75, 0.95, 0.85), 2.0)
 			staff_people[e["id"]] = {"p": p, "role": e["role"], "e": e, "t": _rng.randf_range(0.0, 3.0), "state": "idle",
 				"till": -1}

@@ -83,6 +83,22 @@ func _init(seed := 0, staff := false) -> void:
 	add_child(_bubble)
 
 
+## Staff uniform by the business's level (Growth): an independent's
+## staff wear a white top and the green apron; an established business
+## puts them in your brand's apron; a major retailer or flagship in a
+## brand-coloured top (no apron – a proper uniform).
+func set_uniform(level: int, cols: Array) -> void:
+	var prim: Color = cols[0]
+	var acc: Color = cols[1]
+	if level >= 3:
+		_mi.set_instance_shader_parameter("shirt", prim)
+		_mi.set_instance_shader_parameter("apron", 0.0)
+	elif level == 2:
+		_mi.set_instance_shader_parameter("shirt", Color(0.94, 0.94, 0.92) if prim.get_luminance() < 0.6 else acc)
+		_mi.set_instance_shader_parameter("apron", 1.0)
+		_mi.set_instance_shader_parameter("apron_col", Vector3(prim.r, prim.g, prim.b))
+
+
 func _floor_ok(at: Vector3) -> bool:
 	return not floor_ok.is_valid() or floor_ok.call(at)
 

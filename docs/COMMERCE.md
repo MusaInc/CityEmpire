@@ -71,6 +71,9 @@ Each stage has three steps measured from the live game. The last stage targets �
 
 - The nightclub and car-hire desk have no walk-in interiors; they run from the phone.
 - Fleet vans don't drive visibly through traffic; they appear at the kerb when they arrive.
-- Staff uniforms don't change with level.
-- Competitors still react only through the existing rival chain and promos, not to your prices.
-- Balance is first-pass. Car hire pays back slowly (a saloon earns about £32 a day).
+- Balance is first-pass (car hire: a saloon earns about £50 a day).
+
+Since added:
+
+- **Staff uniforms follow the level:** level 1 is a white top and green apron, level 2 your brand's apron, level 3+ a brand-colour top.
+- **Rivals answer your prices:** undercut a QuikSave by 8% or more and it starts a 3-day price war (it counts 1.5×). Charging more than 20% over RRP next to one sends shoppers over (1.3×).

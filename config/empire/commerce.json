@@ -62,11 +62,11 @@
   "entry": [6, 12, 20], "bar_spend": 24.0, "vip_share": 0.04, "vip_spend": 380.0, "staff_per_100": 6, "staff_wage_night": 95.0
  },
  "rental": {"desk": {"name": "Skyport Car Hire desk", "price": 45000, "upkeep": 35},
-  "classes": {"economy": 38, "family": 52, "premium": 95, "sports": 180, "super": 420},
+  "classes": {"economy": 55, "family": 75, "premium": 150, "sports": 260, "super": 650},
   "model_class": {"hatch": "economy", "used_kestrel": "economy", "street_compact": "economy", "saloon": "family", "street_sedan": "family",
    "street_suv": "family", "warden": "premium", "goliath": "premium", "scout": "sports", "brute": "sports", "vanta": "premium",
    "halcyon": "super", "stiletto": "super", "van": "family", "street_van": "family", "box": "family"},
-  "km_per_day": 140, "wear_per_hire": 0.012, "base_occ": 0.62, "service_at": 0.55},
+  "km_per_day": 140, "wear_per_hire": 0.012, "base_occ": 0.66, "service_at": 0.55},
  "hotel": {"facilities": [
    {"id": "restaurant", "name": "Signature restaurant", "cost": 180000, "occ": 0.05, "rate": 0.08, "upkeep": 120},
    {"id": "spa", "name": "Spa & pool", "cost": 260000, "occ": 0.04, "rate": 0.12, "upkeep": 150},

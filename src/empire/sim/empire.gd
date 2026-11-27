@@ -979,7 +979,7 @@ func competitors_near(b: Business) -> float:
 		return 0.0
 	var me := Vector3(p[0], p[1], p[2])
 	var r := float(EmpireData.economy().get("competition_radius", 140.0))
-	var n := float(b.premises.get("rivals", 0)) + float(CityLife.rivals_near(self, b)) + CityLife.firms_near(self, b)
+	var n := float(b.premises.get("rivals", 0)) + CityLife.rival_pressure(self, b) + CityLife.firms_near(self, b)
 	for o: Business in businesses:
 		if o == b:
 			continue
