@@ -413,6 +413,8 @@ static func buy_out(e: Empire, unit: Dictionary, err := []) -> Business:
 	var b := e._open_business(unit, "convenience")
 	b.owned = true
 	b.reputation = 60.0
+	# (A chain store comes fitted out: it starts as an established business.)
+	Growth.apply_level(b, int(EmpireData.file("commerce").get("acquire", {}).get("rival_level", 2)))
 	e.stats["rivals_bought"] = int(e.stats.get("rivals_bought", 0)) + 1
 	var rc := rival_cfg()
 	if e.rivals.is_empty() and int(e.stats["rivals_bought"]) >= int(rc.get("retreat_after", 3)):

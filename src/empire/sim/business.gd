@@ -36,6 +36,10 @@ var history: Array = []  # last 14 day reports
 var lifetime := {"revenue": 0.0, "profit": 0.0, "customers": 0}
 var orders: Array = []   # [{units: {id: n}, due_day, fee}] manager re-orders on their way
 var opened_day := 1
+## Growth level 1–4 (Growth; 2026-11-27) and the trade's own loop state
+## (Trades: food supplier/menu, clothing collection …).
+var level := 1
+var trade := {}
 
 # --- live state (not saved) ---
 ## The player is here: shoppers are walking agents (ShopFloor), not the
@@ -44,6 +48,7 @@ var live := false
 var pending_arrivals := 0
 var player_at_till := false
 var _arrival_acc := 0.0
+var chain_footfall := 0.0   # (Growth.refresh: a flagship of the same trade)
 
 
 func _init(p_id := "", p_type := "convenience") -> void:
@@ -86,7 +91,7 @@ func expected_backroom_capacity() -> int:
 	var base := int(type_def().get("backroom_cases", 20)) * scale
 	if has_upgrade("backroom"):
 		base += int(EmpireData.upgrade("backroom").get("backroom", 0)) * scale
-	return base
+	return roundi(base * Growth.backroom_k(self))
 
 
 # ------------------------------------------------------------- setup
@@ -114,6 +119,7 @@ func rebuild_slots() -> void:
 	var t := type_def()
 	var per: Dictionary = t.get("slots_per", {})
 	var caps: Dictionary = t.get("slot_units", {})
+	var ck := Growth.cap_k(self)
 	var old := {}  # "kind:unit:k" -> slot
 	var seen := {}
 	for o: Dictionary in slots:
@@ -126,7 +132,7 @@ func rebuild_slots() -> void:
 		var n := int(fixtures.get(kind, 0))
 		for u in n:
 			for k in int(per.get(kind, 0)):
-				var s := {"fixture": kind, "unit": u, "product": "", "qty": 0, "cap": int(caps.get(kind, 20))}
+				var s := {"fixture": kind, "unit": u, "product": "", "qty": 0, "cap": roundi(int(caps.get(kind, 20)) * ck)}
 				if kind == "coffee":
 					s["product"] = "coffee"
 				elif kind == "pickmix":
@@ -329,11 +335,11 @@ func _upgrade_sum(key: String) -> float:
 
 
 func quality_bonus() -> float:
-	return _upgrade_sum("quality")
+	return _upgrade_sum("quality") + Growth.quality(self) + float(trade.get("quality", 0.0))
 
 
 func footfall_bonus() -> float:
-	return _upgrade_sum("footfall")
+	return _upgrade_sum("footfall") + Growth.footfall(self) + float(trade.get("footfall", 0.0))
 
 
 func dirt_factor() -> float:
@@ -478,7 +484,7 @@ func to_dict() -> Dictionary:
 		"upgrades": upgrades.duplicate(), "backroom": backroom.to_dict(), "floor_pile": floor_pile.to_dict(), "reputation": reputation,
 		"cleanliness": cleanliness, "staff": staff.duplicate(true), "today": today.duplicate(true),
 		"history": history.duplicate(true), "lifetime": lifetime.duplicate(), "orders": orders.duplicate(true),
-		"opened_day": opened_day, "open_hour": _custom_hours.x, "close_hour": _custom_hours.y}
+		"opened_day": opened_day, "level": level, "trade": trade.duplicate(true), "open_hour": _custom_hours.x, "close_hour": _custom_hours.y}
 
 
 static func from_dict(d: Dictionary) -> Business:
@@ -507,6 +513,8 @@ static func from_dict(d: Dictionary) -> Business:
 	b.lifetime = d.get("lifetime", b.lifetime)
 	b.orders = d.get("orders", [])
 	b.opened_day = int(d.get("opened_day", 1))
+	b.level = clampi(int(d.get("level", 1)), 1, Growth.MAX_LEVEL)
+	b.trade = d.get("trade", {})
 	if d.has("today"):
 		b.today.merge(d["today"], true)
 	b.rebuild_slots()

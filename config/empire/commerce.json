@@ -1,0 +1,91 @@
+{
+ "_doc": "The commercial empire layer (2026-11-27). levels: what each business level costs, needs and gives (Growth). warehouses/fleet/contracts: the supply chain (SupplyChain). food/clothing/nightclub/rental/hotel: the trade loops (Trades). stages: career progression (Progression). cost_k scales a level's price by business type.",
+ "levels": [
+  {"n": 1, "name": "Independent shop", "blurb": "Basic shelving, a small range, you behind the till.", "cost": 0,
+   "cap_k": 1.0, "footfall": 0.0, "quality": 0.0, "backroom_k": 1.0},
+  {"n": 2, "name": "Established business", "blurb": "A proper fit-out, uniforms, your branding inside and a bigger range.", "cost": 6000,
+   "needs": {"upgrades": 3, "staff": 2, "days_open": 3, "rep": 50, "profit_7": 0},
+   "cap_k": 1.25, "footfall": 0.10, "quality": 0.05, "backroom_k": 1.3, "adds": 1},
+  {"n": 3, "name": "Major retailer", "blurb": "Self-checkout, automated re-ordering, more floor space and twice the shoppers.", "cost": 30000,
+   "needs": {"upgrades": 5, "manager": true, "rep": 62, "revenue_7": 3500},
+   "cap_k": 1.6, "footfall": 0.25, "quality": 0.08, "backroom_k": 1.8, "adds": 2, "tills": 1, "auto": true},
+  {"n": 4, "name": "Corporate flagship", "blurb": "The chain's flagship: regional operations lift every branch of the brand.", "cost": 120000,
+   "needs": {"hq": 1, "branches": 3, "rep": 72, "revenue_7": 9000},
+   "cap_k": 2.0, "footfall": 0.40, "quality": 0.12, "backroom_k": 2.5, "adds": 3, "tills": 2, "auto": true,
+   "chain_footfall": 0.08, "chain_wholesale": 0.03}
+ ],
+ "cost_k": {"convenience": 1.0, "takeaway": 0.9, "cafe": 0.9, "bakery": 0.9, "clothing": 1.6, "phones": 2.0},
+ "warehouses": [
+  {"id": "west_depot", "name": "Westbank Depot", "island": "west", "price": 85000, "upkeep": 60, "cases": 600,
+   "blurb": "A cross-dock shed behind the Westbank cash & carry."},
+  {"id": "city_dc", "name": "Harbour Distribution Centre", "island": "east", "price": 240000, "upkeep": 150, "cases": 1800,
+   "blurb": "Dock-side racking for the whole city, with contract buying from the suppliers."},
+  {"id": "skyport_logistics", "name": "Skyport Logistics", "island": "skyport", "estate": "logistics", "price": 0, "upkeep": 0, "cases": 900,
+   "blurb": "Your Skyport warehouse estate doubles as a depot."}
+ ],
+ "warehouse_discount": 0.07,
+ "racking": {"cost": 22000, "cases": 400, "max": 3},
+ "fleet": {"models": ["van", "box", "goliath", "street_van"], "speed_kmh": 34.0, "stop_minutes": 12.0, "fuel_per_km": 0.32,
+  "runs": [6.0, 13.0], "driver_wage": 13.5},
+ "contracts": {"offer_every_days": 2, "max_open": 3, "days": [5, 10], "margin": [0.10, 0.22], "cases": [6, 24], "penalty_k": 0.5,
+  "clients": ["Harbour Hotels", "Meridian Catering", "Westbank Schools", "City Cafés Co-op", "Skyport Lounges", "Riverside Care Homes", "Dockside Canteens", "Heights Stadium Kiosks"]},
+ "food": {
+  "suppliers": [
+   {"id": "budget", "name": "Value range", "cost_k": 0.86, "quality": -0.06, "rep_target": 42},
+   {"id": "standard", "name": "Market fresh", "cost_k": 1.0, "quality": 0.0, "rep_target": 55},
+   {"id": "premium", "name": "Artisan & organic", "cost_k": 1.22, "quality": 0.10, "rep_target": 74}
+  ],
+  "menu_sizes": {"tight": [0.92, 0.05], "classic": [1.0, 0.0], "wide": [1.08, -0.04]}
+ },
+ "clothing": {
+  "collections": [
+   {"id": "basics", "name": "Everyday basics", "launch": 0, "affluence": [0.7, 1.1], "quality": 0.0, "footfall": 0.0},
+   {"id": "street", "name": "Streetwear drop", "launch": 1800, "affluence": [0.8, 1.2], "quality": 0.04, "footfall": 0.18},
+   {"id": "tailoring", "name": "City tailoring", "launch": 3500, "affluence": [1.1, 1.7], "quality": 0.10, "footfall": 0.06},
+   {"id": "resort", "name": "Resort & swim", "launch": 2600, "affluence": [1.0, 1.5], "quality": 0.06, "footfall": 0.12, "weather": "sunny"},
+   {"id": "designer", "name": "Designer label", "launch": 9000, "affluence": [1.35, 2.2], "quality": 0.22, "footfall": 0.04}
+  ],
+  "fresh_days": 14
+ },
+ "nightclub": {
+  "sites": [
+   {"id": "vault", "name": "The Vault", "district": "east:midtown", "price": 320000, "capacity": 420, "rent": 0, "upkeep": 260},
+   {"id": "halo", "name": "Halo Rooftop", "district": "east:cbd", "price": 780000, "capacity": 300, "rent": 0, "upkeep": 420, "vip": 1.6}
+  ],
+  "events": [
+   {"id": "house", "name": "House night", "cost": 400, "draw": 1.0, "vip": 1.0},
+   {"id": "rnb", "name": "R&B Fridays", "cost": 900, "draw": 1.25, "vip": 1.1},
+   {"id": "guest_dj", "name": "Guest DJ", "cost": 4500, "draw": 1.7, "vip": 1.5, "pop": 3},
+   {"id": "vip_launch", "name": "VIP launch party", "cost": 12000, "draw": 1.3, "vip": 2.6, "pop": 5}
+  ],
+  "nights": {"Thu": 0.55, "Fri": 1.0, "Sat": 1.15, "Sun": 0.35},
+  "entry": [6, 12, 20], "bar_spend": 24.0, "vip_share": 0.04, "vip_spend": 380.0, "staff_per_100": 6, "staff_wage_night": 95.0
+ },
+ "rental": {"desk": {"name": "Skyport Car Hire desk", "price": 45000, "upkeep": 35},
+  "classes": {"economy": 38, "family": 52, "premium": 95, "sports": 180, "super": 420},
+  "model_class": {"hatch": "economy", "used_kestrel": "economy", "street_compact": "economy", "saloon": "family", "street_sedan": "family",
+   "street_suv": "family", "warden": "premium", "goliath": "premium", "scout": "sports", "brute": "sports", "vanta": "premium",
+   "halcyon": "super", "stiletto": "super", "van": "family", "street_van": "family", "box": "family"},
+  "km_per_day": 140, "wear_per_hire": 0.012, "base_occ": 0.62, "service_at": 0.55},
+ "hotel": {"facilities": [
+   {"id": "restaurant", "name": "Signature restaurant", "cost": 180000, "occ": 0.05, "rate": 0.08, "upkeep": 120},
+   {"id": "spa", "name": "Spa & pool", "cost": 260000, "occ": 0.04, "rate": 0.12, "upkeep": 150},
+   {"id": "conference", "name": "Conference suite", "cost": 140000, "occ": 0.07, "rate": 0.03, "upkeep": 70},
+   {"id": "rooftop", "name": "Rooftop bar", "cost": 120000, "occ": 0.03, "rate": 0.06, "upkeep": 60, "rep": 2}
+ ]},
+ "acquire": {"rival_k": 1.35, "rival_level": 2},
+ "stages": [
+  {"id": "entrepreneur", "name": "Entrepreneur", "goal": "Run your first profitable shop",
+   "steps": [{"k": "businesses", "n": 1, "t": "Open a shop"}, {"k": "profit_days", "n": 1, "t": "Finish a day in profit"}, {"k": "revenue_total", "n": 2500, "t": "Take £2,500 in sales"}]},
+  {"id": "owner", "name": "Business owner", "goal": "Hire a team and open more locations",
+   "steps": [{"k": "staff", "n": 3, "t": "Employ three people"}, {"k": "businesses", "n": 2, "t": "Run two locations"}, {"k": "level_max", "n": 2, "t": "Grow a shop to Established"}]},
+  {"id": "investor", "name": "Regional investor", "goal": "Build a warehouse and a delivery operation",
+   "steps": [{"k": "warehouse", "n": 1, "t": "Buy a warehouse"}, {"k": "fleet", "n": 1, "t": "Put a van and driver on the rounds"}, {"k": "contracts_done", "n": 1, "t": "Complete a wholesale contract"}]},
+  {"id": "executive", "name": "Corporate executive", "goal": "Own several companies and a head office",
+   "steps": [{"k": "hq", "n": 1, "t": "Take a head office"}, {"k": "industries", "n": 3, "t": "Trade in three industries"}, {"k": "level_max", "n": 3, "t": "Grow a Major retailer"}]},
+  {"id": "tycoon", "name": "Tycoon", "goal": "Develop skyscrapers and acquire competitors",
+   "steps": [{"k": "level_max", "n": 4, "t": "Open a corporate flagship"}, {"k": "acquired", "n": 1, "t": "Buy out a competitor"}, {"k": "tower", "n": 1, "t": "Own a tower (HQ tower or Tower Road Offices)"}]},
+  {"id": "billionaire", "name": "Billionaire", "goal": "A commercial empire across every island",
+   "steps": [{"k": "islands", "n": 3, "t": "Trade on all three islands"}, {"k": "businesses", "n": 12, "t": "Run twelve businesses"}, {"k": "net_worth", "n": 1000000000, "t": "Reach £1 billion"}]}
+ ]
+}

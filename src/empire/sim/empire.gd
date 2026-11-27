@@ -23,6 +23,9 @@ signal day_ended(report: Dictionary)
 signal goal_done(goal: Dictionary)
 signal changed
 signal won
+## A fleet van has unloaded at a branch (SupplyChain): the world parks a
+## branded van outside it for a while.
+signal fleet_arrived(business: Business, vehicle_id: String)
 
 const VERSION := 6
 
@@ -147,6 +150,9 @@ func _minute_tick() -> void:
 		_deliver_orders()   # (same-day orders: your logistics firm)
 	CityLife.minute(self)
 	Club.minute(self)
+	SupplyChain.minute(self)
+	if new_hour:
+		Trades.refresh(self)
 	for b: Business in businesses:
 		_staff_work(b, h)
 		if b.trading(h):
@@ -632,7 +638,7 @@ func record_discovery(place_id: String, label: String, counts_towards_reward := 
 
 ## Today's wholesale price of one case (deals and shortages from CityLife).
 func case_price(pid: String) -> float:
-	return float(EmpireData.product(pid).get("case_cost", 0.0)) * CityLife.price_k(self, pid) * hq_wholesale_k()
+	return float(EmpireData.product(pid).get("case_cost", 0.0)) * CityLife.price_k(self, pid) * hq_wholesale_k() * Growth.wholesale_k(self)
 
 
 ## Goods entering the economy at `unit_price`: updates the average cost.
@@ -688,7 +694,7 @@ func order_delivery(b: Business, order: Dictionary, by_manager := false) -> Stri
 	var bk := Careers.bulk_k(self, cases, by_manager)
 	cost *= bk
 	var fee := delivery_fee(b)
-	if by_manager and not b.has_role("manager"):
+	if by_manager and not b.has_role("manager") and not Growth.automated(b):
 		fee += Careers.auto_fee(self)   # (the supplier's auto-restock service)
 	if not pay(cost + fee, "stock", "Delivery order%s" % (" (manager)" if by_manager else ""), b.id):
 		return "Not enough money (%s)" % EmpireData.money(cost + fee, true)
@@ -767,7 +773,7 @@ func restock_plan(b: Business, full := false, max_cases := 9999, budget := INF, 
 
 ## A driver with a company van collects for free; otherwise the wholesaler delivers for a fee.
 func delivery_fee(b: Business) -> float:
-	if Offices.free_delivery(self) or Careers.has_perk(self, "free_delivery"):
+	if Offices.free_delivery(self) or Careers.has_perk(self, "free_delivery") or SupplyChain.served(self, b):
 		return 0.0
 	if b.has_role("driver") and vehicles.any(func(v): return v["model"] in ["van", "box"]):
 		return 0.0
@@ -805,7 +811,7 @@ func _deliver_orders() -> void:
 func _manager_reorders() -> void:
 	for b: Business in businesses:
 		var pur := Careers.purchasing(self, b.id)
-		if not b.has_role("manager") and not bool(pur["auto"]):
+		if not b.has_role("manager") and not bool(pur["auto"]) and not Growth.automated(b):
 			continue
 		# Any line short of a shelf-fill gets two shelf-fills' worth (deliveries
 		# stack in the aisle when the racking's full); company money only,
@@ -821,6 +827,9 @@ func _manager_reorders() -> void:
 			for o: Dictionary in b.orders:
 				pending += int(o["units"].get(pid, 0))
 			var have := b.shelf_qty(pid) + b.backroom.qty(pid) + pending
+			# (The fleet brings what the warehouse holds: no supplier order.)
+			if SupplyChain.served(self, b) and SupplyChain.stock(self).qty(pid) >= EmpireData.case_qty(pid):
+				continue
 			if have < cap:
 				var cases := int(ceil(float(cap * 2 - have) / float(EmpireData.case_qty(pid))))
 				var room := b.backroom.room_for(pid) / maxi(EmpireData.case_qty(pid), 1)
@@ -1096,6 +1105,7 @@ func end_day() -> void:
 	var report := {"day": day, "businesses": [], "revenue": 0.0, "profit": 0.0, "personal": 0.0}
 	report["bonuses"] = Careers.settle_targets(self)   # (before today's figures reset)
 	report["profit"] = float(report["bonuses"])
+	Trades.before_day_end(self)   # (food suppliers: cost of goods adjustment, reputation)
 	for b: Business in businesses:
 		b.tidy_pile()  # (cases left on the floor go into the stockroom overnight)
 		var t := b.today
@@ -1176,6 +1186,12 @@ func end_day() -> void:
 	report["ventures"] = vt
 	report["profit"] = float(report["profit"]) + float(vt["rent"]) - float(vt["upkeep"]) + float(vt["dealer"]) + float(vt.get("charter", 0.0)) - float(vt["fees"])
 	# City500 equity dividends (booked as investment income when stakes are held).
+	# The commercial layer: warehouse/fleet/contracts, nightclub, car hire.
+	var sc := SupplyChain.end_day(self)
+	var td := Trades.end_day(self)
+	report["logistics"] = sc
+	report["trades"] = td
+	report["profit"] = float(report["profit"]) + float(sc["profit"]) + float(td["club"]) + float(td["rental"])
 	var c500_div := City500.daily_dividend(self)
 	if c500_div > 0.0:
 		company_cash += c500_div
@@ -1211,7 +1227,10 @@ func end_day() -> void:
 	report["weather"] = weather
 	CityLife.new_day(self)
 	report["tomorrow"] = weather
+	Growth.refresh(self)
+	Trades.refresh(self)
 	_check_goals()
+	Progression.check(self)
 	day_ended.emit(report)
 	changed.emit()
 
@@ -1291,7 +1310,17 @@ func asset_value() -> float:
 	for q in properties:
 		props += float(q.get("price", 0.0))
 	return maxf(personal_cash, 0.0) + maxf(company_cash, 0.0) + stock_value() + premises_value() + vehicles_value() + props \
-		+ float(hq.get("paid", 0.0)) + Club.value(self) + Ventures.assets_value(self) + City500.portfolio_value(self)
+		+ float(hq.get("paid", 0.0)) + Club.value(self) + Ventures.assets_value(self) + City500.portfolio_value(self) \
+		+ SupplyChain.assets_value(self) + Trades.assets_value(self) + _levels_value()
+
+
+## Fit-outs count at half what they cost (they stay with the business).
+func _levels_value() -> float:
+	var v := 0.0
+	for b: Business in businesses:
+		for n in range(2, b.level + 1):
+			v += Growth.cost(b, n) * 0.5
+	return v
 
 
 func net_worth() -> float:
@@ -1596,6 +1625,8 @@ static func from_dict(src: Dictionary) -> Empire:
 	# A unit has one occupier: yours beats a stale independent / rival record.
 	e.firms = e.firms.filter(func(f): return e.business_at(String(f.get("unit", ""))) == null)
 	e.rivals = e.rivals.filter(func(r): return e.business_at(String(r.get("unit", ""))) == null)
+	Growth.refresh(e)
+	Trades.refresh(e)
 	return e
 
 

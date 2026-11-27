@@ -257,14 +257,15 @@ static func target_occupancy(st: Dictionary, kind: String) -> float:
 	var k := float(st["rent_k"])
 	var base := {0.85: 0.97, 1.0: 0.9, 1.2: 0.72}.get(snappedf(k, 0.05), 0.85) as float
 	if kind == "hotel":
-		base *= 0.85
+		base = base * 0.85 + Trades.hotel_occ_k(st)   # (restaurant, spa … : Trades)
 	return clampf(base * lerpf(0.55, 1.05, float(st["cond"])), 0.0, 1.0)
 
 
 ## A unit's rent a day (market rent rises 12% a renovation, the first
 ## MAX_RENOVATIONS of them).
 static func unit_rent(d: Dictionary, st: Dictionary) -> float:
-	return float(d["rent"]) * float(st["rent_k"]) * (1.0 + 0.12 * mini(int(st["renovated"]), MAX_RENOVATIONS))
+	return float(d["rent"]) * float(st["rent_k"]) * (1.0 + 0.12 * mini(int(st["renovated"]), MAX_RENOVATIONS)) \
+		* (1.0 + Trades.hotel_rate_k(st))
 
 
 ## What a buyer would pay: the list price for its condition, more or less
@@ -313,7 +314,7 @@ static func estates_day(e: Empire) -> Dictionary:
 				tgt *= clampf(float(CityLife.weather_def(e.weather).get("footfall", 1.0)), 0.7, 1.15)
 			st["occ"] = clampf(float(st["occ"]) + (tgt - float(st["occ"])) * 0.18 + e.rng.randf_range(-0.02, 0.02), 0.0, 1.0)
 		var income := unit_rent(d, st) * float(d["units"]) * float(st["occ"])
-		var upkeep := float(d["upkeep"]) * lerpf(1.3, 1.0, float(st["cond"]))
+		var upkeep := float(d["upkeep"]) * lerpf(1.3, 1.0, float(st["cond"])) + Trades.hotel_upkeep(st)
 		st["cond"] = maxf(float(st["cond"]) - 0.004, 0.2)
 		st["last"] = income - upkeep
 		st["income"] = float(st.get("income", 0.0)) + income
