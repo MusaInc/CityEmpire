@@ -191,12 +191,88 @@ static func empire(ph: Phone, body: VBoxContainer) -> void:
 
 
 # ------------------------------------------------------------ Supply chain
+## Corporate (2026-11-27, native): your brand, the head office in Meridian
+## Tower and marketing campaigns – stacked cards that fit a phone.
+static func corporate(ph: Phone, body: VBoxContainer) -> void:
+	var ui := ph.ui
+	var g := ph.game
+	var e := g.empire
+	var v := PhonePages.scroller(body, 18)
+	# Brand
+	var bc := _card(v, 20)
+	bc.add_child(G.text("Your brand", "title3"))
+	var pv := EmpireWidgets.BrandPreview.new()
+	pv.ident = ShopStyle.house_ident(e.brand if not e.brand.is_empty() else ShopStyle.default_house(""))
+	pv.custom_minimum_size = Vector2(0, 150)
+	pv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bc.add_child(pv)
+	if e.brand.is_empty():
+		bc.add_child(G.para("Your shops each wear their own sign. Create a brand and every one trades under your name.", "footnote"))
+		bc.add_child(G.button("Create your brand", func(): ui.open_brand(), "filled", "large"))
+	else:
+		var hb := G.hbox(10)
+		hb.add_child(G.text("%d shop%s wear it" % [e.businesses.size(), "" if e.businesses.size() == 1 else "s"], "subhead", G.LABEL2))
+		hb.add_child(G.spacer())
+		hb.add_child(G.button("Edit brand", func(): ui.open_brand(), "gray", "small"))
+		bc.add_child(hb)
+	# Head office
+	var hc := _card(v, 20)
+	hc.add_child(G.text("Head office · Meridian Tower", "footnote", G.ACCENT_TEXT, "semibold"))
+	var tier := e.hq_tier()
+	if tier > 0:
+		var d := e.hq_def(tier)
+		hc.add_child(G.text(String(d["name"]), "title2"))
+		var pl := ui._perks(d)
+		hc.add_child(G.para(pl.text, "footnote"))
+		pl.free()
+		hc.add_child(G.text("Upkeep %s a day" % EmpireData.money(float(d["upkeep"])), "footnote", G.LABEL2))
+	else:
+		hc.add_child(G.text("No head office yet", "title2"))
+		hc.add_child(G.para("Lease a floor of the city's tallest tower: bulk buying for every shop, and a marketing desk.", "footnote"))
+	var nd := e.hq_def(tier + 1)
+	if not nd.is_empty():
+		hc.add_child(G.text("Next: %s · %s" % [nd["name"], EmpireData.money(float(nd["price"]))], "subhead", G.ACCENT_TEXT, "semibold"))
+		hc.add_child(Bar.new(float(e.businesses.size()) / maxf(float(nd["shops"]), 1.0), G.ACCENT))
+		var why := e.hq_block(tier + 1)
+		hc.add_child(G.text("%d of %d shops%s" % [mini(e.businesses.size(), int(nd["shops"])), int(nd["shops"]), " · " + why if why != "" else ""], "footnote", G.LABEL2))
+	hc.add_child(G.button("GPS to the tower", func():
+		var u := g.hq_unit()
+		if not u.is_empty():
+			g.set_gps(Premises.door_point(u), "Meridian Tower")
+		ui.close_panel(true), "filled" if tier == 0 else "gray", "regular", null, "goals"))
+	# Marketing
+	var run := e.campaign_running()
+	var rows: Array = []
+	for c in EmpireData.hq().get("campaigns", []):
+		var cd: Dictionary = c
+		var why2 := e.campaign_block(cd["id"])
+		var live: bool = run.get("id", "") == cd["id"]
+		var sub := "+%d%% shoppers · %d days" % [roundi(float(cd["footfall"]) * 100.0), int(cd["days"])] + (" · ★+%d" % int(cd["rep"]) if int(cd["rep"]) > 0 else "")
+		if live:
+			var left := int(run["until"]) - e.day + 1
+			rows.append(G.row(String(cd["name"]), "Running · %d day%s left" % [left, "" if left == 1 else "s"], "", "megaphone", G.GREEN))
+		else:
+			var can := why2 == "" or why2.begins_with("Costs")
+			rows.append(G.row(String(cd["name"]), sub, EmpireData.money(float(cd["cost"])), "megaphone", G.ORANGE if can else G.LABEL3,
+				func():
+					if not can:
+						ui.toast(why2, "warn")
+						return
+					var err := e.run_campaign(cd["id"])
+					if err == "":
+						Sfx.play("chime", -6.0)
+					_act(ph, err, "%s is running" % cd["name"])))
+	if not rows.is_empty():
+		v.add_child(G.group(rows, "Marketing", "Campaigns are run from your head office." if tier == 0 else ""))
+	v.add_child(G.gap(4))
+
+
 static func supply(ph: Phone, body: VBoxContainer) -> void:
 	var e := ph.game.empire
 	var v := PhonePages.scroller(body, 18)
 	if not SupplyChain.has_warehouse(e):
 		var hc := _card(v, 22)
-		hc.add_child(G.text("Supply chain", "title1"))
+		hc.add_child(G.text("Your own warehouse", "title1"))
 		hc.add_child(G.para("Buy in bulk at contract prices, store it in your own warehouse and let your vans keep every branch stocked twice a day – no more cash & carry runs or delivery fees.", "subhead"))
 		for s: Dictionary in SupplyChain.sites():
 			var c := _card(v, 20)

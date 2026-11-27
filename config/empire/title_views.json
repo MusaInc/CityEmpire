@@ -1,0 +1,496 @@
+{
+ "views": [
+  {
+   "id": "harbour_bridge",
+   "name": "Harbour Bridges",
+   "mood": "Golden hour",
+   "hour": 20.5,
+   "weather": "clear",
+   "fov": 50,
+   "eye": [
+    330,
+    45,
+    880
+   ],
+   "look": [
+    40,
+    12,
+    740
+   ],
+   "eye2": [
+    300,
+    40,
+    905
+   ],
+   "look2": [
+    40,
+    12,
+    745
+   ],
+   "dur": 45
+  },
+  {
+   "id": "under_bridge",
+   "name": "Under the Bridge",
+   "mood": "Blue hour",
+   "hour": 22.1,
+   "weather": "clear",
+   "fov": 60,
+   "eye": [
+    170,
+    3,
+    730
+   ],
+   "look": [
+    90,
+    14,
+    800
+   ],
+   "eye2": [
+    165,
+    3.4,
+    740
+   ],
+   "look2": [
+    90,
+    14,
+    800
+   ],
+   "dur": 45,
+   "ground": [
+    120,
+    760
+   ]
+  },
+  {
+   "id": "strait",
+   "name": "The Strait",
+   "mood": "Sunrise",
+   "hour": 5.8,
+   "weather": "clear",
+   "fov": 55,
+   "eye": [
+    -260,
+    70,
+    -330
+   ],
+   "look": [
+    -200,
+    10,
+    60
+   ],
+   "eye2": [
+    -240,
+    64,
+    -320
+   ],
+   "look2": [
+    -200,
+    10,
+    60
+   ],
+   "dur": 45,
+   "ground": [
+    -200,
+    -20
+   ]
+  },
+  {
+   "id": "lighthouse",
+   "name": "Lighthouse Point",
+   "mood": "Golden hour",
+   "hour": 20.9,
+   "weather": "bright",
+   "fov": 55,
+   "eye": [
+    110,
+    40,
+    500
+   ],
+   "look": [
+    -30,
+    0,
+    580
+   ],
+   "eye2": [
+    115,
+    36,
+    525
+   ],
+   "look2": [
+    -30,
+    0,
+    580
+   ],
+   "dur": 45,
+   "ground": [
+    40,
+    560
+   ]
+  },
+  {
+   "id": "west_bank",
+   "name": "West Bank",
+   "mood": "Afternoon",
+   "hour": 14.2,
+   "weather": "bright",
+   "fov": 55,
+   "eye": [
+    -800,
+    3,
+    0
+   ],
+   "look": [
+    -760,
+    8,
+    -60
+   ],
+   "eye2": [
+    -797,
+    3,
+    -8
+   ],
+   "look2": [
+    -760,
+    8,
+    -60
+   ],
+   "dur": 45,
+   "ground": [
+    -800,
+    0
+   ]
+  },
+  {
+   "id": "runway",
+   "name": "Skyport Runway",
+   "mood": "Golden hour",
+   "hour": 20.4,
+   "weather": "clear",
+   "fov": 50,
+   "eye": [
+    -741,
+    16,
+    978
+   ],
+   "look": [
+    -706,
+    60,
+    1918
+   ],
+   "eye2": [
+    -730,
+    18,
+    995
+   ],
+   "look2": [
+    -706,
+    60,
+    1918
+   ],
+   "dur": 45
+  },
+  {
+   "id": "skyport",
+   "name": "Skyport",
+   "mood": "Morning",
+   "hour": 9.0,
+   "weather": "clear",
+   "fov": 55,
+   "eye": [
+    84,
+    160,
+    968
+   ],
+   "look": [
+    -496,
+    0,
+    1668
+   ],
+   "eye2": [
+    60,
+    150,
+    1000
+   ],
+   "look2": [
+    -496,
+    0,
+    1668
+   ],
+   "dur": 45
+  },
+  {
+   "id": "terminal",
+   "name": "Skyport Terminal",
+   "mood": "Night",
+   "hour": 23.5,
+   "weather": "clear",
+   "fov": 55,
+   "eye": [
+    -364,
+    4.5,
+    1558
+   ],
+   "look": [
+    -406,
+    12,
+    1668
+   ],
+   "eye2": [
+    -368,
+    4.5,
+    1565
+   ],
+   "look2": [
+    -406,
+    12,
+    1668
+   ],
+   "dur": 45
+  },
+  {
+   "id": "uptown",
+   "name": "Uptown Towers",
+   "mood": "Golden hour",
+   "hour": 20.3,
+   "weather": "clear",
+   "fov": 52,
+   "eye": [
+    150,
+    120,
+    -50
+   ],
+   "look": [
+    -100,
+    80,
+    -220
+   ],
+   "eye2": [
+    160,
+    112,
+    -80
+   ],
+   "look2": [
+    -100,
+    80,
+    -220
+   ],
+   "dur": 45,
+   "ground": [
+    -100,
+    -220
+   ]
+  },
+  {
+   "id": "across_water",
+   "name": "Across the Water",
+   "mood": "Dusk",
+   "hour": 22.0,
+   "weather": "clear",
+   "fov": 40,
+   "eye": [
+    -2050,
+    60,
+    -100
+   ],
+   "look": [
+    450,
+    60,
+    -200
+   ],
+   "eye2": [
+    -2050,
+    64,
+    -60
+   ],
+   "look2": [
+    450,
+    60,
+    -180
+   ],
+   "dur": 50,
+   "ground": [
+    -2050,
+    -100
+   ],
+   "ground_eye_only": true
+  },
+  {
+   "id": "south_strand",
+   "name": "South Strand",
+   "mood": "Midday",
+   "hour": 12.6,
+   "weather": "bright",
+   "fov": 55,
+   "eye": [
+    -530,
+    45,
+    520
+   ],
+   "look": [
+    -360,
+    0,
+    480
+   ],
+   "eye2": [
+    -525,
+    42,
+    540
+   ],
+   "look2": [
+    -360,
+    0,
+    480
+   ],
+   "dur": 45,
+   "ground": [
+    -430,
+    470
+   ]
+  },
+  {
+   "id": "skyline_west",
+   "name": "Downtown Skyline",
+   "mood": "Golden hour",
+   "hour": 21.0,
+   "weather": "clear",
+   "fov": 48,
+   "eye": [
+    -300,
+    18,
+    -250
+   ],
+   "look": [
+    500,
+    90,
+    -200
+   ],
+   "eye2": [
+    -300,
+    22,
+    -190
+   ],
+   "look2": [
+    500,
+    90,
+    -180
+   ],
+   "dur": 45
+  },
+  {
+   "id": "financial_night",
+   "name": "Financial District",
+   "mood": "Night",
+   "hour": 23.6,
+   "weather": "clear",
+   "fov": 52,
+   "eye": [
+    -100,
+    240,
+    -1000
+   ],
+   "look": [
+    520,
+    40,
+    -250
+   ],
+   "eye2": [
+    -40,
+    230,
+    -1020
+   ],
+   "look2": [
+    520,
+    40,
+    -240
+   ],
+   "dur": 50
+  },
+  {
+   "id": "strait_rain",
+   "name": "The Strait",
+   "mood": "Rain",
+   "hour": 16.0,
+   "weather": "rain",
+   "fov": 55,
+   "eye": [
+    -250,
+    12,
+    300
+   ],
+   "look": [
+    -150,
+    20,
+    -300
+   ],
+   "eye2": [
+    -240,
+    13,
+    260
+   ],
+   "look2": [
+    -150,
+    20,
+    -300
+   ],
+   "dur": 45
+  },
+  {
+   "id": "western_ranges",
+   "name": "Western Ranges",
+   "mood": "Morning",
+   "hour": 7.6,
+   "weather": "clear",
+   "fov": 50,
+   "ground": [
+    -1150,
+    -450
+   ],
+   "eye": [
+    -1150,
+    35,
+    -450
+   ],
+   "look": [
+    -2700,
+    330,
+    -300
+   ],
+   "eye2": [
+    -1150,
+    38,
+    -420
+   ],
+   "look2": [
+    -2700,
+    330,
+    -300
+   ],
+   "dur": 50
+  },
+  {
+   "id": "art_map",
+   "art": true,
+   "name": "",
+   "mood": "",
+   "hour": 14,
+   "weather": "bright",
+   "fov": 45,
+   "eye": [
+    -900,
+    1100,
+    1400
+   ],
+   "look": [
+    250,
+    0,
+    -150
+   ],
+   "focus": [
+    200,
+    0,
+    0
+   ]
+  }
+ ]
+}

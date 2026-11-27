@@ -66,7 +66,7 @@ func _ready() -> void:
 	col.anchor_left = 1.0
 	col.anchor_right = 1.0
 	col.offset_left = -72
-	col.offset_top = 16
+	col.offset_top = maxf(16.0, chips_top)   # below a page's search row (Nearby sat on "+")
 	add_child(col)
 	for b in [["plus", func(): _zoom_by(1.4, size * 0.5)], ["minus", func(): _zoom_by(1.0 / 1.4, size * 0.5)],
 			["location", center_on_player], ["gps", _fit_route], ["layers", func(): legend = not legend; queue_redraw()]]:

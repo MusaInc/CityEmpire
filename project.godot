@@ -5,11 +5,11 @@ config_version=5
 
 config/name="WORLDSTATE"
 config/description="Open-world business life sim: start as the worker, become the owner, build the empire, climb the City500. Musa Studios."
-config/version="0.23.0"
+config/version="0.24.0"
 run/main_scene="res://scenes/boot.tscn"
 config/features=PackedStringArray("4.5", "Mobile")
 config/icon="res://assets/icon_1024.png"
-boot_splash/bg_color=Color(0.071, 0.106, 0.129, 1)
+boot_splash/bg_color=Color(0.0353, 0.051, 0.0863, 1)
 boot_splash/image="res://assets/splash/launch.png"
 boot_splash/fullsize=true
 boot_splash/use_filter=true

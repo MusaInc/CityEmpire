@@ -83,7 +83,7 @@ static func operations(ph: Phone, body: VBoxContainer) -> void:
 	var e := g.empire
 	var v := PhonePages.scroller(body, 18)
 	var head := _card(v)
-	head.add_child(G.text("Operations", "title2"))
+	head.add_child(G.text("Restocking", "title2"))
 	head.add_child(G.para("Each shop restocks itself overnight if it has a manager or the supplier's auto-restock (%s a delivery), up to its daily purchasing budget. Orders of 20, 60 and 150 cases get 5, 10 and 15%% off." % EmpireData.money(Careers.auto_fee(e)), "footnote"))
 	if e.businesses.is_empty():
 		head.add_child(G.para("You don't run a shop yet.", "body"))

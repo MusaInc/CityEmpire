@@ -95,8 +95,6 @@ func _ready() -> void:
 
 
 var _safe_root: Control
-var _title_center: Control
-var _title_studio: Control
 
 
 ## Insets the HUD by the display's safe area (none on desktop in a window).
@@ -111,13 +109,8 @@ func _apply_safe_area() -> void:
 	hud.offset_top = inset[1]
 	hud.offset_right = -inset[2]
 	hud.offset_bottom = -hud_bottom
-	if _title_center != null and is_instance_valid(_title_center):
-		_title_center.offset_left = 80.0 + float(inset[0])
-		_title_center.offset_right = 600.0 + float(inset[0])
-		_title_center.offset_top = float(inset[1])
-		_title_center.offset_bottom = -float(inset[3])
-	if _title_studio != null and is_instance_valid(_title_studio):
-		_anchor(_title_studio, 0.0, 1.0, Vector2(80.0 + float(inset[0]), -52.0 - float(inset[3])), Vector2(200, 26))
+	if title_menu != null and is_instance_valid(title_menu):
+		title_menu.set_insets(inset)
 
 
 # ------------------------------------------------------------------ HUD
@@ -217,8 +210,25 @@ func _build_hud() -> void:
 	tv.add_child(_turn_dist)
 	tv.add_child(_turn_sub)
 	# In-game smartphone button (left of the minimap).
-	_phone_btn = S.button("PHONE", func(): open_phone("overview"), false, 88)
-	_phone_btn.add_theme_font_size_override("font_size", 15)
+	# (The W: Home on the phone – every app is one more tap.)
+	_phone_btn = Button.new()
+	_phone_btn.focus_mode = Control.FOCUS_NONE
+	var pb := StyleBoxFlat.new()
+	pb.bg_color = Color(Brand.NAVY_DEEP, 0.78)
+	pb.set_corner_radius_all(26)
+	pb.border_color = Color(Brand.GOLD, 0.38)
+	pb.set_border_width_all(1)
+	pb.shadow_color = Color(0, 0, 0, 0.3)
+	pb.shadow_size = 8
+	var pbp := pb.duplicate() as StyleBoxFlat
+	pbp.bg_color = Color(Brand.NAVY, 0.92)
+	for st in ["normal", "hover", "focus"]:
+		_phone_btn.add_theme_stylebox_override(st, pb)
+	_phone_btn.add_theme_stylebox_override("pressed", pbp)
+	var pm := Brand.Mark.new(26.0)
+	pm.position = Vector2(13, 16)
+	_phone_btn.add_child(pm)
+	_phone_btn.pressed.connect(func(): open_phone("home"))
 	hud.add_child(_phone_btn)
 	# Toasts (top centre).
 	_toasts = S.vbox(8)
@@ -339,8 +349,7 @@ func show_hud() -> void:
 	_title_root.visible = false
 	for c in _title_root.get_children():
 		c.queue_free()
-	_title_center = null
-	_title_studio = null
+	title_menu = null
 	_hud_cache.clear()
 	hud.visible = true
 	touch.visible = DisplayServer.is_touchscreen_available() or game.args.has("touch")
@@ -777,74 +786,37 @@ func _fixed(text: String, w: float, size := 17, col := S.PAPER, weight := "semib
 
 
 # ---------------------------------------------------------------- title
-func show_title(has_save: bool) -> void:
+var title_menu: TitleMenu
+
+
+func show_title(has_save: bool, view := {}) -> void:
 	hud.visible = false
 	touch.visible = false
 	for c in _title_root.get_children():
 		c.queue_free()
 	_title_root.visible = true
-	var g := Gradient.new()
-	g.set_color(0, Color(0.03, 0.055, 0.07, 0.98))
-	g.add_point(0.33, Color(0.03, 0.055, 0.07, 0.86))
-	g.add_point(0.68, Color(0.03, 0.055, 0.07, 0.20))
-	g.set_color(g.get_point_count() - 1, Color(0.03, 0.055, 0.07, 0.05))
-	var gt := GradientTexture2D.new()
-	gt.gradient = g
-	gt.width = 256
-	gt.height = 4
-	gt.fill_to = Vector2(1, 0)
-	var shade := TextureRect.new()
-	shade.texture = gt
-	shade.stretch_mode = TextureRect.STRETCH_SCALE
-	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_title_root.add_child(shade)
+	title_menu = TitleMenu.new(self, game, has_save, view)
+	_title_root.add_child(title_menu)
+	title_menu.set_insets(_safe_insets(_safe_root.size if _safe_root else Vector2.ZERO))
 
-	var ins := _safe_insets()
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
-	center.offset_left = 80.0 + float(ins[0])
-	center.offset_right = 600.0 + float(ins[0])
-	center.offset_top = float(ins[1])
-	center.offset_bottom = -float(ins[3])
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_title_center = center
-	_title_root.add_child(center)
-	var stack := S.vbox(16)
-	stack.custom_minimum_size.x = 520.0
-	center.add_child(stack)
-	stack.add_child(MenuParts.Logo.new())
-	var rule := ColorRect.new()
-	rule.color = Color("e8b961")
-	rule.custom_minimum_size = Vector2(57, 2)
-	rule.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_child(rule)
-	var space := Control.new()
-	space.custom_minimum_size.y = 13
-	stack.add_child(space)
 
-	var actions := S.vbox(10)
-	actions.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	stack.add_child(actions)
-	if has_save:
-		actions.add_child(S.button("Continue", game.continue_game, true, 246))
-	actions.add_child(S.button("New game", func():
-		if has_save:
-			_confirm_new()
-		else:
-			game.start_new(), not has_save, 246))
-	var options := S.hbox(10)
-	if has_save:
-		options.add_child(S.button("Character", func():
-			game.continue_game()
-			open_style(), false, 118))
-	options.add_child(S.button("Settings", _settings_panel, false, 118 if has_save else 246))
-	actions.add_child(options)
-	var studio := S.label("Musa Studios", 15, Color("c0c5c5"))
-	_anchor(studio, 0.0, 1.0, Vector2(80.0 + float(ins[0]), -52.0 - float(ins[3])), Vector2(200, 26))
-	_title_studio = studio
-	_title_root.add_child(studio)
+func title_logo_rect() -> Rect2:
+	return title_menu.logo_rect() if title_menu and is_instance_valid(title_menu) else Rect2()
+
+
+func title_reveal(delay := 0.0) -> void:
+	if title_menu and is_instance_valid(title_menu):
+		title_menu.reveal(delay)
+
+
+func title_handoff() -> void:
+	if title_menu and is_instance_valid(title_menu):
+		title_menu.handoff()
+
+
+## Something drawn over every layer (the title's dip into the world).
+func add_overlay(c: Control) -> void:
+	_panel_root.get_parent().add_child(c)
 
 
 func _confirm_new() -> void:
@@ -1911,7 +1883,7 @@ class _Roundel extends Control:
 		draw_string(f, c + Vector2(-w * 0.5, fs * 0.36), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, acc)
 
 
-func open_phone(tab := "overview", focus := {}) -> void:
+func open_phone(tab := "home", focus := {}) -> void:
 	var e := game.empire
 	# (Onboarding: these count as having looked.)
 	if tab == "map":
@@ -1933,7 +1905,9 @@ func open_phone(tab := "overview", focus := {}) -> void:
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	Phone.section = sec
-	Phone.st(sec)["sub"] = sub
+	if sub != "":
+		Phone.stacks[sec] = [{"page": "root", "args": {}, "title": Phone.title_of(sec)},
+			{"page": sub, "args": {}, "title": String(Phone.DETAILS[sub][1])}]
 	if not focus.is_empty():
 		Phone.st(sec)["focus"] = focus
 	phone = Phone.new()

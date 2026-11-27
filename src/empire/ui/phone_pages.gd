@@ -20,158 +20,518 @@ const G = preload("res://src/empire/ui/glass.gd")
 
 
 static func build(ph: Phone, sec: String, page: String, args: Dictionary, body: VBoxContainer) -> void:
-	match sec:
-		"overview", "home":
-			overview_hub(ph, body)
-		"businesses":
-			if page == "company":
-				company(ph, body, int(args.get("idx", 0)))
-			else:
-				businesses_hub(ph, body)
-		"assets":
-			if page == "vehicle":
-				vehicle_offer(ph, body, String(args.get("model", "")), String(args.get("site", "")))
-			elif page == "listing":
-				listing(ph, body, args)
-			else:
-				assets_hub(ph, body)
-		"map":
-			map_hub(ph, body)
-		"profile":
-			profile_hub(ph, body)
-		"market":
-			if page == "vehicle":
-				vehicle_offer(ph, body, String(args.get("model", "")), String(args.get("site", "")))
-			elif page == "listing":
-				listing(ph, body, args)
-			else:
-				market(ph, body)
+	# Pages any app can push.
+	match page:
+		"vehicle":
+			vehicle_offer(ph, body, String(args.get("model", "")), String(args.get("site", "")))
+			return
+		"listing":
+			listing(ph, body, args)
+			return
+		"company":
+			company(ph, body, int(args.get("idx", 0)))
+			return
+		"growth":
+			CommercePages.empire(ph, body)
+			return
+		"supply":
+			CommercePages.supply(ph, body)
+			return
+		"ventures":
+			CommercePages.ventures(ph, body)
+			return
+		"ops":
+			CareerPages.operations(ph, body)
+			return
+		"reports":
+			CareerPages.reports(ph, body)
+			return
 		"city500":
-			if page == "company":
-				company(ph, body, int(args.get("idx", 0)))
-			else:
-				city500(ph, body)
+			city500(ph, body)
+			return
+		"history":
+			bank_history(ph, body)
+			return
+		"city":
+			city_today(ph, body)
+			return
+		"corporate":
+			CommercePages.corporate(ph, body)
+			return
+		"goals", "nearby":
+			var lv := G.vbox(12)
+			lv.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			body.add_child(lv)
+			ph.ui.legacy_tab({"corporate": "company", "nearby": "explore"}.get(page, page), lv, Phone.st(sec).get("focus", {}))
+			Phone.st(sec).erase("focus")
+			return
+	match sec:
+		"home":
+			launcher(ph, body)
+		"businesses":
+			businesses_root(ph, body)
+		"bank":
+			bank(ph, body)
 		"vehicles":
 			garage(ph, body)
 		"property":
-			if page == "listing":
-				listing(ph, body, args)
-			else:
-				property(ph, body)
-		"you":
+			property(ph, body)
+		"map":
+			map(ph, body)
+		"wardrobe":
 			character(ph, body)
-		"more":
-			more(ph, body)
-		_:
-			var v := G.vbox(14)
-			v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			body.add_child(v)
-			ph.ui.legacy_tab(sec, v, Phone.st(sec).get("focus", {}))
-			Phone.st(sec).erase("focus")
-
-
-static func _sub_bar(ph: Phone, sec: String, items: Array, default_key: String, body: VBoxContainer) -> String:
-	var st := Phone.st(sec)
-	var cur := String(st.get("sub", default_key))
-	var valid := false
-	for it in items:
-		if String(it[0]) == cur:
-			valid = true
-			break
-	if not valid:
-		cur = default_key
-		st["sub"] = cur
-	var pick := func(k: String):
-		Phone.st(sec)["sub"] = k
-		ph.refresh()
-	# (More than five tabs scroll as pills rather than squeezing a segment.)
-	body.add_child(G.pills(items, cur, pick) if items.size() > 5 else G.segmented(items, cur, pick))
-	return cur
-
-
-static func overview_hub(ph: Phone, body: VBoxContainer) -> void:
-	var sub := _sub_bar(ph, "overview", [["summary", "Summary"], ["jobs", "Jobs"], ["finances", "Finances"], ["city", "City"], ["goals", "Goals"]], "summary", body)
-	match sub:
 		"jobs":
 			CareerPages.jobs(ph, body)
-		"finances":
-			var v := G.vbox(12)
-			v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			body.add_child(v)
-			ph.ui.legacy_tab("bank", v)
-		"city":
-			var v := G.vbox(12)
-			v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			body.add_child(v)
-			ph.ui.legacy_tab("city", v)
-		"goals":
-			var v := G.vbox(12)
-			v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			body.add_child(v)
-			ph.ui.legacy_tab("goals", v)
-		_:
-			home(ph, body)
-
-
-static func businesses_hub(ph: Phone, body: VBoxContainer) -> void:
-	var sub := _sub_bar(ph, "businesses", [["empire", "Empire"], ["shops", "Businesses"], ["supply", "Supply chain"], ["ventures", "Ventures"],
-		["ops", "Operations"], ["reports", "Reports"], ["corporate", "Corporate"], ["city500", "City500"]], "empire", body)
-	match sub:
-		"empire":
-			CommercePages.empire(ph, body)
-		"supply":
-			CommercePages.supply(ph, body)
-		"ventures":
-			CommercePages.ventures(ph, body)
-		"ops":
-			CareerPages.operations(ph, body)
-		"reports":
-			CareerPages.reports(ph, body)
-		"corporate":
-			var v := G.vbox(12)
-			v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			body.add_child(v)
-			ph.ui.legacy_tab("company", v)
-		"city500":
-			city500(ph, body)
-		_:
-			var v := G.vbox(12)
-			v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			body.add_child(v)
-			ph.ui.legacy_tab("businesses", v)
-
-
-static func assets_hub(ph: Phone, body: VBoxContainer) -> void:
-	var sub := _sub_bar(ph, "assets", [["property", "Properties"], ["garage", "Garage"], ["market", "Marketplace"]], "property", body)
-	match sub:
-		"garage":
-			garage(ph, body)
 		"market":
 			market(ph, body)
+		"settings":
+			settings(ph, body)
 		_:
-			property(ph, body)
+			launcher(ph, body)
 
 
-static func map_hub(ph: Phone, body: VBoxContainer) -> void:
-	var sub := _sub_bar(ph, "map", [["city_map", "City Map"], ["explore", "Nearby"]], "city_map", body)
-	if sub == "explore":
-		var v := G.vbox(12)
-		v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		body.add_child(v)
-		ph.ui.legacy_tab("explore", v)
+# ------------------------------------------------------------ launcher
+## Home (2026-11-27): one glance at your money, the one thing that needs
+## you, and the nine apps as photographed tiles – everything in two taps.
+const APP_ART := "res://assets/ui/apps/%s.jpg"
+static var _art := {}
+
+
+static func app_art(key: String) -> Texture2D:
+	if not _art.has(key):
+		var p := APP_ART % key
+		_art[key] = load(p) if ResourceLoader.exists(p) else null
+	return _art[key]
+
+
+static func launcher(ph: Phone, body: VBoxContainer) -> void:
+	var g := ph.game
+	var e := g.empire
+	var v := scroller(body, 16)
+	# Money at a glance (tap: Banking).
+	var yd := float(e.day_reports[-1].get("profit", 0.0)) if not e.day_reports.is_empty() else 0.0
+	var strip := Button.new()
+	strip.focus_mode = Control.FOCUS_NONE
+	for st in ["normal", "hover", "focus"]:
+		strip.add_theme_stylebox_override(st, G.box(G.CARD, 20, 0))
+	strip.add_theme_stylebox_override("pressed", G.box(G.CARD.lerp(G.LABEL, 0.06), 20, 0))
+	strip.custom_minimum_size.y = 84
+	var figs := G.hbox(28)
+	figs.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	figs.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	figs.offset_left = 20
+	figs.offset_right = -16
+	figs.offset_top = 12
+	figs.offset_bottom = -12
+	figs.add_child(G.figure("Net worth", EmpireData.money(e.net_worth()), null, "title3"))
+	figs.add_child(G.figure("Cash", EmpireData.money(e.personal_cash + maxf(e.company_cash, 0.0)), G.ACCENT_TEXT, "title3"))
+	if not e.day_reports.is_empty():
+		figs.add_child(G.figure("Yesterday", EmpireData.money(yd, true), G.GREEN if yd >= 0.0 else G.RED, "title3"))
+	figs.add_child(G.spacer())
+	var chev := G.Symbol.new("chevron", G.LABEL3, 18)
+	chev.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	figs.add_child(chev)
+	strip.add_child(figs)
+	G.feedback(strip, func(): ph.go("bank"))
+	v.add_child(strip)
+	# The one thing that needs you.
+	var ob := g.objective()
+	var alerts := Dashboard.grouped(ph.ui)
+	if String(ob[0]) != "":
+		v.add_child(G.group([G.row(String(ob[0]), "Next step · tap to set a route", "", "goals", G.ACCENT_TEXT, ph.ui.objective_action)]))
+	elif not alerts.is_empty():
+		var ad: Dictionary = alerts[0]
+		v.add_child(G.group([G.row(String(ad["title"]), "Tap to sort it" if alerts.size() == 1 else "+%d more on Businesses" % (alerts.size() - 1), "",
+			String(ad.get("icon", "alert")), EmpireUI.tones()[ad["tone"]], func(): Dashboard.open_group(ph.ui, ad))]))
+	# Apps.
+	var n := clampi(cols(ph, 196.0), 3, 4)
+	var w := (width(ph) - 14.0 * (n - 1)) / n
+	var gd := grid(n)
+	gd.add_theme_constant_override("h_separation", 14)
+	gd.add_theme_constant_override("v_separation", 14)
+	for key: String in Phone.APPS:
+		gd.add_child(_app_tile(ph, key, w, roundf(w * 0.56)))
+	v.add_child(gd)
+	# Quieter ways in.
+	v.add_child(G.group([
+		G.row("Goals", "Chapters and milestones", "", "goals", G.ACCENT_TEXT, func(): ph.detail("goals")),
+		G.row("City today", "Weather, events and rivals", "", "city", G.TEAL, func(): ph.detail("city")),
+	]))
+	v.add_child(G.gap(4))
+
+
+static func _app_line(ph: Phone, key: String) -> String:
+	var g := ph.game
+	var e := g.empire
+	match key:
+		"businesses":
+			if e.businesses.is_empty():
+				return "Lease your first shop"
+			var p := 0.0
+			for b: Business in e.businesses:
+				p += float(b.last_day().get("profit", 0.0))
+			return "%d open · %s yesterday" % [e.businesses.size(), EmpireData.money(p, true)] if not e.day_reports.is_empty() else "%d open" % e.businesses.size()
+		"bank":
+			return EmpireData.money(e.personal_cash + e.company_cash)
+		"vehicles":
+			return "%d in the garage" % e.vehicles.size() if not e.vehicles.is_empty() else "Visit a showroom"
+		"property":
+			return "%d places" % e.properties.size() if not e.properties.is_empty() else "Homes and units"
+		"map":
+			return "Routes and places"
+		"wardrobe":
+			return "%d items" % Wardrobe.owned(e.flags).size()
+		"jobs":
+			return "Courier runs and shifts"
+		"market":
+			return "Cars, homes, fashion"
+	return ""
+
+
+static func _app_tile(ph: Phone, key: String, w: float, h: float) -> Control:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(w, h)
+	var empty := StyleBoxEmpty.new()
+	for st in ["normal", "hover", "pressed", "focus"]:
+		b.add_theme_stylebox_override(st, empty)
+	var art := app_art(key)
+	var frame := Panel.new()
+	frame.clip_children = CanvasItem.CLIP_CHILDREN_AND_DRAW
+	frame.add_theme_stylebox_override("panel", G.box(G.CARD, 20, 0))
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	b.add_child(frame)
+	var on_photo := art != null
+	if art:
+		var tr := TextureRect.new()
+		tr.texture = art
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		tr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		frame.add_child(tr)
+		# A soft scrim under the words only.
+		var gr := Gradient.new()
+		gr.set_color(0, Color(0.02, 0.03, 0.06, 0.0))
+		gr.set_color(1, Color(0.02, 0.03, 0.06, 0.78))
+		gr.add_point(0.45, Color(0.02, 0.03, 0.06, 0.0))
+		var gt := GradientTexture2D.new()
+		gt.gradient = gr
+		gt.fill_from = Vector2(0.5, 0.0)
+		gt.fill_to = Vector2(0.5, 1.0)
+		gt.width = 4
+		gt.height = 128
+		var scrim := TextureRect.new()
+		scrim.texture = gt
+		scrim.stretch_mode = TextureRect.STRETCH_SCALE
+		scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		frame.add_child(scrim)
+	var rim := Panel.new()
+	var rsb := G.box(Color(0, 0, 0, 0), 20, 0)
+	rsb.border_color = Color(1, 1, 1, 0.10) if on_photo else G.SEP
+	rsb.set_border_width_all(1)
+	rim.add_theme_stylebox_override("panel", rsb)
+	rim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	b.add_child(rim)
+	var words := G.vbox(0)
+	words.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	words.alignment = BoxContainer.ALIGNMENT_END
+	words.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	words.offset_left = 16
+	words.offset_right = -12
+	words.offset_bottom = -12
+	words.offset_top = 12
+	var ink := Color(0.98, 0.97, 0.95) if on_photo else G.LABEL
+	if not on_photo:
+		var ic := G.Symbol.new(Phone.icon_of(key), Phone.color_of(key), 30)
+		words.add_child(ic)
+		words.add_child(G.spacer())
+	words.add_child(G.text(Phone.title_of(key), "headline", ink, "semibold"))
+	var line := _app_line(ph, key)
+	if line != "":
+		var l2 := G.text(line, "caption", Color(ink, 0.74) if on_photo else G.LABEL2, "medium")
+		l2.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		words.add_child(l2)
+	b.add_child(words)
+	b.button_down.connect(func(): b.scale = Vector2(0.97, 0.97))
+	b.button_up.connect(func(): b.scale = Vector2.ONE)
+	b.resized.connect(func(): b.pivot_offset = b.size * 0.5)
+	G.feedback(b, func(): ph.go(key))
+	return b
+
+
+# ------------------------------------------------------------ settings
+static func settings(ph: Phone, body: VBoxContainer) -> void:
+	var ui := ph.ui
+	var g := ph.game
+	var e := g.empire
+	var v := scroller(body, 18)
+	v.add_child(G.group([
+		G.row("Save now", "Day %d · %s %s" % [e.day, e.weekday(), e.clock_text()], "", "goals", G.GREEN, func():
+			g.save_game()
+			ui.toast("Saved", "good")),
+		G.row("Normal speed" if g.time_scale > 1.0 else "Fast-forward ×4", "Time in the city", "", "clock", G.BLUE, func():
+			g.toggle_fast()
+			ph.refresh()),
+		G.row("Sleep till 07:00", "Skip the night", "", "home", G.PURPLE, func():
+			ui.close_panel(true)
+			g.sleep_until(7.0)),
+	], "Game"))
+	v.add_child(G.group([
+		G.row("Graphics, look & sound", "Quality, visual look, lens, appearance, volume", "", "game", G.LABEL2, func(): ui._settings_panel()),
+	], "Display"))
+	var rows: Array = []
+	if OS.is_debug_build():
+		rows.append(G.row("Beta tester · add £1,000,000", "Debug builds only", "", "bank", G.ORANGE, func():
+			e.personal_cash += 1000000.0
+			e._book("personal", 1000000.0, "other", "Tester money")
+			e.changed.emit()
+			ui.toast("£1,000,000 added to your personal account", "good")
+			ph.refresh()))
+	rows.append(G.row("Save & quit to title", "", "", "back", G.RED, func():
+		g.save_game()
+		ui.close_panel(true)
+		EmpireMap.clear_caches()
+		ExploreUI.clear_caches()
+		Phone.clear_caches()
+		Thumbs.clear_caches()
+		Glass.clear_caches()
+		ui.get_tree().reload_current_scene()))
+	v.add_child(G.group(rows))
+	var mark := Brand.Wordmark.new(22.0, G.LABEL2)
+	mark.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	v.add_child(mark)
+	var cr := G.para("A Musa Studios game. Character built on MakeHuman (CC0) · Hooded sweat jacket · Elvaerwyn · CC BY · " +
+		"Running shoes 01 · punkduck · CC BY 3.0 · Cargo pants · Cortu Johnstone · CC0 · Gloves · MRT · CC0 · " +
+		"Typefaces: Inter, Outfit and shop faces · SIL Open Font License", "caption")
+	cr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(cr)
+	v.add_child(G.gap(4))
+
+
+# ---------------------------------------------------------- businesses
+## Your businesses first (what needs you on top); everything deeper –
+## company, supply chain, ventures, operations, reports, corporate,
+## rankings – one tap away as its own page.
+static func businesses_root(ph: Phone, body: VBoxContainer) -> void:
+	var ui := ph.ui
+	var g := ph.game
+	var e := g.empire
+	var v := scroller(body, 18)
+	var rev := 0.0
+	var prof := 0.0
+	for r: Dictionary in e.day_reports.slice(maxi(e.day_reports.size() - 7, 0)):
+		rev += float(r.get("revenue", 0.0))
+		prof += float(r.get("profit", 0.0))
+	var fc := G.card(18, 0)
+	var fr := G.hbox(30)
+	fr.add_child(G.figure("Sales · 7 days", EmpireData.money(rev), null, "title3"))
+	fr.add_child(G.figure("Profit · 7 days", EmpireData.money(prof, true), G.GREEN if prof >= 0.0 else G.RED, "title3"))
+	fr.add_child(G.figure("Stage", String(Progression.current(e).get("name", "")), null, "title3"))
+	(fc[1] as VBoxContainer).add_child(fr)
+	v.add_child(fc[0])
+	if e.businesses.is_empty():
+		v.add_child(G.group([G.row("Lease your first shop", "Empty units across the city", "", "property", G.ACCENT_TEXT, func(): ph.go("property"))]))
 	else:
-		map(ph, body)
+		var bs: Array = e.businesses.duplicate()
+		var hr := e.minute / 60.0
+		bs.sort_custom(func(a: Business, b2: Business):
+			var ta := String(a.status(hr)[2]) == "bad"
+			var tb := String(b2.status(hr)[2]) == "bad"
+			if ta != tb:
+				return ta
+			return float(a.last_day().get("profit", 0.0)) > float(b2.last_day().get("profit", 0.0)))
+		var rows: Array = []
+		for b: Business in bs:
+			var bb := b
+			var stt := b.status(hr)
+			var p := float(b.last_day().get("profit", 0.0))
+			rows.append(G.row(b.name, "%s · %s" % [String(EmpireData.business_type(b.type_id).get("name", "Shop")), String(stt[1])],
+				EmpireData.money(p, true) if not b.history.is_empty() else "New", "businesses", EmpireUI.tones()[stt[2]],
+				func(): ui.open_manage(bb), G.GREEN if p >= 0.0 else G.RED))
+		v.add_child(G.group(rows, "Your businesses", "Tap one to manage stock, staff, prices and growth."))
+	v.add_child(G.group([
+		G.row("Company & growth", "Levels, fit-outs, brand and divisions", "", "brand", G.ACCENT_TEXT, func(): ph.detail("growth")),
+		G.row("Supply chain", "Warehouse, fleet and contracts", "", "truck", G.BLUE, func(): ph.detail("supply")),
+		G.row("Ventures", "Clubs, car hire, hotels", "", "neon", G.PURPLE, func(): ph.detail("ventures")),
+		G.row("Operations", "Staff and shifts across the empire", "", "staff", G.TEAL, func(): ph.detail("ops")),
+		G.row("Reports", "Daily results and trends", "", "finances", G.GREEN, func(): ph.detail("reports")),
+		G.row("Corporate", "Name, sign and company accounts", "", "company", G.ORANGE, func(): ph.detail("corporate")),
+		G.row("City500", "Rankings and shares", "", "star", G.ACCENT_TEXT, func(): ph.detail("city500")),
+	], "Manage"))
+	v.add_child(G.button("Find another shop", func(): ph.go("property"), "gray", "large", null, "property"))
+	v.add_child(G.gap(4))
 
 
-static func profile_hub(ph: Phone, body: VBoxContainer) -> void:
-	var sub := _sub_bar(ph, "profile", [["character", "Character"], ["game", "Settings"]], "character", body)
-	if sub == "game":
-		var v := G.vbox(12)
-		v.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		body.add_child(v)
-		ph.ui.legacy_tab("game", v)
-	else:
-		character(ph, body)
+# --------------------------------------------------------------- bank
+static func _money_row(title: String, sub: String, amounts: Array, cb: Callable, can: Callable) -> Control:
+	var col := G.vbox(8)
+	var h := G.hbox(10)
+	var tv := G.vbox(0)
+	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tv.add_child(G.text(title, "headline"))
+	tv.add_child(G.text(sub, "footnote", G.LABEL2))
+	h.add_child(tv)
+	col.add_child(h)
+	var bh := G.hbox(8)
+	for a in amounts:
+		var amt: float = a[1]
+		var bt := G.button(String(a[0]), func(): cb.call(amt), "gray", "small")
+		bt.disabled = not bool(can.call(amt))
+		bh.add_child(bt)
+	col.add_child(bh)
+	return col
+
+
+## Banking (2026-11-27, was the old Finances tab): accounts, moving money,
+## the business loan and statements.
+static func bank(ph: Phone, body: VBoxContainer) -> void:
+	var ui := ph.ui
+	var e := ph.game.empire
+	var v := scroller(body, 18)
+	var hc := G.card(22, 14)
+	var hv: VBoxContainer = hc[1]
+	hv.add_child(G.figure("Net worth", EmpireData.money(e.net_worth()), null, "large"))
+	var fr := G.hbox(30)
+	fr.add_child(G.figure("Savings", EmpireData.money(e.personal_cash, true), null, "title3"))
+	fr.add_child(G.figure("Company", EmpireData.money(e.company_cash, true), G.RED if e.company_cash < 0.0 else null, "title3"))
+	fr.add_child(G.figure("Stock", EmpireData.money(e.stock_value()), null, "title3"))
+	hv.add_child(fr)
+	var hist: Array = e.day_reports.map(func(r): return float(r.get("net_worth", 0.0)))
+	if hist.size() >= 2:
+		hist.append(e.net_worth())
+		var ch := Chart.new(hist.slice(maxi(hist.size() - 30, 0)), Vector2(0, 70), 2.5)
+		ch.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hv.add_child(ch)
+	v.add_child(hc[0])
+	var mv := G.card(20, 18)
+	var mvv: VBoxContainer = mv[1]
+	mvv.add_child(G.text("Move money", "title3"))
+	var all_in := floorf(e.personal_cash * 100.0) / 100.0
+	mvv.add_child(_money_row("Savings → Company", "Fund stock, wages and rent", [["£100", 100.0], ["£500", 500.0], ["£2,000", 2000.0], ["All", -1.0]],
+		func(a: float):
+			var amt := all_in if a < 0.0 else a
+			if not e.transfer_to_company(amt):
+				ui.toast("Not enough savings", "bad")
+			ph.refresh(),
+		func(a: float): return (all_in if a < 0.0 else a) > 0.0 and e.personal_cash >= (all_in if a < 0.0 else a)))
+	var all_out := floorf(e.company_cash * 100.0) / 100.0
+	mvv.add_child(_money_row("Company → Savings", "Pay yourself for cars, homes and clothes", [["£100", 100.0], ["£500", 500.0], ["All", -1.0]],
+		func(a: float):
+			var amt := all_out if a < 0.0 else a
+			if not e.draw_from_company(amt):
+				ui.toast("Not enough in the company", "bad")
+			ph.refresh(),
+		func(a: float): return (all_out if a < 0.0 else a) > 0.0 and e.company_cash >= (all_out if a < 0.0 else a)))
+	v.add_child(mv[0])
+	var lc := G.card(20, 12)
+	var lv: VBoxContainer = lc[1]
+	var lim := e.loan_limit()
+	lv.add_child(G.text("Business loan", "title3"))
+	lv.add_child(G.para("Up to %s at %.1f%% a day, paid into the company." % [EmpireData.money(lim), float(EmpireData.economy()["loan"]["daily_rate"]) * 100.0], "footnote"))
+	var lb := G.hbox(8)
+	for frac: float in [0.25, 1.0]:
+		var amt3 := floorf(lim * frac / 100.0) * 100.0
+		if amt3 >= 100.0:
+			lb.add_child(G.button("Borrow %s" % EmpireData.money(amt3), func():
+				e.take_loan(amt3)
+				ph.refresh(), "gray", "small"))
+	if lb.get_child_count() > 0:
+		lv.add_child(lb)
+	var loans: Array = []
+	for l in e.loans:
+		var ll: Dictionary = l
+		var r := G.row("Loan · %s" % EmpireData.money(float(ll["principal"])), "Due day %d" % int(ll["due"]), "Repay", "bank", G.ORANGE, func():
+			if not e.repay_loan(ll, float(ll["principal"])):
+				ui.toast("Not enough money", "bad")
+			ph.refresh(), G.ACCENT_TEXT)
+		loans.append(r)
+	if not loans.is_empty():
+		lv.add_child(G.group(loans))
+	v.add_child(lc[0])
+	v.add_child(G.group([G.row("Statements", "Every payment in and out", "", "finances", G.GREEN, func(): ph.detail("history"))]))
+	v.add_child(G.gap(4))
+
+
+## City today (2026-11-27, native): weather, rivals to buy out, running
+## businesses for sale and the news – rows that fit a phone, not a desk.
+static func city_today(ph: Phone, body: VBoxContainer) -> void:
+	var ui := ph.ui
+	var g := ph.game
+	var e := g.empire
+	var v := scroller(body, 18)
+	var hc := G.card(22, 12)
+	var hv: VBoxContainer = hc[1]
+	var fr := G.hbox(30)
+	fr.add_child(G.figure("Today", String(CityLife.weather_def(e.weather).get("name", "")), G.ACCENT_TEXT, "title3"))
+	fr.add_child(G.figure("Tomorrow", String(CityLife.weather_def(e.forecast).get("name", "")), null, "title3"))
+	var gone := bool(e.flags.get("rival_gone", false))
+	fr.add_child(G.figure(String(CityLife.rival_cfg().get("name", "QuikSave")), "Gone" if gone else "%d stores" % e.rivals.size(), G.GREEN if gone else G.RED, "title3"))
+	hv.add_child(fr)
+	var tip := String(CityLife._weather_tip(e.weather))
+	if tip != "":
+		hv.add_child(G.para(tip, "footnote"))
+	v.add_child(hc[0])
+	var radius := float(EmpireData.economy().get("competition_radius", 140.0))
+	var rivals: Array = []
+	for r in e.rivals:
+		var u: Dictionary = g.unit_by_id.get(r["unit"], {})
+		if u.is_empty():
+			continue
+		var near := 0
+		for b: Business in e.businesses:
+			if CityLife._dist(r["pos"], b.premises.get("pos", [])) < radius:
+				near += 1
+		rivals.append(G.row(String(r["name"]), "Near %d of yours" % near if near > 0 else "No shop of yours nearby",
+			EmpireData.money(CityLife.rival_price(r)), "company", G.RED, func(): ui.open_rival(u)))
+	if not rivals.is_empty():
+		v.add_child(G.group(rivals, "Rivals", "Buy a store out and its regulars become yours."))
+	var sale := CityLife.firms_for_sale(e)
+	sale.sort_custom(func(a, b): return CityLife.firm_price(a) < CityLife.firm_price(b))
+	var firms: Array = []
+	for f in sale:
+		var u2: Dictionary = g.unit_by_id.get(f["unit"], {})
+		if u2.is_empty():
+			continue
+		firms.append(G.row(String(f["name"]), "%s · ★ %d · %s a day" % [CityLife._dname(f), int(f["rep"]), EmpireData.money(CityLife.firm_profit(f))],
+			EmpireData.money(CityLife.firm_price(f)), "brand", G.GREEN, func(): ui.open_firm(u2)))
+	if not firms.is_empty():
+		v.add_child(G.group(firms, "Businesses for sale", "Running shops with stock, staff and regulars."))
+	var ns: Array = e.news.duplicate()
+	ns.reverse()
+	if not ns.is_empty():
+		var nc := G.card(20, 14)
+		var nv: VBoxContainer = nc[1]
+		nv.add_child(G.text("News", "title3"))
+		for n in ns.slice(0, 12):
+			var col: Color = {"good": G.GREEN, "warn": G.ORANGE, "bad": G.RED}.get(String(n.get("kind", "")), G.LABEL2)
+			var it := G.vbox(2)
+			it.add_child(G.text("Day %d" % int(n.get("day", 0)), "footnote", col, "semibold"))
+			it.add_child(G.para(String(n.get("text", "")), "subhead", G.LABEL))
+			nv.add_child(it)
+		v.add_child(nc[0])
+	v.add_child(G.gap(4))
+
+
+static func bank_history(ph: Phone, body: VBoxContainer) -> void:
+	var e := ph.game.empire
+	var v := scroller(body, 16)
+	var rows: Array = []
+	var recent := e.ledger.slice(maxi(e.ledger.size() - 60, 0))
+	recent.reverse()
+	for x in recent:
+		var amt := float(x["amount"])
+		if absf(amt) < 0.005:
+			continue
+		rows.append(G.row(String(x["memo"]), "%s · Day %d %02d:%02d" % ["Company" if x["acct"] == "company" else "Savings", int(x["day"]), int(x["min"]) / 60, int(x["min"]) % 60],
+			EmpireData.money(amt, true), "bank" if amt < 0.0 else "finances", G.GREEN if amt > 0.0 else G.LABEL3, null, G.GREEN if amt > 0.0 else G.LABEL))
+	if rows.is_empty():
+		rows.append(G.row("Nothing yet", "Payments appear here as you trade", ""))
+	v.add_child(G.group(rows, "Recent"))
+	v.add_child(G.button("Full financial history", func(): ph.ui._finance_history_panel(), "gray", "large", null, "chart"))
 
 
 # ------------------------------------------------------------- helpers
@@ -342,99 +702,6 @@ static func change_pill(pct: float) -> PanelContainer:
 
 
 # ---------------------------------------------------------------- home
-static func home(ph: Phone, body: VBoxContainer) -> void:
-	var ui := ph.ui
-	var g := ph.game
-	var e := g.empire
-	var v := scroller(body, 14)
-	# Compact, neutral-glass Wealth & Chart card (essential info by default;
-	# no oversized gradient financial card).
-	var rc := G.card(18, 10)
-	v.add_child(rc[0])
-	var rv: VBoxContainer = rc[1]
-	var hist: Array = e.day_reports.map(func(r): return float(r.get("net_worth", 0.0)))
-	var rng := String(Phone.st("overview").get("range", "1W"))
-	var nsl: int = {"1W": 7, "1M": 30, "All": 100000}.get(rng, 7)
-	var shown: Array = hist.slice(maxi(hist.size() - nsl, 0))
-	shown.append(e.net_worth())
-	var first := float(shown[0]) if not shown.is_empty() else e.net_worth()
-	var delta := e.net_worth() - first
-	var yd := float(e.day_reports[-1].get("profit", 0.0)) if not e.day_reports.is_empty() else 0.0
-	var top_row := G.hbox(14)
-	var nw_col := G.vbox(-2)
-	nw_col.add_child(G.text("NET WORTH", "caption2", G.LABEL2, "semibold"))
-	nw_col.add_child(G.text(EmpireData.money(e.net_worth()), "title2", G.LABEL, "bold"))
-	nw_col.add_child(G.text(("▲ " if delta >= 0.0 else "▼ ") + EmpireData.money(absf(delta)) + (" · " + rng),
-		"caption", G.GREEN if delta >= 0.0 else G.RED, "semibold"))
-	top_row.add_child(nw_col)
-	top_row.add_child(G.spacer())
-	var cash_col := G.vbox(-2)
-	cash_col.add_child(G.text("AVAILABLE CASH", "caption2", G.LABEL2, "semibold"))
-	cash_col.add_child(G.text(EmpireData.money(e.personal_cash + maxf(e.company_cash, 0.0)), "headline", G.ACCENT_TEXT, "semibold"))
-	cash_col.add_child(G.text(("Yesterday " + EmpireData.money(yd, true)) if not e.day_reports.is_empty() else "Day %d" % e.day,
-		"caption", G.GREEN if yd >= 0.0 else G.RED if not e.day_reports.is_empty() else G.LABEL2))
-	top_row.add_child(cash_col)
-	rv.add_child(top_row)
-	if shown.size() >= 3:
-		var ch := Chart.new(shown, Vector2(0, 74), 2.5)
-		ch.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		rv.add_child(ch)
-	# Actionable alerts & current objective (essential only).
-	var rows: Array = []
-	var ob := g.objective()
-	if String(ob[0]) != "":
-		rows.append(G.row(String(ob[0]), "Next step · tap to set route", "", "goals", G.ACCENT_TEXT, ui.objective_action))
-	for a in Dashboard.grouped(ui).slice(0, 3):
-		var ad: Dictionary = a
-		var tone: Color = EmpireUI.tones()[ad["tone"]]
-		rows.append(G.row(String(ad["title"]), "Tap to resolve", "", String(ad.get("icon", "alert")), tone, func(): Dashboard.open_group(ui, ad)))
-	if rows.is_empty():
-		rows.append(G.row("All operations running smoothly", "Every shop is stocked and trading", "", "goals", G.GREEN))
-	v.add_child(G.group(rows, "Notifications"))
-	# Visual business strip (photo cards).
-	v.add_child(G.header("Businesses", "Manage all", func(): ph.go("businesses")))
-	var car := carousel(12)
-	v.add_child(car[0])
-	if e.businesses.is_empty():
-		(car[1] as HBoxContainer).add_child(photo_card(Thumbs.place(Dashboard._door(g, null), 120.0), 260, 128, "Lease your first shop",
-			"Available units across the city", "Browse properties ›", G.ACCENT_TEXT, "", Color.WHITE, func(): ph.go("property")))
-	for b: Business in e.businesses:
-		var bb := b
-		var uid := String(b.premises.get("id", ""))
-		var stt := b.status(e.minute / 60.0)
-		var prof := float(b.last_day().get("profit", 0.0))
-		(car[1] as HBoxContainer).add_child(photo_card(PhotoBook.frame(uid, "front", Vector2(260, 128), Dashboard._door(g, b), 0), 260, 128,
-			b.name, String(EmpireData.business_type(b.type_id).get("name", "Shop")), ("Yesterday " + EmpireData.money(prof, true)) if not b.history.is_empty() else "New",
-			G.GREEN if prof >= 0.0 else G.RED, String(stt[1]), EmpireUI.tones()[stt[2]], func(): ui.open_manage(bb)))
-	# Progressive disclosure: Recent Activity hidden behind a clean toggle by default.
-	var show_more := bool(Phone.st("overview").get("show_activity", false))
-	var toggle_row := G.hbox(8)
-	toggle_row.add_child(G.button("Hide recent activity" if show_more else "Show recent activity & breakdown", func():
-		Phone.st("overview")["show_activity"] = not show_more
-		ph.refresh(), "gray", "small"))
-	toggle_row.add_child(G.spacer())
-	toggle_row.add_child(G.button("Full Finances ›", func():
-		Phone.st("overview")["sub"] = "finances"
-		ph.refresh(), "plain", "small"))
-	v.add_child(toggle_row)
-	if show_more:
-		var act: Array = []
-		var recent := e.ledger.slice(maxi(e.ledger.size() - 20, 0))
-		recent.reverse()
-		for x in recent:
-			if absf(float(x["amount"])) < 0.005:
-				continue
-			var amt := float(x["amount"])
-			act.append(G.row(String(x["memo"]), "Day %d · %02d:%02d" % [int(x["day"]), int(x["min"]) / 60, int(x["min"]) % 60],
-				EmpireData.money(amt, true), "bank" if amt < 0.0 else "finances",
-				G.GREEN if amt > 0.0 else G.LABEL3, null, G.GREEN if amt > 0.0 else G.LABEL))
-			if act.size() >= 6:
-				break
-		if not act.is_empty():
-			v.add_child(G.group(act, "Recent Activity"))
-	v.add_child(G.gap(6))
-
-
 static func _empire_card(ph: Phone, wide: bool) -> Control:
 	var e := ph.game.empire
 	var ident := ShopStyle.house_ident(e.brand) if not e.brand.is_empty() else {}
@@ -513,12 +780,28 @@ static func map(ph: Phone, body: VBoxContainer) -> void:
 		Phone.st("map").erase("focus")
 	# Floating search (top left): places by name, tap one to show it.
 	var bar := G.surface(-1.0, 4.0, Color(0, 0, 0, 0), true, true)
-	bar.position = Vector2(16, 16)
-	bar.custom_minimum_size = Vector2(minf(width(ph) - 120.0, 520.0), 58)
+	# (anchored, not sized from width(ph): that is 0 while the page builds,
+	# which shrank the field to "Search pl")
+	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	bar.offset_left = 16
+	bar.offset_right = -174
+	bar.offset_top = 16
+	bar.offset_bottom = 74
 	holder.add_child(bar)
+	# Nearby places (was the map's second tab) – top right.
+	var nb := G.surface(-1.0, 4.0, Color(0, 0, 0, 0), true, true)
+	nb.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	nb.offset_left = -158
+	nb.offset_right = -16
+	nb.offset_top = 16
+	nb.offset_bottom = 74
+	nb.add_child(G.button("Nearby", func(): ph.detail("nearby"), "plain", "regular", null, "location"))
+	holder.add_child(nb)
 	var results := G.surface(26.0, 8.0, Color(0, 0, 0, 0), true, true)
-	results.position = Vector2(16, 82)
-	results.custom_minimum_size = Vector2(bar.custom_minimum_size.x, 0)
+	results.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	results.offset_left = 16
+	results.offset_right = -174
+	results.offset_top = 82
 	results.visible = false
 	holder.add_child(results)
 	var rl := G.vbox(0)

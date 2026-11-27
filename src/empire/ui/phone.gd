@@ -17,56 +17,86 @@ extends Control
 ## Detail windows open as sheets OVER the page (the page underneath is
 ## untouched); closing one returns to exactly where you were.
 
+## (2026-11-27 IA) One Home launcher and nine apps. Every app opens on the
+## one page you use most; its deeper management, reports and statistics are
+## detail pages pushed from there (back returns, Home is the W).
 const SECTIONS := [
-	["overview", "Overview", "chart", "ACCENT"],
+	["home", "Home", "grid", "ACCENT"],
 	["businesses", "Businesses", "businesses", "ACCENT"],
-	["assets", "Assets", "property", "ACCENT"],
-	["map", "Map", "map", "ACCENT"],
-	["profile", "Profile", "person", "ACCENT"],
+	["bank", "Banking", "bank", "GREEN"],
+	["vehicles", "Vehicles", "vehicles", "BLUE"],
+	["property", "Properties", "property", "ORANGE"],
+	["map", "Map", "map", "TEAL"],
+	["wardrobe", "Wardrobe", "shirt", "PINK"],
+	["jobs", "Jobs", "desk", "PURPLE"],
+	["market", "Marketplace", "tag", "ACCENT"],
+	["settings", "Settings", "game", "LABEL2"],
 ]
-const TABS := ["overview", "businesses", "assets", "map", "profile"]
+const APPS := ["businesses", "bank", "vehicles", "property", "map", "wardrobe", "jobs", "market", "settings"]
+const TABS: Array = []   # (no dock since the launcher)
 
-## Maps any legacy section/tab key onto one of the 5 unified sections + sub-tab.
+## Detail pages: key -> [app, title].
+const DETAILS := {
+	"growth": ["businesses", "Company & growth"],
+	"supply": ["businesses", "Supply chain"],
+	"ventures": ["businesses", "Ventures"],
+	"ops": ["businesses", "Operations"],
+	"reports": ["businesses", "Reports"],
+	"corporate": ["businesses", "Corporate"],
+	"city500": ["businesses", "City500"],
+	"history": ["bank", "Statements"],
+	"goals": ["home", "Goals"],
+	"city": ["home", "City today"],
+	"nearby": ["map", "Nearby"],
+}
+
+## Any legacy section/tab key -> [app, detail page or ""].
 static func resolve_section(raw: String) -> Array:
 	match raw:
-		"overview", "home", "empire", "":
-			return ["overview", "summary"]
+		"overview", "home", "empire", "", "more":
+			return ["home", ""]
 		"bank", "finances":
-			return ["overview", "finances"]
+			return ["bank", ""]
 		"city":
-			return ["overview", "city"]
+			return ["home", "city"]
 		"goals":
-			return ["overview", "goals"]
-		"businesses":
-			return ["businesses", "shops"]
+			return ["home", "goals"]
+		"businesses", "shops":
+			return ["businesses", ""]
 		"company", "corporate":
 			return ["businesses", "corporate"]
 		"commerce", "growth":
-			return ["businesses", "empire"]
+			return ["businesses", "growth"]
 		"supply", "warehouse", "fleet":
 			return ["businesses", "supply"]
 		"ventures", "nightclub", "rental":
 			return ["businesses", "ventures"]
+		"ops", "operations":
+			return ["businesses", "ops"]
+		"reports":
+			return ["businesses", "reports"]
 		"city500":
 			return ["businesses", "city500"]
 		"assets", "property":
-			return ["assets", "property"]
+			return ["property", ""]
 		"vehicles", "garage":
-			return ["assets", "garage"]
+			return ["vehicles", ""]
 		"market", "marketplace":
-			return ["assets", "market"]
-		"map":
-			return ["map", "city_map"]
-		"explore":
-			return ["map", "explore"]
-		"profile", "you", "character":
-			return ["profile", "character"]
-		"game", "settings", "more":
-			return ["profile", "game"]
-	return ["overview", "summary"]
+			return ["market", ""]
+		"map", "city_map":
+			return ["map", ""]
+		"explore", "nearby":
+			return ["map", "nearby"]
+		"profile", "you", "character", "wardrobe":
+			return ["wardrobe", ""]
+		"jobs":
+			return ["jobs", ""]
+		"game", "settings":
+			return ["settings", ""]
+	return ["home", ""]
 
 ## Session state (survives closing the phone).
-static var section := "overview"
+static var section := "home"
 static var stacks := {}        # section -> [{page, args, title}]
 static var scroll_mem := {}    # "section|page|args" -> [[v, h], …] per scroll container (tree order)
 static var state := {}         # section -> Dictionary (filters, selection, search)
@@ -95,7 +125,7 @@ var _tab_btns := {}            # tab key -> {btn, icon, label}
 
 
 static func clear_caches() -> void:
-	section = "overview"
+	section = "home"
 	stacks.clear()
 	scroll_mem.clear()
 	state.clear()
@@ -254,18 +284,12 @@ func _build() -> void:
 	host_wrap.add_theme_constant_override("margin_left", 20)
 	host_wrap.add_theme_constant_override("margin_right", 20)
 	host_wrap.add_theme_constant_override("margin_top", 12)
-	host_wrap.add_theme_constant_override("margin_bottom", 8)
+	host_wrap.add_theme_constant_override("margin_bottom", 14)
 	shell.add_child(host_wrap)
 	_page_host = Control.new()
 	_page_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_page_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	host_wrap.add_child(_page_host)
-	var rule_bot := ColorRect.new()
-	rule_bot.color = Glass.SEP
-	rule_bot.custom_minimum_size.y = 1
-	shell.add_child(rule_bot)
-	# Compact 5-icon floating smartphone dock at bottom of the bezel.
-	shell.add_child(_dock_bar())
 	_sheet_layer = Control.new()
 	_sheet_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_sheet_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -293,12 +317,18 @@ func _status_bar() -> Control:
 	var row := Glass.hbox(12)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var brand_dot := ColorRect.new()
-	brand_dot.color = Glass.ACCENT
-	brand_dot.custom_minimum_size = Vector2(8, 8)
-	brand_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	brand_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(brand_dot)
+	# The W: Home from anywhere (one tap).
+	var home_b := Button.new()
+	home_b.flat = true
+	home_b.focus_mode = Control.FOCUS_NONE
+	home_b.custom_minimum_size = Vector2(44, 34)
+	for st in ["normal", "hover", "pressed", "focus"]:
+		home_b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	var wm := Brand.Mark.new(22.0)
+	wm.position = Vector2(8, 8)
+	home_b.add_child(wm)
+	Glass.feedback(home_b, func(): go("home"))
+	row.add_child(home_b)
 	_status_clock = Glass.text("Day %d · %s %s" % [e.day, e.weekday(), e.clock_text()], "caption", Glass.LABEL2, "semibold")
 	row.add_child(_status_clock)
 	row.add_child(Glass.spacer())
@@ -615,11 +645,20 @@ func go(sec: String, focus := {}) -> void:
 	dismiss_sheet(false)
 	var resolved := resolve_section(sec)
 	var target_sec := String(resolved[0])
-	var target_sub := String(resolved[1])
-	var was_sub := String(st(target_sec).get("sub", ""))
-	if sec != target_sec:
-		st(target_sec)["sub"] = target_sub
-	if target_sec == section and focus.is_empty() and (sec == target_sec or was_sub == target_sub):
+	var detail := String(resolved[1])
+	if detail != "":
+		save_scroll()
+		section = target_sec
+		stacks[target_sec] = [_stack(target_sec)[0], {"page": detail, "args": {}, "title": String(DETAILS[detail][1])}]
+		if not focus.is_empty():
+			st(target_sec)["focus"] = focus
+		if _needs_shell_rebuild():
+			_build()
+			return
+		_sync_nav()
+		_show_page(true)
+		return
+	if target_sec == section and focus.is_empty():
 		if (_stack(target_sec) as Array).size() > 1:
 			save_scroll()
 			stacks[target_sec] = [_stack(target_sec)[0]]
@@ -656,6 +695,13 @@ func back() -> void:
 		save_scroll()
 		s.pop_back()
 		_show_page(true)
+	elif section != "home":
+		go("home")
+
+
+## Open a detail page of the current app (Phone.DETAILS key).
+func detail(key: String, args := {}) -> void:
+	push(key, args, String(DETAILS.get(key, ["", key.capitalize()])[1]), "", "")
 
 
 func open_recent(r: Dictionary) -> void:
@@ -699,11 +745,11 @@ func _show_page(animate: bool) -> void:
 	# Header: back · large title · close.
 	var head := Glass.hbox(10)
 	var depth := (_stack(section) as Array).size()
-	if depth > 1:
+	if depth > 1 or section != "home":
 		head.add_child(Glass.icon_button("back", back, true, 42))
 	var tv := Glass.vbox(-2)
 	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_title_l = Glass.line(String(top["title"]) if depth > 1 else title_of(section), "title2")
+	_title_l = Glass.line(String(top["title"]) if depth > 1 else _root_title(), "title2")
 	tv.add_child(_title_l)
 	var sub := _subtitle()
 	if sub != "" and depth == 1:
@@ -757,20 +803,28 @@ func save_scroll() -> void:
 	scroll_mem[_page_key()] = arr
 
 
+func _root_title() -> String:
+	if section != "home":
+		return title_of(section)
+	var h := fmod(game.empire.minute, 1440.0) / 60.0
+	var part := "morning" if h >= 5.0 and h < 12.0 else ("afternoon" if h < 18.0 and h >= 12.0 else "evening")
+	var nm := "Jules" if String(HeroLook.current(game.empire.flags).get("body", "a")) == "b" else "Ade"
+	return "Good %s, %s" % [part, nm]
+
+
 func _subtitle() -> String:
 	var e := game.empire
 	match section:
-		"overview":
-			var nm := String(e.brand.get("name", ""))
-			return (nm + " · " if nm != "" else "") + "Net worth %s" % EmpireData.money(e.net_worth())
+		"home":
+			return "Day %d · %s %s" % [e.day, e.weekday(), e.clock_text()]
 		"businesses":
-			return "%d active business%s · corporate & rankings" % [e.businesses.size(), "" if e.businesses.size() == 1 else "es"]
-		"assets":
-			return "%d propert%s · %d vehicle%s" % [e.properties.size(), "y" if e.properties.size() == 1 else "ies", e.vehicles.size(), "" if e.vehicles.size() == 1 else "s"]
-		"map":
-			return ""
-		"profile":
-			return "Character, style and game settings"
+			return "%d business%s · %s" % [e.businesses.size(), "" if e.businesses.size() == 1 else "es", Company.name_of(e)]
+		"bank":
+			return "Net worth %s" % EmpireData.money(e.net_worth())
+		"property":
+			return "%d owned or rented" % e.properties.size()
+		"vehicles":
+			return "%d in your garage" % e.vehicles.size()
 	return ""
 
 

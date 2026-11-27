@@ -155,6 +155,9 @@ func play(name: String, db := 0.0, pitch := 1.0) -> void:
 
 ## WorldState supplies shelter from its live cabin and interior state.
 var shelter := 0.0
+## The title menu's mix: a soft city bed under the cinematic views (the hero
+## isn't there, so no wind or height-based fades).
+var menu := false
 var _shelter_blend := 0.0
 var _pause_blend := 0.0
 
@@ -244,7 +247,7 @@ func _process(dt: float) -> void:
 			# CarAudio runs its own cabin-tuned wind loop while driving: avoid double wind audio.
 			wind.volume_db = lerpf(wind.volume_db, -80.0, 1.0 - exp(-10.0 * dt))
 		else:
-			var w := smoothstep(3.0, 50.0, spd)
+			var w := 0.0 if menu else smoothstep(3.0, 50.0, spd)
 			wind.volume_db = lerpf(wind.volume_db, linear_to_db(maxf(w * 0.9 * outside_gain * pause_wind, 0.003)), k)
 			wind.pitch_scale = lerpf(wind.pitch_scale, 0.75 + 0.6 * w, k)
 	var rope: AudioStreamPlayer = _loops.get("rope_tension_loop")
@@ -255,12 +258,12 @@ func _process(dt: float) -> void:
 	var amb: AudioStreamPlayer = _loops.get("city_ambience")
 	if amb:
 		# The street hum fades as you climb above the rooftops, and eases quietly overnight.
-		var height := clampf(player.height_above_ground() / 120.0, 0.0, 1.0)
+		var height := 0.15 if menu else clampf(player.height_above_ground() / 120.0, 0.0, 1.0)
 		amb.volume_db = lerpf(amb.volume_db, linear_to_db(maxf((0.55 - 0.35 * height) * tod.x * rain_duck * outside_gain * pause_env, 0.002)), k)
 	var traffic: AudioStreamPlayer = _loops.get("traffic_loop")
 	if traffic:
 		# Street-level traffic: loud on the pavement, gone above the rooftops, modulated by hour.
-		var low := 1.0 - clampf(player.height_above_ground() / 60.0, 0.0, 1.0)
+		var low := 0.55 if menu else 1.0 - clampf(player.height_above_ground() / 60.0, 0.0, 1.0)
 		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4 * tod.y * rain_duck * outside_gain * pause_env, 0.002)), k)
 	var rain: AudioStreamPlayer = _loops.get("rain_loop")
 	if rain:

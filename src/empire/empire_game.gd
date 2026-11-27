@@ -1199,29 +1199,91 @@ func apply_hero_look(preview := {}) -> void:
 
 
 var _title_focus: Node3D
-const TITLE_HOUR := 19.2   # blue hour: lit windows, lamps and headlights against a deep sky
+const TITLE_HOUR := 19.2   # (fallback when no title view loads)
+var _title_hour := TITLE_HOUR
+var _title_view := {}
+var _title_r := {}
+var _title_t := 0.0
+## The boot screen waits on this before revealing the world (title: the
+## view is built and has rendered; play: set at once).
+var title_ready := false
+var _title_hero_vis := true
 
 
 func _title(_has_save: bool) -> void:
 	state = "title"
 	player.input_enabled = false
-	ui.show_title(FileAccess.file_exists(save_path) or FileAccess.file_exists(save_path + ".bak"))
-	# Frame the bridges from open water so the menu camera never crosses a
-	# building or the city streaming boundary during the reveal.
-	var eye := Vector3(268.0, 42.0, 840.0)
-	var look := Vector3(-38.0, 29.0, 817.0)
-	atmosphere.hour = TITLE_HOUR
-	atmosphere.set_weather("clear", true)
+	_title_hero_vis = player.visible
+	player.visible = false   # (the views are the city, not the hero)
+	if audio:
+		audio.menu = true
 	if _title_focus == null:
 		_title_focus = Node3D.new()
 		_title_focus.name = "TitleFocus"
 		add_child(_title_focus)
-	var focus := Vector3(96.0, 10.0, 795.0)
+	apply_title_view(TitleViews.pick(String(args.get("title-view", ""))))
+	ui.show_title(FileAccess.file_exists(save_path) or FileAccess.file_exists(save_path + ".bak"), _title_view)
+	_title_settle.call_deferred()
+	if args.has("title-tour"):
+		_title_tour.call_deferred(String(args["title-tour"]))
+
+
+## Puts the menu camera on a view: its hour, its weather, the world built
+## round what it sees, and the slow dolly.
+func apply_title_view(v: Dictionary) -> void:
+	if v.is_empty():
+		v = {"id": "bridges", "name": "Harbour Bridges", "mood": "Blue hour", "hour": TITLE_HOUR, "weather": "clear", "fov": 56,
+			"eye": [268, 42, 840], "look": [-38, 29, 817], "focus": [96, 10, 795]}
+	_title_view = v
+	_title_r = TitleViews.resolve(v, layout)
+	_title_t = 0.0
+	_title_hour = float(v.get("hour", TITLE_HOUR))
+	atmosphere.hour = _title_hour
+	atmosphere.set_weather(String(v.get("weather", "clear")), true)
+	var focus: Vector3 = _title_r["focus"]
 	_title_focus.global_position = focus
 	world.set_viewer(_title_focus)
-	world.build_all_near(focus, 320.0)
-	camera.cine = func(_dt: float) -> Array:
-		return [Transform3D(Basis.looking_at(look - eye, Vector3.UP), eye), 56.0]
+	if skyport and SkyportIsland.distance_to(focus) < SkyportIsland.NEAR_LOAD and not skyport.near_loaded():
+		skyport.load_near_now()
+	if venues:
+		venues.load_near_now(focus)
+	world.build_all_near(focus, 340.0)
+	var dur := float(v.get("dur", 42.0))
+	var fov := float(v.get("fov", 52.0))
+	camera.cine = func(dt: float) -> Array:
+		_title_t += dt
+		return [TitleViews.at(_title_r, dur, _title_t), fov]
+	camera.snap()
+
+
+func _title_settle() -> void:
+	for i in 4:
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	title_ready = true
+
+
+## Review: every title view in turn, one PNG each (--title-ui keeps the menu).
+func _title_tour(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	var wait := float(args.get("title-wait", "6"))
+	var only := String(args.get("title-only", ""))
+	if not args.has("title-ui"):
+		ui._title_root.visible = false
+	for v in TitleViews.all():
+		var id := String(v.get("id", ""))
+		if only != "" and not id in only.split(","):
+			continue
+		apply_title_view(v)
+		if args.has("title-ui"):
+			ui.show_title(true, v)
+			ui.title_reveal(0.0)
+		_title_t = float(args.get("title-at", "8"))
+		await get_tree().create_timer(wait).timeout
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(dir.path_join(id + ".png"))
+		print("TITLE_SHOT ", id, " ", JSON.stringify({"draws": RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)}))
+	get_tree().quit()
 
 
 func start_new() -> void:
@@ -1236,8 +1298,17 @@ func continue_game() -> void:
 
 
 func _play() -> void:
+	var from_title := state == "title"
 	state = "play"
+	title_ready = true
 	camera.cine = Callable()
+	if from_title:
+		player.visible = _title_hero_vis
+	if audio:
+		audio.menu = false
+	if from_title:
+		# (The title streamed round its view: the hero's street now.)
+		world.build_all_near(player.global_position, 260.0)
 	world.set_viewer(chase if driving != "" else camera)   # (the title streamed round its own camera)
 	camera.snap()
 	player.input_enabled = driving == ""
@@ -1347,7 +1418,7 @@ func _process(dt: float) -> void:
 		var phone_up: bool = ui != null and ui.phone != null and is_instance_valid(ui.phone) and ui.phone.visible
 		rig.using_phone = phone_up and driving == "" and (skyport_play == null or skyport_play.piloting == "")
 	if not atmosphere.fixed_hour:
-		atmosphere.hour = empire.hour() if state != "title" else TITLE_HOUR
+		atmosphere.hour = empire.hour() if state != "title" else _title_hour
 	_stream_t -= dt
 	if _stream_t <= 0.0:
 		_stream_t = 0.4

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://byk2pnf0vq7o3"
-path="res://.godot/imported/wordmark_stacked.png-16b9127fb68bd89836f5e77573945278.ctex"
+uid="uid://xry4jlfex434"
+path="res://.godot/imported/businesses.jpg-4e8c9bd252a7a22f2def66e44332e823.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/brand/wordmark_stacked.png"
-dest_files=["res://.godot/imported/wordmark_stacked.png-16b9127fb68bd89836f5e77573945278.ctex"]
+source_file="res://assets/ui/apps/businesses.jpg"
+dest_files=["res://.godot/imported/businesses.jpg-4e8c9bd252a7a22f2def66e44332e823.ctex"]
 
 [params]
 
