@@ -829,9 +829,15 @@ func _physics_process(dt: float) -> void:
 		linear_velocity = lv
 		angular_velocity = angular_velocity.limit_length(6.0)
 	climbed_kerb = maxf(0.0, climbed_kerb - dt)
+	Prof.begin("car_steps")
 	_handle_steps()
+	Prof.end("car_steps")
+	Prof.begin("car_impacts")
 	_handle_impacts()
+	Prof.end("car_impacts")
+	Prof.begin("car_scrapes")
 	_handle_scrapes(dt)
+	Prof.end("car_scrapes")
 	if in_water:
 		# Wallow: heavy drag, no grip to speak of.
 		var wv := linear_velocity

@@ -950,6 +950,7 @@ func _ensure_copy() -> void:
 	# once; warm_dent_cache() does it during loading for your own cars):
 	# a dent then only copies the working arrays (native copies).
 	var cache: Dictionary = warm_dent_cache(path, src)
+	_part_idx = _part_lists(path, cache["idx"], _part_tri)
 	for s in (cache["arrays"] as Array).size():
 		var arr: Array = (cache["arrays"][s] as Array).duplicate()
 		arr[Mesh.ARRAY_VERTEX] = (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate()
@@ -960,6 +961,35 @@ func _ensure_copy() -> void:
 
 
 static var _dent_cache := {}
+static var _part_lists_cache := {}
+## Per surface: part id -> PackedInt32Array of its triangles' vertex indices
+## (3 per triangle), in source order. Losing a panel then only touches its
+## own triangles (detach) and the kept lists are joined natively (_rebuild).
+var _part_idx: Array = []
+
+
+static func _part_lists(path: String, idx_per_surface: Array, part_tri: Array) -> Array:
+	if _part_lists_cache.has(path):
+		return _part_lists_cache[path]
+	var out: Array = []
+	for s in idx_per_surface.size():
+		var src_idx: PackedInt32Array = idx_per_surface[s]
+		var pm: PackedByteArray = part_tri[s] if s < part_tri.size() else PackedByteArray()
+		var lists := {}
+		var tmp := {}
+		for t in pm.size():
+			var pid := pm[t]
+			var l: Array = tmp.get(pid, [])
+			if l.is_empty():
+				tmp[pid] = l
+			l.append(src_idx[t * 3])
+			l.append(src_idx[t * 3 + 1])
+			l.append(src_idx[t * 3 + 2])
+		for pid in tmp:
+			lists[pid] = PackedInt32Array(tmp[pid])
+		out.append(lists)
+	_part_lists_cache[path] = out
+	return out
 
 
 ## Rest arrays + vertex cells of a body, cached per model.
@@ -977,6 +1007,7 @@ static func warm_dent_cache(path: String, src: Mesh = null) -> Dictionary:
 			c["rest"].append(rv)
 			c["idx"].append((arr[Mesh.ARRAY_INDEX] as PackedInt32Array).duplicate())
 			c["cells"].append(_cells_for(rv))
+		_part_lists(path, c["idx"], part_map(path, src))   # (panels: loading, not mid-crash)
 	_dent_cache[path] = c
 	return c
 
@@ -1005,16 +1036,12 @@ func _rebuild() -> void:
 	for s in _arrays.size():
 		var arr: Array = _arrays[s]
 		if not _lost.is_empty():
-			var src_idx: PackedInt32Array = _rest_idx[s]
-			var pm: PackedByteArray = _part_tri[s]
 			var idx := PackedInt32Array()
-			for t in pm.size():
-				var pid := pm[t]
+			var lists: Dictionary = _part_idx[s] if s < _part_idx.size() else {}
+			for pid: int in lists:
 				if pid != NO_PART and _lost.has(Car.PARTS[pid]):
 					continue
-				idx.append(src_idx[t * 3])
-				idx.append(src_idx[t * 3 + 1])
-				idx.append(src_idx[t * 3 + 2])
+				idx.append_array(lists[pid])
 			if idx.is_empty():
 				idx = PackedInt32Array([0, 0, 0])  # keep the surface (materials stay in step)
 			arr[Mesh.ARRAY_INDEX] = idx
@@ -1218,34 +1245,33 @@ func detach(part: String, world_at: Vector3, normal: Vector3) -> void:
 	var piece_mats: Array = []
 	var any := false
 	for s in _arrays.size():
-		var pm: PackedByteArray = _part_tri[s]
 		var arr: Array = _arrays[s]
 		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 		var nrm = arr[Mesh.ARRAY_NORMAL]
-		var src_idx: PackedInt32Array = _rest_idx[s]
+		var tan = arr[Mesh.ARRAY_TANGENT]
 		var uv0 = arr[Mesh.ARRAY_TEX_UV]
 		var uv1 = arr[Mesh.ARRAY_TEX_UV2]
 		var pv := PackedVector3Array()
 		var pn := PackedVector3Array()
+		var pt := PackedFloat32Array()
 		var pu := PackedVector2Array()
 		var pu2 := PackedVector2Array()
-		for t in pm.size():
-			if pm[t] != pid:
-				continue
-			for k in 3:
-				var vi := src_idx[t * 3 + k]
-				var q := v[vi]
-				var qn: Vector3 = nrm[vi] if nrm != null else Vector3.UP
-				pv.append(q)
-				pn.append(qn)
-				# (UVs too: the loose panel keeps its paint texture and bake.)
-				if uv0 != null:
-					pu.append(uv0[vi])
-				if uv1 != null:
-					pu2.append(uv1[vi])
-				# The frame underneath: the same shape a few cm in, bare metal.
-				st_frame.set_normal(qn)
-				st_frame.add_vertex(q - qn * 0.045)
+		var mine: PackedInt32Array = (_part_idx[s] as Dictionary).get(pid, PackedInt32Array()) if s < _part_idx.size() else PackedInt32Array()
+		for vi: int in mine:
+			var q := v[vi]
+			var qn: Vector3 = nrm[vi] if nrm != null else Vector3.UP
+			pv.append(q)
+			pn.append(qn)
+			# (UVs and tangents too: the loose panel keeps its paint and bake.)
+			if uv0 != null:
+				pu.append(uv0[vi])
+			if uv1 != null:
+				pu2.append(uv1[vi])
+			if tan != null:
+				pt.append_array([tan[vi * 4], tan[vi * 4 + 1], tan[vi * 4 + 2], tan[vi * 4 + 3]])
+			# The frame underneath: the same shape a few cm in, bare metal.
+			st_frame.set_normal(qn)
+			st_frame.add_vertex(q - qn * 0.045)
 		if pv.is_empty():
 			continue
 		any = true
@@ -1257,8 +1283,10 @@ func detach(part: String, world_at: Vector3, normal: Vector3) -> void:
 			a[Mesh.ARRAY_TEX_UV] = pu
 		if pu2.size() == pv.size():
 			a[Mesh.ARRAY_TEX_UV2] = pu2
+		if pt.size() == pv.size() * 4:
+			a[Mesh.ARRAY_TANGENT] = pt
 		piece.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
-		if pu.size() == pv.size():
+		if pu.size() == pv.size() and pt.size() != pv.size() * 4:
 			piece.regen_normal_maps()
 		piece_mats.append(body.get_surface_override_material(s))
 	_lost[part] = true

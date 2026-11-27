@@ -47,7 +47,6 @@ var _commercial_sign: Node3D
 const PRELOAD_RANGE := 520.0
 var _requested := {}          # id -> threaded load requested
 var _car_queue: Array = []    # [id, room, mark name, model]
-static var _shapes := {}      # venue id -> its collision shape (built once)
 static var _finishes := {}
 static var _display_shadow: ShaderMaterial
 
@@ -70,6 +69,9 @@ func setup(g: EmpireGame) -> void:
 ## Quitting: background loads still running are collected first (a pending
 ## threaded load at teardown is not something to leave behind).
 func _exit_tree() -> void:
+	for t in _shape_tasks:
+		WorkerThreadPool.wait_for_task_completion(t)
+	_shape_tasks.clear()
 	for id in _requested.keys():
 		if _requested[id]:
 			ResourceLoader.load_threaded_get("res://assets/venues/%s.glb" % id)
@@ -131,14 +133,17 @@ func _process(dt: float) -> void:
 func load_near_now(p: Vector3) -> void:
 	if game.skyport == null:
 		return
+	_sync_collide = true
 	for id in (game.skyport.plan_data.get("venues", {}) as Dictionary):
 		var xf := venue_xf(id)
 		if xf.origin.distance_to(p) < LOAD_RANGE and not rooms.has(id):
 			_load(id, xf)
+	_sync_collide = false
 
 
 # ---------------------------------------------------------------- building a room
 func _load(id: String, xf: Transform3D) -> void:
+	Prof.begin("venue_get")
 	var path := "res://assets/venues/%s.glb" % id
 	var ps: PackedScene
 	if _requested.get(id, false):
@@ -146,14 +151,18 @@ func _load(id: String, xf: Transform3D) -> void:
 		_requested.erase(id)
 	if ps == null:
 		ps = load(path)
+	Prof.end("venue_get")
 	if ps == null:
 		return
+	Prof.begin("venue_instantiate")
 	var root: Node3D = ps.instantiate()
 	root.name = "Venue_" + id
 	game.add_child(root)
 	root.global_transform = xf
 	var R := {"id": id, "node": root, "xf": xf, "marks": {}, "doors": [], "turntable": null, "cars": [], "spots": [],
 		"ceiling": xf.origin.y + float(DEFS[id]["h"]) - 0.4, "door_t": 0.0}
+	Prof.end("venue_instantiate")
+	Prof.begin("venue_parts")
 	for n in root.get_children():
 		var nm := String(n.name)
 		if n is MeshInstance3D:
@@ -168,12 +177,19 @@ func _load(id: String, xf: Transform3D) -> void:
 			R["turntable"] = n
 		elif not (n is MeshInstance3D):
 			R["marks"][nm] = (n as Node3D).global_transform
+	Prof.end("venue_parts")
 	var defs: Dictionary = DEFS[id]
 	var panel_width := minf(float(defs["w"]) * 0.88, 26.0)
+	Prof.begin("venue_sign")
 	_sign(root, id, Vector3(0, float(defs["h"]) - 0.84, 0.43), panel_width, 1.70)
+	Prof.end("venue_sign")
+	Prof.begin("venue_lights")
 	_lights(root, id)
+	Prof.end("venue_lights")
 	_cars(R)
+	Prof.begin("venue_craft")
 	_craft(R)
+	Prof.end("venue_craft")
 	for nm: String in R["marks"]:
 		if nm.begins_with("spot_") and not nm.begins_with("spot_car_"):
 			R["spots"].append([nm, (R["marks"][nm] as Transform3D).origin])
@@ -415,17 +431,13 @@ func _collide(root: Node3D, mi: MeshInstance3D) -> void:
 	body.collision_layer = CityWorld.HUMAN_LAYER | 1
 	body.collision_mask = 0
 	root.add_child(body)
-	var vid := String(root.name)
-	if _shapes.has(vid):
-		var cs0 := CollisionShape3D.new()
-		cs0.shape = _shapes[vid]
-		cs0.transform = mi.transform
-		body.add_child(cs0)
-		return
-	# (2026-11-27) Built natively: the solid surfaces copied into a mesh of
-	# their own, then one trimesh shape from it. The old per-index loop in
-	# script was most of a 50–100 ms stall the first time you drove up.
-	var solid := ArrayMesh.new()
+	Prof.begin("venue_collide")
+	# (2026-11-27) The surfaces are read here; the faces and the shape (its
+	# BVH) are built on a worker and attached when ready – this was a
+	# 50–120 ms stall each time a venue streamed in, 260 m before you could
+	# reach it.
+	Prof.begin("venue_readback")
+	var parts: Array = []
 	for i in mi.mesh.get_surface_count():
 		var m := mi.mesh.surface_get_material(i)
 		var nm := String(m.resource_name) if m else ""
@@ -433,18 +445,57 @@ func _collide(root: Node3D, mi: MeshInstance3D) -> void:
 		if nm.begins_with("led") or nm == "screen":
 			continue
 		var arr := mi.mesh.surface_get_arrays(i)
-		var lean := []
-		lean.resize(Mesh.ARRAY_MAX)
-		lean[Mesh.ARRAY_VERTEX] = arr[Mesh.ARRAY_VERTEX]
-		lean[Mesh.ARRAY_INDEX] = arr[Mesh.ARRAY_INDEX]
-		solid.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, lean)
-	var shape: ConcavePolygonShape3D = solid.create_trimesh_shape() if solid.get_surface_count() > 0 else ConcavePolygonShape3D.new()
-	shape.backface_collision = true
+		parts.append([arr[Mesh.ARRAY_VERTEX], arr[Mesh.ARRAY_INDEX]])
+	Prof.end("venue_readback")
+	var xf := mi.transform
+	var build := func():
+		var faces := PackedVector3Array()
+		for pt: Array in parts:
+			var vs: PackedVector3Array = pt[0]
+			var ix = pt[1]
+			if ix == null or (ix as PackedInt32Array).is_empty():
+				faces.append_array(vs)
+			else:
+				var idx: PackedInt32Array = ix
+				var start := faces.size()
+				faces.resize(start + idx.size())
+				for k in idx.size():
+					faces[start + k] = vs[idx[k]]
+		var shape := ConcavePolygonShape3D.new()
+		shape.backface_collision = true
+		shape.set_faces(faces)
+		return shape
+	if _sync_collide:
+		# (arriving inside or at the door: solid now)
+		_attach_shape(body, build.call(), xf)
+	else:
+		_shape_tasks.append(WorkerThreadPool.add_task(func():
+			_attach_shape.call_deferred(body, build.call(), xf), false, "venue collision"))
+	Prof.end("venue_collide")
+
+
+var _shape_tasks: Array = []
+var _sync_collide := false
+
+
+func _attach_shape(body: StaticBody3D, shape: ConcavePolygonShape3D, xf: Transform3D) -> void:
+	_reap_shape_tasks()
+	if not is_instance_valid(body):
+		return
 	var cs := CollisionShape3D.new()
 	cs.shape = shape
-	cs.transform = mi.transform
+	cs.transform = xf
 	body.add_child(cs)
-	_shapes[vid] = shape
+
+
+func _reap_shape_tasks() -> void:
+	var keep: Array = []
+	for t in _shape_tasks:
+		if WorkerThreadPool.is_task_completed(t):
+			WorkerThreadPool.wait_for_task_completion(t)
+		else:
+			keep.append(t)
+	_shape_tasks = keep
 
 
 ## Adds a solid collider to a sliding door leaf so closed doors feel physical;
