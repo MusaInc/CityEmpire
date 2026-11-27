@@ -948,6 +948,16 @@ func _load_props() -> void:
 ## 16-sided tyre and a hub disc, not the 1.5k-triangle player wheel), all
 ## merged into one mesh with a surface per look. Front along -Z like the
 ## old models; ground at y = 0.
+## A traffic cut's texture bake: its own, else (2026-11-27) the full body's –
+## lod1.py's decimation keeps UV2, so the civ_*_traffic cuts share the bake
+## of the model they were cut from.
+static func _traffic_bake(body: String, dims_of: String) -> Texture2D:
+	var t := VehicleTex.bake(body)
+	if t == null and dims_of != "" and body.ends_with("_traffic"):
+		t = VehicleTex.bake(dims_of)
+	return t
+
+
 func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 	var path := "res://assets/vehicles/%s.glb" % body
 	var d: Dictionary = BodyDims.DIMS.get(dims_of if dims_of != "" else body, {})
@@ -1012,7 +1022,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			# The full model only: mid/far LODs carry no beam.
 			# (No road beam: an additive patch on the road at the bumper read as a
 			# light under the car at night, 2026-11-21.)
-			return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), VehicleTex.bake(body), sealed)
+			return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), _traffic_bake(body, dims_of), sealed)
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -1030,7 +1040,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
 			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(_white_uv2(tyre), 0, xf)
 			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(_white_uv2(hub), 0, xf)
-	return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), VehicleTex.bake(body), sealed)   # (no road beam: the user asked for them gone, 2026-11-18)
+	return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), _traffic_bake(body, dims_of), sealed)   # (no road beam: the user asked for them gone, 2026-11-18)
 
 
 const BEAM_SHADER := preload("res://src/world/shaders/traffic_beam.gdshader")
