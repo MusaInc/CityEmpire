@@ -90,7 +90,6 @@ var _last_car_pos := Vector3.ZERO
 var _km_acc := 0.0
 var _clean_t := 0.0
 var _tutorial := 0
-var _warm := false
 var _cloud_sync := Callable()
 
 
@@ -115,6 +114,7 @@ func _mem_mark(tag: String, prev: Array) -> void:
 		var now := Time.get_ticks_msec()
 		print("LOAD_T EG %-26s %6d ms (t=%d)" % [tag, now - _lt_ms if _lt_ms > 0 else 0, now])
 		_lt_ms = now
+	StartupTrace.mark(tag)
 	if not args.has("mem-audit"):
 		return
 	var mb := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
@@ -128,6 +128,7 @@ func _mem_mark(tag: String, prev: Array) -> void:
 
 
 func _ready() -> void:
+	StartupTrace.mark("game scene ready callback")
 	CarVisual.auto_dent = true   # (every car's impacts dent its own body)
 	for a in OS.get_cmdline_user_args():
 		var kv := a.trim_prefix("--").split("=", true, 1)
@@ -141,6 +142,7 @@ func _ready() -> void:
 	var paced := LoadPacer.active
 	if paced:
 		tree.paused = true
+		LoadPacer.stage = "Generating streets and buildings"
 	Prof.enabled = args.has("profile-world")
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
@@ -155,6 +157,7 @@ func _ready() -> void:
 	Settings.time_of_day = "empire"   # the Empire's clock drives the sun
 	Settings.weather = "empire"       # and its daily weather the sky (CityLife)
 	Settings.apply()
+	StartupTrace.mark("graphics settings applied (tier=%s quality=%d)" % [Settings.device_tier, Settings.quality])
 	minutes_per_second = float(EmpireData.economy().get("minutes_per_real_second", 1.0))
 	sfx = Sfx.new()
 	sfx.name = "Sfx"
@@ -179,17 +182,18 @@ func _ready() -> void:
 	# Skyport Island (the third island: airport, logistics, high-rise, marina).
 	SkyportIsland.enabled = true
 	Venues.register()   # (the island carves their rooms out of its buildings)
+	LoadPacer.stage = "Building Skyport and coastline"
 	var t1 := Time.get_ticks_msec()
 	skyport = SkyportIsland.new()
 	skyport.name = "Skyport"
 	add_child(skyport)
-	skyport.build(layout, world)
+	await skyport.build(layout, world)
 	_mem_mark("SkyportIsland", _mp)
 	await LoadPacer.step(tree, 0.80)
 	var lfn := Landforms.new()
 	lfn.name = "Landforms"
 	add_child(lfn)
-	lfn.build(layout)
+	await lfn.build(layout)
 	_mem_mark("Landforms", _mp)
 	await LoadPacer.step(tree, 0.86)
 	skyport.viewer = func() -> Vector3:
@@ -202,7 +206,7 @@ func _ready() -> void:
 	_build_elevators()
 	_mem_mark("Elevators", _mp)
 	await LoadPacer.step(tree, 0.87)
-	EmpireMinimap.bake.call_deferred(self, layout)  # (the minimap's and phone map's city image)
+	LoadPacer.stage = "Preparing the player and city systems"
 	atmosphere.configure(args, world)
 	Car.water_check = layout.is_water
 	for P in [layout.mainland.premises if layout.mainland else null, layout.premises]:
@@ -243,8 +247,9 @@ func _ready() -> void:
 	crowd = Crowd.new()
 	crowd.name = "Crowd"
 	add_child(crowd)
-	crowd.setup(self)
-	_mem_mark("Crowd", _mp)
+	if not paced:
+		crowd.setup(self)
+	_mem_mark("Crowd node", _mp)
 	await LoadPacer.step(tree, 0.91)
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
@@ -328,8 +333,9 @@ func _ready() -> void:
 	near_traffic = NearTrafficPool.new()
 	near_traffic.name = "NearTrafficPool"
 	add_child(near_traffic)
-	near_traffic.setup(self)
-	_mem_mark("UI+Venues+Gps+NearTraf", _mp)
+	if not paced:
+		near_traffic.setup(self)
+	_mem_mark("UI+Venues+Gps", _mp)
 	await LoadPacer.step(tree, 0.94)
 	# Dynamic resolution on phones (CitySwing's FrameGovernor; WorldState never
 	# installed it, audit WS-08): eases the 3-D render scale down under load or
@@ -403,6 +409,65 @@ func _ready() -> void:
 			clouds.cover = float(skym.get_shader_parameter("cloud_cover"))
 			clouds.dark = float(skym.get_shader_parameter("cloud_dark"))
 		get_tree().process_frame.connect(_cloud_sync)
+	RenderingServer.global_shader_parameter_set("refl_probe", 0.0)
+	RenderingServer.global_shader_parameter_set("mirror_on", 0.0)
+	_mem_mark("City systems and HUD", _mp)
+	LoadPacer.stage = "Checking saved progress"
+
+	await LoadPacer.step(tree, 0.97)
+	if args.has("save"):
+		save_path = String(args["save"])
+	else:
+		# The WORLDSTATE rename moved the desktop app-data folder: bring a
+		# City Empire save over (copied; the old folder is left alone). WS-07
+		SafeSave.migrate_dir(["City Empire", "CityEmpire"], ["cityempire_save.json", "cityempire_save.json.bak"])
+	var has_save := FileAccess.file_exists(save_path) or FileAccess.file_exists(save_path + ".bak")
+	StartupTrace.mark("save check complete, existing=%s" % has_save)
+	if args.has("new") or (args.has("play") and not has_save):
+		new_game()
+		_play()
+	elif args.has("play") and has_save:
+		load_game()
+		_play()
+	else:
+		if has_save:
+			if paced:
+				await tree.process_frame
+			_title_save_loaded = load_game()
+		elif not paced:
+			new_game()
+		LoadPacer.stage = "Preparing the main menu"
+		await LoadPacer.step(tree, 0.99)
+		_title(has_save)
+	if paced:
+		tree.paused = false
+	startup_ready = true
+	StartupTrace.mark("initial state ready (%s)" % state)
+	_after_start.call_deferred()
+
+
+func _start_optional_play_systems() -> void:
+	# Keep offscreen rendering and reflection pipelines off the critical path.
+	for i in 8:
+		await get_tree().process_frame
+	if crowd.game == null:
+		StartupTrace.mark("loading near pedestrian assets")
+		crowd.setup(self)
+		await get_tree().process_frame
+	if near_traffic.game == null:
+		near_traffic.setup(self)
+		await get_tree().process_frame
+	if DisplayServer.get_name() == "headless":
+		return
+	StartupTrace.mark("starting gameplay map")
+	await EmpireMinimap.bake(self, layout)
+	StartupTrace.mark("gameplay map ready")
+	await get_tree().process_frame
+	_start_reflections()
+
+
+func _start_reflections() -> void:
+	StartupTrace.mark("initializing optional reflections")
 	# Real reflections (overhaul 2026-11-26; off on Low, and with
 	# --noreflect for comparisons): probes that follow you for glass, paint,
 	# chrome and wet streets, and a planar mirror for the water.
@@ -428,29 +493,6 @@ func _ready() -> void:
 		RenderingServer.global_shader_parameter_set("refl_probe", 0.0)
 		RenderingServer.global_shader_parameter_set("mirror_on", 0.0)
 
-	await LoadPacer.step(tree, 0.97)
-	if paced:
-		tree.paused = false
-	if args.has("save"):
-		save_path = String(args["save"])
-	else:
-		# The WORLDSTATE rename moved the desktop app-data folder: bring a
-		# City Empire save over (copied; the old folder is left alone). WS-07
-		SafeSave.migrate_dir(["City Empire", "CityEmpire"], ["cityempire_save.json", "cityempire_save.json.bak"])
-	var has_save := FileAccess.file_exists(save_path) or FileAccess.file_exists(save_path + ".bak")
-	if args.has("new") or (args.has("play") and not has_save):
-		new_game()
-		_play()
-	elif args.has("play") and has_save:
-		load_game()
-		_play()
-	else:
-		if has_save:
-			_title_save_loaded = load_game()
-		else:
-			new_game()
-		_title(has_save)
-	_after_start.call_deferred()
 
 
 func _after_start() -> void:
@@ -1249,13 +1291,14 @@ var _title_hour := TITLE_HOUR
 var _title_view := {}
 var _title_r := {}
 var _title_t := 0.0
-## The boot screen waits on this before revealing the world (title: the
-## view is built and has rendered; play: set at once).
+## Scene data is ready independently of render submission.
+var startup_ready := false
 var title_ready := false
+var _optional_play_scheduled := false
 var _title_hero_vis := true
 
 
-func _title(_has_save: bool) -> void:
+func _title(has_save: bool) -> void:
 	state = "title"
 	player.input_enabled = false
 	_title_hero_vis = player.visible
@@ -1266,9 +1309,9 @@ func _title(_has_save: bool) -> void:
 		_title_focus = Node3D.new()
 		_title_focus.name = "TitleFocus"
 		add_child(_title_focus)
-	apply_title_view(TitleViews.pick(String(args.get("title-view", ""))))
-	ui.show_title(FileAccess.file_exists(save_path) or FileAccess.file_exists(save_path + ".bak"), _title_view)
-	_title_settle.call_deferred()
+	apply_title_view(TitleViews.pick(String(args.get("title-view", ""))), LoadPacer.active)
+	ui.show_title(has_save, _title_view)
+	title_ready = true
 	if args.has("title-tour"):
 		_title_tour.call_deferred(String(args["title-tour"]))
 	if args.has("enter"):
@@ -1348,7 +1391,7 @@ func _profile_enter(kind: String) -> void:
 
 ## Puts the menu camera on a view: its hour, its weather, the world built
 ## round what it sees, and the slow dolly.
-func apply_title_view(v: Dictionary) -> void:
+func apply_title_view(v: Dictionary, stream_details := false) -> void:
 	if v.is_empty():
 		v = {"id": "bridges", "name": "Harbour Bridges", "mood": "Blue hour", "hour": TITLE_HOUR, "weather": "clear", "fov": 56,
 			"eye": [268, 42, 840], "look": [-38, 29, 817], "focus": [96, 10, 795]}
@@ -1361,24 +1404,18 @@ func apply_title_view(v: Dictionary) -> void:
 	var focus: Vector3 = _title_r["focus"]
 	_title_focus.global_position = focus
 	world.set_viewer(_title_focus)
-	if skyport and SkyportIsland.distance_to(focus) < SkyportIsland.NEAR_LOAD and not skyport.near_loaded():
-		skyport.load_near_now()
-	if venues:
-		venues.load_near_now(focus)
-	world.build_all_near(focus, 340.0)
+	if not stream_details:
+		if skyport and SkyportIsland.distance_to(focus) < SkyportIsland.NEAR_LOAD and not skyport.near_loaded():
+			skyport.load_near_now()
+		if venues:
+			venues.load_near_now(focus)
+		world.build_all_near(focus, 340.0)
 	var dur := float(v.get("dur", 42.0))
 	var fov := float(v.get("fov", 52.0))
 	camera.cine = func(dt: float) -> Array:
 		_title_t += dt
 		return [TitleViews.at(_title_r, dur, _title_t), fov]
 	camera.snap()
-
-
-func _title_settle() -> void:
-	for i in 4:
-		await get_tree().process_frame
-	await RenderingServer.frame_post_draw
-	title_ready = true
 
 
 ## Review: every title view in turn, one PNG each (--title-ui keeps the menu).
@@ -1405,6 +1442,7 @@ func _title_tour(dir: String) -> void:
 
 
 func start_new() -> void:
+	StartupTrace.mark("Begin or confirmed New game selected")
 	new_game()
 	save_game()
 	_tr("start_new: save_game")
@@ -1412,6 +1450,7 @@ func start_new() -> void:
 
 
 func continue_game() -> void:
+	StartupTrace.mark("Continue selected")
 	# The menu loaded this save at launch and nothing on the title changes it
 	# (the sim only runs in play): loading it again re-made the empire, cars,
 	# interiors and the hero's streets for nothing (2026-11-27).
@@ -1440,6 +1479,13 @@ func _play() -> void:
 	player.input_enabled = driving == ""
 	ui.show_hud()
 	_tr("_play: viewer + hud")
+	StartupTrace.mark("gameplay ready (spawn and HUD)")
+	if DisplayServer.get_name() != "headless":
+		RenderingServer.frame_post_draw.connect(
+			func(): StartupTrace.mark("first gameplay frame submitted"), CONNECT_ONE_SHOT)
+	if not _optional_play_scheduled:
+		_optional_play_scheduled = true
+		_start_optional_play_systems.call_deferred()
 	if empire.flags.get("intro_done", false) == false and not args.has("shot") and not args.has("tour") and not args.has("autoplay") and not args.has("perf") \
 			and not args.has("scenarios"):
 		ui.intro()
@@ -4340,7 +4386,9 @@ static func save_problem(d: Dictionary) -> String:
 
 
 func load_game() -> bool:
+	StartupTrace.mark("save read started")
 	var d = SafeSave.read(save_path, save_problem)
+	StartupTrace.mark("save read complete (source=%s)" % SafeSave.last_source)
 	if d == null:
 		if SafeSave.last_error != "":
 			# Unreadable save and backup: keep the files for recovery (the next
@@ -4392,6 +4440,7 @@ func load_game() -> bool:
 	for id in interiors.keys():
 		rebuild_interior(id)
 	_tr("load_game: rebuild %d interiors" % interiors.size())
+	StartupTrace.mark("save restored, player positioned and interiors loaded")
 	return true
 
 

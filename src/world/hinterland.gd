@@ -121,7 +121,7 @@ static func _ridged(p: Vector2) -> float:
 	return s
 
 
-func _ready() -> void:
+static func _mesh_arrays() -> Array:
 	var nx := int(EXTENT.size.x / CELL) + 1
 	var nz := int(EXTENT.size.y / CELL) + 1
 	var hs := PackedFloat32Array()
@@ -165,6 +165,11 @@ func _ready() -> void:
 	arr[Mesh.ARRAY_VERTEX] = verts
 	arr[Mesh.ARRAY_NORMAL] = normals
 	arr[Mesh.ARRAY_INDEX] = idx
+	return arr
+
+
+func build() -> void:
+	var arr: Array = await LoadPacer.run(get_tree(), _mesh_arrays)
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	var mi := MeshInstance3D.new()

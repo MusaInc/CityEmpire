@@ -176,6 +176,7 @@ jobs:
           fi
           "$GODOT" --headless --export-release "iOS" build/ios/CityEmpire.ipa
           test -d build/ios/CityEmpire.xcodeproj
+          cat tools/ios/startup_memory.cpp >> build/ios/CityEmpire/dummy.cpp
           # Install-size audit (2026-11-27): the game data pack and its
           # biggest entries, every build, so growth is visible in the log.
           pck=$(ls build/ios/*.pck 2>/dev/null | head -1)

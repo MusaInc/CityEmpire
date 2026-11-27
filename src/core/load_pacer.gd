@@ -29,6 +29,7 @@ static func timing() -> bool:
 static var budget_us := 14000
 ## 0..1: how far the build has got (the boot screen's hairline).
 static var progress := 0.0
+static var stage := ""
 static var _since := 0
 
 

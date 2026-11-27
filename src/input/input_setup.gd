@@ -34,6 +34,7 @@ const BINDINGS := {
 
 
 func _ready() -> void:
+	StartupTrace.mark("input autoload begin")
 	for action in BINDINGS:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action, 0.15)

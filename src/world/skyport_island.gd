@@ -1551,8 +1551,10 @@ func build(layout: CityLayout, world: Node) -> void:
 	street.collision_layer = 1 << 3
 	add_child(street)
 	_build_ground(street)
+	await LoadPacer.pace(get_tree())
 	add_child(Shoreline.build(waterline_edges()))
 	_build_skyline()
+	await LoadPacer.pace(get_tree())
 	_build_bridge(street)
 
 

@@ -216,7 +216,9 @@ func _build() -> void:
 	if layout == null:
 		# (Node-free and deterministic: on a worker thread at launch, the same
 		# city as built in line – tests/test_load_async.gd.)
+		StartupTrace.mark("layout generation started")
 		layout = (await LoadPacer.run(tree, func(): return CityLayout.new().generate())) as CityLayout
+		StartupTrace.mark("layout generation complete")
 		await LoadPacer.step(tree, 0.2)
 	if street_interiors_enabled:
 		street_units = layout.premises.cover_streets(layout)
@@ -272,6 +274,7 @@ func _build() -> void:
 		if _lt:
 			print("LOAD_T CW[%s] %-22s %6d ms" % ["M" if secondary else "I", lbl, Time.get_ticks_msec() - int(_tl[0])])
 			_tl[0] = Time.get_ticks_msec()
+		StartupTrace.mark("world %s: %s" % ["mainland" if secondary else "island", lbl])
 		if not _ma:
 			return
 		var m := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
@@ -283,6 +286,7 @@ func _build() -> void:
 	if shared_assets_from != null:
 		_share_props_from(shared_assets_from)
 	else:
+		StartupTrace.mark("world prop and traffic mesh load started")
 		await _load_props()
 	_mp.call("props")
 	await LoadPacer.step(tree, 0.36 if not secondary else 0.0)
@@ -323,6 +327,7 @@ func _build() -> void:
 	await LoadPacer.step(tree, 0.49 if not secondary else 0.0)
 	if not secondary:
 		_build_water()
+		await LoadPacer.pace(tree)
 		# The real sea floor under the shallows (the water shows it there).
 		if water_mat.get_shader_parameter("has_seabed"):
 			var sb := SeabedMesh.build((load(SEABED) as Texture2D).get_image(), Rect2(-2400.0, -1800.0, 4800.0, 4800.0), 32.0)
@@ -367,6 +372,8 @@ func _build() -> void:
 	var hinter := Hinterland.new()
 	hinter.name = "Hinterland"
 	add_child(hinter)
+	await hinter.build()
+	_mp.call("hinterland")
 	mainland = CityWorld.new()
 	mainland.name = "Mainland"
 	mainland.secondary = true

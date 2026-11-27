@@ -37,7 +37,9 @@ const DEFAULTS := {
 
 
 func _ready() -> void:
+	StartupTrace.mark("statistics autoload begin")
 	load_data()
+	StartupTrace.mark("statistics autoload complete")
 
 
 func use_file(p: String) -> void:

@@ -351,6 +351,7 @@ func build(layout: CityLayout) -> void:
 	add_child(body)
 	for f: Dictionary in _forms:
 		_build_form(f, body)
+		await LoadPacer.pace(get_tree())
 
 
 func _build_form(f: Dictionary, body: StaticBody3D) -> void:

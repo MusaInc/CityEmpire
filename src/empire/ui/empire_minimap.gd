@@ -46,16 +46,15 @@ static func bake(host: Node, layout: CityLayout) -> void:
 	painter.layout = layout
 	vp.add_child(painter)
 	host.add_child(vp)
+	# Keep the one-shot texture on the GPU. Reading it back to generate
+	# mipmaps synchronizes rendering and briefly duplicates its storage.
+	vp.tree_exiting.connect(func():
+		map_tex = null
+		_baking = false)
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
-	var img := vp.get_texture().get_image() if vp.get_texture() else null
-	vp.queue_free()
+	map_tex = vp.get_texture()
 	_baking = false
-	if img == null or img.is_empty():
-		return
-	img.convert(Image.FORMAT_RGB8)
-	img.generate_mipmaps()
-	map_tex = ImageTexture.create_from_image(img)
 
 
 func _ready() -> void:

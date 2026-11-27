@@ -55,6 +55,8 @@ var device_tier := ""
 
 
 func _ready() -> void:
+	StartupTrace.begin()
+	StartupTrace.mark("settings autoload begin")
 	var cfg := ConfigFile.new()
 	var loaded := cfg.load(PATH) == OK
 	var prof := {}
@@ -101,6 +103,7 @@ func _ready() -> void:
 			fps_60 = bool(prof["fps_60"])
 		save()
 	apply()
+	StartupTrace.mark("settings autoload complete")
 
 
 func preset() -> Dictionary:
