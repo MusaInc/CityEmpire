@@ -819,6 +819,23 @@ func add_overlay(c: Control) -> void:
 	_panel_root.get_parent().add_child(c)
 
 
+## Fade and remove an overlay added with add_overlay() after gameplay settles.
+## Owned by EmpireUI so freeing TitleMenu inside the enter callback cannot
+## strand the opaque navy veil over the game.
+func fade_overlay(c: Control, wait_frames := 3, duration := 0.6) -> void:
+	var tree := get_tree()
+	for _i in wait_frames:
+		if tree == null:
+			break
+		await tree.process_frame
+	if not is_instance_valid(c):
+		return
+	var tw := c.create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(c, "modulate:a", 0.0, duration).set_trans(Tween.TRANS_SINE)
+	tw.tween_callback(c.queue_free)
+
+
 ## What a new game throws away, said plainly (title menu + Settings).
 func new_game_warning() -> String:
 	var e := game.empire

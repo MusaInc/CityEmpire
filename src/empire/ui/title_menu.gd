@@ -235,19 +235,14 @@ func _enter(cb: Callable) -> void:
 	var tw := create_tween()
 	tw.tween_property(_veil, "modulate:a", 1.0, 0.32).set_trans(Tween.TRANS_SINE)
 	await tw.finished
-	# (The veil outlives the menu: it lives on the UI root while the world
-	# streams in under it, then fades.)
+	# (The veil outlives the menu: cb.call() -> ui.show_hud() frees TitleMenu,
+	# so EmpireUI owns fading and removing the veil once the world settles.)
 	var veil := _veil
+	var host := ui
 	remove_child(veil)
-	ui.add_overlay(veil)
+	host.add_overlay(veil)
+	host.fade_overlay.call_deferred(veil, 3, 0.6)
 	cb.call()
-	await get_tree().process_frame
-	await get_tree().process_frame
-	await get_tree().process_frame
-	if is_instance_valid(veil):
-		var t2 := veil.create_tween()
-		t2.tween_property(veil, "modulate:a", 0.0, 0.6).set_trans(Tween.TRANS_SINE)
-		t2.tween_callback(veil.queue_free)
 
 
 func _confirm_new() -> void:

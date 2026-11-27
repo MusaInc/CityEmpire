@@ -56,3 +56,31 @@ func test_retry_loads_one_scene_and_releases_overlay(t) -> void:
 	await tree.process_frame
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(script_path))
+
+
+func test_title_enter_lifts_navy_veil_after_menu_freed(t) -> void:
+	var tree: SceneTree = Engine.get_main_loop()
+	var ui := EmpireUI.new()
+	tree.root.add_child(ui)
+	await tree.process_frame
+	ui.show_title(false, {"name": "Test View", "mood": "Dusk"})
+	await tree.process_frame
+	var menu: TitleMenu = ui.title_menu
+	t.check(menu != null, "title menu created")
+	var veil: ColorRect = menu._veil
+	t.check(veil != null, "title menu has navy transition veil")
+	var entered := [false]
+	menu._enter(func():
+		entered[0] = true
+		# Mirrors EmpireUI.show_hud(): frees TitleMenu immediately on enter.
+		for c in ui._title_root.get_children():
+			c.queue_free()
+		ui.title_menu = null)
+	var deadline := Time.get_ticks_msec() + 4000
+	while is_instance_valid(veil) and Time.get_ticks_msec() < deadline:
+		await tree.process_frame
+	t.check(entered[0], "enter callback ran")
+	t.check(not is_instance_valid(menu), "title menu was freed on entering gameplay")
+	t.check(not is_instance_valid(veil), "navy veil faded out and freed even after TitleMenu was freed")
+	ui.queue_free()
+	await tree.process_frame
