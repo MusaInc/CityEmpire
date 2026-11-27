@@ -4039,6 +4039,7 @@ func load_game() -> bool:
 
 
 func _exit_tree() -> void:
+	SafeSave.settle()   # (an autosave still writing finishes before teardown)
 	if _cloud_sync.is_valid() and get_tree() and get_tree().process_frame.is_connected(_cloud_sync):
 		get_tree().process_frame.disconnect(_cloud_sync)
 	_cloud_sync = Callable()

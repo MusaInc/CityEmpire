@@ -432,7 +432,7 @@ func _build(n: int) -> void:
 	var led_m := _mat(Color(0.95, 0.97, 1.0), 0.4, 0.0, Color(0.88, 0.94, 1.0), 3.0)
 	var warm_m := _mat(Color(1.0, 0.92, 0.78), 0.4, 0.0, Color(1.0, 0.86, 0.66), 2.6)
 	var panel_m := _mat(Color(0.95, 0.93, 0.88), 0.5, 0.0, Color(0.62, 0.56, 0.46), 1.8)
-	var exit_m := _mat(Color(0.1, 0.75, 0.35), 0.4, 0.0, Color(0.1, 0.9, 0.4), 2.4)
+	var exit_m := _mat(Color(0.02, 0.32, 0.14), 0.4, 0.0, Color(0.02, 0.42, 0.16), 1.2)
 	var sign_m := _mat(Color(0.06, 0.07, 0.08), 0.4, 0.3)
 	var steel_m := _mat(Color(0.62, 0.64, 0.66), 0.28, 0.9)
 	var stop_m := _mat(Color(0.2, 0.2, 0.21), 0.8)
@@ -473,6 +473,11 @@ func _build(n: int) -> void:
 		var w1 := W * 0.5 + 0.3
 		_box(_vis, Vector3(w1 - w0, H, 0.3), Vector3(sx * (w0 + w1) * 0.5, H * 0.5, -0.15), wall_m, true)
 	_box(_vis, Vector3(lw * 2.0, H - ApartmentElevator.PORTAL_H, 0.3), Vector3(0, (H + ApartmentElevator.PORTAL_H) * 0.5, -0.15), wall_m, true)
+	# the far end: a wall either side of the ramp's mouth
+	var rw := RAMP_W * 0.5 + 0.8
+	for sx: float in [-1.0, 1.0]:
+		_box(_vis, Vector3(W * 0.5 - rw + 0.3, H, 0.3), Vector3(sx * (rw + W * 0.5 + 0.3) * 0.5, H * 0.5, L + 0.15), wall_m, true)
+		_box(_vis, Vector3(W * 0.5 - rw + 0.3, 1.1, 0.02), Vector3(sx * (rw + W * 0.5 + 0.3) * 0.5, 0.55, L - 0.01), dado_m)
 	# ---- ceiling structure: transverse beams every two bays, a duct and a
 	# sprinkler main along the aisle, cable trays over the bays
 	var z := LOBBY
@@ -570,7 +575,7 @@ func _build(n: int) -> void:
 	for sz: float in [LOBBY + row_len() * 0.5, L - 1.0]:
 		_box(_vis, Vector3(2.6, 0.5, 0.08), Vector3(0, H - 1.05, sz), sign_m)
 		_box(_vis, Vector3(2.5, 0.42, 0.01), Vector3(0, H - 1.05, sz - 0.045), exit_m)
-		_label("WAY OUT  ↑", 56, 0.0055, Color(1, 1, 1), Vector3(0, H - 1.05, sz - 0.06), Vector3(0, PI, 0))
+		_label("WAY OUT  ↑", 56, 0.0055, Color(1, 1, 1), Vector3(0, H - 1.05, sz - 0.07), Vector3(0, PI, 0), 6)
 		_box(_vis, Vector3(0.03, 0.4, 0.03), Vector3(-1.1, H - 0.6, sz), steel_m)
 		_box(_vis, Vector3(0.03, 0.4, 0.03), Vector3(1.1, H - 0.6, sz), steel_m)
 	_label("5", 160, 0.006, Color(0.95, 0.95, 0.95), Vector3(2.2, 0.012, LOBBY + 1.6), Vector3(-PI * 0.5, PI, 0.0))
@@ -591,7 +596,6 @@ func _build(n: int) -> void:
 		_box(_vis, Vector3(0.5, 0.15, slope), rc + Vector3(kx, 0.17, 0), _mat(Color(0.62, 0.62, 0.6), 0.8), false, -ang)
 		_box(_vis, Vector3(0.06, 0.04, slope), rc + Vector3(sx * (RAMP_W * 0.5 + 0.02), 0.27, 0), led_m, false, -ang)
 		_box(_vis, Vector3(0.3, H + RAMP_RISE + 0.6, RAMP_LEN + 6.0), Vector3(sx * (RAMP_W * 0.5 + 0.65), (H + RAMP_RISE) * 0.5, L + (RAMP_LEN + 6.0) * 0.5), wall_m, true)
-		_box(_vis, Vector3(0.02, 1.1, RAMP_LEN + 6.0), Vector3(sx * (RAMP_W * 0.5 + 0.49), RAMP_RISE * 0.5 + 0.55, L + (RAMP_LEN + 6.0) * 0.5), dado_m, false)
 	# ceiling over the ramp follows it up (stepped slabs)
 	for k in 7:
 		var z0 := L + k * (RAMP_LEN + 6.0) / 7.0
@@ -640,12 +644,14 @@ func _set_lights(L: float) -> void:
 
 
 func _arrow(at: Vector3, m: Material) -> void:
-	_box(_vis, Vector3(0.35, 0.012, 2.2), at + Vector3(0, 0, -0.4), m)
-	for s: float in [-1.0, 1.0]:
-		var piece := Vector3(0.3, 0.012, 1.1)
-		var b := Basis(Vector3.UP, s * 0.7)
-		var c := at + Vector3(s * 0.3, 0, 0.85)
-		_box_rot(piece, c, b, m)
+	# A painted arrow pointing down the aisle (+Z): a shaft and two barbs
+	# meeting at the tip.
+	var tip := at + Vector3(0, 0, 1.1)
+	_box(_vis, Vector3(0.32, 0.012, 2.0), at + Vector3(0, 0, -0.3), m)
+	for sd: float in [-1.0, 1.0]:
+		var back := Vector3(sd * 0.75, 0.0, -0.75).normalized()
+		var centre := tip + back * 0.55
+		_box_rot(Vector3(0.28, 0.012, 1.1), centre, Basis.looking_at(back, Vector3.UP), m)
 
 
 func _chevron(at: Vector3, pitch: float, m: Material) -> void:

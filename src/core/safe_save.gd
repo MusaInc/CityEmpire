@@ -52,6 +52,13 @@ static func write_async(path: String, data: Dictionary, done := Callable()) -> b
 	return true
 
 
+## Waits for an autosave in flight (quitting, tests).
+static func settle() -> void:
+	if _task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
+
+
 static func write_text(path: String, text: String) -> String:
 	var tmp := path + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)

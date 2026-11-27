@@ -1045,7 +1045,9 @@ func _handle_impacts() -> void:
 	_hits_near = keep
 	_hits_near.append([_time, side])
 	amount *= 1.0 + 0.18 * mini(repeats, 3)
+	Prof.begin("car_localised")
 	_localised(side, local, dv, n, other, amount)
+	Prof.end("car_localised")
 	dmg[side] = minf(1.0, dmg[side] + amount)
 	health = maxf(0.2 if immortal else 0.0, health - amount * 0.6)
 	if dv > 9.0 and (side == "left" or side == "right"):
@@ -1055,10 +1057,14 @@ func _handle_impacts() -> void:
 	if role == "player" and other is Car:
 		var av := angular_velocity
 		angular_velocity = Vector3(av.x, av.y * 0.5, av.z)
+	Prof.begin("car_impact_signal")
 	impact.emit(dv, at, n, other)
+	Prof.end("car_impact_signal")
 	if health <= 0.0 and not disabled and not immortal:
 		disabled = true
+		Prof.begin("car_wrecked_signal")
 		wrecked.emit()
+		Prof.end("car_wrecked_signal")
 
 
 ## Where on the car the hit landed decides what breaks: lamps at the

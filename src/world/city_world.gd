@@ -333,6 +333,9 @@ func _exit_tree() -> void:
 	for task in _pending.values():
 		WorkerThreadPool.wait_for_task_completion(task)
 	_pending.clear()
+	for task in _refreshing.values():
+		WorkerThreadPool.wait_for_task_completion(task)
+	_refreshing.clear()
 	_results.clear()
 	_lamps_by_chunk.clear()
 	if not secondary:
@@ -1804,7 +1807,33 @@ func unbreak_item(p: Vector3) -> void:
 
 
 ## Rebuilds a loaded chunk's props and furniture (after something broke).
+## (2026-11-27 engine pass) The arrays are made on a worker; only the node
+## swap happens here – this was a 45–50 ms stall each time a car knocked
+## over a lamp post or a bench.
+var _refreshing := {}      # chunk key -> worker task
+var _refresh_again := {}
+
+
 func refresh_props(key: Vector2i) -> void:
+	if not _loaded.has(key):
+		return
+	if _refreshing.has(key):
+		_refresh_again[key] = true
+		return
+	_refreshing[key] = WorkerThreadPool.add_task(func():
+		var by_kind := _props_by_kind(key)
+		var furn = _furniture_arrays(key)
+		var fol = _foliage_arrays(key)
+		_finish_refresh.call_deferred(key, by_kind, furn, fol), false, "props refresh")
+
+
+func _finish_refresh(key: Vector2i, by_kind: Dictionary, furn_arrays: Variant, fol_arrays: Variant) -> void:
+	WorkerThreadPool.wait_for_task_completion(_refreshing[key])
+	_refreshing.erase(key)
+	if _refresh_again.has(key):
+		_refresh_again.erase(key)
+		refresh_props(key)   # (something else broke meanwhile: once more)
+		return
 	var root: Node3D = _loaded.get(key)
 	if root == null:
 		return
@@ -1812,9 +1841,9 @@ func refresh_props(key: Vector2i) -> void:
 		if ch.name.begins_with("Props_") or ch.name == "Furniture" or ch.name == "LampHalos" or ch.name == "Foliage" or ch.name.begins_with("Signal"):
 			root.remove_child(ch)
 			ch.queue_free()
-	_add_props(root, key, null)   # (the ground pools stay: only the halos are rebuilt)
+	_add_props_kinds(root, by_kind, null)   # (the ground pools stay: only the halos are rebuilt)
 	_add_street_contacts(root, key)
-	var furn := _mesh_from(_furniture_arrays(key))
+	var furn := _mesh_from(furn_arrays)
 	if furn:
 		var fi := MeshInstance3D.new()
 		fi.name = "Furniture"
@@ -1823,7 +1852,7 @@ func refresh_props(key: Vector2i) -> void:
 		fi.visibility_range_end = FURNITURE_RANGE
 		fi.visibility_range_end_margin = 20.0
 		root.add_child(fi)
-	_add_foliage(root, _mesh_from(_foliage_arrays(key)))
+	_add_foliage(root, _mesh_from(fol_arrays))
 
 
 ## Rebuilds a loaded chunk's parked cars (one was driven off as a wreck).
@@ -2598,6 +2627,11 @@ static func _prop_buffer(list: Array) -> PackedFloat32Array:
 	return buf
 
 func _add_props(root: Node3D, key: Vector2i, pools: Variant = null) -> void:
+	_add_props_kinds(root, _props_by_kind(key), pools)
+
+
+## The chunk's props grouped by kind (pure: runs on a worker for refreshes).
+func _props_by_kind(key: Vector2i) -> Dictionary:
 	var by_kind := {}
 	for p in chunk_props(key):
 		var kind: String = p[0]
@@ -2605,6 +2639,10 @@ func _add_props(root: Node3D, key: Vector2i, pools: Variant = null) -> void:
 		if not by_kind.has(kind):
 			by_kind[kind] = []
 		by_kind[kind].append(xf)
+	return by_kind
+
+
+func _add_props_kinds(root: Node3D, by_kind: Dictionary, pools: Variant = null) -> void:
 	for kind in by_kind:
 		var mesh: Mesh = prop_meshes.get(kind)
 		if mesh == null:

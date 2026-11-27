@@ -673,17 +673,29 @@ static func _listing_grid(ph: Phone, items: Array, n: int, card_w: float, ph_h: 
 	var gd := grid(n)
 	if items.is_empty():
 		gd.add_child(G.para("Nothing matches right now.", "subhead"))
-	for it in items:
-		var info := ph.ui._listing(it[1], float(it[0]))
-		var rec: Dictionary = it[1]
-		var args := {"id": String(info["id"]), "home": rec.get("kind", "") == "home"}
-		var ttl := String(info["title"])
-		var sel := String(Phone.st(sec).get("sel", "")) == String(info["id"])
-		gd.add_child(CatalogArt.showcase(place_pic(String(info["id"]), "front", info["world"]), Vector2(card_w, ph_h + 40.0),
-			ttl, String(info["sub"]), String(info["price"]), String(info["status"]), info["col"], func():
-				Phone.st(sec)["sel"] = args["id"]
-				ph.push("listing", args, ttl, String(info["sub"]), "property"), sel))
+	# (the first rows of cards now, the rest a few per frame: see STAGGER)
+	var later: Array = []
+	for i in items.size():
+		var it: Array = items[i]
+		if i >= 9:
+			later.append(func() -> Control: return _listing_card(ph, it, card_w, ph_h, sec))
+			continue
+		gd.add_child(_listing_card(ph, it, card_w, ph_h, sec))
+	if not later.is_empty():
+		_stagger_into(ph, gd, later)
 	return gd
+
+
+static func _listing_card(ph: Phone, it: Array, card_w: float, ph_h: float, sec: String) -> Control:
+	var info := ph.ui._listing(it[1], float(it[0]))
+	var rec: Dictionary = it[1]
+	var args := {"id": String(info["id"]), "home": rec.get("kind", "") == "home"}
+	var ttl := String(info["title"])
+	var sel := String(Phone.st(sec).get("sel", "")) == String(info["id"])
+	return CatalogArt.showcase(place_pic(String(info["id"]), "front", info["world"]), Vector2(card_w, ph_h + 40.0),
+		ttl, String(info["sub"]), String(info["price"]), String(info["status"]), info["col"], func():
+			Phone.st(sec)["sel"] = args["id"]
+			ph.push("listing", args, ttl, String(info["sub"]), "property"), sel)
 
 
 ## A place's photograph filling its parent (or its map crop).
@@ -1129,6 +1141,48 @@ static func _c500_idx(c: Dictionary) -> int:
 	return City500.companies().find(c)
 
 
+const STAGGER_FIRST := 14
+const STAGGER_PER_FRAME := 6
+
+
+## Appends rows to a G.group a few per frame (makers: Callables returning
+## a row Control), with the group's separators; stops if the group goes.
+static func _stagger_rows(ph: Phone, grp: VBoxContainer, makers: Array) -> void:
+	var inner: VBoxContainer
+	for ch in grp.get_children():
+		if ch is PanelContainer:
+			inner = (ch as PanelContainer).get_child(0) as VBoxContainer
+	if inner == null:
+		return
+	_stagger_into(ph, inner, makers, true)
+
+
+## Adds makers' Controls to `box` a few per frame (with G.group separators
+## when `rule`).
+static func _stagger_into(ph: Phone, box: Container, makers: Array, rule := false) -> void:
+	var inner := box
+	var queue := makers.duplicate()
+	var step := func(self_ref: Array) -> void:
+		if not is_instance_valid(inner) or not inner.is_inside_tree():
+			return
+		for k in STAGGER_PER_FRAME:
+			if queue.is_empty():
+				return
+			var row: Control = (queue.pop_front() as Callable).call()
+			if rule:
+				var hr := ColorRect.new()
+				hr.color = G.SEP
+				hr.custom_minimum_size.y = 1
+				hr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				var last := inner.get_child(inner.get_child_count() - 1) as Control if inner.get_child_count() > 0 else null
+				inner.add_child(G.margin(hr, 76 if last and last.has_meta("icon") else 22, 0, 0, 0))
+			inner.add_child(row)
+		if not queue.is_empty():
+			ph.get_tree().process_frame.connect(func(): (self_ref[0] as Callable).call(self_ref), CONNECT_ONE_SHOT)
+	var holder := [step]
+	ph.get_tree().process_frame.connect(func(): step.call(holder), CONNECT_ONE_SHOT)
+
+
 static func city500(ph: Phone, body: VBoxContainer) -> void:
 	var e := ph.game.empire
 	var s := Phone.st("city500")
@@ -1160,7 +1214,11 @@ static func city500(ph: Phone, body: VBoxContainer) -> void:
 		var q_low := query.strip_edges().to_lower()
 		var cur_sec := String(Phone.st("city500").get("sector", ""))
 		var limit := int(Phone.st("city500").get("limit", 60))
+		# (2026-11-27) Rows are built as they're needed: the first screenful
+		# now, the rest a few per frame (STAGGER) – opening City500 built all
+		# sixty at once, a visible pause on a phone.
 		var rows: Array = []
+		var later: Array = []
 		var shown := 0
 		var you_row: Control = null
 		for r in rank:
@@ -1177,7 +1235,10 @@ static func city500(ph: Phone, body: VBoxContainer) -> void:
 			shown += 1
 			if shown > limit:
 				continue
-			rows.append(_c500_row(ph, r, day, wide))
+			if rows.size() < STAGGER_FIRST or jump_to_you:
+				rows.append(_c500_row(ph, r, day, wide))
+			else:
+				later.append(r)
 		var hdr := G.card(20, 6)
 		(hdr[1] as VBoxContainer).add_child(G.figure("Your empire's value", City500.money(float(yr["value"])), null, "title2"))
 		var ahead: Dictionary = yr["ahead"]
@@ -1198,7 +1259,10 @@ static func city500(ph: Phone, body: VBoxContainer) -> void:
 		if rows.is_empty():
 			v.add_child(G.para("No companies match “%s”." % query, "subhead"))
 		else:
-			v.add_child(G.group(rows))
+			var grp := G.group(rows)
+			v.add_child(grp)
+			if not later.is_empty():
+				_stagger_rows(ph, grp, later.map(func(r): return func() -> Control: return _c500_row(ph, r, day, wide)))
 		if shown > limit:
 			v.add_child(G.button("Show more (%d)" % (shown - limit), func():
 				Phone.st("city500")["limit"] = limit + 100

@@ -981,6 +981,8 @@ func scenario_bench() -> void:
 	b.stop()
 	var out := b.report()
 	out["menus"] = ui_ms
+	if Prof.enabled:
+		Prof.report(1)
 	if game.args.has("bench-out"):
 		var f := FileAccess.open(String(game.args["bench-out"]), FileAccess.WRITE)
 		if f:
@@ -1204,9 +1206,10 @@ func scenario_ev() -> void:
 				"lobby":
 					_cine_at(el.to_global(Vector3(0.5, 1.62, D - 0.5)), el.to_global(Vector3(0, 1.35, 0)), 70.0)
 				"cabin":
+					# (the hero stands in the car, hidden, so its doors stay open)
+					game.player.respawn(el.cabin_center_world() + Vector3(0.0, -0.05, -0.3))
+					el.call_to(false)
 					_cine_at(el.to_global(Vector3(-0.35, 1.62, -ApartmentElevator.SHAFT_D * 0.5 - 0.75)), el.to_global(Vector3(0.2, 1.3, 3.0)), 74.0)
-					el._g_door_open = 1.0
-					el._sync_doors()
 				"hall":
 					el.snap_to_top(game.player)
 					_cine_at(el.to_global(Vector3(0.4, el.top_y + 1.62, Apartments.HALL_D - 0.25)), el.to_global(Vector3(0, el.top_y + 1.3, 0)), 74.0)
@@ -1224,6 +1227,9 @@ func scenario_ev() -> void:
 		game.garage.enter(hid0)
 		await wait(1.5)
 		game.player.visible = false
+		var glift = game.garage.get("lift")
+		if glift:
+			game.player.respawn(glift.cabin_center_world() + Vector3(0.0, -0.05, -0.35))
 		var gar := game.garage
 		var rs := float(gar.ramp_start())
 		var consts: Dictionary = gar.get_script().get_script_constant_map()
@@ -1263,13 +1269,23 @@ func scenario_soak() -> void:
 	var mems: Array = []
 	for lap in laps:
 		var vid := String(e.vehicles[0]["id"])
-		await stand(game.elevators[hid].street_door_world() + Vector3.UP * 0.2)
+		var door: Vector3 = game.elevators[hid].street_door_world()
+		await stand(door + Vector3.UP * 0.2)
+		var car: Car = game.cars[vid]
+		# (the car may still be down in the garage: out onto the road first)
+		var rs: Dictionary = game.safe.road_spot(door, car.spec["size"], {"exclude": [car.get_rid()], "min_d": 4.0, "max_r": 120.0})
+		if rs["ok"]:
+			var rx: Transform3D = rs["xf"]
+			car.place(Transform3D(rx.basis, rx.origin + rx.basis.y * 0.35))
+		await wait(0.3)
 		game.enter_vehicle(vid)
 		await wait(0.5)
-		var car: Car = game.cars[vid]
 		game.drive_input.enabled = false
+		var driven := 0.0
 		for to in [game.skyport_play.site("terminal").get("door", start) if game.skyport_play else start, Vector3(-800, 0, 0), start]:
-			await _drive_route(car, to, 30.0, 300.0)
+			var r := await _drive_route(car, to, 30.0, 300.0)
+			driven += float(r.get("dist", 0.0))
+		print("SOAK lap %d driven %.0f m" % [lap, driven])
 		car.throttle = 0.0
 		await until(func():
 			car.brake = 1.0

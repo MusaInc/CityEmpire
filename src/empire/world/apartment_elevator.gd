@@ -117,6 +117,7 @@ var _call_g_mat: StandardMaterial3D
 var _call_top_mat: StandardMaterial3D
 var _lobby_light: OmniLight3D
 var _porch_light: OmniLight3D
+var _lobby_light2: OmniLight3D
 var _cabin_light: OmniLight3D
 
 
@@ -347,6 +348,8 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 		_lobby_light.visible = near
 	if _porch_light:
 		_porch_light.visible = near
+	if _lobby_light2:
+		_lobby_light2.visible = near
 	if _cabin_light:
 		_cabin_light.visible = near
 	if not near and state in ["idle_g", "idle_top", "sealed"]:
@@ -685,15 +688,18 @@ func _build_entrance(pal: Array, fin: Array) -> void:
 	_bx(-ehw, ehw, dz - 0.05, L + 0.35, -0.04, 0.025, c_stone.darkened(0.25), true)
 	# Front wall inside the facade round the doors (the lobby's street end).
 	var hw := lobby_hw
-	_bx(-hw - T, -ehw, dz - T, dz, 0.0, LOBBY_H, pal[0], true)
-	_bx(ehw, hw + T, dz - T, dz, 0.0, LOBBY_H, pal[0], true)
-	_bx(-ehw, ehw, dz - T, dz, eh, LOBBY_H, pal[0], true)
+	var fz := minf(dz, L - 0.03)   # (never in the facade's plane)
+	_bx(-hw - T, -ehw, fz - T, fz, 0.0, LOBBY_H, pal[0], true)
+	_bx(ehw, hw + T, fz - T, fz, 0.0, LOBBY_H, pal[0], true)
+	_bx(-ehw, ehw, fz - T, fz, eh, LOBBY_H, pal[0], true)
 	if L - dz > 0.05:
 		# (behind the facade either side of the recess: the lobby's front
 		# corners, so the recess never looks into the wall's thickness)
+		# (kept 3 cm behind the facade plane: flush, they z-fought the
+		# building's wall and showed as white panels round the door)
 		for sx: float in [-1.0, 1.0]:
-			_bx(sx * (ehw + T), sx * (hw + T), dz, L, 0.0, LOBBY_H, pal[0], true)
-		_bx(-hw - T, hw + T, dz, L, LOBBY_H, LOBBY_H + 0.1, pal[0])
+			_bx(sx * (ehw + T), sx * (hw + T), dz, L - 0.03, 0.0, LOBBY_H, pal[0], true)
+		_bx(-hw - T, hw + T, dz, L - 0.03, LOBBY_H, LOBBY_H + 0.1, pal[0])
 	# The door frame: metal jambs, head and a transom bar; the transom glass.
 	var fw := 0.07
 	for sx: float in [-1.0, 1.0]:
@@ -814,6 +820,17 @@ func _build_lobby(pal: Array, fin: Array) -> void:
 	_gl(dx - 0.37, dx - 0.36, rz - 0.7, rz + 0.7, 0.04, 0.07, Color(1.0, 0.86, 0.6))
 	_bx(dx + 0.1, dx + 0.2, rz + 0.45, rz + 0.55, 1.1, 1.42, c_metal)
 	_gl(dx + 0.04, dx + 0.26, rz + 0.39, rz + 0.61, 1.42, 1.56, Color(1.0, 0.84, 0.58))
+	# Framed artwork down the plain wall, each with a picture light.
+	var arts := [Color(0.62, 0.42, 0.3), Color(0.3, 0.42, 0.52), Color(0.72, 0.66, 0.52), Color(0.36, 0.46, 0.34)]
+	var az := rz + 2.6
+	var ai := 0
+	while az < L - 1.8:
+		_bx(hw - 0.05, hw, az - 0.62, az + 0.62, 1.15, 2.05, c_metal.darkened(0.2))
+		_bx(hw - 0.06, hw - 0.05, az - 0.55, az + 0.55, 1.22, 1.98, arts[ai % arts.size()])
+		_bx(hw - 0.18, hw - 0.05, az - 0.3, az + 0.3, 2.12, 2.16, c_metal)
+		_gl(hw - 0.17, hw - 0.07, az - 0.28, az + 0.28, 2.115, 2.12, Color(1.0, 0.88, 0.66))
+		az += 4.2
+		ai += 1
 	# Seating by the street end: a bench and a planter.
 	if L > 6.0:
 		var sz := L - 2.0
@@ -1128,11 +1145,20 @@ func _build_lights() -> void:
 	add_child(dir_lbl)
 	var lz := InteriorKit.add_lighting_zone(self, AABB(Vector3(-hw, 0.0, 0.0), Vector3(hw * 2.0, LOBBY_H, L)))
 	InteriorKit.room_probe(lz, Color(1.0, 0.92, 0.8), 0.55, 0.2)
-	_lobby_light = OmniLight3D.new()
-	_lobby_light.position = Vector3(0.0, LOBBY_H - 0.45, L * 0.5)
-	_lobby_light.light_color = Color(1.0, 0.9, 0.74)
-	InteriorKit.tune_light(_lobby_light, 2.6, maxf(7.0, L * 0.75))
-	add_child(_lobby_light)
+	# Warm light: one for a short lobby, two down a long one; the dark
+	# palettes (loft, penthouse) get more so the finishes still read.
+	var dark := tier == 2 or tier == 4
+	var n_l := 1 if L < 9.0 else 2
+	for i in n_l:
+		var ol := OmniLight3D.new()
+		ol.position = Vector3(0.0, LOBBY_H - 0.45, L * (0.5 if n_l == 1 else (0.28 if i == 0 else 0.74)))
+		ol.light_color = Color(1.0, 0.9, 0.74)
+		InteriorKit.tune_light(ol, (2.6 if n_l == 1 else 2.2) * (1.35 if dark else 1.0), maxf(7.0, L * (0.75 if n_l == 1 else 0.42)))
+		add_child(ol)
+		if i == 0:
+			_lobby_light = ol
+		else:
+			_lobby_light2 = ol
 	# A warm light under the canopy (shadowless, near only).
 	_porch_light = OmniLight3D.new()
 	_porch_light.position = Vector3(0.0, _ent_h + 0.2, lobby_len + 0.6)

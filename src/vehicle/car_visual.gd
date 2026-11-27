@@ -539,7 +539,9 @@ func paint_colour() -> Color:
 
 func _on_damaged(kind: String, _what: Variant, _at: Vector3) -> void:
 	if kind in ["glass", "lamp", "scrape", "roof"]:
+		Prof.begin("visual_refresh_damage")
 		refresh_damage()
+		Prof.end("visual_refresh_damage")
 
 
 ## Car damage state → materials: scratches / paint transfer, glass cracks,

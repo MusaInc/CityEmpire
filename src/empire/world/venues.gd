@@ -67,6 +67,15 @@ func setup(g: EmpireGame) -> void:
 	game = g
 
 
+## Quitting: background loads still running are collected first (a pending
+## threaded load at teardown is not something to leave behind).
+func _exit_tree() -> void:
+	for id in _requested.keys():
+		if _requested[id]:
+			ResourceLoader.load_threaded_get("res://assets/venues/%s.glb" % id)
+	_requested.clear()
+
+
 ## World transform of a venue's front-centre floor point (the GLB's origin).
 func venue_xf(id: String) -> Transform3D:
 	var v: Dictionary = (game.skyport.plan_data.get("venues", {}) as Dictionary).get(id, {})
@@ -413,7 +422,10 @@ func _collide(root: Node3D, mi: MeshInstance3D) -> void:
 		cs0.transform = mi.transform
 		body.add_child(cs0)
 		return
-	var faces := PackedVector3Array()
+	# (2026-11-27) Built natively: the solid surfaces copied into a mesh of
+	# their own, then one trimesh shape from it. The old per-index loop in
+	# script was most of a 50–100 ms stall the first time you drove up.
+	var solid := ArrayMesh.new()
 	for i in mi.mesh.get_surface_count():
 		var m := mi.mesh.surface_get_material(i)
 		var nm := String(m.resource_name) if m else ""
@@ -421,21 +433,18 @@ func _collide(root: Node3D, mi: MeshInstance3D) -> void:
 		if nm.begins_with("led") or nm == "screen":
 			continue
 		var arr := mi.mesh.surface_get_arrays(i)
-		var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
-		var ix = arr[Mesh.ARRAY_INDEX]
-		if ix == null or (ix as PackedInt32Array).is_empty():
-			faces.append_array(vs)
-		else:
-			for k in (ix as PackedInt32Array):
-				faces.append(vs[k])
-	var shape := ConcavePolygonShape3D.new()
-	shape.set_faces(faces)
+		var lean := []
+		lean.resize(Mesh.ARRAY_MAX)
+		lean[Mesh.ARRAY_VERTEX] = arr[Mesh.ARRAY_VERTEX]
+		lean[Mesh.ARRAY_INDEX] = arr[Mesh.ARRAY_INDEX]
+		solid.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, lean)
+	var shape: ConcavePolygonShape3D = solid.create_trimesh_shape() if solid.get_surface_count() > 0 else ConcavePolygonShape3D.new()
 	shape.backface_collision = true
-	_shapes[vid] = shape
 	var cs := CollisionShape3D.new()
 	cs.shape = shape
 	cs.transform = mi.transform
 	body.add_child(cs)
+	_shapes[vid] = shape
 
 
 ## Adds a solid collider to a sliding door leaf so closed doors feel physical;
