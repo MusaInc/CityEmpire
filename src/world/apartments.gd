@@ -276,6 +276,13 @@ const LOBBY_HW := 2.6
 const LOBBY_H := 3.6
 const STREET_DOOR_HW := 1.15
 const STREET_DOOR_H := 2.7
+## The street entrance's opening by the home's tier (2026-11-27: grander
+## the dearer the home): [half width, height, recess depth].
+const PORTAL := [[1.15, 2.75, 0.7], [1.3, 2.9, 0.9], [1.4, 3.0, 1.0], [1.55, 3.2, 1.2], [1.75, 3.4, 1.4]]
+
+
+static func portal(c: Dictionary) -> Array:
+	return PORTAL[clampi(int(c.get("tier", 0)), 0, 4)]
 
 
 static func make_core(c: Dictionary) -> Dictionary:
@@ -337,7 +344,9 @@ static func core_door(c: Dictionary) -> Array:
 	if k.is_empty():
 		return []
 	var a: float = k["a_f0"]
-	return [int(c["face"]), a - STREET_DOOR_HW, a + STREET_DOOR_HW, float(k["base"]), float(k["base"]) + STREET_DOOR_H]
+	var pt := portal(c)
+	var hw := minf(float(pt[0]), float(k["lobby_hw"]) - 0.15)
+	return [int(c["face"]), a - hw, a + hw, float(k["base"]), float(k["base"]) + float(pt[1])]
 
 
 ## Kept clear of features, plinths and awnings: the street door's opening
@@ -348,8 +357,10 @@ static func door_zone(c: Dictionary) -> AABB:
 		return AABB()
 	var f := face_of(c)
 	var a_c: float = k["a_c"]
-	return BuildingMesher._fbox(f, a_c - STREET_DOOR_HW - 0.4, a_c + STREET_DOOR_HW + 0.4, float(k["o_face0"]) - 0.6, float(k["o_face0"]) + 3.0,
-		float(k["base"]) - 1.0, float(k["base"]) + STREET_DOOR_H + 0.8)
+	var pt := portal(c)
+	var hw := float(pt[0]) + 0.75   # (the portal's pilasters and sconces)
+	return BuildingMesher._fbox(f, a_c - hw, a_c + hw, float(k["o_face0"]) - 0.6, float(k["o_face0"]) + 3.2,
+		float(k["base"]) - 1.0, float(k["base"]) + float(pt[1]) + 1.2)
 
 
 ## A box minus another (axis-aligned): up to six pieces.

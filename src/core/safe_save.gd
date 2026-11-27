@@ -21,7 +21,38 @@ static var last_source := ""   # "primary" | "backup" | ""
 
 
 static func write(path: String, data: Dictionary) -> String:
+	if _task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_task)   # (an autosave still writing)
+		_task = -1
+	return write_text(path, JSON.stringify(data))
+
+
+## Autosaves (2026-11-27 engine pass): the data is serialised here, on the
+## caller's thread (a snapshot – nothing can change under it), and the file
+## work – write, read back, verify, keep the backup – runs on a worker so
+## play never waits on the disk. done(err) is called on the main thread.
+## A save already in flight makes this one skip (the next autosave runs).
+static var _busy := false
+static var _task := -1
+
+
+static func write_async(path: String, data: Dictionary, done := Callable()) -> bool:
+	if _task >= 0 and WorkerThreadPool.is_task_completed(_task):
+		WorkerThreadPool.wait_for_task_completion(_task)   # (finished: release it)
+		_task = -1
+	if _busy:
+		return false
 	var text := JSON.stringify(data)
+	_busy = true
+	_task = WorkerThreadPool.add_task(func():
+		var err := write_text(path, text)
+		_busy = false
+		if done.is_valid():
+			done.call_deferred(err), false, "autosave")
+	return true
+
+
+static func write_text(path: String, text: String) -> String:
 	var tmp := path + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:

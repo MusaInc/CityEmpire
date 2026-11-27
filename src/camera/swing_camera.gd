@@ -155,6 +155,11 @@ func shake(amount: float) -> void:
 	_fov_kick -= amount * 6.0
 
 
+## A steady low tremor (a lift travelling): positional only, no FOV kick.
+func vibrate(amount: float) -> void:
+	_shake = maxf(_shake, amount)
+
+
 func snap() -> void:
 	_snapped = true
 	_handoff = 0.0

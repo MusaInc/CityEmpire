@@ -44,6 +44,10 @@ var game: EmpireGame
 var rooms := {}            # id -> {node, xf, marks, doors, turntable, cars, spots, ceiling}
 var _t := 0.0
 var _commercial_sign: Node3D
+const PRELOAD_RANGE := 520.0
+var _requested := {}          # id -> threaded load requested
+var _car_queue: Array = []    # [id, room, mark name, model]
+static var _shapes := {}      # venue id -> its collision shape (built once)
 static var _finishes := {}
 static var _display_shadow: ShaderMaterial
 
@@ -94,10 +98,22 @@ func _process(dt: float) -> void:
 		for id in (game.skyport.plan_data.get("venues", {}) as Dictionary):
 			var xf := venue_xf(id)
 			var d := xf.origin.distance_to(p)
+			var path := "res://assets/venues/%s.glb" % id
+			if d < PRELOAD_RANGE and not rooms.has(id) and not _requested.has(id):
+				# (2026-11-27 engine pass) The GLB loads on a worker thread
+				# well before you get there; the room is put in the world when
+				# it's ready – not a 50–110 ms load on the main thread.
+				_requested[id] = ResourceLoader.load_threaded_request(path) == OK
 			if d < LOAD_RANGE and not rooms.has(id):
-				_load(id, xf)
+				if not _requested.get(id, false) or ResourceLoader.load_threaded_get_status(path) != ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+					_load(id, xf)
 			elif d > FREE_RANGE and rooms.has(id):
 				_free(id)
+	# Display cars arrive one per frame (each is a car, its body and glass).
+	if not _car_queue.is_empty():
+		var job: Array = _car_queue.pop_front()
+		if rooms.has(job[0]) and rooms[job[0]] == job[1]:
+			_display_car(job[1], job[2], job[3])
 	for id in rooms:
 		_animate(rooms[id], dt, game.player.global_position)
 
@@ -114,7 +130,13 @@ func load_near_now(p: Vector3) -> void:
 
 # ---------------------------------------------------------------- building a room
 func _load(id: String, xf: Transform3D) -> void:
-	var ps: PackedScene = load("res://assets/venues/%s.glb" % id)
+	var path := "res://assets/venues/%s.glb" % id
+	var ps: PackedScene
+	if _requested.get(id, false):
+		ps = ResourceLoader.load_threaded_get(path) as PackedScene
+		_requested.erase(id)
+	if ps == null:
+		ps = load(path)
 	if ps == null:
 		return
 	var root: Node3D = ps.instantiate()
@@ -384,6 +406,13 @@ func _collide(root: Node3D, mi: MeshInstance3D) -> void:
 	body.collision_layer = CityWorld.HUMAN_LAYER | 1
 	body.collision_mask = 0
 	root.add_child(body)
+	var vid := String(root.name)
+	if _shapes.has(vid):
+		var cs0 := CollisionShape3D.new()
+		cs0.shape = _shapes[vid]
+		cs0.transform = mi.transform
+		body.add_child(cs0)
+		return
 	var faces := PackedVector3Array()
 	for i in mi.mesh.get_surface_count():
 		var m := mi.mesh.surface_get_material(i)
@@ -402,6 +431,7 @@ func _collide(root: Node3D, mi: MeshInstance3D) -> void:
 	var shape := ConcavePolygonShape3D.new()
 	shape.set_faces(faces)
 	shape.backface_collision = true
+	_shapes[vid] = shape
 	var cs := CollisionShape3D.new()
 	cs.shape = shape
 	cs.transform = mi.transform
@@ -469,6 +499,11 @@ func _cars(R: Dictionary) -> void:
 		var model := String(STAR.get(id, "")) if nm == "car_turntable" and STAR.has(id) else String(stock[k % stock.size()])
 		if nm != "car_turntable":
 			k += 1
+		_car_queue.append([id, R, nm, model])
+
+
+func _display_car(R: Dictionary, nm: String, model: String) -> void:
+		var sid := String(DEFS[String(R["id"])]["site"])
 		var xf: Transform3D = R["marks"][nm]
 		var c := Car.new()
 		c.name = "Showroom_" + model

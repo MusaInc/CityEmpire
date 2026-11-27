@@ -110,7 +110,11 @@ func _support(at: Vector3, body: PhysicsBody3D) -> Vector3:
 	if hit.is_empty() or (hit["normal"] as Vector3).y < 0.72:
 		return Vector3.INF
 	var floor: Vector3 = hit["position"]
-	if floor.y < Craft.SEA_Y + 0.15 or (floor.y < Craft.SEA_Y + 1.0 and game.layout.is_water(floor)):
+	# (Water is a band round the sea surface: a floor far below it is a
+	# structure – the Vehicle Collection is 320 m down, and its every door
+	# used to count as "in the sea", so you couldn't get into your cars.)
+	var near_sea := floor.y > Craft.SEA_Y - 12.0
+	if near_sea and (floor.y < Craft.SEA_Y + 0.15 or (floor.y < Craft.SEA_Y + 1.0 and game.layout.is_water(floor))):
 		return Vector3.INF
 	var centre := floor + Vector3.UP * STAND_HEIGHT
 	return centre if _clear(centre, body) else Vector3.INF

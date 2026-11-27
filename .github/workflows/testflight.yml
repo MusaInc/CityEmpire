@@ -176,6 +176,14 @@ jobs:
           fi
           "$GODOT" --headless --export-release "iOS" build/ios/CityEmpire.ipa
           test -d build/ios/CityEmpire.xcodeproj
+          # Install-size audit (2026-11-27): the game data pack and its
+          # biggest entries, every build, so growth is visible in the log.
+          pck=$(ls build/ios/*.pck 2>/dev/null | head -1)
+          if [ -n "$pck" ]; then
+            echo "Game data pack: $(du -h "$pck" | cut -f1) ($pck)"
+            echo "::notice::Game data pack $(du -m "$pck" | cut -f1) MB"
+          fi
+          du -sh build/ios/* 2>/dev/null | sort -rh | head -10 || true
 
       - name: App Store Connect API key
         env:

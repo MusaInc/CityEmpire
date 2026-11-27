@@ -50,11 +50,25 @@ var time_of_day := "cycle"
 ## Weather: "changing" (drifts between clear, cloudy, rain, storm, fog) or one fixed state.
 var weather := "changing"
 var tuning_overrides := {}  # SwingParams property -> value, from the in-game tuning panel
+## The device profile chosen on first launch ("high" / "mid" / "low").
+var device_tier := ""
 
 
 func _ready() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(PATH) == OK:
+	var loaded := cfg.load(PATH) == OK
+	var prof := {}
+	if not loaded or not cfg.has_section_key("gfx", "device_tier"):
+		# Once per install: what this device can hold (DeviceProfile). On
+		# phones and tablets only – desktop/dev runs keep the defaults.
+		if OS.get_name() in ["iOS", "Android"]:
+			prof = DeviceProfile.classify()
+			device_tier = String(prof["tier"])
+		else:
+			device_tier = "desktop"
+	else:
+		device_tier = String(cfg.get_value("gfx", "device_tier", ""))
+	if loaded:
 		quality = cfg.get_value("gfx", "quality", quality)
 		fps_60 = cfg.get_value("gfx", "fps_60", fps_60)
 		show_perf = cfg.get_value("gfx", "show_perf", show_perf)
@@ -78,6 +92,14 @@ func _ready() -> void:
 			fps_60 = true  # 0.1.x saved the old 30 fps default
 		if not OS.is_debug_build():
 			tuning_overrides = {}  # the tuning panel is a developer tool
+	if not prof.is_empty():
+		# (Only where the old defaults still stand: a preset or frame rate
+		# chosen by hand is kept.)
+		if quality == Quality.MEDIUM:
+			quality = int(prof["quality"])
+		if fps_60:
+			fps_60 = bool(prof["fps_60"])
+		save()
 	apply()
 
 
@@ -122,6 +144,7 @@ func apply() -> void:
 func save() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("gfx", "quality", quality)
+	cfg.set_value("gfx", "device_tier", device_tier)
 	cfg.set_value("gfx", "fps_60", fps_60)
 	cfg.set_value("gfx", "show_perf", show_perf)
 	cfg.set_value("gfx", "driving_lens", driving_lens)

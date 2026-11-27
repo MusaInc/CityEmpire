@@ -23,6 +23,15 @@ var _since_change := 0.0
 var _headroom_time := 0.0
 var _vp_rid: RID
 var _last_us := 0
+## Frame pacing (2026-11-27): when 60 can't be held even at the lowest
+## render scale (an older or hot phone), a steady 30 beats a ragged 40–55;
+## the lock lifts once the GPU shows clear headroom for a while.
+var pacing_locked := false
+var _behind_at_floor := 0.0
+var _locked_roomy := 0.0
+var _menu_capped := false
+const LOCK_AFTER := 8.0
+const UNLOCK_AFTER := 25.0
 
 
 func _ready() -> void:
@@ -46,13 +55,38 @@ func _reset() -> void:
 	_acc = 0.0
 	_frames = 0
 	_last_us = Time.get_ticks_usec()
+	pacing_locked = false
+	_behind_at_floor = 0.0
+	_locked_roomy = 0.0
+	_menu_capped = false
+
+
+## The frame-rate cap the player's settings ask for.
+func _target_fps() -> int:
+	var settings := get_node_or_null("/root/Settings")
+	if settings == null:
+		return 60
+	return 60 if (settings.fps_60 or int(settings.preset()["fps"]) == 60) else 30
+
+
+func _apply_fps() -> void:
+	var want := _target_fps()
+	if pacing_locked or _menu_capped:
+		want = mini(want, 30)
+	if Engine.max_fps != want:
+		Engine.max_fps = want
 
 
 func _process(_dt: float) -> void:
 	var now := Time.get_ticks_usec()
 	var real_dt := (now - _last_us) / 1e6
 	_last_us = now
-	if not enabled or get_tree().paused or real_dt > 0.5:
+	# Phone panels pause the world: 30 fps there saves battery and heat.
+	var paused := get_tree().paused
+	if paused != _menu_capped:
+		_menu_capped = paused
+		_apply_fps()
+	if not enabled or paused or real_dt > 0.5:
 		_acc = 0.0
 		_frames = 0
 		_headroom_time = 0.0
@@ -71,6 +105,24 @@ func _process(_dt: float) -> void:
 	var floor_scale := maxf(_cap * FLOOR_FRACTION, ABS_FLOOR)
 	var behind := frame_ms > budget * 1.18
 	var gpu_bound := (not gpu_known) or gpu_ms > budget * 0.8
+	# Pacing: behind at the floor scale for LOCK_AFTER s → a steady 30.
+	if _target_fps() == 60:
+		if not pacing_locked:
+			_behind_at_floor = _behind_at_floor + CHECK_EVERY if behind and scale <= floor_scale + 0.001 else 0.0
+			if _behind_at_floor >= LOCK_AFTER:
+				pacing_locked = true
+				_locked_roomy = 0.0
+				_apply_fps()
+				return
+		else:
+			# Unlock when the 30 fps frames would fit in a 60 fps budget with room.
+			var fits := (gpu_known and gpu_ms < 1000.0 / 60.0 * 0.6) or (not gpu_known and frame_ms < 1000.0 / 60.0 * 0.9)
+			_locked_roomy = _locked_roomy + CHECK_EVERY if fits else 0.0
+			if _locked_roomy >= UNLOCK_AFTER:
+				pacing_locked = false
+				_behind_at_floor = 0.0
+				_apply_fps()
+				return
 	if behind and gpu_bound:
 		_headroom_time = 0.0
 		if _since_change >= MIN_GAP and scale > floor_scale + 0.001:

@@ -439,7 +439,7 @@ func _spawn(li: int, s: float) -> void:
 			profile = "stroller"
 			spd = _rng.randf_range(0.88, 1.15)
 	_people.append({"loop": li, "s": s, "dir": 1 if is_city_cross else int(l["dir"]) * (1 if _rng.randf() < 0.85 else -1),
-		"speed": spd, "vel_cur": spd * _speed_scale, "profile": profile, "body": _rng.randi() % maxi(_mmis.size(), 1), "seed": _rng.randf(),
+		"speed": spd, "vel_cur": spd * _speed_scale, "profile": profile, "body": _rng.randi() % maxi(_mmis.size(), 1), "seed": _rng.randf(), "slot": _rng.randi() % 6,
 		"top": TOPS[_rng.randi() % TOPS.size()], "scale": _rng.randf_range(0.93, 1.06), "lane": _rng.randf_range(-0.35, 0.35),
 		"stride": _rng.randf() * 3.0, "look": 0.0, "glance": 0.0, "glance_t": _rng.randf_range(0.7, 2.4),
 		"state": "walk", "t": 0.0, "goal": Vector3.ZERO, "pos": Vector3.ZERO, "yaw": 0.0, "walk": 1.0,
@@ -539,10 +539,22 @@ func _process(dt: float) -> void:
 	var fz := focus.z
 	var over_budget := _target_count > 0 and _people.size() > _target_count + 4
 	var keep_r := KEEP * 0.72 if over_budget else KEEP
+	var frame := Engine.get_process_frames()
 	for pr in _people:
 		var p0: Vector3 = pr["pos"]
 		var d2_focus := (p0.x - fx) * (p0.x - fx) + (p0.z - fz) * (p0.z - fz) if p0 != Vector3.ZERO else 0.0
-		_step(pr, dt, me, eye, d2_focus)
+		# (2026-11-27 engine pass) Simulation LOD: everyone within 48 m
+		# steps every frame; further out (where they're only a few pixels
+		# tall and don't dodge or browse anyway) every 2nd frame, past 75 m
+		# every 3rd, on staggered frames, with the time they skipped. They
+		# walk the same paths at the same speeds.
+		var every := 1 if d2_focus < 48.0 * 48.0 or p0 == Vector3.ZERO else (2 if d2_focus < 75.0 * 75.0 else 3)
+		var lag := float(pr.get("lag", 0.0)) + dt
+		if every > 1 and (frame + int(pr.get("slot", 0))) % every != 0:
+			pr["lag"] = lag
+		else:
+			pr["lag"] = 0.0
+			_step(pr, minf(lag, 0.1), me, eye, d2_focus)
 		var p: Vector3 = pr["pos"]
 		if pr["state"] == "gone":
 			continue

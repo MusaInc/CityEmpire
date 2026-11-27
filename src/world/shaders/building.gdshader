@@ -487,7 +487,11 @@ void fragment() {
 	bool tall_street_floor = facade && style >= 60.0 && style <= 67.0;
 	bool solid_belt = facade && style >= 40.0 && style <= 47.0;
 	bool real_street_floor = (facade && style >= 20.0 && style <= 27.0) || tall_street_floor;
-	if (real_street_floor || solid_belt) {
+	// An apartment tower's street floor (2026-11-27): residential – no
+	// painted shopfronts or fake doors; its real entrance is a mesh
+	// (ApartmentElevator). BuildingMesher.residential_tower() sets it.
+	bool residential_floor = facade && style >= 80.0 && style <= 87.0;
+	if (real_street_floor || solid_belt || residential_floor) {
 		style = mod(style, 20.0);
 	}
 	float face_t = fract(UV2.x) / 0.999;
@@ -670,7 +674,7 @@ void fragment() {
 		// Ground floor: tall shopfront glazing + fascia band.
 		// (Only some buildings have shops on the ground floor; the rest carry
 		// their windows down. BuildingMesher.ground_shops() matches this.)
-		bool shop = !real_street_floor && !solid_belt && uv.y < 4.6 && style != 3.0 && fract(seed * 5.37 + 0.21) < 0.5;
+		bool shop = !real_street_floor && !solid_belt && !residential_floor && uv.y < 4.6 && style != 3.0 && fract(seed * 5.37 + 0.21) < 0.5;
 		if (shop) {
 			float bay = fract(uv.x / 6.0);
 			glass = step(0.08, bay) * step(bay, 0.92) * step(0.25, uv.y) * step(uv.y, 3.6);
@@ -952,7 +956,7 @@ void fragment() {
 		// Opaque entrance trim should replace the window's relief and gloss.
 		// These are visual entrances on the city shell. Enterable premises
 		// still own their door meshes, floor levels and interaction points.
-		if (!real_street_floor && !solid_belt && !shop && face_w > 7.0 && uv.y < 4.3 && detail > 0.0) {
+		if (!real_street_floor && !solid_belt && !residential_floor && !shop && face_w > 7.0 && uv.y < 4.3 && detail > 0.0) {
 			float edge = clamp(max(length(uv_dx), length(uv_dy)) * 0.65, 0.006, 0.12);
 			float face_x = (face_t - 0.5) * face_w;
 			vec2 entrance = vec2(face_x, uv.y);
@@ -1130,7 +1134,7 @@ void fragment() {
 		albedo *= 1.0 - detail * ((0.07 + 0.25 * age) * streak + (0.045 + 0.17 * age) * patches
 			+ (0.05 + 0.11 * age) * street_splash * float(v_kind != KIND_TRIM));
 		// (Base courses always: their shops are above them.)
-		bool street_wall = v_kind == KIND_STONE || (v_kind == KIND_WALL && (real_street_floor || !(uv.y < 4.6 && style != 3.0 && fract(seed * 5.37 + 0.21) < 0.5)));
+		bool street_wall = v_kind == KIND_STONE || (v_kind == KIND_WALL && (real_street_floor || residential_floor || !(uv.y < 4.6 && style != 3.0 && fract(seed * 5.37 + 0.21) < 0.5)));
 		// Peeling render on old painted walls: patches showing the darker
 		// substrate, a pale lip at the edge.
 		if (street_wall && (style == 0.0 || style == 5.0 || style == 7.0 || style == 4.0) && age > 0.5) {

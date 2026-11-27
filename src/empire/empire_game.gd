@@ -144,6 +144,8 @@ func _ready() -> void:
 	skyport.viewer = func() -> Vector3:
 		if state == "title" and is_instance_valid(_title_focus):
 			return _title_focus.global_position
+		if garage and garage.inside and world.stream_anchor:
+			return world.stream_anchor.global_position   # (underground: the street above)
 		return vehicle_node().global_position if vehicle_node() else player.global_position
 	print("Skyport Island: %d ms" % (Time.get_ticks_msec() - t1))
 	_build_elevators()
@@ -1339,6 +1341,7 @@ func _process(dt: float) -> void:
 	if vehicle_access.active():
 		vehicle_access.tick(dt)
 		return
+	_drain_interiors()
 	_tick_elevators(dt)
 	_update_spot()
 	_update_indoors()
@@ -1355,7 +1358,7 @@ func _process(dt: float) -> void:
 	_save_t += dt
 	if _save_t > 90.0:
 		_save_t = 0.0
-		save_game()
+		save_game(true)
 	_tutorial_step()
 	ui.update_hud()
 	if args.has("perf"):
@@ -1432,9 +1435,22 @@ func toggle_fast() -> void:
 
 
 # ----------------------------------------------------------- interiors
+var _interior_queue: Array = []
+
+
+func _drain_interiors() -> void:
+	while not _interior_queue.is_empty():
+		var u: Dictionary = _interior_queue.pop_front()
+		if not interiors.has(String(u["id"])):
+			_build_interior(u)
+			return
+
+
 func _stream_interiors() -> void:
 	var dc: Node3D = cars.get(driving) if driving != "" else null
 	var focus := dc.global_position if dc and is_instance_valid(dc) else player.global_position
+	if garage and garage.inside and world.stream_anchor:
+		focus = world.stream_anchor.global_position
 	var to_build: Array = []
 	for u in units:
 		if u.has("street_use"):
@@ -1448,9 +1464,16 @@ func _stream_interiors() -> void:
 			interiors.erase(id)
 	if not to_build.is_empty():
 		to_build.sort_custom(func(a, b): return a[0] < b[0])
-		var budget := 4 if state != "play" else 2
-		for i in mini(budget, to_build.size()):
-			_build_interior(to_build[i][1])
+		if state != "play":
+			for i in mini(4, to_build.size()):
+				_build_interior(to_build[i][1])
+		else:
+			# (2026-11-27) In play they're queued, nearest first, and built
+			# one per frame (_drain_interiors) – two in one frame were the
+			# 35–60 ms hitches driving into a shopping street.
+			_interior_queue.clear()
+			for i in mini(3, to_build.size()):
+				_interior_queue.append(to_build[i][1])
 	# Cull active interior point/spot lights when player is outdoors beyond 36 m.
 	for id: String in interiors:
 		var si: ShopInterior = interiors[id]
@@ -2339,9 +2362,17 @@ func act() -> void:
 		"steal_car":
 			street_cars.steal(spot)
 		"garage_down":
-			garage.enter(String(spot["home"]))
+			# The way down is the lift itself: call it, step in, ▼.
+			var el_gd: ApartmentElevator = elevators.get(String(spot["home"]))
+			if el_gd:
+				Sfx.play("click", -5.0)
+				el_gd.call_to(false)
+				ui.toast("Step into the lift and choose ▼ Vehicle Collection", "info")
 		"garage_up":
 			ui.open_lift_floors(garage.from_home, true)
+		"garage_call":
+			Sfx.play("click", -5.0)
+			garage.lift.call_to(false)
 		"car_boot":
 			_boot_action(spot["vehicle"])
 
@@ -2543,7 +2574,11 @@ func _spawn_cars() -> void:
 	cars.clear()
 	for v in empire.vehicles:
 		if SkyportPlay.vclass(String(v["model"])) == "car":
-			_spawn_car(v)
+			var c := _spawn_car(v)
+			# (Loading: your cars' crumple data is ready before the first
+			# knock – it was a 40–70 ms stall on the first dent of a drive.)
+			if c:
+				CarVisual.warm_dent_cache(String(c.spec["body"]))
 	if street_cars:
 		street_cars.apply_stored()
 	if skyport_play:
@@ -2828,7 +2863,8 @@ func _track_driving(dt: float) -> void:
 	elif c.upside_time > 2.0:
 		_right_car(c)
 	else:
-		_sample_car_safe(driving, c, get_process_delta_time())
+		if garage == null or not garage.inside:
+			_sample_car_safe(driving, c, get_process_delta_time())
 
 
 func _spray_on_pavement(at: Vector3) -> bool:
@@ -3598,13 +3634,20 @@ func _tick_elevators(dt: float) -> void:
 		var el: ApartmentElevator = elevators[hid]
 		var owns := empire.owns_property(hid)
 		if owns:
-			var q := empire.properties.filter(func(x): return x["id"] == hid)
-			if not q.is_empty() and q[0].get("let", false):
-				owns = false
+			# (a plain loop: this ran a filter lambda per lift per frame)
+			for x: Dictionary in empire.properties:
+				if x["id"] == hid:
+					owns = not x.get("let", false)
+					break
 		el.tick(dt, player, owns)
 		if el.is_riding():
 			riding = true
 			_riding_el = el
+	if garage and garage.inside and garage.lift and garage.lift.is_riding():
+		riding = true
+		_riding_el = garage.lift
+	if riding and _riding_el and is_instance_valid(_riding_el) and _riding_el.ride_rumble > 0.01:
+		camera.vibrate(0.0045 * _riding_el.ride_rumble)
 	if riding and not _elev_riding:
 		_elev_riding = true
 		player.scripted = true
@@ -3638,7 +3681,7 @@ func lift_floors(hid: String) -> Array:
 	var home := home_by_id(hid)
 	return [["▲  %s · %s" % [String(home.get("name", "Apartment")), el.top_floor_label], "top", el.at_top],
 		["●  Lobby · G", "lobby", not el.at_top],
-		["▼  Vehicle Collection", "garage", false]]
+		["▼  Vehicle Collection · %s" % VehicleGarage.BAY_LEVEL, "garage", false]]
 
 
 func choose_floor(hid: String, which: String) -> void:
@@ -3651,37 +3694,56 @@ func choose_floor(hid: String, which: String) -> void:
 		"lobby":
 			el.ride_to(false)
 		"garage":
-			# Doors close, the cabin hums down, and they open on the garage.
-			el._start_close()
-			Sfx.play("elev_hum", -12.0)
-			player.scripted = true
+			# (2026-11-27) A real ride, not a cut: the doors close, the cabin
+			# rides down to the lobby if it's up, then hums on past B1 to the
+			# Vehicle Collection's level while it shudders; doors shut, you
+			# are carried into the garage lift's cabin (same plan, same
+			# finish), whose doors then open on the garage.
 			_face_lift_doors(el)
-			get_tree().create_timer(1.8, false).timeout.connect(func():
-				player.scripted = false
-				garage.enter(hid))
+			el.trip(["B1", VehicleGarage.BAY_LEVEL], func():
+				var from := el.cabin_xf()
+				garage.enter(hid, false)
+				garage.lift.arrive_sealed(false, VehicleGarage.BAY_LEVEL)
+				_carry_rider(from, garage.lift)
+				el.settle_closed())
 
 
-## From the garage's lift back up: arrive in the real cabin at that floor.
+## From the garage's lift back up (the floor panel in its cabin): the same
+## ride in reverse – B1, G – into the apartment lift's cabin at the lobby,
+## which opens there or rides on up to the home.
 func arrive_from_garage(hid: String, to_top: bool) -> void:
 	var el: ApartmentElevator = elevators.get(hid)
-	if el == null:
+	if el == null or garage.lift == null:
 		return
-	garage.leave_quietly()
-	if to_top:
-		el.snap_to_top(player)
-	else:
-		el.at_top = false
-		el.target_top = false
-		el.cabin_y = 0.0
-		el.state = "idle_g"
-		el._g_door_open = 1.0
-		el._top_door_open = 0.0
-		el._cabin.position.y = 0.0
-		el._sync_doors()
-	var out := el.global_basis.z
-	_teleport(el.cabin_center_world() + Vector3.UP * 0.1, atan2(-out.x, -out.z))
-	_face_lift_doors(el)
-	Sfx.play("chime", -7.0)
+	var gl := garage.lift
+	_face_lift_doors(gl)
+	gl.trip(["B1", "G"], func():
+		var from := gl.cabin_xf()
+		garage.leave_quietly()
+		el.arrive_sealed(false, "G", to_top)
+		_carry_rider(from, el))
+
+
+## Moves you from one lift cabin to another at the same place inside it
+## (doors shut both ends: nothing to see). The camera keeps its framing.
+func _carry_rider(from: Transform3D, to_el: ApartmentElevator) -> void:
+	var to := to_el.cabin_xf()
+	var rel := from.affine_inverse() * player.global_position
+	var p := to * rel
+	vehicle_access.interrupt()
+	player.respawn(p)
+	player.last_safe_position = p
+	_face_lift_doors(to_el)
+	player.scripted = true
+	_riding_el = to_el
+
+
+## Places you in a lift cabin (`rel` in its frame): the garage's way in
+## without the ride (tests, "Stuck?").
+func _teleport_local(xf: Transform3D, rel: Transform3D) -> void:
+	var p := xf * rel.origin
+	var f := (xf.basis * rel.basis).z
+	_teleport(p, atan2(-f.x, -f.z))
 
 
 ## Street door of a home's tower (below its window, on the pavement).
@@ -3833,7 +3895,7 @@ func _tutorial_step() -> void:
 
 
 # ------------------------------------------------------------------ save
-func save_game() -> void:
+func save_game(background := false) -> void:
 	if empire == null or state == "boot":
 		return
 	# Vehicles' positions and the hero's, then the economy.
@@ -3882,7 +3944,14 @@ func save_game() -> void:
 		elif cr2 and is_instance_valid(cr2):
 			var side2 := skyport_play.saved_pilot_point(cr2)
 			d["player"] = [side2.x, side2.y + 1.0, side2.z, yaw]
-	var err := SafeSave.write(save_path, d)
+	if background:
+		# Autosave: the file work runs off the main thread (SafeSave).
+		SafeSave.write_async(save_path, d, _on_saved)
+		return
+	_on_saved(SafeSave.write(save_path, d))
+
+
+func _on_saved(err: String) -> void:
 	if err != "":
 		push_warning("WORLDSTATE: save failed – " + err)
 		if ui and not _save_warned:

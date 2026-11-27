@@ -72,6 +72,11 @@ var _deformed := false
 var _dent_cooldown := 0.0
 var _arrays: Array = []           # per surface: [arrays, material]
 var _rest: Array = []             # per surface: original vertices
+## Per surface: Vector3i(0.5 m cell) -> PackedInt32Array of vertex indices
+## (2026-11-27: a dent only visits the vertices near it – it used to loop
+## over the whole body, tens of ms on the 50k-triangle cars).
+var _cells: Array = []
+const DENT_CELL := 0.5
 var dirt := 0.0
 var siren_on := false
 var _t := randf() * 10.0
@@ -883,27 +888,47 @@ func dent(world_at: Vector3, dir: Vector3, amount: float, radius := 0.9) -> void
 func _dent_local(c: Vector3, d: Vector3, amount: float, radius: float) -> void:
 	if body == null or body.mesh == null:
 		return
+	Prof.begin("dent")
 	_ensure_copy()
 	var r2 := radius * radius
 	var size: Vector3 = car.spec["size"]
+	# (vertices move at most 35 cm from rest: search the rest cells round
+	# the dent, grown by that much)
+	var reach := radius + 0.36
+	var lo := Vector3i(((c - Vector3.ONE * reach) / DENT_CELL).floor())
+	var hi := Vector3i(((c + Vector3.ONE * reach) / DENT_CELL).floor())
+	var touched := false
 	for s in _arrays.size():
 		var arr: Array = _arrays[s]
 		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 		var rest: PackedVector3Array = _rest[s]
-		for i in v.size():
-			var q := v[i]
-			var dd := q.distance_squared_to(c)
-			if dd < r2:
-				var f := 1.0 - dd / r2
-				var np := q + d * amount * f * f
-				# Never crumple more than 35 cm from the original shape.
-				var off := np - rest[i]
-				if off.length() > 0.35:
-					np = rest[i] + off.normalized() * 0.35
-				np.x = clampf(np.x, -size.x * 0.5, size.x * 0.5)
-				v[i] = np
-		arr[Mesh.ARRAY_VERTEX] = v
-	_rebuild()
+		var cells: Dictionary = _cells[s]
+		var hit := false
+		for cx in range(lo.x, hi.x + 1):
+			for cy in range(lo.y, hi.y + 1):
+				for cz in range(lo.z, hi.z + 1):
+					var ids = cells.get(Vector3i(cx, cy, cz))
+					if ids == null:
+						continue
+					for i: int in (ids as PackedInt32Array):
+						var q := v[i]
+						var dd := q.distance_squared_to(c)
+						if dd < r2:
+							var f := 1.0 - dd / r2
+							var np := q + d * amount * f * f
+							# Never crumple more than 35 cm from the original shape.
+							var off := np - rest[i]
+							if off.length() > 0.35:
+								np = rest[i] + off.normalized() * 0.35
+							np.x = clampf(np.x, -size.x * 0.5, size.x * 0.5)
+							v[i] = np
+							hit = true
+		if hit:
+			arr[Mesh.ARRAY_VERTEX] = v
+			touched = true
+	if touched:
+		_rebuild()
+	Prof.end("dent")
 	# Bolt-on plates and ram bars crumple too (a little shove inwards).
 	if _mods:
 		for ch in _mods.get_children():
@@ -916,13 +941,57 @@ func _ensure_copy() -> void:
 	if _deformed:
 		return
 	_deformed = true
-	var src: Mesh = load_mesh(car.spec["body"])
-	_part_tri = part_map(car.spec["body"], src)
-	for s in src.get_surface_count():
-		var arr := src.surface_get_arrays(s)
+	var path := String(car.spec["body"])
+	var src: Mesh = load_mesh(path)
+	_part_tri = part_map(path, src)
+	# The body's rest data is shared by every car of that model (built
+	# once; warm_dent_cache() does it during loading for your own cars):
+	# a dent then only copies the working arrays (native copies).
+	var cache: Dictionary = warm_dent_cache(path, src)
+	for s in (cache["arrays"] as Array).size():
+		var arr: Array = (cache["arrays"][s] as Array).duplicate()
+		arr[Mesh.ARRAY_VERTEX] = (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate()
 		_arrays.append(arr)
-		_rest.append((arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate())
-		_rest_idx.append((arr[Mesh.ARRAY_INDEX] as PackedInt32Array).duplicate())
+		_rest.append(cache["rest"][s])
+		_rest_idx.append(cache["idx"][s])
+		_cells.append(cache["cells"][s])
+
+
+static var _dent_cache := {}
+
+
+## Rest arrays + vertex cells of a body, cached per model.
+static func warm_dent_cache(path: String, src: Mesh = null) -> Dictionary:
+	if _dent_cache.has(path):
+		return _dent_cache[path]
+	if src == null:
+		src = load_mesh(path)
+	var c := {"arrays": [], "rest": [], "idx": [], "cells": []}
+	if src != null:
+		for s in src.get_surface_count():
+			var arr := src.surface_get_arrays(s)
+			var rv := (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate()
+			c["arrays"].append(arr)
+			c["rest"].append(rv)
+			c["idx"].append((arr[Mesh.ARRAY_INDEX] as PackedInt32Array).duplicate())
+			c["cells"].append(_cells_for(rv))
+	_dent_cache[path] = c
+	return c
+
+
+## Vertex indices bucketed by 0.5 m cell (rest positions).
+static func _cells_for(rv: PackedVector3Array) -> Dictionary:
+	var lists := {}
+	for i in rv.size():
+		var k := Vector3i((rv[i] / DENT_CELL).floor())
+		var l: Array = lists.get(k, [])
+		if l.is_empty():
+			lists[k] = l
+		l.append(i)
+	var out := {}
+	for k in lists:
+		out[k] = PackedInt32Array(lists[k])
+	return out
 
 
 ## The working copy back into the body (dents, minus any panels that fell off).
@@ -969,6 +1038,7 @@ func reset_dents() -> void:
 	_deformed = false
 	_arrays.clear()
 	_rest.clear()
+	_cells.clear()
 	_rest_idx.clear()
 	var mats: Array = []
 	for s in body.mesh.get_surface_count():

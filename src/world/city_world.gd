@@ -91,6 +91,8 @@ var layout: CityLayout
 var street_interiors_enabled := false
 var street_units: Array = []
 var viewer: Node3D
+## Streams round this instead of the viewer while set (VehicleGarage).
+var stream_anchor: Node3D
 var detail_range := 380.0
 ## Fire escapes, fins, portals, chimneys: small detail, drawn nearer than the
 ## detailed LOD (they still collide at any distance).
@@ -2141,7 +2143,10 @@ func _process(dt: float) -> void:
 		RenderingServer.global_shader_parameter_set(&"signal_time", Traffic.signal_time)
 	if viewer == null:
 		return
-	var p := viewer.global_position
+	# (A stream anchor overrides the viewer: underground in the Vehicle
+	# Collection, the street round your building stays loaded.)
+	var src: Node3D = stream_anchor if stream_anchor and is_instance_valid(stream_anchor) else viewer
+	var p := src.global_position
 	if _last_pos != Vector3.INF and dt > 0.0:
 		var v := (p - _last_pos) / dt
 		# (A teleport – entering a car, a respawn – isn't speed.)

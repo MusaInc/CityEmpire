@@ -397,6 +397,8 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 		var shell_style := style
 		if i == 0 and apt.get("ground", false):
 			shell_style += 60.0 if apt.get("flagship", false) else 20.0
+		elif i == 0 and residential_tower(b):
+			shell_style += 80.0   # (a residential street floor: building.gdshader)
 		var opening := apt if has_apt and (detailed or not street_front) else {}
 		if i == 0 and not apt.is_empty() and apt.has("core") and not apt.get("ground", false):
 			# The home's street door into its lobby (the bottom tier).
@@ -495,7 +497,7 @@ func _frontage_courses(t: Array, style: int, seed: float, col: Color, trim: Colo
 ## building.gdshader's 6 m shopfront bay grid so windows sit recessed behind
 ## projecting piers, fascia cornice, stall-riser sill and doorway hood).
 func _shopfront_frames(t: Array, style: int, seed: float, col: Color, trim: Color, unit: Dictionary) -> void:
-	if bool(unit.get("ground", false)) or style == CityLayout.Style.WAREHOUSE:
+	if bool(unit.get("ground", false)) or style == CityLayout.Style.WAREHOUSE or (unit.has("core") and not unit.get("ground", false)):
 		return
 	if fposmod(seed * 5.37 + 0.21, 1.0) >= 0.5:
 		return
@@ -738,7 +740,7 @@ static func _plinth_sections(b: Dictionary) -> Array[AABB]:
 	var tier: Array = b["tiers"][0]
 	var base := base_of(b)
 	var sections: Array[AABB] = []
-	var clear_entrances := int(b["style"]) != CityLayout.Style.WAREHOUSE and not ground_shops(b)
+	var clear_entrances := int(b["style"]) != CityLayout.Style.WAREHOUSE and not ground_shops(b) and not residential_tower(b)
 	for side in 4:
 		var face := _face(tier, side)
 		var length: float = face[3]
@@ -877,15 +879,17 @@ static func _clear_of_apt(b: Dictionary, out: Dictionary) -> Dictionary:
 			continue
 		if not (d[0] as AABB).intersects(keep):
 			res["draw"].append(d)
+	# (Nothing stands in, over or invisibly across the street door either:
+	# 2026-11-27, beams and features' collision were kept there.)
 	for c in out["col"]:
-		if not (c as AABB).intersects(keep):
+		if not (c as AABB).intersects(keep) and not (dz.has_volume() and (c as AABB).intersects(dz)):
 			res["col"].append(c)
 	for c in out.get("col_human", []):
-		if not (c as AABB).intersects(keep):
+		if not (c as AABB).intersects(keep) and not (dz.has_volume() and (c as AABB).intersects(dz)):
 			res["col_human"].append(c)
 	for bm in out["beams"]:
 		var bb := AABB(bm[0], Vector3.ZERO).expand(bm[1]).grow(0.3)
-		if not bb.intersects(keep):
+		if not bb.intersects(keep) and not (dz.has_volume() and bb.intersects(dz)):
 			res["beams"].append(bm)
 	for k in out:
 		if not res.has(k):
@@ -1660,9 +1664,19 @@ func _ledges(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, c
 		y += repeat_height
 
 
+## An apartment tower (a home with a lift core from the street): its
+## ground floor is residential – an entrance lobby, not shops (2026-11-27:
+## the homes used to read as converted shopfronts).
+static func residential_tower(b: Dictionary) -> bool:
+	var apt: Dictionary = b.get("apt", {})
+	return apt.has("core") and not apt.get("ground", false)
+
+
 ## Does the building shader draw shopfronts along this building's ground
 ## floor? (Same test as building.gdshader, on the seed as the faces carry it.)
 static func ground_shops(b: Dictionary) -> bool:
+	if residential_tower(b):
+		return false
 	var q := floorf(fposmod(float(b["seed"]), 1.0) * 256.0) / 256.0
 	return fposmod(q * 5.37 + 0.21, 1.0) < 0.5
 

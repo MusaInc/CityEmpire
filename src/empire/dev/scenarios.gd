@@ -808,7 +808,7 @@ func scenario_ga() -> void:
 	await wait(0.5)
 	check(game.driving == vid, "in a car in the garage")
 	var c2: Car = game.cars[vid]
-	c2.place(game.garage.global_transform * Transform3D(Basis(Vector3.UP, PI), Vector3(0.0, 2.5, game.garage.ramp_start() + VehicleGarage.RAMP_LEN - 0.5)))
+	_to_ramp_top(c2)
 	await until(func(): return not game.garage.inside, 20.0)
 	await wait(1.5)
 	var door := el.street_door_world()
@@ -823,12 +823,487 @@ func scenario_ga() -> void:
 	await wait(0.5)
 	game.garage.enter(hid)
 	await wait(1.0)
-	await stand(game.garage.lift_door_world() + Vector3(0, 0.9, 1.0))
+	var gl = game.garage.get("lift")
+	await stand((gl.cabin_center_world() - Vector3.UP * 0.9) if gl else game.garage.lift_door_world() + Vector3(0, 0.9, 1.0))
 	await wait(0.6)
-	check(String(game.spot.get("kind", "")) == "garage_up", "the lift doors take you back up (%s)" % game.spot.get("kind", "none"))
+	check(String(game.spot.get("kind", "")) == "garage_up", "the lift takes you back up (%s)" % game.spot.get("kind", "none"))
 	game.garage.leave_on_foot()
 	await wait(1.0)
 	check(game.player.global_position.distance_to(el.ground_call_world()) < 6.0, "back in the lobby")
+
+
+# ---------------------------------------------- BENCH: engine benchmark
+## High-speed GPS drives across the islands, a dense-centre crawl, then
+## repeated lift → garage → street transitions, timed frame by frame (see
+## Bench). Same code runs on the "before" worktree for comparisons.
+func _drive_route(car: Car, to: Vector3, top: float, secs: float) -> Dictionary:
+	var fwd0 := -car.global_basis.z
+	var r: Dictionary = game.gps.plan(car.global_position, to, "drive", fwd0)
+	var route: PackedVector3Array = r["points"]
+	if route.size() < 2:
+		return {"ok": false, "why": "no route: %s" % r["error"], "len": 0.0}
+	var st := {"i": 0, "slow": 0.0, "skips": 0, "dist": 0.0, "last": car.global_position, "vmax": 0.0}
+	var goal := route[route.size() - 1]
+	var ok := await until(func():
+		var p := car.global_position
+		var i: int = st["i"]
+		var look := clampf(car.speed * 0.9, 9.0, 34.0)
+		while i < route.size() - 1 and Vector2(route[i].x - p.x, route[i].z - p.z).length() < look:
+			i += 1
+		st["i"] = i
+		var tgt := route[i]
+		var fwd := -car.global_basis.z
+		fwd.y = 0.0
+		var des := Vector3(tgt.x - p.x, 0.0, tgt.z - p.z).normalized()
+		var cy := fwd.normalized().cross(des).y
+		var ang := fwd.normalized().angle_to(des)
+		# Bend ahead: the turn between this target and one further on.
+		var j := mini(i + 3, route.size() - 1)
+		var bend := 0.0
+		if j > i:
+			bend = Vector2(route[j].x - tgt.x, route[j].z - tgt.z).angle_to(Vector2(des.x, des.z)) if (route[j] - tgt).length() > 1.0 else 0.0
+		var want := lerpf(top, 9.0, clampf(maxf(ang, absf(bend) * 0.6) / 0.9, 0.0, 1.0))
+		car.steer = clampf(-signf(cy) * ang * 1.5, -1.0, 1.0)
+		car.throttle = 1.0 if car.forward_speed < want else 0.0
+		car.brake = clampf((car.forward_speed - want) / 6.0, 0.0, 1.0) if car.forward_speed > want + 1.5 else 0.0
+		st["vmax"] = maxf(float(st["vmax"]), car.speed)
+		st["dist"] = float(st["dist"]) + p.distance_to(st["last"])
+		st["last"] = p
+		if car.speed < 1.0:
+			st["slow"] = float(st["slow"]) + get_process_delta_time()
+		else:
+			st["slow"] = 0.0
+		if float(st["slow"]) > 4.0 and i < route.size() - 2:
+			# Wedged on traffic: carry on from further along the route.
+			var k := mini(i + 4, route.size() - 1)
+			var dk := (route[mini(k + 1, route.size() - 1)] - route[k])
+			dk.y = 0.0
+			if dk.length() < 0.1:
+				dk = des
+			car.place(Transform3D(Basis(Vector3.UP, atan2(-dk.x, -dk.z)), route[k] + Vector3.UP * 0.8), dk.normalized() * 8.0)
+			st["i"] = k
+			st["slow"] = 0.0
+			st["skips"] = int(st["skips"]) + 1
+		return Vector2(goal.x - p.x, goal.z - p.z).length() < 16.0, secs)
+	return {"ok": ok, "len": float(r["length"]), "dist": st["dist"], "skips": st["skips"], "vmax": st["vmax"]}
+
+
+func scenario_bench() -> void:
+	print("--- BENCH: engine benchmark")
+	var b := Bench.new()
+	b.game = game
+	game.add_child(b)
+	var e := game.empire
+	e.personal_cash = 9000000.0
+	var vid := String(e.vehicles[0]["id"])
+	await stand(game.player.global_position)
+	game.enter_vehicle(vid)
+	await wait(0.5)
+	var car: Car = game.cars[vid]
+	game.drive_input.enabled = false
+	var start := Premises.door_point(game.starter_unit())
+	var legs: Array = []
+	var top := float(game.args.get("bench-speed", "30"))
+	if game.skyport_play:
+		legs.append(["to_skyport", game.skyport_play.site("terminal").get("door", start)])
+	legs.append(["to_westbank", Vector3(-800, 0, 0)])
+	legs.append(["to_centre", start])
+	var only_legs := String(game.args.get("bench-legs", "")).split(",", false)
+	b.start()
+	for leg: Array in legs:
+		if not only_legs.is_empty() and not (String(leg[0]) in only_legs):
+			continue
+		b.phase(leg[0])
+		var r := await _drive_route(car, leg[1], top, 300.0)
+		check(r["ok"], "BENCH leg %s: %.0f m driven (route %.0f m, top %.0f m/s, %d skips)" % [leg[0], float(r.get("dist", 0.0)), float(r["len"]), float(r.get("vmax", 0.0)), int(r.get("skips", 0))])
+	# Dense centre: a slow crawl round the starter's blocks (crowds, shops).
+	b.phase("centre_crawl")
+	var near_units: Array = []
+	for u: Dictionary in (game.unit_by_id.values() if not game.args.has("bench-legs") else []):
+		var dp := Premises.door_point(u)
+		var dd := Vector2(dp.x - start.x, dp.z - start.z).length()
+		if dd > 120.0 and dd < 260.0:
+			near_units.append(dp)
+	for k in mini(3, near_units.size()):
+		var r2 := await _drive_route(car, near_units[k * near_units.size() / 3], 12.0, 120.0)
+		check(r2["ok"], "BENCH crawl %d: %.0f m (route %.0f m, %d skips)" % [k, float(r2.get("dist", 0.0)), float(r2["len"]), int(r2.get("skips", 0))])
+	car.throttle = 0.0
+	await until(func():
+		car.brake = 1.0
+		return car.speed < 0.5, 20.0)
+	car.brake = 0.0
+	game.drive_input.enabled = true
+	# Transitions: lift lobby → garage → drive out, three times.
+	var hid := ""
+	for h0: String in game.elevators:
+		hid = h0
+		break
+	if hid != "" and not e.owns_property(hid):
+		var hm := game.home_by_id(hid)
+		e.properties.append({"id": hid, "kind": "home", "name": String(hm["name"]), "price": float(hm["price"]), "let": false, "income": 0.0})
+	for lap in 3:
+		if hid == "":
+			break
+		b.phase("transitions")
+		var el: ApartmentElevator = game.elevators[hid]
+		await stand(el.cabin_center_world() - Vector3.UP * 0.9)
+		await wait(0.5)
+		var t0 := Time.get_ticks_msec()
+		game.choose_floor(hid, "garage")
+		var down := await until(func(): return game.garage.inside and not game.player.scripted, 40.0)
+		var t_down := (Time.get_ticks_msec() - t0) / 1000.0
+		await wait(1.0)
+		var vid2 := String(e.vehicles[0]["id"])
+		game.enter_vehicle(vid2)
+		await wait(0.3)
+		var c2: Car = game.cars[vid2]
+		t0 = Time.get_ticks_msec()
+		_to_ramp_top(c2)
+		var up := await until(func(): return not game.garage.inside, 30.0)
+		await wait(2.0)
+		check(down and up, "BENCH transition lap %d: down %.1f s, out %.1f s" % [lap, t_down, (Time.get_ticks_msec() - t0) / 1000.0])
+		c2.linear_velocity = Vector3.ZERO
+		await wait(0.3)
+		game.exit_vehicle(false)
+	# Menus: each phone section opened from play (build + the next frame).
+	b.phase("menus")
+	var ui_ms := {}
+	for sec in ["home", "market", "vehicles", "property", "map", "city500", "you", "more"]:
+		await frames(5)
+		var t1 := Time.get_ticks_usec()
+		game.ui.open_phone(sec)
+		await get_tree().process_frame
+		await get_tree().process_frame
+		ui_ms[sec] = snappedf((Time.get_ticks_usec() - t1) / 1000.0, 0.1)
+		game.ui.close_panel(true)
+	print("BENCH menus ", ui_ms)
+	b.phase("")
+	b.stop()
+	var out := b.report()
+	out["menus"] = ui_ms
+	if game.args.has("bench-out"):
+		var f := FileAccess.open(String(game.args["bench-out"]), FileAccess.WRITE)
+		if f:
+			f.store_string(JSON.stringify(out, "  "))
+	b.queue_free()
+
+
+## GL (2026-11-27): the whole loop, played: home → lift hall → into the
+## cabin → ▼ Vehicle Collection (a real ride: doors shut, the indicator
+## counts B1, B2, you're carried into the garage cabin and its doors open)
+## → walk out → to a car → in by its door → drive it out of its bay, down
+## the aisle, up the ramp → out on the street, same car, same condition,
+## still driving → back up: the lift from the garage to the home floor.
+## `--sc-only=<home id>` picks the home (default: every home, one by one,
+## when `--sc-all`; otherwise the first).
+func scenario_gl() -> void:
+	print("--- GL: apartment → lift → garage → car → street")
+	var film := String(game.args.get("sc-film", ""))
+	var e := game.empire
+	e.personal_cash = 9000000.0
+	var only := String(game.args.get("sc-only", "")).split(",", false)
+	var hids: Array = []
+	for h0: String in game.elevators:
+		if (only.is_empty() and (hids.is_empty() or game.args.has("sc-all"))) or h0 in only:
+			hids.append(h0)
+	for m in ["saloon", "scout"]:
+		var v := e.add_vehicle(m, game.player.global_position + Vector3(8, 0, 8), 0.0)
+		game._spawn_car(v, game.player.global_position)
+	var p := game.player
+	var w := _Walk.new()
+	w.amount = 0.8
+	for hid: String in hids:
+		var hm := game.home_by_id(hid)
+		if not e.owns_property(hid):
+			e.properties.append({"id": hid, "kind": "home", "name": String(hm["name"]), "price": float(hm["price"]), "let": false, "income": 0.0})
+		var el: ApartmentElevator = game.elevators[hid]
+		# Start in the lift hall on the home's floor, the cabin up here.
+		el.snap_to_top(p)
+		await stand(el.to_global(Vector3(0, el.top_y, Apartments.HALL_D * 0.6)))
+		await wait(0.6)
+		p.bot = w
+		var r := await _walk_to(w, el.cabin_center_world() - Vector3.UP * 0.95, 10.0)
+		var ok: bool = r["ok"] and el.is_inside_cabin(p.global_position)
+		check(ok, "%s: into the lift from the hall%s" % [hid, "" if ok else " (at %s)" % r.get("at", "")])
+		p.bot = null
+		if not ok:
+			continue
+		await wait(0.3)
+		check(String(game.spot.get("kind", "")) == "elev_select", "%s: the floor buttons in the cabin (%s)" % [hid, game.spot.get("kind", "none")])
+		var shown := {}
+		var t0 := Time.get_ticks_msec()
+		game.choose_floor(hid, "garage")
+		var saw := {"rumble": false}
+		var arrived := await until(func():
+			if el._ind_cabin:
+				shown[el._ind_cabin.text.get_slice(" ", 0)] = true
+			if game.garage.lift and game.garage.lift._ind_cabin:
+				shown[game.garage.lift._ind_cabin.text.get_slice(" ", 0)] = true
+			if el.ride_rumble > 0.3 or (game.garage.lift and game.garage.lift.ride_rumble > 0.3):
+				saw["rumble"] = true
+			return game.garage.inside and game.garage.lift.state == "idle_g" and game.garage.lift._g_door_open > 0.95, 60.0)
+		var secs := (Time.get_ticks_msec() - t0) / 1000.0
+		check(arrived and game.garage.lift.is_inside_cabin(p.global_position),
+			"%s: rode down to the garage in the lift (%.1f s; floors shown %s; rumble %s)" % [hid, secs, shown.keys(), saw["rumble"]])
+		check(shown.has("B1") and shown.has(VehicleGarage.BAY_LEVEL) and shown.has("G"), "%s: the indicator counted G → B1 → %s" % [hid, VehicleGarage.BAY_LEVEL])
+		await frames(3)
+		check(not p.scripted, "%s: free to walk once the doors open" % hid)
+		if film != "":
+			await _hero_shot(film + "/gl_%s_arrive.png" % hid)
+		# Out of the lift and down the lobby to the first car.
+		p.bot = w
+		var gar := game.garage
+		var r2 := await _walk_to(w, gar.to_global(Vector3(0.0, 0.0, 2.6)), 10.0)
+		check(r2["ok"], "%s: out of the lift into the garage lobby%s" % [hid, "" if r2["ok"] else " (at %s)" % r2.get("at", "")])
+		var vid := ""
+		var car: Car
+		var best := INF
+		for v2 in e.vehicles:
+			var c: Car = game.cars.get(String(v2["id"]))
+			if c and SkyportPlay.vclass(String(v2["model"])) == "car" and c.global_position.distance_to(gar.global_position) < 150.0:
+				var dd := c.global_position.distance_to(p.global_position)
+				if dd < best:
+					best = dd
+					vid = String(v2["id"])
+					car = c
+		check(car != null, "%s: a car in its bay" % hid)
+		if car == null:
+			p.bot = null
+			continue
+		var cond0 := e.vehicle(vid).duplicate(true)
+		# Walk to its driver's side, between the cars (the gap's 1.8 m now).
+		var side := car.global_basis.x
+		var stand_at := car.global_position + side * 1.55 + car.global_basis.z * 0.2
+		var aisle_pt := gar.to_global(Vector3(signf(gar.to_local(car.global_position).x) * 2.5, 0.0, gar.to_local(car.global_position).z))
+		await _walk_to(w, aisle_pt, 10.0)
+		var r3 := await _walk_to(w, Vector3(stand_at.x, p.global_position.y, stand_at.z), 8.0)
+		p.bot = null
+		await wait(0.4)
+		var found := game.vehicle_access.landing(car, true)
+		check(not found.is_empty(), "%s: a clear door to get in by (%s)" % [hid, "ok" if not found.is_empty() else "none, at %s" % r3.get("at", p.global_position)])
+		game.enter_vehicle(vid, true)
+		await until(func(): return game.driving == vid, 20.0)
+		check(game.driving == vid, "%s: in the car through its door" % hid)
+		if game.driving != vid:
+			continue
+		if film != "":
+			await wait(1.0)
+			await _hero_shot(film + "/gl_%s_incar.png" % hid)
+		# Drive it: out of the bay, down the aisle, up the ramp.
+		game.drive_input.enabled = false
+		var lp := gar.to_local(car.global_position)
+		var pts := [Vector3(lp.x * 0.25, 0, lp.z + 1.5), Vector3(0, 0, gar.ramp_start() - 4.0), Vector3(0, 0, gar.ramp_start() + 4.0),
+			Vector3(0, VehicleGarage.RAMP_RISE, gar.ramp_end() + 2.0), Vector3(0, VehicleGarage.RAMP_RISE, gar.ramp_end() + 8.0)]
+		var st := {"i": 0, "hits": {}, "maxv": 0.0}
+		var out := await until(func():
+			if not gar.inside:
+				return true
+			var q := gar.to_local(car.global_position)
+			var i: int = st["i"]
+			var tgt: Vector3 = pts[i]
+			if Vector2(tgt.x - q.x, tgt.z - q.z).length() < 2.5 and i < pts.size() - 1:
+				st["i"] = i + 1
+				tgt = pts[i + 1]
+			var fwd := gar.global_basis.inverse() * (-car.global_basis.z)
+			fwd.y = 0.0
+			var des := Vector3(tgt.x - q.x, 0.0, tgt.z - q.z).normalized()
+			var ang := fwd.normalized().signed_angle_to(des, Vector3.UP)
+			car.steer = clampf(-ang * 1.8, -1.0, 1.0)
+			var want := 3.5 if absf(ang) > 0.6 else 6.5
+			car.throttle = 0.65 if car.forward_speed < want else 0.0
+			car.brake = 0.3 if car.forward_speed > want + 1.5 else 0.0
+			st["maxv"] = maxf(float(st["maxv"]), car.speed)
+			for bdy in car.get_colliding_bodies():
+				if bdy != gar._col:
+					(st["hits"] as Dictionary)[String((bdy as Node).name)] = true
+			return false, 90.0)
+		await wait(1.2)
+		var door := el.street_door_world()
+		var on_road := game.safe.is_safe(car.global_position) if game.safe.has_method("is_safe") else true
+		check(out and game.driving == vid and car.global_position.distance_to(door) < 160.0,
+			"%s: up the ramp and out on the street, still driving (%.0f m from the door, %.1f m/s, %s)" % [hid, car.global_position.distance_to(door), car.speed, "road" if on_road else "?"])
+		check((st["hits"] as Dictionary).is_empty(), "%s: drove out without touching anything (%s)" % [hid, (st["hits"] as Dictionary).keys()])
+		var v1 := e.vehicle(vid)
+		check(str(v1.get("damage", {})) == str(cond0.get("damage", {})) and str(v1.get("dent_state", {})) == str(cond0.get("dent_state", {})),
+			"%s: same car, same condition" % hid)
+		check(game.world.stream_anchor == null, "%s: streaming follows you again" % hid)
+		if film != "":
+			await _hero_shot(film + "/gl_%s_street.png" % hid)
+		car.throttle = 0.0
+		await until(func():
+			car.brake = 1.0
+			return car.speed < 0.5, 20.0)
+		car.brake = 0.0
+		game.drive_input.enabled = true
+		game.exit_vehicle(false)
+		await wait(0.5)
+		# And back: down by the lift again, then up from the garage to the home.
+		await stand(el.cabin_center_world() - Vector3.UP * 0.9 if not el.at_top else el.to_global(Vector3(0, 0, 1.5)))
+		if el.at_top:
+			el.call_to(false)
+			await until(func(): return el.state == "idle_g" and el._g_door_open > 0.95, 30.0)
+			await stand(el.cabin_center_world() - Vector3.UP * 0.9)
+		game.choose_floor(hid, "garage")
+		await until(func(): return game.garage.inside and game.garage.lift.state == "idle_g" and game.garage.lift._g_door_open > 0.95, 60.0)
+		await wait(0.4)
+		check(String(game.spot.get("kind", "")) == "garage_up", "%s: the garage lift's floor buttons (%s)" % [hid, game.spot.get("kind", "none")])
+		game.arrive_from_garage(hid, true)
+		var home_ok := await until(func(): return el.state == "idle_top" and el.at_top and el.is_inside_cabin(p.global_position), 90.0)
+		check(home_ok and not game.garage.inside, "%s: up from the garage to the home floor in the lift (state %s)" % [hid, el.state])
+		await wait(0.5)
+
+
+## EV (2026-11-27): fixed views of every home's entrance, lobby, lift,
+## hall and home, and of the Vehicle Collection, for before/after sheets:
+## `--sc-film=<dir>` (rendered: xvfb). Works on older builds too (reads
+## fields by name). `--sc-only=<ids>`, `--sc-views=ext34,lobby,…`.
+func _cine_at(from: Vector3, to: Vector3, fov := 62.0) -> void:
+	var xf := Transform3D(Basis.looking_at(to - from, Vector3.UP), from)
+	game.camera.cine = func(_dt: float) -> Array: return [xf, fov]
+
+
+func _ev_shot(path: String, settle := 1.2) -> void:
+	await wait(settle)
+	await frames(6)
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(path)
+	print("    shot ", path)
+
+
+func scenario_ev() -> void:
+	print("--- EV: entrance / lift / garage views")
+	var film := String(game.args.get("sc-film", "user://ev"))
+	DirAccess.make_dir_recursive_absolute(film)
+	var only := String(game.args.get("sc-only", "")).split(",", false)
+	var views := String(game.args.get("sc-views", "ext34,front,lobby,cabin,hall,home")).split(",", false)
+	var e := game.empire
+	e.personal_cash = 9000000.0
+	if game.atmosphere:
+		game.atmosphere.fixed_hour = true
+		game.atmosphere.hour = float(game.args.get("hour", "11"))
+	for hid: String in game.elevators:
+		if not only.is_empty() and not (hid in only):
+			continue
+		var hm := game.home_by_id(hid)
+		if not e.owns_property(hid):
+			e.properties.append({"id": hid, "kind": "home", "name": String(hm["name"]), "price": float(hm["price"]), "let": false, "income": 0.0})
+		var el: ApartmentElevator = game.elevators[hid]
+		var L := float(el.lobby_len)
+		var dz = el.get("_door_z")
+		var D: float = float(dz) if dz != null else L
+		var sd := float(el.street_drop)
+		var g := el.to_global(Vector3(0, -sd, L + 7.0))
+		await stand(g + Vector3.UP * 0.1)
+		game.player.visible = false
+		for v: String in views:
+			match v:
+				"ext34":
+					_cine_at(el.to_global(Vector3(4.2, 1.7 - sd, L + 8.5)), el.to_global(Vector3(0, 1.8, L)))
+				"front":
+					_cine_at(el.to_global(Vector3(0.0, 1.6 - sd, L + 5.2)), el.to_global(Vector3(0, 1.75, L)))
+				"lobby":
+					_cine_at(el.to_global(Vector3(0.5, 1.62, D - 0.5)), el.to_global(Vector3(0, 1.35, 0)), 70.0)
+				"cabin":
+					_cine_at(el.to_global(Vector3(-0.35, 1.62, -ApartmentElevator.SHAFT_D * 0.5 - 0.75)), el.to_global(Vector3(0.2, 1.3, 3.0)), 74.0)
+					el._g_door_open = 1.0
+					el._sync_doors()
+				"hall":
+					el.snap_to_top(game.player)
+					_cine_at(el.to_global(Vector3(0.4, el.top_y + 1.62, Apartments.HALL_D - 0.25)), el.to_global(Vector3(0, el.top_y + 1.3, 0)), 74.0)
+				"home":
+					el.snap_to_top(game.player)
+					_cine_at(el.to_global(Vector3(1.2, el.top_y + 1.62, Apartments.HALL_D + 5.5)), el.to_global(Vector3(0, el.top_y + 1.2, Apartments.HALL_D)), 70.0)
+				_:
+					continue
+			game.world.build_all_near(game.camera.global_position, 160.0)
+			await _ev_shot(film + "/%s_%s.png" % [hid, v])
+		game.camera.cine = Callable()
+		game.player.visible = true
+	if String(game.args.get("sc-garage", "1")) == "1" and game.garage:
+		var hid0: String = game.elevators.keys()[0]
+		game.garage.enter(hid0)
+		await wait(1.5)
+		game.player.visible = false
+		var gar := game.garage
+		var rs := float(gar.ramp_start())
+		var consts: Dictionary = gar.get_script().get_script_constant_map()
+		var rl := float(consts.get("RAMP_LEN", 14.0))
+		var ry := float(consts.get("RAMP_RISE", 3.0))
+		var lob := float(VehicleGarage.LOBBY)
+		var gv := {
+			"g_arrive": [Vector3(0.0, 1.62, -0.6), Vector3(0.0, 1.2, 12.0), 74.0],
+			"g_lift": [Vector3(1.0, 1.65, 5.5), Vector3(0.0, 1.5, 0.0), 66.0],
+			"g_aisle": [Vector3(2.6, 2.3, lob + 1.0), Vector3(0.0, 0.6, lob + 16.0), 70.0],
+			"g_bays": [Vector3(1.5, 1.7, lob + 5.0), Vector3(-7.0, 0.7, lob + 7.5), 70.0],
+			"g_ramp": [Vector3(0.8, 1.8, rs - 7.0), Vector3(0.0, ry * 0.8, rs + rl), 66.0],
+		}
+		for k: String in gv:
+			var a: Array = gv[k]
+			_cine_at(gar.to_global(a[0]), gar.to_global(a[1]), a[2])
+			await _ev_shot(film + "/garage_%s.png" % k, 2.0)
+		game.camera.cine = Callable()
+		game.player.visible = true
+	check(true, "EV views done")
+
+
+## SOAK (2026-11-27): prolonged play – three laps of city → Skyport →
+## Westbank → city at speed, each followed by a lift → garage → street
+## round trip; memory, nodes and objects printed after every lap (a leak
+## climbs lap on lap; caches level off after the first).
+func scenario_soak() -> void:
+	print("--- SOAK: laps")
+	var e := game.empire
+	e.personal_cash = 9000000.0
+	var laps := int(game.args.get("soak-laps", "3"))
+	var hid: String = game.elevators.keys()[0]
+	if not e.owns_property(hid):
+		var hm := game.home_by_id(hid)
+		e.properties.append({"id": hid, "kind": "home", "name": String(hm["name"]), "price": float(hm["price"]), "let": false, "income": 0.0})
+	var start := Premises.door_point(game.starter_unit())
+	var mems: Array = []
+	for lap in laps:
+		var vid := String(e.vehicles[0]["id"])
+		await stand(game.elevators[hid].street_door_world() + Vector3.UP * 0.2)
+		game.enter_vehicle(vid)
+		await wait(0.5)
+		var car: Car = game.cars[vid]
+		game.drive_input.enabled = false
+		for to in [game.skyport_play.site("terminal").get("door", start) if game.skyport_play else start, Vector3(-800, 0, 0), start]:
+			await _drive_route(car, to, 30.0, 300.0)
+		car.throttle = 0.0
+		await until(func():
+			car.brake = 1.0
+			return car.speed < 0.5, 20.0)
+		car.brake = 0.0
+		game.drive_input.enabled = true
+		game.exit_vehicle(false)
+		var el: ApartmentElevator = game.elevators[hid]
+		await stand(el.cabin_center_world() - Vector3.UP * 0.9)
+		game.choose_floor(hid, "garage")
+		await until(func(): return game.garage.inside and not game.player.scripted, 60.0)
+		await wait(1.0)
+		game.garage.leave_on_foot()
+		await wait(3.0)
+		var mem := int(Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0)
+		mems.append(mem)
+		print("SOAK lap %d: static %d MB, nodes %d, objects %d, resources %d, video %d MB" % [lap, mem,
+			int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)), int(Performance.get_monitor(Performance.OBJECT_COUNT)),
+			int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)), int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0)])
+	if mems.size() >= 3:
+		var growth := int(mems[-1]) - int(mems[1])
+		check(growth < 60, "SOAK: memory levels off after the first lap (+%d MB over laps 2–%d)" % [growth, mems.size()])
+
+
+## A car near the top of the garage's exit ramp, rolling out (works on the
+## old garage too: its short ramp ended 3 m up).
+func _to_ramp_top(c: Car) -> void:
+	var gar := game.garage
+	if gar.has_method("ramp_end"):
+		var rise := float(gar.get_script().get_script_constant_map().get("RAMP_RISE", 3.0))
+		var zt: float = gar.call("ramp_end") - 1.0
+		c.place(gar.global_transform * Transform3D(Basis(Vector3.UP, PI), Vector3(0.0, rise + 0.7, zt)), gar.global_basis.z * 6.0)
+	else:
+		c.place(gar.global_transform * Transform3D(Basis(Vector3.UP, PI), Vector3(0.0, 2.5, gar.ramp_start() + VehicleGarage.RAMP_LEN - 0.5)))
 
 
 func _hero_shot(path: String) -> void:
@@ -2011,6 +2486,14 @@ func _run() -> void:
 		await scenario_sm()
 	if _which.split(",").has("GA"):
 		await scenario_ga()
+	if _which.split(",").has("BENCH"):
+		await scenario_bench()
+	if _which.split(",").has("GL"):
+		await scenario_gl()
+	if _which.split(",").has("EV"):
+		await scenario_ev()
+	if _which.split(",").has("SOAK"):
+		await scenario_soak()
 	if _which.split(",").has("MEM"):
 		await scenario_mem()
 	if _which.split(",").has("CR"):
