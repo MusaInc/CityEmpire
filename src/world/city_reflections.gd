@@ -42,7 +42,9 @@ var on := true
 
 var _layers: Array = []
 var _ball: MeshInstance3D
-var _age := 0.0   # per layer: {size, step, box, probes[2], live, last, pending, frames, t}
+var _age := 0.0
+var _room_t := 0.0
+# per layer: {size, step, box, probes[2], live, last, pending, frames, t}
 
 
 func _ready() -> void:
@@ -55,7 +57,8 @@ func _ready() -> void:
 		_layers.append(_make_layer("City", CITY_SIZE, CITY_STEP, false, 0.0, 0.92))
 	RenderingServer.global_shader_parameter_set("refl_probe", 1.0 if on else 0.0)
 	if "--probe-sphere" in OS.get_cmdline_user_args():
-		# (Debug: a chrome ball that shows exactly what the probes hold.)
+		# (Debug: a chrome ball in front of the camera that shows exactly
+		# what the probes hold.)
 		_ball = MeshInstance3D.new()
 		var sm := SphereMesh.new()
 		sm.radius = 1.2
@@ -64,7 +67,6 @@ func _ready() -> void:
 		var m := StandardMaterial3D.new()
 		m.metallic = 1.0
 		m.roughness = 0.0
-		m.albedo_color = Color.WHITE
 		_ball.material_override = m
 		add_child(_ball)
 	if not on:
@@ -99,6 +101,10 @@ func _make_layer(nm: String, sz: Vector3, step: float, box: bool, blend: float, 
 
 
 func _process(dt: float) -> void:
+	_room_t -= dt
+	if _room_t <= 0.0:
+		_room_t = 0.5
+		_budget_rooms()
 	if not on or not view_fn.is_valid():
 		return
 	_age += dt
@@ -154,3 +160,37 @@ func _capture(l: Dictionary, p: Vector3, lsig: Vector3) -> void:
 	l["last"] = p
 	l["t"] = 0.0
 	l["light"] = lsig
+
+
+## Room probe budget. Every shop, home, venue and lobby has its own small
+## probe (InteriorKit.room_probe), and Godot captures probes one at a time,
+## a few frames each, from one 12-slot atlas (project.godot). Left alone,
+## twenty-odd of them queued ahead of the street probe after every move –
+## the street reflection only arrived seconds later – and evicted each
+## other's atlas slots. Only rooms near the camera matter (their lights
+## fade out by ~64 m anyway), so at most ROOM_MAX of them, nearest first,
+## within ROOM_RANGE (with a margin so they don't flicker at the edge).
+const ROOM_MAX := 8
+const ROOM_RANGE := 70.0
+const ROOM_MARGIN := 10.0
+
+
+func _budget_rooms() -> void:
+	var c := get_viewport().get_camera_3d()
+	if c == null:
+		return
+	var at := c.global_position
+	var near: Array = []
+	for zone: Node in get_tree().get_nodes_in_group("interior_lighting_zones"):
+		var rp := zone.get_node_or_null("InteriorBounce") as ReflectionProbe
+		if rp == null or not (zone as Node3D).is_visible_in_tree():
+			continue
+		var d := rp.global_position.distance_to(at)
+		var reach := ROOM_RANGE + (ROOM_MARGIN if rp.visible else 0.0)
+		if d < reach:
+			near.append([d, rp])
+		else:
+			rp.visible = false
+	near.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
+	for i in near.size():
+		(near[i][1] as ReflectionProbe).visible = i < ROOM_MAX

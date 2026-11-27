@@ -15,7 +15,7 @@ extends Node
 ## water itself, rain streaks and the seabed are left out (render layer
 ## LAYER, excluded from the mirror camera's cull mask).
 
-const LAYER := 1 << 19          # render layer 20: things the mirror skips
+const LAYER := 1 << 18          # render layer 19: things the mirror skips (20 is the hero light's)
 const PLANE_Y := -1.6           # SkyportIsland.SEA_Y / CityWorld's water
 
 var quality := 2

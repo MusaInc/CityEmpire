@@ -352,10 +352,11 @@ func _ready() -> void:
 		refl.light_fn = func() -> Vector3:
 			return Vector3(atmosphere.night if atmosphere else 0.0, atmosphere.wetness if atmosphere else 0.0,
 				clampf(atmosphere.hour / 24.0, 0.0, 1.0) if atmosphere else 0.0)
-		var mirror := WaterMirror.new()
-		mirror.name = "WaterMirror"
-		mirror.water_fn = layout.is_water
-		add_child(mirror)
+		if not args.has("no-mirror"):
+			var mirror := WaterMirror.new()
+			mirror.name = "WaterMirror"
+			mirror.water_fn = layout.is_water
+			add_child(mirror)
 	else:
 		RenderingServer.global_shader_parameter_set("refl_probe", 0.0)
 		RenderingServer.global_shader_parameter_set("mirror_on", 0.0)
