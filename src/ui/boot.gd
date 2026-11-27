@@ -19,6 +19,7 @@ var surface: Control
 var bg: ColorRect
 var mark: Brand.Mark
 var glow: Brand.Glow
+var plain: TextureRect
 var track: ColorRect
 var fill: ColorRect
 var status: Label
@@ -42,17 +43,24 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 200
 	_t_boot = Time.get_ticks_msec()
-	_timing = OS.get_cmdline_user_args().has("--load-timing")
+	_timing = LoadPacer.timing()
 	_master = AudioServer.get_bus_index("Master")
 	_master_db = AudioServer.get_bus_volume_db(_master)
 	AudioServer.set_bus_volume_db(_master, -60.0)
+	print("BOOT ready (%s, %s)" % [OS.get_name(), RenderingServer.get_current_rendering_driver_name()])
 	_build_view()
 	get_viewport().size_changed.connect(_place)
+	_first_frame.call_deferred()
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--boot-shots="):
 			_boot_shots(a.trim_prefix("--boot-shots="))
 	if auto_start:
 		_begin.call_deferred()
+
+
+func _first_frame() -> void:
+	await RenderingServer.frame_post_draw
+	print("BOOT first frame drawn at %d ms" % (Time.get_ticks_msec() - _t_boot))
 
 
 ## Review: --boot-shots=<dir> saves a frame every 0.5 s from the first splash
@@ -83,6 +91,18 @@ func _build_view() -> void:
 	surface.add_child(bg)
 	glow = Brand.Glow.new()
 	surface.add_child(glow)
+	# Insurance: the same W in flat gold with no custom shader, exactly under
+	# the shaded one (same mask, so it never shows round it). If the gold
+	# shader ever fails to compile on a device, the W is still there.
+	plain = TextureRect.new()
+	plain.texture = preload("res://assets/brand/w_alpha.png")   # (white W with alpha: the mask, as alpha)
+	plain.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	plain.stretch_mode = TextureRect.STRETCH_SCALE
+	plain.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	plain.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	plain.material = CanvasItemMaterial.new()
+	plain.self_modulate = Brand.GOLD
+	surface.add_child(plain)
 	mark = Brand.Mark.new(100.0)
 	surface.add_child(mark)
 	track = ColorRect.new()
@@ -119,6 +139,8 @@ func _place() -> void:
 	var w := Brand.SPLASH_FRAC * minf(vs.x, vs.y)
 	mark.set_width(w)
 	mark.position = (vs - mark.size) * 0.5
+	plain.position = mark.position
+	plain.size = mark.size
 	glow.fit(mark)
 	var lw := w * 0.62
 	track.size = Vector2(lw, 2.0)

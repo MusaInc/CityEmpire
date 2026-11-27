@@ -262,7 +262,7 @@ func _build() -> void:
 		traffic_density = p["traffic"] * TRAFFIC_SHARE
 		detail_range = minf(380.0, view_distance * 0.45)
 	var _ma := OS.get_cmdline_user_args().has("--mem-audit")
-	var _lt := OS.get_cmdline_user_args().has("--load-timing")
+	var _lt := LoadPacer.timing()
 	var _m0 := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
 	var _tl := [t0]
 	if _lt:
@@ -970,7 +970,7 @@ func _share_props_from(src: CityWorld) -> void:
 
 
 func _load_props() -> void:
-	var _lt := OS.get_cmdline_user_args().has("--load-timing")
+	var _lt := LoadPacer.timing()
 	var _t := [Time.get_ticks_msec()]
 	var _lp := func(lbl: String) -> void:
 		if _lt:

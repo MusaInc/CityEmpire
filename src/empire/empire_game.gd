@@ -102,7 +102,7 @@ var _title_save_loaded := false   # (the save loaded at launch, still as loaded)
 ## --load-timing: one step of a menu → gameplay transition, in ms since the
 ## previous mark (main-thread time: nothing else runs meanwhile).
 func _tr(tag: String) -> void:
-	if not args.has("load-timing"):
+	if not LoadPacer.timing():
 		return
 	var now := Time.get_ticks_usec()
 	if _tr_us > 0:
@@ -111,7 +111,7 @@ func _tr(tag: String) -> void:
 
 
 func _mem_mark(tag: String, prev: Array) -> void:
-	if args.has("load-timing"):
+	if LoadPacer.timing():
 		var now := Time.get_ticks_msec()
 		print("LOAD_T EG %-26s %6d ms (t=%d)" % [tag, now - _lt_ms if _lt_ms > 0 else 0, now])
 		_lt_ms = now

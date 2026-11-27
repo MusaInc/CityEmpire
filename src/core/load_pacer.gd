@@ -15,6 +15,13 @@ extends RefCounted
 ## screen switches it on for the launch.
 
 static var active := false
+
+
+## Loading timings in the log (LOAD_T / LOAD_GAP / ENTER_T): --load-timing,
+## and always on iOS for now (2026-11-27: a TestFlight build showed only navy
+## on an iPad; the log in Files → WORLDSTATE → logs says where it stops).
+static func timing() -> bool:
+	return OS.get_cmdline_user_args().has("--load-timing") or OS.has_feature("ios")
 ## Main-thread work between two frames (µs). A phone waits for vsync
 ## (16.7 ms) on every frame handed back, so the budget fills most of one:
 ## 14 ms of building + the splash's ~1 ms frame keeps 60 fps and wastes

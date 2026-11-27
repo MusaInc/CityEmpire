@@ -34,7 +34,7 @@ extends Node3D
 const LAND_Y := 3.0
 const SEA_Y := -1.6
 const DETAIL_RANGE := 650.0
-static var _lt := OS.get_cmdline_user_args().has("--load-timing")
+static var _lt := LoadPacer.timing()
 var STEPS_TOTAL := 0
 const NEAR_LOAD := 850.0     # stream detail early enough for fast aircraft approaches
 const NEAR_FREE := 1150.0
