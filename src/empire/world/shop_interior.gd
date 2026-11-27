@@ -555,7 +555,7 @@ func _under_mezzanine(p: Vector3) -> bool:
 ## a SELF CHECKOUT sign over the extra till; the flagship's is gold-trimmed
 ## with FLAGSHIP under the name. All above head height – nothing to walk into.
 func _level_fitout(st: _Batch, part_d: float) -> void:
-	if H < 3.1 or W < 5.0:
+	if H < 2.9 or W < 5.0:
 		return
 	var nm := String(ShopStyle.house.get("name", "")) if not ShopStyle.house.is_empty() else ""
 	if nm == "":
@@ -568,8 +568,8 @@ func _level_fitout(st: _Batch, part_d: float) -> void:
 	if biz.level >= 3 and part_d > 9.0:
 		at_d.append(part_d * 0.78)
 	for d: float in at_d:
-		var y1 := H - 0.22
-		var y0 := y1 - 0.5
+		var y1 := H - 0.14
+		var y0 := y1 - (0.5 if H >= 3.3 else 0.4)
 		var hw := minf(W * 0.3, 2.4)
 		# Hangers, frame and the lit face (both sides).
 		for sx: float in [-hw * 0.8, hw * 0.8]:

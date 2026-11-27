@@ -833,7 +833,7 @@ func _phone_shots(dir: String, secs: String) -> void:
 						ui.phone.push("listing", {"id": String(fs[0]["unit"]), "home": false}, String(fs[0]["name"]))
 				"sheet":
 					if not empire.businesses.is_empty():
-						ui.open_manage(empire.businesses[0])
+						ui.open_manage(empire.businesses[0], parts[2] if parts.size() > 2 else "overview")
 		await get_tree().create_timer(float(args.get("phone-wait", "4")), true, false, true).timeout
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png("%s/%s.png" % [dir, sec.replace(":", "_")])
@@ -2627,7 +2627,7 @@ func _spawn_cars() -> void:
 		cars[id].queue_free()
 	cars.clear()
 	for v in empire.vehicles:
-		if SkyportPlay.vclass(String(v["model"])) == "car":
+		if SkyportPlay.vclass(String(v["model"])) == "car" and not away(v):
 			var c := _spawn_car(v)
 			# (Loading: your cars' crumple data is ready before the first
 			# knock – it was a 40–70 ms stall on the first dent of a drive.)
@@ -2637,6 +2637,26 @@ func _spawn_cars() -> void:
 		street_cars.apply_stored()
 	if skyport_play:
 		skyport_play.spawn_all()   # (helicopters, planes, boats)
+
+
+## A car that's out working: on hire at the Skyport desk or on the
+## warehouse rounds (Trades / SupplyChain) – not in your garage or street.
+static func away(v: Dictionary) -> bool:
+	return bool(v.get("hire", false)) or bool(v.get("fleet", false))
+
+
+## After cars go on hire / the rounds or come back: their bodies leave or
+## return (the one you're driving never does).
+func sync_away_cars() -> void:
+	for v in empire.vehicles:
+		var id := String(v["id"])
+		if SkyportPlay.vclass(String(v["model"])) != "car" or id == driving:
+			continue
+		if away(v) and cars.has(id):
+			cars[id].queue_free()
+			cars.erase(id)
+		elif not away(v) and not cars.has(id):
+			_spawn_car(v)
 
 
 ## In any vehicle: a car you're driving or a craft you're piloting.
@@ -4109,6 +4129,50 @@ func _notification(what: int) -> void:
 
 
 # ------------------------------------------------------- captures/tests
+## Captures of the commercial empire: a branded company a few weeks in –
+## three shops (one a major retailer), a warehouse and van, a contract,
+## the club, car hire and the hotel with a spa.
+func _demo_commerce(b: Business) -> void:
+	var e := empire
+	e.personal_cash = 6000000.0
+	e.transfer_to_company(4000000.0)
+	e.set_brand(ShopStyle.default_house("Crown Goods"))
+	for role in ["cashier", "stocker", "manager"]:
+		var cs := e.candidates.filter(func(x): return x["role"] == role)
+		if not cs.is_empty():
+			e.hire(b, cs[0])
+	var n := 0
+	for u2 in units:
+		if n >= 2:
+			break
+		if u2["kind"] == "shop" and u2["island"] == "east" and e.business_at(u2["id"]) == null and not CityLife.is_taken(e, u2["id"]):
+			e.rent_premises(u2, "cafe" if n == 0 else "clothing")
+			n += 1
+	Growth.apply_level(b, 3)
+	for x: Business in e.businesses:
+		for i in 6:
+			x.history.append({"day": i, "revenue": 900.0 + 180.0 * i, "profit": 140.0 + 40.0 * i})
+	for i in 14:
+		e.day_reports.append({"day": i + 1, "revenue": 2200.0 + 160.0 * i, "profit": -300.0 + 120.0 * i + (240.0 if i % 3 == 0 else 0.0),
+			"company": e.company_cash, "personal": e.personal_cash, "net_worth": e.net_worth(), "assets": e.asset_value(), "debt": 0.0})
+	SupplyChain.buy_site(e, "west_depot")
+	SupplyChain.stock_up(e, SupplyChain.suggested_order(e))
+	var v := e.buy_vehicle("van", player.global_position + Vector3(8, 0, 0), 0.0)
+	SupplyChain.toggle_fleet(e, String(v["id"]))
+	SupplyChain.end_day(e)
+	SupplyChain.end_day(e)
+	Trades.buy_club(e, "vault")
+	Trades.buy_rental(e)
+	for m in ["saloon", "scout"]:
+		Trades.toggle_hire(e, String(e.buy_vehicle(m, player.global_position + Vector3(-8, 0, 0), 0.0)["id"]))
+	Ventures.buy_estate(e, "skyport_hotel")
+	Trades.build_facility(e, "skyport_hotel", "spa")
+	e.stats["profitable_days"] = 4
+	Progression.check(e)
+	Growth.refresh(e)
+	Trades.refresh(e)
+
+
 func _demo_setup(kind: String) -> void:
 	# A running shop for captures: rented, stocked, prices set, a till queue.
 	var u := starter_unit()
@@ -4131,6 +4195,8 @@ func _demo_setup(kind: String) -> void:
 			var cs := empire.candidates.filter(func(x): return x["role"] == role)
 			if not cs.is_empty():
 				empire.hire(b, cs[0])
+	if kind == "commerce":
+		_demo_commerce(b)
 	b.cleanliness = 0.75
 	rebuild_interior(u["id"])
 	empire.minute = maxf(empire.minute, 9.0 * 60.0)

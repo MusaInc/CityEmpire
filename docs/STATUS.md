@@ -1,5 +1,9 @@
 # Status (2026-11-19, WORLDSTATE final overhaul; branch final-overhaul → 0.8.0)
 
+## Commercial empire (2026-11-27, branch business-empire from 0.21.0)
+
+Business levels 1–4 with real fit-outs, the company (logo, divisions, livery), the supply chain (warehouse → fleet → branches, wholesale contracts), trade loops (food suppliers and menus, clothing collections, nightclub, car hire, hotel facilities) and six career stages. See docs/COMMERCE.md. Checks: run_tests 135/135, `--scenarios=BZ` 25/25, GA 11/11.
+
 ## Engine pass + lift/garage/entrances (2026-11-27, branch engine-overhaul from 0.20.0)
 
 Checked in the running game (headless scenarios; rendered before/after views under xvfb):

@@ -35,7 +35,7 @@ class Bar extends Control:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 	func _draw() -> void:
 		var r := size.y * 0.5
-		draw_rect(Rect2(Vector2.ZERO, size), Color(G.FILL, 1.0), true)
+		draw_rect(Rect2(Vector2.ZERO, size), G.FILL, true)
 		if f > 0.0:
 			draw_rect(Rect2(Vector2.ZERO, Vector2(maxf(size.x * f, r * 2.0), size.y)), col, true)
 
@@ -136,7 +136,7 @@ static func empire(ph: Phone, body: VBoxContainer) -> void:
 		cc.add_child(sc)
 	else:
 		cc.add_child(G.para("Name your company in Corporate: your sign goes on every shopfront, van and tower you own.", "footnote"))
-	var figs := G.hbox(24)
+	var figs := _figs()
 	var rev := 0.0
 	var prof := 0.0
 	var series: Array = []
@@ -218,7 +218,7 @@ static func supply(ph: Phone, body: VBoxContainer) -> void:
 	wc.add_child(G.text(String(s["name"]), "title1"))
 	var held := SupplyChain.cases_held(e)
 	var cap := SupplyChain.capacity(e)
-	var figs := G.hbox(24)
+	var figs := _figs()
 	figs.add_child(G.figure("Cases held", "%d / %d" % [held, cap], null, "title2"))
 	figs.add_child(G.figure("Stock value", EmpireData.money(_stock_value(e, SupplyChain.stock(e))), null, "title2"))
 	figs.add_child(G.figure("Contracts done", str(int(e.stats.get("contracts_done", 0))), null, "title2"))
@@ -230,8 +230,10 @@ static func supply(ph: Phone, body: VBoxContainer) -> void:
 	for pid in plan:
 		n += int(plan[pid])
 		cost += SupplyChain.case_cost(e, pid) * int(plan[pid])
-	var acts := G.hbox(10)
-	var fill := G.button("Stock for my branches · %d cases · %s" % [n, EmpireData.money(cost)], func():
+	var acts := HFlowContainer.new()
+	acts.add_theme_constant_override("h_separation", 10)
+	acts.add_theme_constant_override("v_separation", 10)
+	var fill := G.button("Stock my branches · %d cases · %s" % [n, EmpireData.money(cost)] if n > 0 else "Your branches are covered", func():
 		_act(ph, SupplyChain.stock_up(e, plan), "Delivered to the warehouse"), "filled", "regular", null, "truck")
 	fill.disabled = n == 0
 	acts.add_child(fill)
@@ -259,7 +261,12 @@ static func supply(ph: Phone, body: VBoxContainer) -> void:
 					var bz := e.business(String(r["biz"]))
 					sub = "On the road → %s, %s · %s" % [bz.name if bz else "a branch", _clock(float(r["eta"])), fl["driver"]]
 		frows.append(G.row(nm, sub, "On the rounds" if on else "Add", "truck", G.GREEN if on else G.LABEL3, func():
-			_act(ph, SupplyChain.toggle_fleet(e, vid)), G.GREEN if on else G.BLUE))
+			if ph.game.driving == vid:
+				ph.ui.toast("Park it and get out first", "warn")
+				return
+			var err := SupplyChain.toggle_fleet(e, vid)
+			ph.game.sync_away_cars()
+			_act(ph, err), G.GREEN if on else G.BLUE))
 	if frows.is_empty():
 		frows.append(G.row("No vans yet", "Buy a Courier Van or Box Truck from the Marketplace", "", "truck", G.LABEL3))
 	var runs: Array = SupplyChain.cfg().get("fleet", {}).get("runs", [6, 13])
@@ -279,6 +286,14 @@ static func supply(ph: Phone, body: VBoxContainer) -> void:
 	if crows.is_empty():
 		crows.append(G.row("No offers today", "City firms ask for supply every couple of days", "", "desk", G.LABEL3))
 	v.add_child(G.group(crows, "Wholesale contracts", "Shipped from the warehouse each night; a short day costs half its value."))
+
+
+## A row of figures that wraps on a narrow phone instead of widening the card.
+static func _figs() -> HFlowContainer:
+	var f := HFlowContainer.new()
+	f.add_theme_constant_override("h_separation", 28)
+	f.add_theme_constant_override("v_separation", 10)
+	return f
 
 
 static func _stock_value(e: Empire, s: Stock) -> float:
@@ -325,7 +340,7 @@ static func _club_card(ph: Phone, e: Empire, v: VBoxContainer) -> void:
 			wd = d
 			if f["open"]:
 				break
-	var figs := G.hbox(24)
+	var figs := _figs()
 	figs.add_child(G.figure("Popularity", "%d" % roundi(float(cl.get("pop", 50))), null, "title2"))
 	figs.add_child(G.figure("%s crowd" % wd, "%d / %d" % [int(f["crowd"]), int(f["capacity"])], null, "title2"))
 	figs.add_child(G.figure("VIP tables", str(int(f["vips"])), null, "title2"))
@@ -357,7 +372,7 @@ static func _rental_card(ph: Phone, e: Empire, v: VBoxContainer) -> void:
 	var r := Trades.rental(e)
 	c.add_child(G.text(String(dk.get("name", "Car hire")), "title1"))
 	var last: Dictionary = (r.get("days", []) as Array).back() if not (r.get("days", []) as Array).is_empty() else {}
-	var figs := G.hbox(24)
+	var figs := _figs()
 	figs.add_child(G.figure("On hire", str(r.get("cars", {}).size()), null, "title2"))
 	figs.add_child(G.figure("Booked yesterday", str(int(last.get("booked", 0))), null, "title2"))
 	figs.add_child(G.figure("Takings", EmpireData.money(float(r.get("takings", 0.0))), null, "title2"))
@@ -377,7 +392,11 @@ static func _rental_card(ph: Phone, e: Empire, v: VBoxContainer) -> void:
 		rows.append(G.row(nm, "%s · %s a day · %d%% condition · %d%% booked" % [Trades.rental_class(veh).capitalize(), EmpireData.money(Trades.day_rate(veh, float(r.get("price_k", 1.0)))),
 			roundi(float(veh["condition"]) * 100), roundi(Trades.hire_chance(e, veh) * 100)], "On hire" if on else "Add", "vehicles", G.GREEN if on else G.LABEL3,
 			func():
+				if ph.game.driving == vid:
+					ph.ui.toast("Park it and get out first", "warn")
+					return
 				Trades.toggle_hire(e, vid)
+				ph.game.sync_away_cars()
 				ph.refresh(), G.GREEN if on else G.BLUE))
 	if rows.is_empty():
 		rows.append(G.row("No cars to hire out", "Buy cars in the Marketplace", "", "vehicles", G.LABEL3))
