@@ -4,6 +4,7 @@ shader_type canvas_item;
 uniform float sweep = -1.0;        // band centre along the diagonal (-0.4 … 1.4)
 uniform float sweep_k = 0.0;       // 0 = no sweep
 uniform float sweep_w = 0.14;
+uniform float lift = 1.0;          // brightness (the splash's breathing)
 uniform vec3 g0 = vec3(0.965, 0.886, 0.659);
 uniform vec3 g1 = vec3(0.882, 0.741, 0.416);
 uniform vec3 g2 = vec3(0.769, 0.596, 0.282);
@@ -20,6 +21,7 @@ void fragment() {
 	vec3 c = gold(clamp(UV.y * 0.85 + UV.x * 0.15, 0.0, 1.0));
 	float d = (UV.x * 0.62 + UV.y * 0.38) - sweep;
 	float band = exp(-(d * d) / (sweep_w * sweep_w));
+	c = min(c * lift, vec3(1.0));
 	c = mix(c, vec3(1.0, 0.975, 0.90), clamp(band * sweep_k, 0.0, 1.0));
 	COLOR = vec4(c, a * COLOR.a);
 }

@@ -290,6 +290,7 @@ class MapPainter:
 			draw_polyline(out, col, maxf(w_m / Minimap.M_PER_PX, 1.0), true)
 
 	func _draw() -> void:
+		var _t0 := Time.get_ticks_msec()  # (LOAD_T probe)
 		draw_rect(Rect2(Vector2.ZERO, Minimap.BOUNDS.size / Minimap.M_PER_PX), WATER)
 		if Landforms.enabled:
 			for f: Dictionary in Landforms.forms():
@@ -355,3 +356,5 @@ class MapPainter:
 		_line(PackedVector2Array([Vector2(56.0, z), Vector2(CityLayout.APPROACH_END, z)]), 12.0, BRIDGE)
 		for tx: float in CityLayout.BRIDGE_TOWERS:
 			draw_circle(_px(Vector2(tx, z)), 14.0 / Minimap.M_PER_PX, Color(0.5, 0.5, 0.53))
+		if OS.get_cmdline_user_args().has("--load-timing"):
+			print("LOAD_T   minimap painter _draw   %6d ms" % (Time.get_ticks_msec() - _t0))

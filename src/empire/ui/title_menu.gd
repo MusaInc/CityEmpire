@@ -251,11 +251,11 @@ func _enter(cb: Callable) -> void:
 
 
 func _confirm_new() -> void:
-	var v := ui._open("Start again?", 560, 240)
-	v.add_child(Glass.para("Your saved empire will be replaced.", "subhead"))
+	var v := ui._open("Delete your current game?", 600, 300)
+	v.add_child(Glass.para(ui.new_game_warning(), "subhead"))
 	var h := Glass.hbox(12)
-	h.add_child(Glass.button("Cancel", func(): ui.close_panel(false), "gray", "large"))
-	h.add_child(Glass.button("New game", func():
+	h.add_child(Glass.button("Keep playing", func(): ui.close_panel(false), "gray", "large"))
+	h.add_child(Glass.button("Delete and start again", func():
 		ui.close_panel(true)
-		_enter(game.start_new), "filled", "large"))
+		_enter(game.start_new), "filled", "large", Glass.RED))
 	v.add_child(h)

@@ -34,6 +34,8 @@ extends Node3D
 const LAND_Y := 3.0
 const SEA_Y := -1.6
 const DETAIL_RANGE := 650.0
+static var _lt := OS.get_cmdline_user_args().has("--load-timing")
+var STEPS_TOTAL := 0
 const NEAR_LOAD := 850.0     # stream detail early enough for fast aircraft approaches
 const NEAR_FREE := 1150.0
 const FAR_RANGE := 5200.0
@@ -1709,6 +1711,7 @@ func _start_near() -> void:
 			near_root.add_child(lf)
 			lf.setup(plan_data),
 	]
+	STEPS_TOTAL = _steps.size()
 
 
 func _near(f: Callable) -> void:
@@ -1775,7 +1778,11 @@ func _process(_dt: float) -> void:
 	if plan_data.is_empty():
 		return
 	if not _steps.is_empty():
+		var t0 := Time.get_ticks_usec()
+		var n := _steps.size()
 		(_steps.pop_front() as Callable).call()
+		if _lt and Time.get_ticks_usec() - t0 > 30000:
+			print("SLOW skyport near step %d/%d: %.0f ms" % [STEPS_TOTAL - n + 1, STEPS_TOTAL, (Time.get_ticks_usec() - t0) / 1000.0])
 		return
 	_check_t -= _dt
 	if _check_t > 0.0:

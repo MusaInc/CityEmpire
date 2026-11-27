@@ -53,27 +53,36 @@ static var enabled := true
 static var _tex := {}
 static var _bakes := {}
 static var _mats := {}
+## (The traffic cars build on worker threads at launch: the caches are shared.
+## Godot's Mutex is recursive, so surface() -> tex() may nest.)
+static var _mx := Mutex.new()
 
 
 static func tex(file: String) -> Texture2D:
 	if not enabled:
 		return null
+	_mx.lock()
 	if not _tex.has(file):
 		var p := DIR + file + ".png"
 		_tex[file] = load(p) if ResourceLoader.exists(p) else null
-	return _tex[file]
+	var t: Texture2D = _tex[file]
+	_mx.unlock()
+	return t
 
 
 ## The bake for a model file (e.g. "kestrel", "civ_sedan_lod1", "wheel_five"); null if none.
 static func bake(model: String) -> Texture2D:
 	if not enabled:
 		return null
+	_mx.lock()
 	if not _bakes.has(model):
 		var p := DIR + model + "_bake.png"
 		if not ResourceLoader.exists(p) and model.ends_with("_traffic"):
 			p = DIR + model.trim_suffix("_traffic") + "_bake.png"
 		_bakes[model] = load(p) if ResourceLoader.exists(p) else null
-	return _bakes[model]
+	var t: Texture2D = _bakes[model]
+	_mx.unlock()
+	return t
 
 
 static func has_family(name: String) -> bool:
@@ -86,9 +95,12 @@ static func has_family(name: String) -> bool:
 ## (name, model) so a fleet shares them.
 static func surface(name: String, base: BaseMaterial3D, model: String) -> Material:
 	var key := name + "@" + model + "@" + str(base.get_instance_id())
+	_mx.lock()
 	if not _mats.has(key):
 		_mats[key] = make_surface(name, base, model)
-	return _mats[key]
+	var m: Material = _mats[key]
+	_mx.unlock()
+	return m
 
 
 ## An uncached car_surface material (for per-car colours such as paint2).

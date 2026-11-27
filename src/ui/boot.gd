@@ -4,9 +4,11 @@ extends CanvasLayer
 ##   1. The OS launch screen (assets/splash/launch.png on Brand.NAVY_DEEP)
 ##      hands over to this screen with the gold W at the SAME size and place
 ##      (Brand.SPLASH_FRAC of the short side, centred) – no cut, no flash.
-##   2. While the game loads, a metallic light sweeps the W now and then and
-##      a gold hairline under it tracks the real progress: the scene's
-##      threaded load, then the world building round the menu's view.
+##   2. While the game loads, a golden shimmer travels across the W every few
+##      seconds and a soft glow breathes round it (2026-11-27), and a gold
+##      hairline tracks the real progress: the scene's threaded load, then
+##      the world's build (LoadPacer: paced so frames keep coming, its
+##      node-free parts on worker threads) and the menu's view.
 ##   3. When the view has rendered, the navy lifts off the city, the W glides
 ##      into the menu's wordmark and the city's sound rises with it.
 ## No dependency on Main/MenuParts: those pull in the city and hero resources.
@@ -16,6 +18,7 @@ extends CanvasLayer
 var surface: Control
 var bg: ColorRect
 var mark: Brand.Mark
+var glow: Brand.Glow
 var track: ColorRect
 var fill: ColorRect
 var status: Label
@@ -25,7 +28,12 @@ var _finishing := false
 var _starting := false
 var _shown := 0.0          # progress drawn (eases toward _target, never back)
 var _target := 0.0
-var _shine_in := 0.9
+var _anim := 0.0           # the shimmer/breath clock (clamped per frame)
+var _fx := 1.0             # shimmer + glow strength (fades out at the reveal)
+var _t_boot := 0
+var _gaps := {"max": 0.0, "n": 0, "over34": 0, "over50": 0, "over100": 0, "sum": 0.0}
+var _timing := false
+var _last_us := 0
 var _master_db := 0.0
 var _master := 0
 
@@ -33,6 +41,8 @@ var _master := 0
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 200
+	_t_boot = Time.get_ticks_msec()
+	_timing = OS.get_cmdline_user_args().has("--load-timing")
 	_master = AudioServer.get_bus_index("Master")
 	_master_db = AudioServer.get_bus_volume_db(_master)
 	AudioServer.set_bus_volume_db(_master, -60.0)
@@ -52,7 +62,7 @@ func _boot_shots(dir: String) -> void:
 	DirAccess.make_dir_recursive_absolute(dir)
 	var tree := get_tree()
 	var loop := func() -> void:
-		for i in 40:
+		for i in 120:
 			await RenderingServer.frame_post_draw
 			tree.root.get_texture().get_image().save_png("%s/boot_%02d.png" % [dir, i])
 			print("BOOT_SHOT ", i)
@@ -71,6 +81,8 @@ func _build_view() -> void:
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	surface.add_child(bg)
+	glow = Brand.Glow.new()
+	surface.add_child(glow)
 	mark = Brand.Mark.new(100.0)
 	surface.add_child(mark)
 	track = ColorRect.new()
@@ -107,6 +119,7 @@ func _place() -> void:
 	var w := Brand.SPLASH_FRAC * minf(vs.x, vs.y)
 	mark.set_width(w)
 	mark.position = (vs - mark.size) * 0.5
+	glow.fit(mark)
 	var lw := w * 0.62
 	track.size = Vector2(lw, 2.0)
 	track.position = Vector2((vs.x - lw) * 0.5, mark.position.y + mark.size.y + w * 0.30)
@@ -133,7 +146,8 @@ func _begin() -> void:
 	# Let the branded frame reach the display before requesting heavier assets.
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var err := ResourceLoader.load_threaded_request(scene_path, "PackedScene")
+	# (Sub-threads: the scene's dependencies load in parallel.)
+	var err := ResourceLoader.load_threaded_request(scene_path, "PackedScene", true)
 	if err != OK:
 		_failed()
 		return
@@ -146,11 +160,20 @@ func _process(dt: float) -> void:
 	if _target > _shown:
 		_shown = move_toward(_shown, _target, maxf((_target - _shown) * 5.0 * dt, 0.12 * dt))
 	fill.size.x = track.size.x * _shown
-	if not _flying:
-		_shine_in -= dt
-		if _shine_in <= 0.0:
-			_shine_in = 2.8
-			mark.shine(1.5, 0.5)
+	_animate(dt)
+	if _timing and _requested and not _flying:
+		# (Wall clock between frames, not dt.)
+		var now := Time.get_ticks_usec()
+		var gap := (now - _last_us) / 1000000.0 if _last_us > 0 else dt
+		_last_us = now
+		_gaps["n"] += 1
+		_gaps["sum"] += gap
+		_gaps["max"] = maxf(_gaps["max"], gap)
+		if gap > 0.1:
+			print("LOAD_GAP %5.0f ms ending at t=%d" % [gap * 1000.0, Time.get_ticks_msec()])
+		for lim in [34, 50, 100]:
+			if gap * 1000.0 > lim:
+				_gaps["over%d" % lim] += 1
 	if not _requested or _finishing:
 		return
 	var amount: Array = []
@@ -165,10 +188,36 @@ func _process(dt: float) -> void:
 			_failed()
 
 
+## The W's life while it waits: a shimmer of light travels across the gold
+## every SHIMMER_EVERY s and a soft glow breathes round it. Both ease in after
+## the OS launch screen's hand-off (that frame is still) and fade at the
+## reveal. The clock steps at most 1/30 s a frame, so a slow frame slows the
+## light a touch instead of making it jump.
+const SHIMMER_EVERY := 3.6
+const SHIMMER_TRAVEL := 1.9
+const BREATH := 4.8
+
+
+func _animate(dt: float) -> void:
+	_anim += minf(dt, 1.0 / 30.0)
+	var intro := smoothstep(0.35, 1.6, _anim) * _fx
+	var breath := 0.5 - 0.5 * cos(TAU * _anim / BREATH)
+	glow.set_strength(intro * (0.07 + 0.13 * breath))
+	mark.mat.set_shader_parameter("lift", 1.0 + 0.045 * breath * intro)
+	var t := fmod(maxf(_anim - 0.8, 0.0), SHIMMER_EVERY) / SHIMMER_TRAVEL
+	if _anim > 0.8 and t < 1.0:
+		mark.mat.set_shader_parameter("sweep", lerpf(-0.45, 1.45, smoothstep(0.0, 1.0, t)))
+		mark.mat.set_shader_parameter("sweep_k", 0.46 * intro * sin(PI * t))
+	else:
+		mark.mat.set_shader_parameter("sweep_k", 0.0)
+
+
 func _open_city() -> void:
 	_target = 0.6
 	await get_tree().process_frame
 	var packed := ResourceLoader.load_threaded_get(scene_path) as PackedScene
+	if _timing:
+		print("LOAD_T BOOT scene loaded            %6d ms since boot" % (Time.get_ticks_msec() - _t_boot))
 	if packed == null:
 		_failed()
 		return
@@ -176,23 +225,30 @@ func _open_city() -> void:
 	if game == null:
 		_failed()
 		return
-	_target = 0.7
+	_target = 0.62
 	await get_tree().process_frame
+	# The world builds over many frames from here (EmpireGame._ready yields).
+	LoadPacer.progress = 0.0
+	LoadPacer.active = true
 	get_tree().root.add_child(game)
 	get_tree().current_scene = game
-	_target = 0.82
-	# Late shaders compile and the menu's view builds under this screen.
-	# Bounded: never hold more than ~6 s on it.
-	var waited := 0
-	while waited < 360:
+	# Until the world is whole and the menu's view has rendered (title_ready).
+	# Bounded by wall time, not frames: the build is paced, so frames come.
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 120000:
 		var warm = game.get("warmed")
 		var ready = game.get("title_ready")
 		if (warm == null or warm == true) and (ready == null or ready == true):
 			break
-		_target = minf(0.82 + waited / 360.0 * 0.17, 0.99)
+		_target = maxf(_target, 0.62 + LoadPacer.progress * 0.37)
 		await get_tree().process_frame
-		waited += 1
+	LoadPacer.active = false
 	_target = 1.0
+	if _timing:
+		print("LOAD_T BOOT world+menu ready        %6d ms since boot" % (Time.get_ticks_msec() - _t_boot))
+		var n := maxi(int(_gaps["n"]), 1)
+		print("LOAD_FRAMES %d frames while loading, mean %.1f ms, worst %.0f ms, >34 ms: %d, >50 ms: %d, >100 ms: %d" % [
+			n, float(_gaps["sum"]) / n * 1000.0, float(_gaps["max"]) * 1000.0, _gaps["over34"], _gaps["over50"], _gaps["over100"]])
 	await get_tree().create_timer(0.18).timeout
 	_reveal(game)
 
@@ -206,6 +262,7 @@ func _reveal(game: Node) -> void:
 	if ui != null and game.get("state") == "title":
 		ui.title_reveal(0.35)
 	var tw := create_tween().set_parallel()
+	tw.tween_property(self, "_fx", 0.0, 0.45).set_trans(Tween.TRANS_SINE)
 	tw.tween_property(track, "modulate:a", 0.0, 0.3)
 	tw.tween_property(bg, "modulate:a", 0.0, 1.3).set_delay(0.12).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	if to.size.x > 0.0:
@@ -226,6 +283,7 @@ func _reveal(game: Node) -> void:
 
 
 func _failed() -> void:
+	LoadPacer.active = false
 	_requested = false
 	_finishing = false
 	_starting = false

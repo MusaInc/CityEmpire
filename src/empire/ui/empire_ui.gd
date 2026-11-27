@@ -819,14 +819,26 @@ func add_overlay(c: Control) -> void:
 	_panel_root.get_parent().add_child(c)
 
 
+## What a new game throws away, said plainly (title menu + Settings).
+func new_game_warning() -> String:
+	var e := game.empire
+	var what := ""
+	if e != null:
+		what = " (Day %d · net worth %s · %d business%s)" % [e.day, EmpireData.money(e.net_worth()),
+			e.businesses.size(), "" if e.businesses.size() == 1 else "es"]
+	return "Starting a new game deletes your current game%s. Your money, businesses, homes and cars will be gone, and this can't be undone." % what
+
+
 func _confirm_new() -> void:
-	var v := _open("Start again?", 560, 240)
-	v.add_child(S.label("Your saved empire will be replaced.", 19, S.MUTED))
+	var v := _open("Delete your current game?", 600, 300)
+	var l := S.label(new_game_warning(), 19, S.MUTED)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(l)
 	var h := S.hbox(12)
-	h.add_child(S.button("Cancel", close_panel.bind(false), false, 160))
-	h.add_child(S.button("New game", func():
+	h.add_child(S.button("Keep playing", close_panel.bind(false), false, 180))
+	h.add_child(Glass.button("Delete and start again", func():
 		close_panel(true)
-		game.start_new(), true, 200))
+		game.start_new(), "filled", "large", Glass.RED))
 	v.add_child(h)
 
 

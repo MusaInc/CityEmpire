@@ -94,7 +94,27 @@ var _warm := false
 var _cloud_sync := Callable()
 
 
+var _lt_ms := 0
+var _tr_us := 0   # (--load-timing: the transition profiler's last mark)
+var _title_save_loaded := false   # (the save loaded at launch, still as loaded)
+
+
+## --load-timing: one step of a menu → gameplay transition, in ms since the
+## previous mark (main-thread time: nothing else runs meanwhile).
+func _tr(tag: String) -> void:
+	if not args.has("load-timing"):
+		return
+	var now := Time.get_ticks_usec()
+	if _tr_us > 0:
+		print("ENTER_T %-34s %7.1f ms" % [tag, (now - _tr_us) / 1000.0])
+	_tr_us = now
+
+
 func _mem_mark(tag: String, prev: Array) -> void:
+	if args.has("load-timing"):
+		var now := Time.get_ticks_msec()
+		print("LOAD_T EG %-26s %6d ms (t=%d)" % [tag, now - _lt_ms if _lt_ms > 0 else 0, now])
+		_lt_ms = now
 	if not args.has("mem-audit"):
 		return
 	var mb := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
@@ -114,6 +134,13 @@ func _ready() -> void:
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	var _mp := [Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))]
 	_mem_mark("boot", _mp)
+	# At launch (LoadPacer active: the boot screen) the build below hands
+	# frames back to the splash. Nothing half-built may tick meanwhile: the
+	# tree is paused until the world is whole (the boot layer always runs).
+	var tree := get_tree()
+	var paced := LoadPacer.active
+	if paced:
+		tree.paused = true
 	Prof.enabled = args.has("profile-world")
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
@@ -144,7 +171,10 @@ func _ready() -> void:
 	world.name = "World"
 	world.street_interiors_enabled = true
 	add_child(world)
+	if not world.is_built:
+		await world.built
 	_mem_mark("CityWorld+Mainland", _mp)
+	await LoadPacer.step(tree, 0.74)
 	layout = world.layout
 	# Skyport Island (the third island: airport, logistics, high-rise, marina).
 	SkyportIsland.enabled = true
@@ -155,11 +185,13 @@ func _ready() -> void:
 	add_child(skyport)
 	skyport.build(layout, world)
 	_mem_mark("SkyportIsland", _mp)
+	await LoadPacer.step(tree, 0.80)
 	var lfn := Landforms.new()
 	lfn.name = "Landforms"
 	add_child(lfn)
 	lfn.build(layout)
 	_mem_mark("Landforms", _mp)
+	await LoadPacer.step(tree, 0.86)
 	skyport.viewer = func() -> Vector3:
 		if state == "title" and is_instance_valid(_title_focus):
 			return _title_focus.global_position
@@ -169,6 +201,7 @@ func _ready() -> void:
 	print("Skyport Island: %d ms" % (Time.get_ticks_msec() - t1))
 	_build_elevators()
 	_mem_mark("Elevators", _mp)
+	await LoadPacer.step(tree, 0.87)
 	EmpireMinimap.bake.call_deferred(self, layout)  # (the minimap's and phone map's city image)
 	atmosphere.configure(args, world)
 	Car.water_check = layout.is_water
@@ -205,12 +238,14 @@ func _ready() -> void:
 	rig.set_player(player)
 	rig.apply_look(HeroLook.build(HeroLook.DEFAULT))
 	_mem_mark("Player+CharacterRig", _mp)
+	await LoadPacer.step(tree, 0.89)
 	# The people on the pavements round you (the GPU walkers carry the far streets).
 	crowd = Crowd.new()
 	crowd.name = "Crowd"
 	add_child(crowd)
 	crowd.setup(self)
 	_mem_mark("Crowd", _mp)
+	await LoadPacer.step(tree, 0.91)
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
 	add_child(camera)
@@ -295,6 +330,7 @@ func _ready() -> void:
 	add_child(near_traffic)
 	near_traffic.setup(self)
 	_mem_mark("UI+Venues+Gps+NearTraf", _mp)
+	await LoadPacer.step(tree, 0.94)
 	# Dynamic resolution on phones (CitySwing's FrameGovernor; WorldState never
 	# installed it, audit WS-08): eases the 3-D render scale down under load or
 	# heat and back up with headroom, so heavy views stay smooth.
@@ -320,6 +356,7 @@ func _ready() -> void:
 	add_child(garage)
 	garage.setup(self)
 	_mem_mark("Wrecks+Garage", _mp)
+	await LoadPacer.step(tree, 0.96)
 	props = Destructibles.new()
 	props.name = "Destructibles"
 	add_child(props)
@@ -391,6 +428,9 @@ func _ready() -> void:
 		RenderingServer.global_shader_parameter_set("refl_probe", 0.0)
 		RenderingServer.global_shader_parameter_set("mirror_on", 0.0)
 
+	await LoadPacer.step(tree, 0.97)
+	if paced:
+		tree.paused = false
 	if args.has("save"):
 		save_path = String(args["save"])
 	else:
@@ -406,7 +446,7 @@ func _ready() -> void:
 		_play()
 	else:
 		if has_save:
-			load_game()
+			_title_save_loaded = load_game()
 		else:
 			new_game()
 		_title(has_save)
@@ -916,13 +956,16 @@ func _reset_vehicle_state() -> void:
 func new_game() -> void:
 	_reset_vehicle_state()
 	ExploreUI.reset_cache()
+	_tr("new_game: reset")
 	empire = Empire.new()
 	empire.market = _market()
 	var start := starter_unit()
 	empire.flags["start_unit"] = start["id"]
 	empire.new_game(int(args.get("seed", "1")))
+	_tr("new_game: new empire")
 	_connect_empire()
 	_sync_rivals()
+	_tr("new_game: connect + rivals")
 	var out := Premises.outward(start)
 	var along := Premises.along_dir(start)
 	var door := Premises.door_point(start)
@@ -932,9 +975,11 @@ func new_game() -> void:
 	v["pos"] = [car_p.x, car_p.y, car_p.z]
 	v["yaw"] = atan2(-along.x, -along.z)
 	_spawn_cars()
+	_tr("new_game: spawn cars")
 	_obj_sig = ""
 	gps.restore()
 	_teleport(door + out * 3.2 + Vector3.UP * 1.0, atan2(-out.x, -out.z) + PI)
+	_tr("new_game: teleport")
 	_tutorial = 0
 	# (No forced "open the map" step: the opening is Nadia's offer instead.)
 	empire.flags["opened_map"] = true
@@ -1226,6 +1271,79 @@ func _title(_has_save: bool) -> void:
 	_title_settle.call_deferred()
 	if args.has("title-tour"):
 		_title_tour.call_deferred(String(args["title-tour"]))
+	if args.has("enter"):
+		_profile_enter.call_deferred(String(args["enter"]))
+
+
+## --enter=continue|new|character [--load-timing]: presses the menu's button
+## (with its navy dip) once the menu has settled, then reports each step,
+## the main-thread block, when streaming round the hero has caught up and
+## every hitch in the next 8 s. Quits when done.
+func _profile_enter(kind: String) -> void:
+	while not title_ready:
+		await get_tree().process_frame
+	await get_tree().create_timer(4.0).timeout
+	var tm: Node = ui.title_menu
+	if kind == "confirm":   # (a look at the new-game warning)
+		tm._confirm_new()
+		await get_tree().create_timer(1.5).timeout
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(String(args.get("shot-out", "user://confirm.png")))
+		get_tree().quit()
+		return
+	var cb: Callable
+	match kind:
+		"new":
+			cb = start_new
+		"character":
+			cb = func():
+				continue_game()
+				ui.open_style()
+				_tr("character: open_style")
+		_:
+			cb = continue_game
+	var t_press := Time.get_ticks_usec()
+	var t_cb := [0, 0]
+	var wrapped := func():
+		_tr_us = Time.get_ticks_usec()
+		t_cb[0] = Time.get_ticks_usec()
+		cb.call()
+		t_cb[1] = Time.get_ticks_usec()
+	tm._enter(wrapped)
+	while t_cb[1] == 0:
+		await get_tree().process_frame
+	print("ENTER_SUMMARY %s: press→callback %.0f ms (the dip), callback (main thread blocked) %.0f ms" % [kind, (t_cb[0] - t_press) / 1000.0, (t_cb[1] - t_cb[0]) / 1000.0])
+	var t0 := Time.get_ticks_usec()
+	var worst := 0.0
+	var cpu_worst := 0.0
+	var over := {"34": 0, "50": 0, "100": 0, "250": 0}
+	var settled_at := -1.0
+	var quiet := 0
+	var frames := 0
+	var last := Time.get_ticks_usec()
+	while Time.get_ticks_usec() - t0 < 8000000:
+		await get_tree().process_frame
+		var now := Time.get_ticks_usec()
+		var dt := (now - last) / 1000.0
+		last = now
+		frames += 1
+		worst = maxf(worst, dt)
+		# (Script + physics CPU per frame, without the VPS's software renderer.)
+		var cpu := (Performance.get_monitor(Performance.TIME_PROCESS) + Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)) * 1000.0
+		cpu_worst = maxf(cpu_worst, cpu)
+		if cpu > 100.0:
+			print("SLOW frame %d after entering: CPU %.0f ms (process %.0f, physics %.0f)" % [frames, cpu,
+				Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0])
+		for k in over:
+			if dt > float(k):
+				over[k] += 1
+		var busy: bool = not world._pending.is_empty() or not world._results.is_empty()
+		quiet = 0 if busy else quiet + 1
+		if settled_at < 0.0 and quiet >= 5:
+			settled_at = (now - t_cb[0]) / 1000.0
+	print("ENTER_SUMMARY %s: streaming settled %.0f ms after the press's callback began; next 8 s: %d frames, worst %.0f ms, >34 ms %d, >50 ms %d, >100 ms %d, >250 ms %d; worst frame CPU (process+physics) %.0f ms" % [
+		kind, settled_at, frames, worst, over["34"], over["50"], over["100"], over["250"], cpu_worst])
+	get_tree().quit()
 
 
 ## Puts the menu camera on a view: its hour, its weather, the world built
@@ -1289,16 +1407,22 @@ func _title_tour(dir: String) -> void:
 func start_new() -> void:
 	new_game()
 	save_game()
+	_tr("start_new: save_game")
 	_play()
 
 
 func continue_game() -> void:
-	load_game()
+	# The menu loaded this save at launch and nothing on the title changes it
+	# (the sim only runs in play): loading it again re-made the empire, cars,
+	# interiors and the hero's streets for nothing (2026-11-27).
+	if not (state == "title" and _title_save_loaded):
+		load_game()
 	_play()
 
 
 func _play() -> void:
 	var from_title := state == "title"
+	_title_save_loaded = false   # (only the first entry from the launch menu reuses it)
 	state = "play"
 	title_ready = true
 	camera.cine = Callable()
@@ -1306,13 +1430,16 @@ func _play() -> void:
 		player.visible = _title_hero_vis
 	if audio:
 		audio.menu = false
+	_tr("_play: begin")
 	if from_title:
 		# (The title streamed round its view: the hero's street now.)
 		world.build_all_near(player.global_position, 260.0)
+		_tr("_play: world.build_all_near 260 m")
 	world.set_viewer(chase if driving != "" else camera)   # (the title streamed round its own camera)
 	camera.snap()
 	player.input_enabled = driving == ""
 	ui.show_hud()
+	_tr("_play: viewer + hud")
 	if empire.flags.get("intro_done", false) == false and not args.has("shot") and not args.has("tour") and not args.has("autoplay") and not args.has("perf") \
 			and not args.has("scenarios"):
 		ui.intro()
@@ -1320,15 +1447,26 @@ func _play() -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
+const TELEPORT_SKYPORT_NOW := 120.0
+
+
 func _teleport(p: Vector3, yaw: float) -> void:
 	vehicle_access.interrupt()
-	if skyport and SkyportIsland.distance_to(p) < SkyportIsland.NEAR_LOAD and not skyport.near_loaded():
-		skyport.load_near_now()   # (arriving at once: its buildings must be solid now)
+	# Arriving ON Skyport Island (or at its shore) its buildings must be solid
+	# now. Further off (within NEAR_LOAD, 850 m: both start spots) it streams
+	# its near detail in one step a frame by itself – forcing all of it here
+	# was ~1.9 s of every New game / Continue on the VPS (2026-11-27).
+	if skyport and SkyportIsland.distance_to(p) < TELEPORT_SKYPORT_NOW and not skyport.near_loaded():
+		skyport.load_near_now()
+		_tr("  teleport: skyport near")
 	if venues:
 		venues.load_near_now(p)
+		_tr("  teleport: venues near")
 	world.build_all_near(p, 300.0)
+	_tr("  teleport: world.build_all_near 300 m")
 	if empire:
 		_stream_street_rooms(p, 24.0, 4)
+		_tr("  teleport: street rooms")
 	# A save made in (or over) the sea used to reload you there and remember
 	# that spot as dry ground: the wading check then sent you back to it for
 	# ever. Somewhere safe instead.
@@ -4216,6 +4354,7 @@ func load_game() -> bool:
 		return false
 	if SafeSave.last_source == "backup" and ui:
 		ui.toast.call_deferred("Your last save was damaged – loaded the one before it.", "bad")
+	_tr("load_game: read save")
 	_reset_vehicle_state()
 	ExploreUI.reset_cache()
 	empire = Empire.from_dict(d["empire"])
@@ -4225,9 +4364,12 @@ func load_game() -> bool:
 	CityLife.ensure_firms(empire)
 	Ventures._grant_homes(empire)   # (homes that come with Skyport buildings)
 	_migrate_penthouse_estate()
+	_tr("load_game: restore empire")
 	_connect_empire()
+	_tr("load_game: connect empire")
 	_rival_sig = "?"
 	_spawn_cars()
+	_tr("load_game: spawn cars")
 	_obj_sig = ""
 	gps.restore()
 	var pp: Array = d.get("player", [])
@@ -4246,8 +4388,10 @@ func load_game() -> bool:
 	else:
 		var s := starter_unit()
 		_teleport(Premises.door_point(s) + Premises.outward(s) * 3.0 + Vector3.UP, 0.0)
+	_tr("load_game: teleport")
 	for id in interiors.keys():
 		rebuild_interior(id)
+	_tr("load_game: rebuild %d interiors" % interiors.size())
 	return true
 
 

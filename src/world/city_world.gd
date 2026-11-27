@@ -200,10 +200,24 @@ var mainland: CityWorld
 var texture_terrain: CityTerrain
 
 
+## Built (the whole of _ready's work) – at once, or over many frames when
+## LoadPacer is active (the launch): wait with `if not w.is_built: await w.built`.
+signal built
+var is_built := false
+
+
 func _ready() -> void:
+	_build.call()
+
+
+func _build() -> void:
 	var t0 := Time.get_ticks_msec()
+	var tree := get_tree()
 	if layout == null:
-		layout = CityLayout.new().generate()
+		# (Node-free and deterministic: on a worker thread at launch, the same
+		# city as built in line – tests/test_load_async.gd.)
+		layout = (await LoadPacer.run(tree, func(): return CityLayout.new().generate())) as CityLayout
+		await LoadPacer.step(tree, 0.2)
 	if street_interiors_enabled:
 		street_units = layout.premises.cover_streets(layout)
 		if layout.mainland:
@@ -248,8 +262,16 @@ func _ready() -> void:
 		traffic_density = p["traffic"] * TRAFFIC_SHARE
 		detail_range = minf(380.0, view_distance * 0.45)
 	var _ma := OS.get_cmdline_user_args().has("--mem-audit")
+	var _lt := OS.get_cmdline_user_args().has("--load-timing")
 	var _m0 := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
+	var _tl := [t0]
+	if _lt:
+		print("LOAD_T CW[%s] %-22s %6d ms" % ["M" if secondary else "I", "layout+coast+setup", Time.get_ticks_msec() - t0])
+		_tl[0] = Time.get_ticks_msec()
 	var _mp := func(lbl: String) -> void:
+		if _lt:
+			print("LOAD_T CW[%s] %-22s %6d ms" % ["M" if secondary else "I", lbl, Time.get_ticks_msec() - int(_tl[0])])
+			_tl[0] = Time.get_ticks_msec()
 		if not _ma:
 			return
 		var m := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
@@ -257,11 +279,13 @@ func _ready() -> void:
 		_m0 = m
 	_materials()
 	_mp.call("materials")
+	await LoadPacer.step(tree, 0.22 if not secondary else 0.0)
 	if shared_assets_from != null:
 		_share_props_from(shared_assets_from)
 	else:
-		_load_props()
+		await _load_props()
 	_mp.call("props")
+	await LoadPacer.step(tree, 0.36 if not secondary else 0.0)
 	if traffic_density > 0.0 and not car_meshes.is_empty():
 		traffic = Traffic.new()
 		traffic.name = "Traffic"
@@ -278,6 +302,7 @@ func _ready() -> void:
 				_props_by_chunk[key] = []
 			_props_by_chunk[key].append(pole)
 	_mp.call("traffic")
+	await LoadPacer.step(tree, 0.42 if not secondary else 0.0)
 	if settings and not settings.changed.is_connected(_on_settings_changed):
 		settings.changed.connect(_on_settings_changed)
 	var land := layout.island.grow(130.0)  # (the shore apron reaches past the coast)
@@ -292,8 +317,10 @@ func _ready() -> void:
 			_all_keys.append(key)  # e.g. the far bridge anchorage across the river
 	_build_collision()
 	_mp.call("build_collision")
+	await LoadPacer.step(tree, 0.47 if not secondary else 0.0)
 	_build_prop_collision()
 	_mp.call("build_prop_collision")
+	await LoadPacer.step(tree, 0.49 if not secondary else 0.0)
 	if not secondary:
 		_build_water()
 		# The real sea floor under the shallows (the water shows it there).
@@ -305,6 +332,7 @@ func _ready() -> void:
 	_build_structures()
 	_build_homes()
 	_mp.call("water+lm+struct+homes")
+	await LoadPacer.step(tree, 0.54 if not secondary else 0.0)
 	if not secondary:
 		ads = AdScreens.new()
 		ads.name = "Ads"
@@ -320,17 +348,22 @@ func _ready() -> void:
 	sea_sky.setup(layout)
 	_bake_street_maps()
 	_mp.call("ads+trains+sea+stmaps")
+	await LoadPacer.step(tree, 0.57 if not secondary else 0.0)
 	# The whole map from far off (shown where chunks aren't streamed in).
 	far_city = FarCity.new()
 	add_child(far_city)
 	far_city.setup(self)
 	_mp.call("far_city")
+	await LoadPacer.step(tree, 0.58 if not secondary else 0.0)
 	if secondary:
 		print("Mainland: %d buildings, %d chunks, %d ms" % [layout.buildings.size(), _all_keys.size(),
 			Time.get_ticks_msec() - t0])
+		_done()
 		return
 	_bake_ground_height()
 	_build_birds()
+	_mp.call("ground_height+birds")
+	await LoadPacer.step(tree, 0.60 if not secondary else 0.0)
 	var hinter := Hinterland.new()
 	hinter.name = "Hinterland"
 	add_child(hinter)
@@ -342,12 +375,22 @@ func _ready() -> void:
 	# (The island's layout made Westbank's already: the railway crosses to it.)
 	mainland.layout = layout.mainland if layout.mainland else CityLayout.new().generate_mainland(layout.seed)
 	add_child(mainland)
+	if not mainland.is_built:
+		await mainland.built
 	layout.mainland = mainland.layout
+	_mp.call("hinterland+mainland")
+	await LoadPacer.step(tree, 0.72 if not secondary else 0.0)
 	# (The bridge's anchor lines are the island layout's; the mainland's
 	# approach viaduct edges join them.)
 	GrappleTargeting.anchor_lines = layout.anchor_lines + mainland.layout.anchor_lines
 	print("CityWorld: %d buildings, %d props, %d chunks, layout+collision %d ms" % [
 		layout.buildings.size(), layout.props.size(), _all_keys.size(), Time.get_ticks_msec() - t0])
+	_done()
+
+
+func _done() -> void:
+	is_built = true
+	built.emit()
 
 
 func _exit_tree() -> void:
@@ -927,6 +970,12 @@ func _share_props_from(src: CityWorld) -> void:
 
 
 func _load_props() -> void:
+	var _lt := OS.get_cmdline_user_args().has("--load-timing")
+	var _t := [Time.get_ticks_msec()]
+	var _lp := func(lbl: String) -> void:
+		if _lt:
+			print("LOAD_T   props.%-18s %6d ms" % [lbl, Time.get_ticks_msec() - int(_t[0])])
+			_t[0] = Time.get_ticks_msec()
 	for k in ["streetlight", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
 			"harbour_dome", "beacon", "cathedral_top", "traffic_light", "roof_hut", "cooling_tower"]:
 		var m := _load_mesh(k)
@@ -940,6 +989,7 @@ func _load_props() -> void:
 						_lamp_base = _lamp_mat.emission_energy_multiplier
 						m.surface_set_material(i, _lamp_mat)
 			prop_meshes[k] = m
+	_lp.call("prop_glbs")
 	# Street/park trees: TreeKit species (replace the single glTF tree).
 	for sp in TreeKit.SPECIES:
 		prop_meshes["tree_" + sp] = TreeKit.mesh(sp)
@@ -960,30 +1010,24 @@ func _load_props() -> void:
 		q.material = gm
 		_glow_mats.append(gm)
 		_glow_meshes.append(q)
+	_lp.call("trees+glow")
 	var shader: Shader = load("res://src/world/shaders/traffic.gdshader")
+	# (~3 s on a VPS core, the bulk of this step. On the main thread: merging
+	# a glTF body reads and writes mesh arrays through the RenderingServer,
+	# which a worker would wait on frame by frame – tried, 3.5× slower. Paced
+	# between meshes instead so the splash keeps moving.)
 	for kind in CAR_KINDS:
-		# Near model: <body>_traffic.glb when there is one (the catalogue cars
-		# are ~40k tris in full; a ~6k cut for traffic), else the body itself.
-		var near_name := String(kind[2]) + "_traffic"
-		var has_tr := ResourceLoader.exists(MODEL_VEH + near_name + ".glb")
-		var cm := _traffic_car_mesh(near_name, shader, String(kind[2]), true, false) if has_tr \
-			else _traffic_car_mesh(String(kind[2]), shader, "", true, false)
-		if cm == null:  # (the old low-detail model as a fallback)
-			cm = _legacy_car_mesh(String(kind[0]), shader)
-		car_meshes.append(cm)
-		# Near moving traffic: omit static wheels (NearTrafficPool animates them
-		# with spin + front-wheel steering) and include the night dipped-beam grid.
-		var cm_mov := _traffic_car_mesh(near_name, shader, String(kind[2]), false, true) if has_tr \
-			else _traffic_car_mesh(String(kind[2]), shader, "", false, true)
-		car_moving_meshes.append(cm_mov if cm_mov else cm)
-		var mid := _traffic_car_mesh(String(kind[2]) + "_lod1", shader, String(kind[2]), true, false)
-		car_mid_meshes.append(mid if mid else cm)
-		car_far_meshes.append(_car_far_mesh(cm) if cm else null)
+		var b: Array = await _car_kind_meshes(kind, shader)
+		car_meshes.append(b[0])
+		car_moving_meshes.append(b[1])
+		car_mid_meshes.append(b[2])
+		car_far_meshes.append(b[3])
 	# Four body types (tools/blender/build_street.py), one surface each;
 	# pedestrian.gdshader colours and poses them from their UVs.
 	# Far walkers from the current hero too (crowd_far.glb, build_crowd.py at
 	# ~900 tris): the old four-body pedestrians.glb read as a different, older
 	# game next to the near crowd (2026-11-21). Same part/limb encoding.
+	_lp.call("cars")
 	walker_meshes = _load_meshes("crowd_far") if ResourceLoader.exists("res://assets/models/crowd_far.glb") else _load_meshes("pedestrians")
 	if not walker_meshes.is_empty():
 		var wm := ShaderMaterial.new()
@@ -994,7 +1038,9 @@ func _load_props() -> void:
 			m.surface_set_material(0, wm)
 			walker_meshes[i] = m
 		walker_mesh = walker_meshes[0]
+	_lp.call("walkers")
 	_walk_paths = _pavement_paths()
+	_lp.call("pavement_paths")
 	for k in FURNITURE:
 		var fm := _load_mesh(k)
 		if fm:
@@ -1002,7 +1048,9 @@ func _load_props() -> void:
 	# Procedural street clutter and district banners (StreetClutter).
 	for k in StreetClutter.kinds():
 		_furn_src[k] = StreetClutter.build(k)
+	_lp.call("furniture+clutter")
 	_load_foliage()
+	_lp.call("foliage")
 	if ResourceLoader.exists("res://src/world/shaders/furniture.gdshader"):
 		var fsh := ShaderMaterial.new()
 		fsh.shader = load("res://src/world/shaders/furniture.gdshader")
@@ -1016,6 +1064,30 @@ func _load_props() -> void:
 	_shadow_mat = StandardMaterial3D.new()
 	_shadow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_furniture_by_chunk = _place_furniture()
+	_lp.call("place_furniture")
+
+
+## One traffic kind's [near, near moving, mid, far] meshes, pacing the
+## launch between them.
+func _car_kind_meshes(kind: Array, shader: Shader) -> Array:
+	var tree := get_tree()
+	# Near model: <body>_traffic.glb when there is one (the catalogue cars
+	# are ~40k tris in full; a ~6k cut for traffic), else the body itself.
+	var near_name := String(kind[2]) + "_traffic"
+	var has_tr := ResourceLoader.exists(MODEL_VEH + near_name + ".glb")
+	var cm := _traffic_car_mesh(near_name, shader, String(kind[2]), true, false) if has_tr \
+		else _traffic_car_mesh(String(kind[2]), shader, "", true, false)
+	if cm == null:  # (the old low-detail model as a fallback)
+		cm = _legacy_car_mesh(String(kind[0]), shader)
+	await LoadPacer.pace(tree)
+	# Near moving traffic: omit static wheels (NearTrafficPool animates them
+	# with spin + front-wheel steering) and include the night dipped-beam grid.
+	var cm_mov := _traffic_car_mesh(near_name, shader, String(kind[2]), false, true) if has_tr \
+		else _traffic_car_mesh(String(kind[2]), shader, "", false, true)
+	await LoadPacer.pace(tree)
+	var mid := _traffic_car_mesh(String(kind[2]) + "_lod1", shader, String(kind[2]), true, false)
+	await LoadPacer.pace(tree)
+	return [cm, cm_mov if cm_mov else cm, mid if mid else cm, _car_far_mesh(cm) if cm else null]
 
 
 ## Body + cabin boxes sized from the full model, sharing its paint and glass
@@ -2531,13 +2603,45 @@ func build_all_near(pos: Vector3, radius: float) -> void:
 	if mainland:
 		mainland.build_all_near(pos, radius)
 	var here := Vector2(pos.x, pos.z)
+	var keys: Array = []
 	for key in _all_keys:
 		var c := (Vector2(key) + Vector2(0.5, 0.5)) * CHUNK
 		if c.distance_to(here) < radius and not _loaded.has(key):
+			keys.append(key)
+	if keys.is_empty():
+		return
+	# (2026-11-27) The chunks' mesh arrays are pure data (generate_chunk_arrays
+	# runs on workers when streaming): build them all at once across the cores
+	# – one after another this was ~1 s of a teleport / Continue / New game on
+	# the VPS. Chunks streaming already have a task in flight: reuse it.
+	var fresh: Array = []
+	for key in keys:
+		if _pending.has(key):
+			WorkerThreadPool.wait_for_task_completion(_pending[key])
+			_pending.erase(key)
+		else:
+			fresh.append(key)
+	var out: Array = []
+	out.resize(fresh.size())
+	if not fresh.is_empty():
+		var gid := WorkerThreadPool.add_group_task(func(i: int) -> void:
 			var t0 := Time.get_ticks_usec()
-			var res := generate_chunk_arrays(key)
+			var res := generate_chunk_arrays(fresh[i])
 			res["usec"] = Time.get_ticks_usec() - t0
-			_instantiate(key, res)
+			out[i] = res, fresh.size(), -1, true, "chunks near")
+		WorkerThreadPool.wait_for_group_task_completion(gid)
+	_mutex.lock()
+	var done := {}
+	for key in keys:
+		if _results.has(key):
+			done[key] = _results[key]
+			_results.erase(key)
+	_mutex.unlock()
+	for i in fresh.size():
+		done[fresh[i]] = out[i]
+	for key in keys:
+		if done.has(key):
+			_instantiate(key, done[key])
 
 
 func _mesh_from(arrays) -> ArrayMesh:

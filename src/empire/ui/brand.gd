@@ -45,6 +45,34 @@ class Mark extends TextureRect:
 		return tw
 
 
+## The splash W's breathing halo: the same mask, blurred, on a rect grown
+## round a Mark by `margin` × its width each side (place it with fit()).
+class Glow extends TextureRect:
+	const GLOW_SHADER := preload("res://src/empire/ui/brand_glow.gdshader")
+	var mat: ShaderMaterial
+	var margin := 0.45
+
+	func _init() -> void:
+		texture = Brand.MASK
+		expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		stretch_mode = TextureRect.STRETCH_SCALE
+		texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		mat = ShaderMaterial.new()
+		mat.shader = GLOW_SHADER
+		mat.set_shader_parameter("mask_tex", Brand.MASK)
+		material = mat
+
+	func fit(mark: Control) -> void:
+		var g := mark.size.x * margin
+		position = mark.position - Vector2(g, g)
+		size = mark.size + Vector2(g, g) * 2.0
+		mat.set_shader_parameter("pad", Vector2(g / size.x, g / size.y))
+
+	func set_strength(k: float) -> void:
+		mat.set_shader_parameter("k", k)
+
+
 ## Mark + tracked WORLDSTATE caps. `h` = the mark's height.
 class Wordmark extends HBoxContainer:
 	var mark: Mark
