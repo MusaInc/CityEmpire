@@ -94,6 +94,15 @@ func set_streamed(key: Vector2i, streamed: bool) -> void:
 		node.visible = not streamed
 
 
+## Shared plain-massing mesh for a chunk (avoids duplicating Low + ShadowProxy).
+func low_mesh(key: Vector2i) -> Mesh:
+	var node := _nodes.get(key) as Node3D
+	if node == null:
+		return null
+	var mi := node.get_node_or_null("Low") as MeshInstance3D
+	return mi.mesh if mi else null
+
+
 func _instantiate(all_now := false) -> void:
 	Prof.begin("far_upload")
 	var started := Time.get_ticks_usec()

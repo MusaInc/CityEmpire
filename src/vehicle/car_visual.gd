@@ -18,6 +18,8 @@ const FLARE_SHADER := preload("res://src/vehicle/lamp_flare.gdshader")
 const LENS_SHADER := preload("res://src/vehicle/lamp_lens.gdshader")
 
 static var _mesh_cache := {}
+static var _mesh_cache_order: Array[String] = []
+const MESH_CACHE_MAX := 14
 static var _mat_cache := {}
 static var _lamp_cache := {}
 static var _flare_mat: ShaderMaterial
@@ -87,6 +89,8 @@ var _heads_ok := 1.0             # share of headlamps still working
 
 static func load_mesh(name: String) -> Mesh:
 	if _mesh_cache.has(name):
+		_mesh_cache_order.erase(name)
+		_mesh_cache_order.append(name)
 		return _mesh_cache[name]
 	var path := DIR + name + ".glb"
 	var m: Mesh = null
@@ -98,6 +102,13 @@ static func load_mesh(name: String) -> Mesh:
 			m = (mis[0] as MeshInstance3D).mesh
 		n.free()
 	_mesh_cache[name] = m
+	_mesh_cache_order.erase(name)
+	_mesh_cache_order.append(name)
+	while _mesh_cache_order.size() > MESH_CACHE_MAX:
+		var evict: String = _mesh_cache_order.pop_front()
+		_mesh_cache.erase(evict)
+		_lamp_cache.erase(evict)
+		_sealed_glass.erase(evict)
 	return m
 
 
@@ -961,7 +972,33 @@ func _ensure_copy() -> void:
 
 
 static var _dent_cache := {}
+static var _dent_cache_order: Array[String] = []
+const DENT_CACHE_MAX := 8
 static var _part_lists_cache := {}
+
+
+## Release cached mesh/damage/part arrays for vehicle bodies not in `keep_bodies`.
+static func trim_caches(keep_bodies: Array = []) -> void:
+	for k in _mesh_cache.keys():
+		if k not in keep_bodies:
+			_mesh_cache.erase(k)
+			_mesh_cache_order.erase(k)
+	for k in _lamp_cache.keys():
+		if k not in keep_bodies:
+			_lamp_cache.erase(k)
+	for k in _sealed_glass.keys():
+		if k not in keep_bodies:
+			_sealed_glass.erase(k)
+	for k in _dent_cache.keys():
+		if k not in keep_bodies:
+			_dent_cache.erase(k)
+			_dent_cache_order.erase(k)
+	for k in _part_lists_cache.keys():
+		if k not in keep_bodies:
+			_part_lists_cache.erase(k)
+	for k in _part_cache.keys():
+		if k not in keep_bodies:
+			_part_cache.erase(k)
 ## Per surface: part id -> PackedInt32Array of its triangles' vertex indices
 ## (3 per triangle), in source order. Losing a panel then only touches its
 ## own triangles (detach) and the kept lists are joined natively (_rebuild).
@@ -1009,6 +1046,12 @@ static func warm_dent_cache(path: String, src: Mesh = null) -> Dictionary:
 			c["cells"].append(_cells_for(rv))
 		_part_lists(path, c["idx"], part_map(path, src))   # (panels: loading, not mid-crash)
 	_dent_cache[path] = c
+	_dent_cache_order.erase(path)
+	_dent_cache_order.append(path)
+	while _dent_cache_order.size() > DENT_CACHE_MAX:
+		var evict: String = _dent_cache_order.pop_front()
+		_dent_cache.erase(evict)
+		_part_lists_cache.erase(evict)
 	return c
 
 

@@ -94,11 +94,26 @@ var _warm := false
 var _cloud_sync := Callable()
 
 
+func _mem_mark(tag: String, prev: Array) -> void:
+	if not args.has("mem-audit"):
+		return
+	var mb := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
+	var nodes := int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
+	var objs := int(Performance.get_monitor(Performance.OBJECT_COUNT))
+	var res := int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT))
+	print("MEM_AUDIT %-24s %7.1f MB (%+6.1f) | nodes %6d (%+6d) | objs %6d | res %5d" % [
+		tag, mb, mb - float(prev[0]), nodes, nodes - int(prev[1]), objs, res])
+	prev[0] = mb
+	prev[1] = nodes
+
+
 func _ready() -> void:
 	CarVisual.auto_dent = true   # (every car's impacts dent its own body)
 	for a in OS.get_cmdline_user_args():
 		var kv := a.trim_prefix("--").split("=", true, 1)
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
+	var _mp := [Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))]
+	_mem_mark("boot", _mp)
 	Prof.enabled = args.has("profile-world")
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
@@ -129,6 +144,7 @@ func _ready() -> void:
 	world.name = "World"
 	world.street_interiors_enabled = true
 	add_child(world)
+	_mem_mark("CityWorld+Mainland", _mp)
 	layout = world.layout
 	# Skyport Island (the third island: airport, logistics, high-rise, marina).
 	SkyportIsland.enabled = true
@@ -138,10 +154,12 @@ func _ready() -> void:
 	skyport.name = "Skyport"
 	add_child(skyport)
 	skyport.build(layout, world)
+	_mem_mark("SkyportIsland", _mp)
 	var lfn := Landforms.new()
 	lfn.name = "Landforms"
 	add_child(lfn)
 	lfn.build(layout)
+	_mem_mark("Landforms", _mp)
 	skyport.viewer = func() -> Vector3:
 		if state == "title" and is_instance_valid(_title_focus):
 			return _title_focus.global_position
@@ -150,6 +168,7 @@ func _ready() -> void:
 		return vehicle_node().global_position if vehicle_node() else player.global_position
 	print("Skyport Island: %d ms" % (Time.get_ticks_msec() - t1))
 	_build_elevators()
+	_mem_mark("Elevators", _mp)
 	EmpireMinimap.bake.call_deferred(self, layout)  # (the minimap's and phone map's city image)
 	atmosphere.configure(args, world)
 	Car.water_check = layout.is_water
@@ -185,11 +204,13 @@ func _ready() -> void:
 	player.add_child(rig)
 	rig.set_player(player)
 	rig.apply_look(HeroLook.build(HeroLook.DEFAULT))
+	_mem_mark("Player+CharacterRig", _mp)
 	# The people on the pavements round you (the GPU walkers carry the far streets).
 	crowd = Crowd.new()
 	crowd.name = "Crowd"
 	add_child(crowd)
 	crowd.setup(self)
+	_mem_mark("Crowd", _mp)
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
 	add_child(camera)
@@ -273,6 +294,7 @@ func _ready() -> void:
 	near_traffic.name = "NearTrafficPool"
 	add_child(near_traffic)
 	near_traffic.setup(self)
+	_mem_mark("UI+Venues+Gps+NearTraf", _mp)
 	# Dynamic resolution on phones (CitySwing's FrameGovernor; WorldState never
 	# installed it, audit WS-08): eases the 3-D render scale down under load or
 	# heat and back up with headroom, so heavy views stay smooth.
@@ -297,6 +319,7 @@ func _ready() -> void:
 	garage.name = "VehicleGarage"
 	add_child(garage)
 	garage.setup(self)
+	_mem_mark("Wrecks+Garage", _mp)
 	props = Destructibles.new()
 	props.name = "Destructibles"
 	add_child(props)
@@ -1796,6 +1819,7 @@ func _door_assist(move: Vector3) -> Vector3:
 ## the change happens as you cross the threshold, not up to 0.4 s later.
 func _update_indoors() -> void:
 	var ceiling := INF
+	var in_elev := false
 	if driving == "":
 		var p := player.global_position
 		for id in interiors:
@@ -1805,10 +1829,17 @@ func _update_indoors() -> void:
 				break
 		if ceiling == INF and venues:
 			ceiling = venues.ceiling_at(p)
+		if ceiling == INF and garage and garage.inside:
+			if garage.lift and garage.lift.is_inside_cabin(p):
+				ceiling = garage.lift.global_position.y + garage.lift.cabin_y + ApartmentElevator.CAB_H - 0.05
+				in_elev = true
+			else:
+				ceiling = garage.global_position.y + VehicleGarage.H - 0.1
 		if ceiling == INF:
 			for el: ApartmentElevator in elevators.values():
 				if el.is_inside_cabin(p):
 					ceiling = el.global_position.y + el.cabin_y + ApartmentElevator.CAB_H - 0.05
+					in_elev = true
 					break
 				elif el.is_inside_lobby(p):
 					var at_upper := absf(p.y - (el.global_position.y + el.top_y + 0.95)) < 2.2
@@ -1818,6 +1849,7 @@ func _update_indoors() -> void:
 	if audio:
 		audio.shelter = 1.0 if player.indoors else (0.6 if driving != "" else 0.0)
 	camera.indoor_ceiling = ceiling
+	camera.in_elevator = in_elev
 	if atmosphere.rain_fx:
 		atmosphere.rain_fx.sheltered = ceiling < INF
 	var close := camera.cam.global_position.distance_squared_to(player.global_position) < 12.25
@@ -3141,6 +3173,10 @@ func delivery_quote(vid: String) -> Dictionary:
 ## the car you're in – on the nearest road lane, facing along it. Craft go
 ## back to where they last stood (only once landed / stopped). "" or why not.
 func unstick() -> String:
+	reset_all_elevators()
+	if garage and garage.inside and driving == "":
+		garage.leave_on_foot()
+		return ""
 	if skyport_play and skyport_play.piloting != "":
 		var cr: Craft = skyport_play.crafts.get(skyport_play.piloting)
 		if cr == null:
@@ -3684,6 +3720,11 @@ func _migrate_penthouse_estate() -> void:
 
 ## Build furnished ground lobbies, shafts and working 3D elevators for every apartment.
 func _build_elevators() -> void:
+	var old := get_node_or_null("ApartmentElevators")
+	if old:
+		remove_child(old)
+		old.queue_free()
+	elevators.clear()
 	var root := Node3D.new()
 	root.name = "ApartmentElevators"
 	add_child(root)
@@ -3730,25 +3771,47 @@ func _tick_elevators(dt: float) -> void:
 	if riding and not _elev_riding:
 		_elev_riding = true
 		player.scripted = true
-		_face_lift_doors(_riding_el)
+		_face_lift_doors(_riding_el, false)
 	elif not riding and _elev_riding:
 		_elev_riding = false
 		player.scripted = false
-		_face_lift_doors(_riding_el)   # (doors open: the camera's behind you, looking out)
+		_face_lift_doors(_riding_el, false)   # (doors open: smooth turn to face out)
+		_riding_el = null
+	elif not riding and player.scripted and not vehicle_access.active() and driving == "" and not camera.cine.is_valid():
+		# Recovery guard: never leave controls permanently disabled after an interrupted transition.
+		player.scripted = false
 
 
 var _riding_el: ApartmentElevator
 
 
+## Safely reset all elevator state machines so an interrupted transition never
+## leaves the player trapped or controls disabled.
+func reset_all_elevators() -> void:
+	for el: ApartmentElevator in elevators.values():
+		if is_instance_valid(el):
+			el.reset_safe()
+	if garage and garage.lift and is_instance_valid(garage.lift):
+		garage.lift.reset_safe()
+	_elev_riding = false
+	_riding_el = null
+	if player and driving == "" and not vehicle_access.active():
+		player.scripted = false
+
+
 ## Character and camera face out through the lift's doors (riding, arriving).
-func _face_lift_doors(el: ApartmentElevator) -> void:
+func _face_lift_doors(el: ApartmentElevator, instant := false) -> void:
 	if el == null or not is_instance_valid(el):
 		return
 	var out := el.global_basis.z
 	out.y = 0.0
 	out = out.normalized()
 	rig.set_facing(out)
-	camera.face(atan2(-out.x, -out.z))
+	var target_yaw := atan2(-out.x, -out.z)
+	if instant:
+		camera.face(target_yaw)
+	else:
+		camera.ease_face(target_yaw)
 
 
 ## Inside the cabin: the floor buttons (2026-11-26) – up to the apartment,
@@ -3812,7 +3875,7 @@ func _carry_rider(from: Transform3D, to_el: ApartmentElevator) -> void:
 	vehicle_access.interrupt()
 	player.respawn(p)
 	player.last_safe_position = p
-	_face_lift_doors(to_el)
+	_face_lift_doors(to_el, true)
 	player.scripted = true
 	_riding_el = to_el
 
@@ -4122,6 +4185,7 @@ func _exit_tree() -> void:
 	if _cloud_sync.is_valid() and get_tree() and get_tree().process_frame.is_connected(_cloud_sync):
 		get_tree().process_frame.disconnect(_cloud_sync)
 	_cloud_sync = Callable()
+	CarVisual.trim_caches()
 
 
 func _notification(what: int) -> void:

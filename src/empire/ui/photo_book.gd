@@ -9,7 +9,7 @@ extends RefCounted
 
 const S = preload("res://src/empire/ui/empire_style.gd")
 const DIR := "res://assets/photos/"
-const CACHE := 48
+const CACHE := 20
 const VIEW_NAMES := {"front": "Street", "area": "Location", "inside": "Inside"}
 
 static var _cache := {}          # path -> Texture2D

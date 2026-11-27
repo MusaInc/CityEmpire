@@ -121,6 +121,9 @@ func crossing_blocked(a: Vector2, b: Vector2) -> bool:
 func _process(dt: float) -> void:
 	if _mm.is_empty():
 		return
+	var cam: Camera3D = get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam != null and cam.global_position.y < -100.0:
+		return
 	dt = minf(dt, 0.1)
 	# Ahead-of-me on the same lane: sort each lane's cars by s.
 	var by_lane := {}
@@ -164,7 +167,6 @@ func _process(dt: float) -> void:
 			c["s"] = float(c["s"]) + float(c["v"]) * dt
 			if float(c["s"]) >= float(L["len"]):
 				_next_lane(c, L)
-	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	for c in cars:
 		if float(c["wait"]) > 0.0:
 			c["wait"] = float(c["wait"]) - dt

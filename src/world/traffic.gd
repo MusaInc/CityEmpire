@@ -1005,7 +1005,9 @@ func _process(dt: float) -> void:
 		if not _dormant.has(id) and c_ev[id] <= now:
 			_event(id)
 	_cull_t -= dt
-	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	var cam: Camera3D = get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam != null and cam.global_position.y < -100.0:
+		return
 	var rot_changed := cam != null and (-cam.global_basis.z).dot(_last_cam_fw) < 0.988
 	if _cull_t <= 0.0 or rot_changed:
 		_cull_t = 0.14
@@ -1420,7 +1422,7 @@ func _make_groups(meshes: Array, far_meshes: Array, mid_meshes: Array) -> void:
 func _cull() -> void:
 	if _groups.is_empty():
 		return
-	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	var cam: Camera3D = get_viewport().get_camera_3d() if is_inside_tree() else null
 	var cp := cam.global_position if cam else Vector3.ZERO
 	var fw := -cam.global_basis.z if cam else Vector3.FORWARD
 	var cos_lim := -1.0

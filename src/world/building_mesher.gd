@@ -932,11 +932,7 @@ static func _fpt(f: Array, a: float, o: float, y: float) -> Vector3:
 ##   draw: [[AABB, Color]] solid boxes   beams: [[a, b, w, h, Color]]
 ##   col:  [AABB] what you stand on / bump into (covers draw and beams)
 static func features(b: Dictionary) -> Dictionary:
-	if b.has("_features"):
-		return b["_features"]
-	var out := _clear_of_apt(b, _features(b))
-	b["_features"] = out  # (the mesher, awnings and collision all ask)
-	return out
+	return _clear_of_apt(b, _features(b))
 
 
 static func _features(b: Dictionary) -> Dictionary:

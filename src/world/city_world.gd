@@ -191,6 +191,9 @@ var gen_ms_total := 0.0
 ## The mainland (Westbank) is a second CityWorld, `secondary`, streaming its
 ## own layout (CityLayout.generate_mainland) as a child of the island's.
 var secondary := false
+## Primary CityWorld whose immutable prop/vehicle/walker/foliage meshes are shared
+## with mainland (0.23.0 memory pass: avoids duplicating ~100 MB of meshes & textures).
+var shared_assets_from: CityWorld
 var mainland: CityWorld
 ## The terrain the walkers' ground_height texture was baked from (the
 ## island's; the mainland world borrows it).
@@ -244,8 +247,21 @@ func _ready() -> void:
 		# and the frame time goes to quality instead of quantity.
 		traffic_density = p["traffic"] * TRAFFIC_SHARE
 		detail_range = minf(380.0, view_distance * 0.45)
+	var _ma := OS.get_cmdline_user_args().has("--mem-audit")
+	var _m0 := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
+	var _mp := func(lbl: String) -> void:
+		if not _ma:
+			return
+		var m := Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0
+		print("  MEM_CW[%s] %-22s %7.1f MB (%+6.1f) | nodes %d" % ["M" if secondary else "I", lbl, m, m - _m0, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))])
+		_m0 = m
 	_materials()
-	_load_props()
+	_mp.call("materials")
+	if shared_assets_from != null:
+		_share_props_from(shared_assets_from)
+	else:
+		_load_props()
+	_mp.call("props")
 	if traffic_density > 0.0 and not car_meshes.is_empty():
 		traffic = Traffic.new()
 		traffic.name = "Traffic"
@@ -261,6 +277,7 @@ func _ready() -> void:
 			if not _props_by_chunk.has(key):
 				_props_by_chunk[key] = []
 			_props_by_chunk[key].append(pole)
+	_mp.call("traffic")
 	if settings and not settings.changed.is_connected(_on_settings_changed):
 		settings.changed.connect(_on_settings_changed)
 	var land := layout.island.grow(130.0)  # (the shore apron reaches past the coast)
@@ -274,7 +291,9 @@ func _ready() -> void:
 		if not key in _all_keys:
 			_all_keys.append(key)  # e.g. the far bridge anchorage across the river
 	_build_collision()
+	_mp.call("build_collision")
 	_build_prop_collision()
+	_mp.call("build_prop_collision")
 	if not secondary:
 		_build_water()
 		# The real sea floor under the shallows (the water shows it there).
@@ -285,6 +304,7 @@ func _ready() -> void:
 	_build_landmarks()
 	_build_structures()
 	_build_homes()
+	_mp.call("water+lm+struct+homes")
 	if not secondary:
 		ads = AdScreens.new()
 		ads.name = "Ads"
@@ -299,10 +319,12 @@ func _ready() -> void:
 	add_child(sea_sky)
 	sea_sky.setup(layout)
 	_bake_street_maps()
+	_mp.call("ads+trains+sea+stmaps")
 	# The whole map from far off (shown where chunks aren't streamed in).
 	far_city = FarCity.new()
 	add_child(far_city)
 	far_city.setup(self)
+	_mp.call("far_city")
 	if secondary:
 		print("Mainland: %d buildings, %d chunks, %d ms" % [layout.buildings.size(), _all_keys.size(),
 			Time.get_ticks_msec() - t0])
@@ -315,6 +337,7 @@ func _ready() -> void:
 	mainland = CityWorld.new()
 	mainland.name = "Mainland"
 	mainland.secondary = true
+	mainland.shared_assets_from = self
 	mainland.texture_terrain = layout.terrain
 	# (The island's layout made Westbank's already: the railway crosses to it.)
 	mainland.layout = layout.mainland if layout.mainland else CityLayout.new().generate_mainland(layout.seed)
@@ -339,6 +362,20 @@ func _exit_tree() -> void:
 	_refreshing.clear()
 	_results.clear()
 	_lamps_by_chunk.clear()
+	_ground_cache.clear()
+	_parked_cache.clear()
+	_furniture_by_chunk.clear()
+	_by_chunk.clear()
+	prop_meshes.clear()
+	car_meshes.clear()
+	car_moving_meshes.clear()
+	car_mid_meshes.clear()
+	car_far_meshes.clear()
+	walker_meshes.clear()
+	_furn_src.clear()
+	_fol_src.clear()
+	_glow_mats.clear()
+	_glow_meshes.clear()
 	if not secondary:
 		GrappleTargeting.anchor_lines = []
 
@@ -866,6 +903,27 @@ func _load_meshes(name: String) -> Array:
 		out.append((mi as MeshInstance3D).mesh)
 	inst.free()
 	return out
+
+
+func _share_props_from(src: CityWorld) -> void:
+	prop_meshes = src.prop_meshes
+	_lamp_mat = src._lamp_mat
+	_lamp_base = src._lamp_base
+	_glow_mats = src._glow_mats
+	_glow_meshes = src._glow_meshes
+	car_meshes = src.car_meshes
+	car_moving_meshes = src.car_moving_meshes
+	car_mid_meshes = src.car_mid_meshes
+	car_far_meshes = src.car_far_meshes
+	walker_meshes = src.walker_meshes
+	walker_mesh = src.walker_mesh
+	_walk_paths = _pavement_paths()
+	_furn_src = src._furn_src
+	_fol_src = src._fol_src
+	foliage_mat = src.foliage_mat
+	furniture_mat = src.furniture_mat
+	_shadow_mat = src._shadow_mat
+	_furniture_by_chunk = _place_furniture()
 
 
 func _load_props() -> void:
@@ -1606,20 +1664,12 @@ func _furniture_arrays(key: Vector2i):
 ## roofs at the height they're drawn, cornices, parapets, plinths and awnings
 ## solid, the street at 0 and the raised pavements at their kerb height.
 func _build_collision() -> void:
-	# Fill every building's feature cache here, on the main thread, before
-	# any chunk task reads them.
-	for b in layout.buildings:
-		BuildingMesher.features(b)
 	var by_chunk := _by_chunk
 	for key in by_chunk:
 		var body := StaticBody3D.new()
 		body.name = "Col_%d_%d" % [key.x, key.y]
 		body.collision_layer = 1 | (1 << 1)
 		body.collision_mask = 0
-		var soft := StaticBody3D.new()
-		soft.name = "ColHuman_%d_%d" % [key.x, key.y]
-		soft.collision_layer = HUMAN_LAYER
-		soft.collision_mask = 0
 		for b in by_chunk[key]:
 			var X := CityLayout.bxf(b)
 			var turned := float(b.get("rot", 0.0)) != 0.0
@@ -1635,14 +1685,7 @@ func _build_collision() -> void:
 				cs.shape = cp
 				cs.transform = X
 				body.add_child(cs)
-			if b["kind"] == "normal":
-				for box: AABB in BuildingMesher.features(b)["col_human"]:
-					_add_box_xf(soft, box, X)
 		add_child(body)
-		if soft.get_child_count() > 0:
-			add_child(soft)
-		else:
-			soft.free()
 	var street := StaticBody3D.new()
 	street.name = "Street"
 	street.collision_layer = 1 << 3
@@ -1659,7 +1702,6 @@ func _build_collision() -> void:
 	for i in _all_keys.size():
 		var gm: BuildingMesher = _ground_meshers[i]
 		_add_faces(street, gm)
-		_ground_cache[_all_keys[i]] = null if gm.is_empty() else gm.arrays()  # drawn later from the same triangles
 	_ground_meshers.clear()
 	var og := BuildingMesher.new()
 	for r in outer_ground_rects():
@@ -1752,9 +1794,14 @@ func _prop_boxes(kind: String) -> Array:
 func _build_prop_collision() -> void:
 	var car_boxes: Array = []
 	for k in CAR_KINDS:
-		var cm := _load_mesh(k[0])
-		var a := cm.get_aabb() if cm else AABB(Vector3(-1, 0, -2.3), Vector3(2, 1.45, 4.6))
-		car_boxes.append([a.size, a.get_center()])
+		var d: Dictionary = BodyDims.DIMS.get(String(k[2]), {})
+		if not d.is_empty():
+			var w := float(d["W"])
+			var h := float(d["roof"])
+			var l := float(d["L"])
+			car_boxes.append([Vector3(w, h, l), Vector3(0.0, h * 0.5, 0.0)])
+		else:
+			car_boxes.append([Vector3(2.0, 1.45, 4.6), Vector3(0.0, 0.725, 0.0)])
 	var cache := {}
 	var keys := {}
 	for k in _props_by_chunk:
@@ -1768,10 +1815,6 @@ func _build_prop_collision() -> void:
 		body.name = "Props_%d_%d" % [key.x, key.y]
 		body.collision_layer = PROPS_LAYER
 		body.collision_mask = 0
-		var soft := StaticBody3D.new()
-		soft.name = "PropsHuman_%d_%d" % [key.x, key.y]
-		soft.collision_layer = HUMAN_LAYER
-		soft.collision_mask = 0
 		var solid := StaticBody3D.new()
 		solid.name = "PropsSolid_%d_%d" % [key.x, key.y]
 		solid.collision_layer = PROPS_LAYER | SOLID_LAYER
@@ -1779,17 +1822,15 @@ func _build_prop_collision() -> void:
 		var items: Array = chunk_props(key) + chunk_furniture(key)
 		for it in items:
 			var kind: String = it[0]
+			if kind in HUMAN_ONLY_PROPS:
+				continue
 			if not cache.has(kind):
 				cache[kind] = _prop_boxes(kind)
-			var target := soft if kind in HUMAN_ONLY_PROPS else (solid if kind in SOLID_PROPS else body)
+			var target := solid if kind in SOLID_PROPS else body
 			for bx in cache[kind]:
 				var sh := _add_oriented_box(target, it[1], bx[0], bx[1])
 				if target == body:
 					_shape_by_key[item_key((it[1] as Transform3D).origin)] = sh
-		if soft.get_child_count() > 0:
-			add_child(soft)
-		else:
-			soft.free()
 		# Parked cars: solid to vehicles (you used to drive through them);
 		# Wrecks turns one into a real car when you hit it.
 		for pc in parked_cars(key):
@@ -1802,13 +1843,25 @@ func _build_prop_collision() -> void:
 				b2.free()
 
 
+## Shared BoxShape3D pool (quantized to 2 cm) to avoid tens of thousands of duplicate physics shapes.
+static var _box_shapes := {}
+
+
+static func _shared_box(size: Vector3) -> BoxShape3D:
+	var k := Vector3i(maxi(1, roundi(size.x * 50.0)), maxi(1, roundi(size.y * 50.0)), maxi(1, roundi(size.z * 50.0)))
+	var bs: BoxShape3D = _box_shapes.get(k)
+	if bs == null:
+		bs = BoxShape3D.new()
+		bs.size = Vector3(k.x * 0.02, k.y * 0.02, k.z * 0.02)
+		_box_shapes[k] = bs
+	return bs
+
+
 ## A box of `size` at `centre` in the frame `xf` (uniform scale baked into the size).
 static func _add_oriented_box(body: StaticBody3D, xf: Transform3D, size: Vector3, centre: Vector3) -> CollisionShape3D:
 	var sc := xf.basis.get_scale()
 	var shape := CollisionShape3D.new()
-	var bs := BoxShape3D.new()
-	bs.size = size * sc
-	shape.shape = bs
+	shape.shape = _shared_box(size * sc)
 	shape.transform = Transform3D(xf.basis.orthonormalized(), xf * centre)
 	body.add_child(shape)
 	return shape
@@ -1993,9 +2046,7 @@ static func _add_box_xf(body: StaticBody3D, box: AABB, xf: Transform3D) -> void:
 	if box.size.x <= 0.0 or box.size.y <= 0.0 or box.size.z <= 0.0:
 		return
 	var shape := CollisionShape3D.new()
-	var bs := BoxShape3D.new()
-	bs.size = box.size
-	shape.shape = bs
+	shape.shape = _shared_box(box.size)
 	shape.transform = xf * Transform3D(Basis(), box.get_center())
 	body.add_child(shape)
 
@@ -2004,9 +2055,7 @@ static func _add_box(body: StaticBody3D, box: AABB) -> void:
 	if box.size.x <= 0.0 or box.size.y <= 0.0 or box.size.z <= 0.0:
 		return
 	var shape := CollisionShape3D.new()
-	var bs := BoxShape3D.new()
-	bs.size = box.size
-	shape.shape = bs
+	shape.shape = _shared_box(box.size)
 	shape.position = box.get_center()
 	body.add_child(shape)
 
@@ -2269,10 +2318,11 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 			var road_axis := layout.roads.travel_axis(here, fwd)
 			var upcoming := layout.roads.travel_axis(here + road_axis * minf(lead, 36.0), road_axis)
 			route_axis = fwd.lerp(upcoming, 0.6).normalized()
+		var detail_stream := minf(vista_range, detail_range + 40.0) if far_city != null else vista_range
 		for key in _all_keys:
 			var c := (Vector2(key) + Vector2(0.5, 0.5)) * CHUNK
 			var offset := c - here
-			var radius := vista_range + CHUNK * 0.75
+			var radius := detail_stream + CHUNK * 0.45
 			var d2 := offset.length_squared()
 			var along := offset.dot(route_axis)
 			var cross_track := absf(offset.cross(route_axis))
@@ -2281,7 +2331,7 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 				var facing := along / sqrt(d2) if d2 > CHUNK * CHUNK else 0.0
 				var camera_facing := camera_axis.dot(offset) / maxf(sqrt(d2), 1.0)
 				want[key] = sqrt(d2) * (1.0 - 0.32 * maxf(facing, 0.0) - 0.13 * maxf(camera_facing, 0.0) + 0.38 * maxf(-facing, 0.0))
-			elif _loaded.has(key) and d2 > pow(radius + CHUNK * 0.66, 2.0):
+			elif _loaded.has(key) and d2 > pow(radius + CHUNK * 0.45, 2.0):
 				var old := _loaded[key] as Node3D
 				remove_child(old)
 				_loaded.erase(key)
@@ -2332,19 +2382,26 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 	var detail := BuildingMesher.new()
 	var low := BuildingMesher.new()
 	var feats := BuildingMesher.new()
+	var col_human: Array = []
 	for b in _by_chunk.get(key, []):
 		detail.add_building(b, true)
 		low.add_building(b, false)
 		if b["kind"] == "normal":
+			var bf := BuildingMesher.features(b)
 			feats.add_features(b)
+			if not (bf["col_human"] as Array).is_empty():
+				col_human.append([CityLayout.bxf(b), bf["col_human"]])
 			detail.add_skyline(b)
 			low.add_skyline(b)
+	var gm := BuildingMesher.new()
+	gm.add_ground(layout, rect)
 	var furn: Variant = _furniture_arrays(key)
 	return {
 		"detail": null if detail.is_empty() else detail.arrays(),
 		"low": null if low.is_empty() else low.arrays(),
 		"features": null if feats.is_empty() else feats.arrays(),
-		"ground": _ground_cache.get(key),
+		"col_human": col_human,
+		"ground": null if gm.is_empty() else gm.arrays(),
 		"furniture": furn,
 		"foliage": _foliage_arrays(key),
 		"pools": _pool_arrays(key),
@@ -2499,7 +2556,8 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 	var root := Node3D.new()
 	root.name = "Chunk_%d_%d" % [key.x, key.y]
 	var detail := _mesh_from(res.get("detail"))
-	var low := _mesh_from(res.get("low"))
+	var shared_low: Mesh = far_city.low_mesh(key) if far_city else null
+	var low: Mesh = shared_low if shared_low != null else _mesh_from(res.get("low"))
 	var ground := _mesh_from(res.get("ground"))
 	if detail:
 		var mi := MeshInstance3D.new()
@@ -2570,6 +2628,7 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 	_add_walkers(root, key, res.get("walkers", []))
 	Prof.end("chunk_walkers")
 	_add_occluder(root, key)
+	_add_chunk_human_collision(root, key, res.get("col_human", []))
 	_loaded[key] = root
 	if far_city:
 		far_city.set_streamed(key, true)
@@ -2579,6 +2638,32 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 	link_lods(root.get_node_or_null("ShadowProxy"), far)
 	chunks_built += 1
 	Prof.end("chunk_upload")
+
+
+## Streamed HUMAN_LAYER collision (balconies, fire escapes, awnings, benches, bins)
+## built with the chunk and freed when the chunk unloads (0.23.0 memory pass).
+func _add_chunk_human_collision(root: Node3D, key: Vector2i, col_human: Array) -> void:
+	var soft := StaticBody3D.new()
+	soft.name = "ColHuman_%d_%d" % [key.x, key.y]
+	soft.collision_layer = HUMAN_LAYER
+	soft.collision_mask = 0
+	for entry in col_human:
+		var X: Transform3D = entry[0]
+		for box: AABB in entry[1]:
+			_add_box_xf(soft, box, X)
+	var cache := {}
+	for it in chunk_props(key) + chunk_furniture(key):
+		var kind: String = it[0]
+		if kind not in HUMAN_ONLY_PROPS:
+			continue
+		if not cache.has(kind):
+			cache[kind] = _prop_boxes(kind)
+		for bx in cache[kind]:
+			_add_oriented_box(soft, it[1], bx[0], bx[1])
+	if soft.get_child_count() > 0:
+		root.add_child(soft)
+	else:
+		soft.free()
 
 
 ## The props drawn in a chunk at the current density: [kind, Transform3D].

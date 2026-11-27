@@ -326,7 +326,9 @@ func _set_visible(on: bool) -> void:
 func _build_lift(tier: int) -> void:
 	_lift_tier = tier
 	if lift:
+		remove_child(lift)
 		lift.queue_free()
+		lift = null
 	lift = ApartmentElevator.build_garage_stop(tier, BAY_LEVEL)
 	add_child(lift)
 	lift.visible = inside
@@ -406,10 +408,15 @@ func _label(text: String, size: int, px: float, col: Color, at: Vector3, rot: Ve
 func _build(n: int) -> void:
 	bays = n
 	if _vis:
+		remove_child(_vis)
 		_vis.queue_free()
+		_vis = null
 	if _col:
+		remove_child(_col)
 		_col.queue_free()
+		_col = null
 	_lights.clear()
+	_plaques.clear()
 	_batches.clear()
 	_vis = Node3D.new()
 	_vis.name = "Visual"

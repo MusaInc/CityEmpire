@@ -1,5 +1,23 @@
 # Status (2026-11-19, WORLDSTATE final overhaul; branch final-overhaul → 0.8.0)
 
+## Stability, memory & apartment systems overhaul (2026-11-27, WorldState 0.23.0)
+
+Major engineering and stability pass building on 0.22.0 (no new gameplay features):
+- **Memory & iOS Jetsam prevention**:
+  - `CityWorld` shares immutable prop/vehicle/walker/foliage meshes & materials with `mainland` (`_share_props_from`), removes permanent `_ground_cache` CPU array retention (chunk ground built on worker threads), removes permanent `b["_features"]` dictionary caching on all 1,953 buildings (`BuildingMesher.features`), pools `BoxShape3D` collision shapes (`_shared_box`, quantized to 2 cm), streams `ColHuman_*` / `PropsHuman_*` with chunks instead of resident at boot, reuses `FarCity.low_mesh()` for streamed `Low`/`ShadowProxy`, and caps detail chunk streaming radius to `detail_range + 40 m` when `FarCity` is active.
+  - Bounded LRU eviction for `CarVisual` (`_mesh_cache`, `_dent_cache`, `_lamp_cache`, `_sealed_glass`, `_part_lists_cache`, `_part_cache`), `PhotoBook` (`CACHE = 20`), and cache cleanup on `Venues._free()`, `SkyportIsland._free_near()` (`SkyportKit.clear_cache()`), and `EmpireGame._exit_tree()`.
+  - Texture memory pass: 80+ PBR/vehicle/tree-bark textures capped at `process/size_limit=1024` and world atlases (`foliage_atlas`, `shop_brands`, `tree_impostors`) switched to VRAM compression (`compress/mode=2`, S3TC + ETC2/ASTC).
+  - Measured on Linux headless (`--quality=1`): `SOAK` (3 laps + garage round trips) static memory **1,465 → 1,152 MB** (lap 0, −21.4%), **1,485 → 1,135 MB** (lap 2, −23.6%), lap 2–3 growth **+26 → −20 MB**, objects **88,070 → 59,375** (−32.6%), nodes **41,105 → 34,635** (−15.7%). `BENCH` peak static memory **1,452 → 1,167 MB** (−19.6%), average **1,306.8 → 1,069.7 MB** (−18.1%). Physical iOS device VRAM/RSS savings add ETC2/ASTC + 1024-capped texture savings (must be verified on physical iOS via TestFlight 0.23.0).
+- **Apartment, elevator & garage rebuild**:
+  - Reliable state machine with watchdog timeouts across every transition state (`closing`, `moving`, `opening`, `arriving`, `trip`, `sealed`), state/floor invariant enforcement, automatic door close when leaving range, and `reset_safe()` / `reset_all_elevators()` recovery wired into `unstick()` and interrupted transitions.
+  - Fixed free-fall/upside-down character animation inside descending elevators (`Player.has_footing()` treats `scripted` as grounded; elevator keeps `velocity = Vector3.ZERO` and `air_time = 0.0` during travel/closing).
+  - Calm cabin camera framing (`SwingCamera.in_elevator`, `ease_face`, 0.94 m close-quarters distance clear of cabin back wall, no craning/side-offset snap).
+  - Duplicate-free elevator/garage rebuilding (`remove_child` before `queue_free` in `VehicleGarage` and `EmpireGame._build_elevators`).
+- **Global efficiency**:
+  - Staggered `SkyportIsland._free_near()` node retirement (`_retire_queue`, 64 nodes/frame) eliminates the 500 ms cross-island unload hitch.
+  - Early-out outdoor-only processing (`Traffic`, `IslandTraffic`, `Crowd`, `NearTrafficPool`, `LampLights`, `CityReflections`, `SeaAndSky`) while underground in the Vehicle Collection.
+- **Checks**: `tests/run_tests.gd` **136/136**, `--scenarios=GL --sc-all` **136/136** (all 8 homes), `--scenarios=SOAK` passed memory leveling (−20 MB), `--scenarios=BENCH` completed, Xvfb rendered elevator capture verified.
+
 ## Commercial empire (2026-11-27, branch business-empire from 0.21.0)
 
 Business levels 1–4 with real fit-outs, the company (logo, divisions, livery), the supply chain (warehouse → fleet → branches, wholesale contracts), trade loops (food suppliers and menus, clothing collections, nightclub, car hire, hotel facilities) and six career stages. See docs/COMMERCE.md. Checks: run_tests 135/135, `--scenarios=BZ` 25/25, GA 11/11.

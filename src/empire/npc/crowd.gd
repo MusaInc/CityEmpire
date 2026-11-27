@@ -667,6 +667,8 @@ func _populate(focus: Vector3) -> void:
 func _process(dt: float) -> void:
 	if game == null or _mmis.is_empty() or game.state != "play" or get_tree().paused:
 		return
+	if game.garage and game.garage.inside:
+		return
 	var focus := _focus()
 	_crossing_counts.clear()
 	for pr in _people:

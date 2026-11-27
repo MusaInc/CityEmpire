@@ -128,8 +128,8 @@ func _process(dt: float) -> void:
 				l["live"] = l["pending"]
 				l["pending"] = -1
 			continue
-		if indoor > 0.6:
-			continue   # (outdoor probes rest while you're inside a room)
+		if indoor > 0.6 or p.y < -100.0:
+			continue   # (outdoor probes rest while you're inside a room or underground)
 		l["t"] = float(l["t"]) + dt
 		var moved := Vector2(p.x - l["last"].x, p.z - l["last"].z).length() > float(l["step"]) or absf(p.y - l["last"].y) > float(l["step"]) * 0.5
 		# (Soon after loading the city is still streaming in: a few quick

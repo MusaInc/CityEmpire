@@ -137,7 +137,9 @@ func _island(dt: float) -> IslandTraffic:
 
 
 func _process(dt: float) -> void:
-	if game == null or game.world == null or _wheel_mmi == null:
+	if game == null or game.world == null or _wheel_mmi == null or game.state != "play" or get_tree().paused:
+		return
+	if game.garage and game.garage.inside:
 		return
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:

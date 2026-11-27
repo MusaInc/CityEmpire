@@ -372,6 +372,14 @@ func _free(id: String) -> void:
 			game.skyport_play.displays.erase(key)
 	(R["node"] as Node).queue_free()
 	rooms.erase(id)
+	if rooms.is_empty() and game and game.empire:
+		var keep: Array = []
+		for v in game.empire.vehicles:
+			var m: Dictionary = EmpireData.vehicle_model(String(v.get("model", "")))
+			var b := String(m.get("body", ""))
+			if b != "" and b not in keep:
+				keep.append(b)
+		CarVisual.trim_caches(keep)
 
 
 static var _glass_mat: StandardMaterial3D

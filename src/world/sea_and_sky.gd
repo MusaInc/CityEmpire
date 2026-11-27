@@ -663,6 +663,9 @@ func _gulls() -> void:
 
 # ------------------------------------------------------------ update
 func _process(dt: float) -> void:
+	var cam: Camera3D = get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam != null and cam.global_position.y < -100.0:
+		return
 	dt = minf(dt, 0.1)
 	_time += dt
 	for sh in _ships:

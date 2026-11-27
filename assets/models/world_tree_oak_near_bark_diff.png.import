@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://c1lieupoxdanu"
-path="res://.godot/imported/world_tree_oak_near_bark_diff.png-62a8508ef28173c5902da16537c8960b.ctex"
+path.s3tc="res://.godot/imported/world_tree_oak_near_bark_diff.png-62a8508ef28173c5902da16537c8960b.s3tc.ctex"
+path.etc2="res://.godot/imported/world_tree_oak_near_bark_diff.png-62a8508ef28173c5902da16537c8960b.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "174bbfd54478e1b6368e862b261b80cd"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/world_tree_oak_near_bark_diff.png"
-dest_files=["res://.godot/imported/world_tree_oak_near_bark_diff.png-62a8508ef28173c5902da16537c8960b.ctex"]
+dest_files=["res://.godot/imported/world_tree_oak_near_bark_diff.png-62a8508ef28173c5902da16537c8960b.s3tc.ctex", "res://.godot/imported/world_tree_oak_near_bark_diff.png-62a8508ef28173c5902da16537c8960b.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -39,5 +41,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=0
+process/size_limit=1024
 detect_3d/compress_to=1

@@ -82,6 +82,13 @@ var _player_riding := false
 var _last_disp_floor := 0
 var _hum_cd := 0.0
 var _auto_close_t := 0.0
+var _state_t := 0.0          # watchdog timer for active transitions
+const MAX_CLOSE_T := 3.5
+const MAX_OPEN_T := 3.5
+const MAX_MOVE_T := 10.0
+const MAX_TRIP_T := 10.0
+const MAX_ARRIVE_T := 3.0
+const MAX_SEALED_T := 4.0
 
 ## Door open fractions (0 = closed, 1 = open)
 var _ent_open := 0.0
@@ -204,7 +211,11 @@ func is_riding() -> bool:
 
 ## Request the elevator to arrive at `to_top` (called from lobby or upper landing).
 func call_to(to_top: bool) -> void:
-	if state == "moving" or state == "closing":
+	if state in ["moving", "trip", "sealed"]:
+		return
+	if state == "closing":
+		if not _player_riding and at_top == to_top:
+			_start_open()
 		return
 	if at_top == to_top:
 		if state != "opening":
@@ -217,9 +228,10 @@ func call_to(to_top: bool) -> void:
 
 ## Press the floor button from inside the cabin (with player aboard).
 func ride_to(to_top: bool) -> void:
-	if state == "moving" or state == "closing":
+	if state in ["moving", "closing", "trip", "sealed"]:
 		return
 	if at_top == to_top:
+		_player_riding = false
 		_start_open()
 		return
 	Sfx.play("click", -4.0)
@@ -227,6 +239,26 @@ func ride_to(to_top: bool) -> void:
 	_player_riding = true
 	_set_button_lit(to_top)
 	_start_close()
+
+
+## Safe recovery if a transition is ever interrupted (save load, stuck watchdog).
+func reset_safe() -> void:
+	_player_riding = false
+	ride_rumble = 0.0
+	_trip_pending = false
+	_trip_after_ride = false
+	_trip_done = Callable()
+	_trip_labels.clear()
+	_state_t = 0.0
+	cabin_y = top_y if at_top else 0.0
+	if _cabin:
+		_cabin.position.y = cabin_y
+	state = "idle_top" if at_top else "idle_g"
+	_g_door_open = 0.0 if at_top else 1.0
+	_top_door_open = 1.0 if at_top else 0.0
+	_sync_doors()
+	_set_button_lit(false, true)
+	_update_indicators(top_floor_label if at_top else "G")
 
 
 ## Instant arrival helper used only by automated `--autoplay` smoke tests.
@@ -269,6 +301,7 @@ func trip(labels: Array, done: Callable) -> void:
 func _start_trip() -> void:
 	_trip_pending = false
 	state = "trip"
+	_state_t = 0.0
 	_last_disp_floor = -99
 	_trip_t = 0.0
 	_trip_dur = 1.3 + 1.05 * float(_trip_labels.size())
@@ -289,6 +322,7 @@ func arrive_sealed(to_top: bool, label: String, then_top := false) -> void:
 	_sync_doors()
 	_update_indicators(label)
 	_player_riding = true
+	_state_t = 0.0
 	if then_top and not to_top:
 		state = "idle_g"
 		ride_to(true)
@@ -301,6 +335,10 @@ func arrive_sealed(to_top: bool, label: String, then_top := false) -> void:
 func settle_closed() -> void:
 	_player_riding = false
 	ride_rumble = 0.0
+	_trip_done = Callable()
+	_trip_pending = false
+	_trip_after_ride = false
+	_state_t = 0.0
 	state = "idle_top" if at_top else "idle_g"
 	_update_indicators(top_floor_label if at_top else "G")
 
@@ -314,10 +352,12 @@ func _start_close() -> void:
 	if _g_door_open > 0.05 or _top_door_open > 0.05:
 		Sfx.play("elev_door", -9.0)
 	state = "closing"
+	_state_t = 0.0
 
 
 func _start_move() -> void:
 	state = "moving"
+	_state_t = 0.0
 	_ride_y0 = cabin_y
 	_ride_y1 = top_y if target_top else 0.0
 	var dist := absf(_ride_y1 - _ride_y0)
@@ -331,6 +371,7 @@ func _start_move() -> void:
 
 func _start_open() -> void:
 	state = "opening"
+	_state_t = 0.0
 	_auto_close_t = 8.0
 	Sfx.play("chime", -7.0)
 	Sfx.play("elev_door", -9.0)
@@ -353,7 +394,26 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 	if _cabin_light:
 		_cabin_light.visible = near
 	if not near and state in ["idle_g", "idle_top", "sealed"]:
+		# Ensure doors don't stay frozen open when the player drives far away.
+		if _ent_open > 0.0:
+			_ent_open = 0.0
+			_sync_entrance_doors()
+		if _g_door_open > 0.0 or _top_door_open > 0.0:
+			_g_door_open = 0.0
+			_top_door_open = 0.0
+			_sync_doors()
+		if _front_open > 0.0:
+			_front_open = 0.0
+			if _front_door:
+				_front_door.rotation.y = 0.0
+			if _front_door_col:
+				_front_door_col.collision_layer = CityWorld.HUMAN_LAYER
 		return
+	# Enforce state/floor invariant so idle state never desyncs from cabin_y.
+	if state == "idle_g" and at_top:
+		state = "idle_top"
+	elif state == "idle_top" and not at_top:
+		state = "idle_g"
 	ride_rumble = move_toward(ride_rumble, 1.0 if _player_riding and state in ["moving", "trip"] else 0.0, dt * 2.5)
 	var lp := to_local(p_world)
 	# 1. Ground entrance sliding glass doors open smoothly on approach.
@@ -366,8 +426,9 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 			Sfx.play("elev_door", -14.0, 1.15)
 		_sync_entrance_doors()
 	# 2. Auto-open elevator doors when the owner walks up to the waiting cabin!
+	var in_threshold := absf(lp.x) < 1.15 and absf(lp.z) < 0.65
 	if owns and state == "idle_g" and not at_top:
-		var at_g_bay := absf(lp.x) < 1.6 and lp.z > -0.1 and lp.z < 2.4 and absf(lp.y) < 2.6
+		var at_g_bay := (absf(lp.x) < 1.6 and lp.z > -0.1 and lp.z < 2.4 or in_threshold) and absf(lp.y) < 2.6
 		var in_cab := is_inside_cabin(p_world)
 		if (at_g_bay or in_cab) and _g_door_open < 0.99:
 			if _g_door_open < 0.05:
@@ -381,7 +442,7 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 				_g_door_open = move_toward(_g_door_open, 0.0, dt * DOOR_SPEED)
 				_sync_doors()
 	elif owns and state == "idle_top" and at_top:
-		var at_t_bay := absf(lp.x) < 1.6 and lp.z > -0.1 and lp.z < HALL_D + 0.4 and absf(lp.y - top_y) < 2.6
+		var at_t_bay := (absf(lp.x) < 1.6 and lp.z > -0.1 and lp.z < HALL_D + 0.4 or in_threshold) and absf(lp.y - top_y) < 2.6
 		var in_cab := is_inside_cabin(p_world)
 		if (at_t_bay or in_cab) and _top_door_open < 0.99:
 			if _top_door_open < 0.05:
@@ -406,13 +467,39 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 			_front_door.rotation.y = -_front_open * deg_to_rad(96.0)
 		if _front_door_col:
 			_front_door_col.collision_layer = 0 if _front_open > 0.4 else CityWorld.HUMAN_LAYER
-	# 3. Elevator state machine (closing -> moving -> opening).
+	# 3. Elevator state machine (closing -> moving -> opening) with watchdog recovery.
+	_state_t += dt
 	match state:
 		"closing":
-			_g_door_open = move_toward(_g_door_open, 0.0, dt * DOOR_SPEED)
-			_top_door_open = move_toward(_top_door_open, 0.0, dt * DOOR_SPEED)
-			_sync_doors()
-			if _g_door_open <= 0.001 and _top_door_open <= 0.001:
+			# Gently walk riding player clear of the door threshold before
+			# the door panels and collision close, so they step naturally inside
+			# instead of sliding or clipping the closing leaves.
+			var clear_to_close := true
+			if _player_riding:
+				var pl := to_local(player.global_position)
+				var want_p := Vector3(clampf(pl.x, -CAB_W * 0.22, CAB_W * 0.22), cabin_y + 0.95, clampf(pl.z, -SHAFT_D + 0.48, -0.82))
+				var step_d := Vector2(want_p.x - pl.x, want_p.z - pl.z).length()
+				var blended := pl.lerp(want_p, 1.0 - exp(-7.5 * dt))
+				var prev_wp := player.global_position
+				var wp := to_global(blended)
+				player.global_position = wp
+				if player.get("s") != null:
+					player.s.position = wp
+					player.s.velocity = Vector3.ZERO
+				if player.get("air_time") != null:
+					player.air_time = 0.0
+				if pl.z > -0.46 and _state_t < 0.7:
+					clear_to_close = false
+			if clear_to_close:
+				_g_door_open = move_toward(_g_door_open, 0.0, dt * DOOR_SPEED)
+				_top_door_open = move_toward(_top_door_open, 0.0, dt * DOOR_SPEED)
+				_sync_doors()
+			if (_g_door_open <= 0.001 and _top_door_open <= 0.001) or _state_t > MAX_CLOSE_T:
+				_g_door_open = 0.0
+				_top_door_open = 0.0
+				_sync_doors()
+				if _player_riding and player.get("s") != null:
+					player.s.velocity = Vector3.ZERO
 				if _trip_pending:
 					_start_trip()
 				else:
@@ -432,13 +519,15 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 				# Clamp gently inside cabin walls while riding so player never clips out.
 				var pl := to_local(p_new)
 				pl.x = clampf(pl.x, -CAB_W * 0.36, CAB_W * 0.36)
-				pl.z = clampf(pl.z, -SHAFT_D + 0.32, -0.32)
+				pl.z = clampf(pl.z, -SHAFT_D + 0.36, -0.38)
 				pl.y = cabin_y + 0.95
 				var wp := to_global(pl)
 				player.global_position = wp
 				if player.get("s") != null:
 					player.s.position = wp
-					player.s.velocity = Vector3(0.0, dy / maxf(dt, 1e-4), 0.0)
+					player.s.velocity = Vector3.ZERO
+				if player.get("air_time") != null:
+					player.air_time = 0.0
 				_hum_cd -= dt
 				if _hum_cd <= 0.0 and _ride_t < _ride_dur - 0.5:
 					_hum_cd = 0.85
@@ -450,7 +539,7 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 				_update_indicators(lbl)
 				if _player_riding:
 					Sfx.play("elev_tick", -15.0)
-			if _ride_t >= _ride_dur:
+			if _ride_t >= _ride_dur or _state_t > MAX_MOVE_T:
 				at_top = target_top
 				cabin_y = top_y if at_top else 0.0
 				_cabin.position.y = cabin_y
@@ -467,12 +556,18 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 				_g_door_open = move_toward(_g_door_open, 1.0, dt * DOOR_SPEED)
 			_sync_doors()
 			var done := (_top_door_open >= 0.999) if at_top else (_g_door_open >= 0.999)
-			if done:
+			if done or _state_t > MAX_OPEN_T:
+				if at_top:
+					_top_door_open = 1.0
+				else:
+					_g_door_open = 1.0
+				_sync_doors()
 				state = "idle_top" if at_top else "idle_g"
+				_state_t = 0.0
 				_player_riding = false
 		"arriving":
 			_arrive_t -= dt
-			if _arrive_t <= 0.0:
+			if _arrive_t <= 0.0 or _state_t > MAX_ARRIVE_T:
 				_start_open()
 		"trip":
 			_trip_t = minf(_trip_t + dt, _trip_dur)
@@ -487,11 +582,17 @@ func tick(dt: float, player: Node3D, owns: bool) -> void:
 			if _hum_cd <= 0.0 and _trip_t < _trip_dur - 0.5:
 				_hum_cd = 0.85
 				Sfx.play("elev_hum", -14.0)
-			if _trip_t >= _trip_dur:
+			if _trip_t >= _trip_dur or _state_t > MAX_TRIP_T:
 				state = "sealed"
+				_state_t = 0.0
 				_last_disp_floor = -99
-				if _trip_done.is_valid():
-					_trip_done.call()
+				var cb := _trip_done
+				_trip_done = Callable()
+				if cb.is_valid():
+					cb.call()
+		"sealed":
+			if _state_t > MAX_SEALED_T:
+				reset_safe()
 
 
 func _update_indicators(text: String) -> void:
@@ -538,7 +639,7 @@ func _sync_entrance_doors() -> void:
 	if _ent_r:
 		_ent_r.rotation.y = -e * deg_to_rad(92.0)
 	if _ent_col:
-		_ent_col.collision_layer = 0 if _ent_open > 0.55 else CityWorld.HUMAN_LAYER
+		_ent_col.collision_layer = 0 if _ent_open > 0.40 else CityWorld.HUMAN_LAYER
 
 
 func _sync_doors() -> void:
@@ -548,14 +649,14 @@ func _sync_doors() -> void:
 	if _g_door_r:
 		_g_door_r.position.x = DOOR_W * 0.25 + gs
 	if _g_door_col:
-		_g_door_col.collision_layer = 0 if _g_door_open > 0.72 else CityWorld.HUMAN_LAYER
+		_g_door_col.collision_layer = 0 if _g_door_open > 0.40 else CityWorld.HUMAN_LAYER
 	var ts := _top_door_open * (DOOR_W * 0.48)
 	if _top_door_l:
 		_top_door_l.position.x = -DOOR_W * 0.25 - ts
 	if _top_door_r:
 		_top_door_r.position.x = DOOR_W * 0.25 + ts
 	if _top_door_col:
-		_top_door_col.collision_layer = 0 if _top_door_open > 0.72 else CityWorld.HUMAN_LAYER
+		_top_door_col.collision_layer = 0 if _top_door_open > 0.40 else CityWorld.HUMAN_LAYER
 	# Cabin doors mirror whichever landing door is currently open.
 	var cf := (_top_door_open if at_top else _g_door_open) if state != "moving" else 0.0
 	var cb := 0.0
@@ -570,9 +671,9 @@ func _sync_doors() -> void:
 	if _cab_back_r:
 		_cab_back_r.position.x = DOOR_W * 0.25 + cbs
 	if _cab_door_col_f:
-		_cab_door_col_f.disabled = cf > 0.72
+		_cab_door_col_f.disabled = cf > 0.40
 	if _cab_door_col_b:
-		_cab_door_col_b.disabled = cb > 0.72
+		_cab_door_col_b.disabled = cb > 0.40
 
 
 # ---------------------------------------------------------------- geometry
@@ -645,6 +746,7 @@ func _end_meshes(vis_end: float) -> void:
 	_arch = null
 	_glass_m = null
 	_glow_m = null
+	_col_boxes.clear()
 
 
 func _build_geometry() -> void:

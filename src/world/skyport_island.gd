@@ -1719,17 +1719,44 @@ func _near(f: Callable) -> void:
 	_target = self
 
 
+var _retire_queue: Array[Node] = []
+
+
 func _free_near() -> void:
 	_steps.clear()
 	if near_root:
+		near_root.visible = false
+		near_root.process_mode = Node.PROCESS_MODE_DISABLED
 		remove_child(near_root)
-		near_root.queue_free()
+		# Stagger freeing ~2,500 Skyport near nodes across frames (0.23.0: eliminates
+		# the 500 ms cross-island unload hitch while still reclaiming all memory).
+		for ch in near_root.get_children():
+			near_root.remove_child(ch)
+			_retire_queue.append(ch)
+		_retire_queue.append(near_root)
 	near_root = null
+	SkyportKit.clear_cache()
 	for key in _groups():
 		var skyline := get_node_or_null("Skyline_" + key) as GeometryInstance3D
 		if skyline:
 			skyline.visibility_range_begin = 0.0
 	body = null
+
+
+func _drain_retire(budget := 64) -> void:
+	var n := 0
+	while not _retire_queue.is_empty() and n < budget:
+		var node: Node = _retire_queue.pop_back()
+		if is_instance_valid(node):
+			node.queue_free()
+		n += 1
+
+
+func _exit_tree() -> void:
+	for node in _retire_queue:
+		if is_instance_valid(node):
+			node.free()
+	_retire_queue.clear()
 
 
 ## Distance from p to the island (0 on it).
@@ -1743,6 +1770,8 @@ static func distance_to(p: Vector3) -> float:
 
 
 func _process(_dt: float) -> void:
+	if not _retire_queue.is_empty():
+		_drain_retire(64)
 	if plan_data.is_empty():
 		return
 	if not _steps.is_empty():

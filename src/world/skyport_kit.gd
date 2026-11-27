@@ -19,6 +19,12 @@ static func ready() -> bool:
 	return not _meshes.is_empty()
 
 
+## Release cached Skyport kit meshes when the island's near detail unloads.
+static func clear_cache() -> void:
+	_meshes.clear()
+	_terminal_meshes.clear()
+
+
 static func mesh(name: String) -> Mesh:
 	_load()
 	return _meshes.get(name)

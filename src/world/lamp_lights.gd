@@ -97,6 +97,10 @@ func _process(dt: float) -> void:
 		return
 	_was_on = true
 	var cam: Vector3 = camera_fn.call()
+	if cam.y < -100.0:
+		for l: SpotLight3D in _lights:
+			l.visible = false
+		return
 	var cand: Array = []
 	var range_sq := RANGE * RANGE
 	for w: CityWorld in worlds:

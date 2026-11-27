@@ -115,7 +115,10 @@ var _handoff_fov := 70.0
 ## never cranes into the ceiling, and treats partitions and big furniture
 ## (HUMAN_LAYER, ignored outdoors) as walls.
 var indoor_ceiling := INF
+var in_elevator := false   # calm close-quarters cabin framing (no craning/side-offset/snap)
 var _indoor := 0.0         # 0 outdoors → 1 indoors (eased)
+var _elev := 0.0           # 0 outside cabin → 1 inside cabin (eased)
+var _ease_yaw := NAN       # smooth orientation target (set by ease_face)
 var _mask := 1 | (1 << 1)
 
 
@@ -178,7 +181,14 @@ func face(heading_yaw: float) -> void:
 	look_yaw = 0.0
 	look_pitch = 0.0
 	pitch = base_pitch
+	_ease_yaw = NAN
 	snap()
+
+
+## Smoothly orient the camera toward `heading_yaw` without a jarring snap.
+func ease_face(heading_yaw: float) -> void:
+	_ease_yaw = heading_yaw
+	_since_look = recenter_delay
 
 
 ## Look input in radians (already sensitivity-scaled). Called by touch/mouse/stick.
@@ -286,11 +296,24 @@ func _process(dt: float) -> void:
 	pitch = move_toward(pitch, want_pitch, deg_to_rad(55.0 if target.wall_run else 25.0) * dt)
 
 	if manual:
+		_ease_yaw = NAN
 		# The player is aiming the view: the follow keeps tracking underneath
 		# but none of it reaches the screen (no fighting the finger).
 		look_yaw = wrapf(look_yaw - wrapf(yaw - yaw_before, -PI, PI), -PI, PI)
 		look_pitch -= pitch - pitch_before
 		look_pitch = clampf(pitch + look_pitch, LOOK_PITCH_MIN, LOOK_PITCH_MAX) - pitch
+	elif not is_nan(_ease_yaw):
+		var ek := 1.0 - exp(-6.5 * dt)
+		var ed := wrapf(_ease_yaw - yaw, -PI, PI)
+		yaw = wrapf(yaw + ed * ek, -PI, PI)
+		_heading = yaw
+		look_yaw = lerpf(look_yaw, 0.0, ek)
+		look_pitch = lerpf(look_pitch, 0.0, ek)
+		if absf(ed) < 0.015 and absf(look_yaw) < 0.015:
+			yaw = _ease_yaw
+			_heading = _ease_yaw
+			look_yaw = 0.0
+			_ease_yaw = NAN
 	elif vh.length() > 2.0 or not grounded:
 		# Moving again after looking: ease back behind the player, gently.
 		var k := 1.0 - exp(-1.8 * dt)
@@ -310,11 +333,15 @@ func _process(dt: float) -> void:
 	want_dist *= CLOSE
 	var indoors := indoor_ceiling < INF
 	_indoor = move_toward(_indoor, 1.0 if indoors else 0.0, dt * 1.5)
+	_elev = move_toward(_elev, 1.0 if in_elevator else 0.0, dt * 4.0)
 	_mask = 1 | (1 << 1) | (CityWorld.HUMAN_LAYER if indoors else 0)
 	if _sweep:
 		_sweep.collision_mask = _mask
 		_point.collision_mask = _mask
 	want_dist = lerpf(want_dist, lerpf(3.5, 4.2, clampf(vh.length() / 9.0, 0.0, 1.0)), _indoor)
+	want_dist = lerpf(want_dist, 0.94, _elev)
+	if _elev > 0.01 and not manual:
+		pitch = lerpf(pitch, deg_to_rad(-5.0), _elev * (1.0 - exp(-5.0 * dt)))
 	var lift_goal := 0.0
 	if target.s.attached and target.s.taut:
 		# Long lines swing big arcs: frame more of them.
@@ -385,7 +412,7 @@ func _process(dt: float) -> void:
 		pos_goal = _focus + basis.z * (_dist + 1.0) + Vector3.UP * 1.2
 		pos_goal -= side * (pos_goal - (rail_at[0] as Vector3)).dot(side) * 0.75
 	if rail_at.is_empty():
-		pos_goal += basis.x * _side_offset(_focus, pos_goal, basis.x, dt)
+		pos_goal += basis.x * _side_offset(_focus, pos_goal, basis.x, dt) * (1.0 - _elev)
 	_pos = _smooth_damp(1, _pos, pos_goal, follow_smooth * (1.3 if not rail_at.is_empty() else 1.0), dt)
 	var off := _pos - _focus
 	var max_off := _dist * 1.2 if rail_at.is_empty() else _dist + 3.0
@@ -403,6 +430,7 @@ func _process(dt: float) -> void:
 	if indoor_ceiling < INF:
 		# Rooms are close quarters by design: only crane when really pinned.
 		squeeze = clampf((1.5 - placed.distance_to(shaken)) / 1.3, 0.0, 1.0)
+	squeeze *= (1.0 - _elev)
 	_crane = lerpf(_crane, squeeze, 1.0 - exp(-(10.0 if squeeze > _crane else 2.5) * dt))
 	if _crane > 0.01:
 		var reach := 2.2

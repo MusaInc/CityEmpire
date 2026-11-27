@@ -618,7 +618,7 @@ func _everyday_step(motion: Vector3) -> bool:
 
 
 func has_footing() -> bool:
-	return is_on_floor() or _step_support > 0.0
+	return is_on_floor() or _step_support > 0.0 or scripted
 
 
 func _update_step_descent(stepped: bool, vertical_travel: float) -> void:
