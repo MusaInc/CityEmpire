@@ -1817,23 +1817,44 @@ var _refresh_again := {}
 func refresh_props(key: Vector2i) -> void:
 	if not _loaded.has(key):
 		return
+	if not is_inside_tree():
+		# (Tools and tests: nobody is driving, and the world may be freed
+		# right after – a worker must never outlive it. Built in place.)
+		_apply_refresh(key, _props_by_kind(key), _furniture_arrays(key), _foliage_arrays(key))
+		return
 	if _refreshing.has(key):
 		_refresh_again[key] = true
 		return
-	_refreshing[key] = WorkerThreadPool.add_task(func():
-		var by_kind := _props_by_kind(key)
-		var furn = _furniture_arrays(key)
-		var fol = _foliage_arrays(key)
-		_finish_refresh.call_deferred(key, by_kind, furn, fol), false, "props refresh")
+	_refreshing[key] = WorkerThreadPool.add_task(_refresh_worker.bind(key), false, "props refresh")
+
+
+func _refresh_worker(key: Vector2i) -> void:
+	var by_kind := _props_by_kind(key)
+	var furn = _furniture_arrays(key)
+	var fol = _foliage_arrays(key)
+	_finish_refresh.call_deferred(key, by_kind, furn, fol)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		for task in _refreshing.values():
+			WorkerThreadPool.wait_for_task_completion(task)
+		_refreshing.clear()
 
 
 func _finish_refresh(key: Vector2i, by_kind: Dictionary, furn_arrays: Variant, fol_arrays: Variant) -> void:
+	if not _refreshing.has(key):
+		return   # (the world left the tree meanwhile; _exit_tree already waited)
 	WorkerThreadPool.wait_for_task_completion(_refreshing[key])
 	_refreshing.erase(key)
 	if _refresh_again.has(key):
 		_refresh_again.erase(key)
 		refresh_props(key)   # (something else broke meanwhile: once more)
 		return
+	_apply_refresh(key, by_kind, furn_arrays, fol_arrays)
+
+
+func _apply_refresh(key: Vector2i, by_kind: Dictionary, furn_arrays: Variant, fol_arrays: Variant) -> void:
 	var root: Node3D = _loaded.get(key)
 	if root == null:
 		return
