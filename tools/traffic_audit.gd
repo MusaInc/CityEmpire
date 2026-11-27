@@ -52,6 +52,7 @@ func _initialize() -> void:
 	for st in steps:
 		var tt := Time.get_ticks_usec()
 		tr.now += dt
+		Traffic.signal_time += dt
 		for id in tr.car_count():
 			if tr.c_ev[id] <= tr.now:
 				var before := "lane %d s %.1f v %.1f stop %.1f ek %d" % [tr.c_lane[id], tr.car_s(id, tr.now), tr.c_v[id], tr.c_stop[id], tr.c_ek[id]]

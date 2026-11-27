@@ -19,7 +19,7 @@ extends Node3D
 const NEAR := 92.0           # (was 62: the hand-over to the GPU walkers happened in plain view)
 const KEEP := 104.0
 const DROP := 150.0           # past this anyone goes, seen or not (a few pixels tall)
-const SPACING := 22.0         # one person per this many metres of pavement (was 28: streets read empty; still only the near band is CPU-driven)
+const SPACING := 26.0         # quality over quantity: cleaner spacing, richer individual behaviour & lower CPU
 const LANES := [1.7, 3.0]     # m in from the block edge (as CityWorld)
 const MODEL := "res://assets/models/crowd.glb"
 const TOPS := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.12, 0.12), Color(0.16, 0.28, 0.5),
@@ -32,9 +32,13 @@ var _loops: Array = []        # {pts, cum, len, dir, rect, crossings, city_cross
 var _grid := {}               # Vector2i(100 m cell) -> [loop index]
 var _people: Array = []       # see _spawn
 var _mmis: Array = []         # MultiMeshInstance3D per body
+var _mm_bufs: Array[PackedFloat32Array] = []  # persistent buffers (zero per-frame allocs)
+var _blob_buf := PackedFloat32Array()
 var _blobs: MultiMeshInstance3D   # contact shadows (one draw for everyone)
 var _doors: Array = []        # [Vector3 door, Vector3 outward, unit id]
 var _door_grid := {}          # Vector2i(100 m cell) -> [door entry]
+var _seats: Array = []        # [{pos: Vector3, yaw: float, kind: String, busy: bool}]
+var _seat_grid := {}          # Vector2i(100 m cell) -> [seat idx]
 var _rng := RandomNumberGenerator.new()
 var _acc := 0.0
 var _first := true
@@ -131,17 +135,43 @@ func setup(p_game: EmpireGame) -> void:
 			if not _door_grid.has(dk):
 				_door_grid[dk] = []
 			(_door_grid[dk] as Array).append(entry)
+	_seats.clear()
+	_seat_grid.clear()
+	for city: CityWorld in [game.world, game.world.mainland]:
+		if city == null or not city.has_method("activity_furniture"):
+			continue
+		for item in city.activity_furniture():
+			var fkind := String(item[0])
+			var fxf: Transform3D = item[1]
+			var fwd := fxf.basis.z
+			var yaw := atan2(-fwd.x, -fwd.z)
+			if fkind == "bench":
+				# Two seat slots per bench, offset ±0.42 m along the bench's X axis.
+				for sx: float in [-0.42, 0.42]:
+					var sp := fxf * Vector3(sx, 0.0, 0.16)
+					_register_seat(sp, yaw, "bench")
+			elif fkind == "bus_shelter":
+				# One bench seat + one standing wait spot under the shelter.
+				_register_seat(fxf * Vector3(-0.55, 0.0, 0.25), yaw, "bench")
+				_register_seat(fxf * Vector3(0.65, 0.0, 0.35), yaw, "shelter_wait")
 	var scene: PackedScene = load(MODEL)
 	if scene == null:
 		return
 	var inst := scene.instantiate()
 	var mis := inst.find_children("*", "MeshInstance3D", true, false)
 	mis.sort_custom(func(a, b): return String(a.name) < String(b.name))
-	var mat := ShaderMaterial.new()
-	mat.shader = load("res://src/empire/npc/crowd.gdshader")
+	var mat_male := ShaderMaterial.new()
+	mat_male.shader = load("res://src/empire/npc/crowd.gdshader")
+	mat_male.set_shader_parameter("pivot_k", 1.0)
+	var mat_female := ShaderMaterial.new()
+	mat_female.shader = load("res://src/empire/npc/crowd.gdshader")
+	mat_female.set_shader_parameter("pivot_k", 0.925)
+	_mm_bufs.clear()
 	for mi in mis:
 		var m: Mesh = (mi as MeshInstance3D).mesh.duplicate()
-		m.surface_set_material(0, mat)
+		var nstr := String(mi.name)
+		var body_num := int(nstr.trim_prefix("person_")) if nstr.begins_with("person_") else 0
+		m.surface_set_material(0, mat_female if (body_num % 2 == 1) else mat_male)
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_colors = true
@@ -152,6 +182,7 @@ func setup(p_game: EmpireGame) -> void:
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mmi)
 		_mmis.append(mmi)
+		_mm_bufs.append(PackedFloat32Array())
 	inst.free()
 	# Contact shadows: a soft disc under each person.
 	var q := QuadMesh.new()
@@ -273,6 +304,83 @@ func _add_loop(pts: PackedVector2Array, dir: int, crossings := [], city_crossing
 			if not _grid.has(k):
 				_grid[k] = []
 			_grid[k].append(idx)
+
+
+func _register_seat(pos: Vector3, yaw: float, kind: String) -> void:
+	var idx := _seats.size()
+	_seats.append({"pos": pos, "yaw": yaw, "kind": kind, "busy": false})
+	var sk := Vector2i(floori(pos.x / 100.0), floori(pos.z / 100.0))
+	if not _seat_grid.has(sk):
+		_seat_grid[sk] = []
+	(_seat_grid[sk] as Array).append(idx)
+
+
+func _claim_seat_near(q: Vector2, max_r: float) -> int:
+	var x0 := floori((q.x - max_r) / 100.0)
+	var x1 := floori((q.x + max_r) / 100.0)
+	var z0 := floori((q.y - max_r) / 100.0)
+	var z1 := floori((q.y + max_r) / 100.0)
+	var best := -1
+	var best_d2 := max_r * max_r
+	for cx in range(x0, x1 + 1):
+		for cz in range(z0, z1 + 1):
+			for idx in _seat_grid.get(Vector2i(cx, cz), []):
+				var st: Dictionary = _seats[int(idx)]
+				if bool(st["busy"]):
+					continue
+				var sp: Vector3 = st["pos"]
+				var d2 := (sp.x - q.x) * (sp.x - q.x) + (sp.z - q.y) * (sp.z - q.y)
+				if d2 < best_d2:
+					best_d2 = d2
+					best = int(idx)
+	if best >= 0:
+		_seats[best]["busy"] = true
+	return best
+
+
+func _release_seat(pr: Dictionary) -> void:
+	var si := int(pr.get("seat", -1))
+	if si >= 0 and si < _seats.size():
+		_seats[si]["busy"] = false
+	pr["seat"] = -1
+
+
+## Spawn a pedestrian stepping out of a parked vehicle onto the nearest pavement loop.
+func spawn_from_car(world_pos: Vector3, body_idx: int, seed_val: float, top_col: Color) -> void:
+	var best_loop := -1
+	var best_s := 0.0
+	var best_d2 := 24.0 * 24.0
+	var q := Vector2(world_pos.x, world_pos.z)
+	for li in _loops_near(world_pos, 24.0):
+		var loop: Dictionary = _loops[int(li)]
+		if not (loop["city_crossing"] as Dictionary).is_empty():
+			continue
+		var poly: PackedVector2Array = loop["pts"]
+		var cum: PackedFloat32Array = loop["cum"]
+		for i in poly.size():
+			var pa := poly[i]
+			var pb := poly[(i + 1) % poly.size()]
+			var cp := Geometry2D.get_closest_point_to_segment(q, pa, pb)
+			var d2 := cp.distance_squared_to(q)
+			if d2 < best_d2:
+				best_d2 = d2
+				best_loop = int(li)
+				best_s = cum[i] + pa.distance_to(cp)
+	if best_loop < 0:
+		return
+	var l: Dictionary = _loops[best_loop]
+	var sp := _sample(l, best_s)
+	var d: Vector2 = (sp[1] as Vector2) * float(l["dir"])
+	var pos := Vector3(world_pos.x, float(_ground.call(world_pos.x, world_pos.z)), world_pos.z)
+	_people.append({"loop": best_loop, "s": best_s, "dir": int(l["dir"]),
+		"speed": _rng.randf_range(1.12, 1.45), "vel_cur": 0.4, "profile": "commuter",
+		"body": body_idx % maxi(_mmis.size(), 1), "seed": seed_val, "slot": _rng.randi() % 6, "fade": 1.0,
+		"top": top_col, "scale": _rng.randf_range(0.95, 1.04), "lane": _rng.randf_range(-0.3, 0.3),
+		"stride": 0.0, "look": 0.0, "glance": 0.0, "glance_t": 1.4,
+		"state": "walk", "t": 0.0, "goal": Vector3.ZERO, "pos": pos, "yaw": atan2(-d.x, -d.y), "walk": 0.4,
+		"browsed": false, "dodge": 0.0, "avoid": (q - (sp[0] as Vector2)).limit_length(1.4), "pace": 1.0,
+		"crossed": false, "cross_cd": 6.0, "pause_cd": 18.0, "waiting": false, "pose": 0, "seat": -1,
+		"phone_walk": _rng.randf() < 0.25, "gy_x": pos.x, "gy_z": pos.z, "gy": pos.y})
 
 
 func _doors_near(q: Vector2) -> Array:
@@ -438,47 +546,62 @@ func _spawn(li: int, s: float) -> void:
 		elif r < jog_p + comm_p + (0.34 if lkind in ["park", "plaza"] else 0.20):
 			profile = "stroller"
 			spd = _rng.randf_range(0.88, 1.15)
+	var body_pick := _rng.randi() % maxi(_mmis.size(), 1)
+	if profile == "jogger" and _mmis.size() >= 12:
+		body_pick = 10 if _rng.randf() < 0.5 else 11
+	elif profile == "commuter" and _mmis.size() >= 9 and _rng.randf() < 0.55:
+		var comm_bodies := [2, 6, 7, 8]
+		body_pick = comm_bodies[_rng.randi() % comm_bodies.size()]
+	var phone_walk := (profile in ["commuter", "stroller", "default"]) and _cur_weather != "storm" and _rng.randf() < 0.16
 	_people.append({"loop": li, "s": s, "dir": 1 if is_city_cross else int(l["dir"]) * (1 if _rng.randf() < 0.85 else -1),
-		"speed": spd, "vel_cur": spd * _speed_scale, "profile": profile, "body": _rng.randi() % maxi(_mmis.size(), 1), "seed": _rng.randf(), "slot": _rng.randi() % 6,
+		"speed": spd, "vel_cur": spd * _speed_scale, "profile": profile, "body": body_pick, "seed": _rng.randf(), "slot": _rng.randi() % 6, "fade": 1.0 if _first else 0.0,
 		"top": TOPS[_rng.randi() % TOPS.size()], "scale": _rng.randf_range(0.93, 1.06), "lane": _rng.randf_range(-0.35, 0.35),
 		"stride": _rng.randf() * 3.0, "look": 0.0, "glance": 0.0, "glance_t": _rng.randf_range(0.7, 2.4),
 		"state": "walk", "t": 0.0, "goal": Vector3.ZERO, "pos": Vector3.ZERO, "yaw": 0.0, "walk": 1.0,
 		"browsed": false, "dodge": 0.0, "avoid": Vector2.ZERO, "pace": 1.0, "crossed": false, "cross_cd": 0.0,
-		"pause_cd": _rng.randf_range(9.0, 26.0), "waiting": false})
+		"pause_cd": _rng.randf_range(9.0, 26.0), "waiting": false, "pose": 1 if profile == "jogger" else (3 if phone_walk else 0),
+		"seat": -1, "phone_walk": phone_walk, "gy_x": 1e9, "gy_z": 1e9, "gy": 0.0})
 
 
 func _populate(focus: Vector3) -> void:
+	# Predictive velocity-biased spawn centre so driving ahead pre-populates upcoming streets.
+	var pop_focus := focus
+	if game != null and game.world != null:
+		var vel: Vector3 = game.world._vel
+		var hvel := Vector3(vel.x, 0.0, vel.z)
+		if hvel.length_squared() > 9.0:
+			pop_focus = focus + hvel.limit_length(18.0) * 2.2
 	if not _first and _target_count > 0 and _people.size() >= _target_count - 1 \
-			and focus.distance_squared_to(_last_pop_focus) < 16.0 * 16.0 \
+			and pop_focus.distance_squared_to(_last_pop_focus) < 16.0 * 16.0 \
 			and absf(_eff_density - _last_pop_density) < 0.08:
 		return
 	var want: Array = []   # [loop, s] slots in range
 	var step := SPACING / maxf(_eff_density, 0.05)
-	for li in _loops_near(focus, NEAR):
+	for li in _loops_near(pop_focus, NEAR):
 		var l: Dictionary = _loops[li]
 		var city: Dictionary = l["city_crossing"]
 		if not city.is_empty():
 			var site: Dictionary = city["site"]
 			var kerb: Vector3 = site["a"]
-			if focus.distance_squared_to(kerb) < 58.0 * 58.0 and int(_crossing_counts.get(li, 0)) == 0:
+			if focus.distance_squared_to(kerb) < 58.0 * 58.0 and int(_crossing_counts.get(li, 0)) < 2:
 				want.append([li, float(l["cum"][2])])
 			continue
 		var s := fposmod(float(li) * 7.3, step)
 		while s < float(l["len"]):
 			var sp: Array = _sample(l, s)
-			if (sp[0] as Vector2).distance_to(Vector2(focus.x, focus.z)) < NEAR:
+			if (sp[0] as Vector2).distance_to(Vector2(pop_focus.x, pop_focus.z)) < NEAR:
 				want.append([li, s])
 			s += step
 	_target_count = want.size()
-	_last_pop_focus = focus
+	_last_pop_focus = pop_focus
 	_last_pop_density = _eff_density
 	var missing := want.size() - _people.size()
 	if missing <= 0 or want.is_empty():
 		return
-	for i in mini(missing, 30 if _first else 4):
+	for i in mini(missing, 28 if _first else 4):
 		var w: Array = want[_rng.randi() % want.size()]
 		var city_route: bool = not _loops[w[0]]["city_crossing"].is_empty()
-		if city_route and int(_crossing_counts.get(w[0], 0)) > 0:
+		if city_route and int(_crossing_counts.get(w[0], 0)) >= 2:
 			continue
 		var jitter := 1.0 if city_route else 4.0
 		var s2: float = float(w[1]) + _rng.randf_range(-jitter, jitter)
@@ -486,7 +609,8 @@ func _populate(focus: Vector3) -> void:
 		if sp2[2] in _loops[w[0]]["crossings"]:
 			continue
 		var p := Vector3(sp2[0].x, focus.y, sp2[0].y)
-		if not _first and not _unseen(p, 70.0):
+		# Never spawn in plain sight inside NEAR (92 m): strict frustum check out to 96 m.
+		if not _first and not _unseen(p, 96.0):
 			continue
 		var clear := true
 		for q in _people:
@@ -495,6 +619,47 @@ func _populate(focus: Vector3) -> void:
 				break
 		if clear:
 			_spawn(int(w[0]), s2)
+			var spawned: Dictionary = _people[_people.size() - 1]
+			# On initial/distant populate, seed some bench sitters and chatting pairs directly
+			# so parks, plazas, and bus stops immediately feel lived in.
+			if not city_route and _cur_weather not in ["rain", "storm"] and _rng.randf() < 0.22:
+				var si := _claim_seat_near(Vector2(p.x, p.z), 12.0)
+				if si >= 0:
+					var st: Dictionary = _seats[si]
+					spawned["seat"] = si
+					spawned["pos"] = st["pos"]
+					spawned["yaw"] = float(st["yaw"])
+					spawned["state"] = "sit" if String(st["kind"]) == "bench" else "pause"
+					spawned["pose"] = 2 if String(st["kind"]) == "bench" else 3
+					spawned["walk"] = 0.0
+					spawned["vel_cur"] = 0.0
+					spawned["t"] = _rng.randf_range(18.0, 52.0)
+					var fdir := Vector2(-sin(float(st["yaw"])), -cos(float(st["yaw"])))
+					spawned["goal"] = (st["pos"] as Vector3) + Vector3(fdir.x, 0.0, fdir.y) * 2.0
+			elif not city_route and String(_loops[w[0]].get("kind", "block")) in ["plaza", "park"] and _cur_weather != "storm" and _rng.randf() < 0.16 and missing > 1:
+				var d2: Vector2 = sp2[1]
+				var p_a := Vector3(sp2[0].x, float(_ground.call(sp2[0].x, sp2[0].y)), sp2[0].y)
+				var p_b := p_a + Vector3(d2.x, 0.0, d2.y) * 1.05
+				p_b.y = float(_ground.call(p_b.x, p_b.z))
+				var chat_t := _rng.randf_range(14.0, 34.0)
+				spawned["pos"] = p_a
+				spawned["state"] = "chat"
+				spawned["pose"] = 4
+				spawned["walk"] = 0.0
+				spawned["vel_cur"] = 0.0
+				spawned["t"] = chat_t
+				spawned["goal"] = p_b
+				spawned["yaw"] = atan2(-(p_b.x - p_a.x), -(p_b.z - p_a.z))
+				_spawn(int(w[0]), s2 + 1.05)
+				var partner: Dictionary = _people[_people.size() - 1]
+				partner["pos"] = p_b
+				partner["state"] = "chat"
+				partner["pose"] = 4
+				partner["walk"] = 0.0
+				partner["vel_cur"] = 0.0
+				partner["t"] = chat_t + _rng.randf_range(-1.5, 1.5)
+				partner["goal"] = p_a
+				partner["yaw"] = atan2(-(p_a.x - p_b.x), -(p_a.z - p_b.z))
 			if city_route:
 				_crossing_counts[w[0]] = int(_crossing_counts.get(w[0], 0)) + 1
 
@@ -528,7 +693,7 @@ func _process(dt: float) -> void:
 		if float(pr.get("fear", 0.0)) > 0.64 and float(pr.get("firsthand", 0.0)) > 0.0:
 			var at: Vector3 = pr["pos"]
 			_panic_calls.append(Vector2(at.x, at.z))
-	_queue_up()
+	_queue_up(focus)
 	var keep: Array = []
 	var crossing_people := PackedVector3Array()
 	var occupied := {}
@@ -541,6 +706,8 @@ func _process(dt: float) -> void:
 	var keep_r := KEEP * 0.72 if over_budget else KEEP
 	var frame := Engine.get_process_frames()
 	for pr in _people:
+		if float(pr.get("fade", 1.0)) < 1.0:
+			pr["fade"] = minf(float(pr["fade"]) + dt / 0.9, 1.0)
 		var p0: Vector3 = pr["pos"]
 		var d2_focus := (p0.x - fx) * (p0.x - fx) + (p0.z - fz) * (p0.z - fz) if p0 != Vector3.ZERO else 0.0
 		# (2026-11-27 engine pass) Simulation LOD: everyone within 48 m
@@ -557,10 +724,12 @@ func _process(dt: float) -> void:
 			_step(pr, minf(lag, 0.1), me, eye, d2_focus)
 		var p: Vector3 = pr["pos"]
 		if pr["state"] == "gone":
+			_release_seat(pr)
 			continue
 		# Out of range: they leave only off camera (or once they're specks).
 		var dd := Vector2(p.x - fx, p.z - fz).length()
-		if dd > DROP or dd > keep_r and _unseen(p, 70.0):
+		if dd > DROP or dd > keep_r and _unseen(p, 96.0):
+			_release_seat(pr)
 			continue
 		keep.append(pr)
 		if pr.get("crossing", false):
@@ -586,12 +755,17 @@ func _process(dt: float) -> void:
 
 ## Walkers on the same loop and side of the pavement who are closing on
 ## someone ahead slow to that person's pace (no walking through people).
-## pr["pace"] is the share of their own speed they walk at this frame.
-func _queue_up() -> void:
+## Runs only within 48 m and sorts by s per loop so it stays O(N log N).
+func _queue_up(focus: Vector3) -> void:
 	var by_loop := {}
+	var fx := focus.x
+	var fz := focus.z
 	for pr in _people:
 		pr["pace"] = 1.0
 		if pr["state"] != "walk":
+			continue
+		var p0: Vector3 = pr["pos"]
+		if (p0.x - fx) * (p0.x - fx) + (p0.z - fz) * (p0.z - fz) > 48.0 * 48.0:
 			continue
 		var k := Vector2i(int(pr["loop"]), int(pr["dir"]))
 		if not by_loop.has(k):
@@ -601,15 +775,23 @@ func _queue_up() -> void:
 		var list: Array = by_loop[k]
 		if list.size() < 2:
 			continue
-		var ln := float((_loops[(k as Vector2i).x] as Dictionary)["len"])
-		for a: Dictionary in list:
-			for b: Dictionary in list:
-				if is_same(a, b) or absf(float(a["lane"]) - float(b["lane"])) > 0.55:
-					continue
-				# Metres from a forward to b along the walking direction.
-				var gap := fposmod((float(b["s"]) - float(a["s"])) * float(a["dir"]), ln)
-				if gap < 1.6 and float(a["speed"]) > float(b["speed"]) * float(b["pace"]):
-					var p := float(b["speed"]) * float(b["pace"]) / float(a["speed"])
+		var kv := k as Vector2i
+		var ln := float((_loops[kv.x] as Dictionary)["len"])
+		var dir_s := float(kv.y)
+		list.sort_custom(func(a, b): return float(a["s"]) * dir_s < float(b["s"]) * dir_s)
+		var n := list.size()
+		for i in n:
+			var a: Dictionary = list[i]
+			var sa := float(a["s"])
+			var sp_a := float(a["speed"])
+			var lane_a := float(a["lane"])
+			for step_i in range(1, mini(n, 4)):
+				var b: Dictionary = list[(i + step_i) % n]
+				var gap := fposmod((float(b["s"]) - sa) * dir_s, ln)
+				if gap >= 1.6:
+					break
+				if absf(lane_a - float(b["lane"])) <= 0.55 and sp_a > float(b["speed"]) * float(b["pace"]):
+					var p := float(b["speed"]) * float(b["pace"]) / sp_a
 					a["pace"] = minf(float(a["pace"]), lerpf(p, 1.0, clampf((gap - 0.9) / 0.7, 0.0, 1.0)))
 
 
@@ -634,6 +816,8 @@ func _collect_vehicles(focus: Vector3) -> void:
 	var max_d2 := (NEAR + 16.0) * (NEAR + 16.0)
 	var f2 := Vector2(focus.x, focus.z)
 	var live_cars := game.cars.values()
+	if game.wrecks != null:
+		live_cars.append_array(game.wrecks.cars())
 	if game.pursuit != null and game.pursuit.state == "chase":
 		live_cars.append(game.pursuit.suspect)
 		live_cars.append_array(game.pursuit.police)
@@ -784,9 +968,11 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 	if had_pos and not far:
 		hazard = _update_fear(pr, pr["pos"], dt)
 		fear = float(pr["fear"])
-		if fear > 0.42 and state in ["browse", "pause"]:
+		if fear > 0.42 and state in ["browse", "pause", "sit", "to_seat", "chat"]:
+			_release_seat(pr)
 			state = "walk"
 			pr["state"] = state
+			pr["pose"] = 0
 			pr["pause_cd"] = 12.0
 	elif far and fear > 0.0:
 		fear = move_toward(fear, 0.0, dt)
@@ -878,7 +1064,7 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 						pr["cross_cd"] = _rng.randf_range(12.0, 22.0)
 						var cli := int(ent["cross_loop"])
 						var on_cross := int(_crossing_counts.get(cli, 0))
-						if on_cross < 2 and _rng.randf() < 0.30:
+						if on_cross < 5 and _rng.randf() < 0.34:
 							var old_p := base + side * float(pr["dodge"]) + avoid
 							pr["loop"] = cli
 							pr["s"] = float(ent["entry_s"])
@@ -956,18 +1142,76 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 									pr["goal"] = dp
 									entered_shop = true
 							break
-				# Natural phone-checking or resting pauses on sidewalks / plazas / parks.
+				# Natural bench sitting, phone-checking, or resting pauses on sidewalks / plazas / parks.
 				if not entered_shop and float(pr["pause_cd"]) <= 0.0 and _cur_weather != "storm" and city_c.is_empty():
 					var lkind := String(l.get("kind", "block"))
-					var pause_chance := 0.22 if lkind in ["plaza", "park"] else (0.14 if profile == "stroller" else 0.07)
+					var pause_chance := 0.24 if lkind in ["plaza", "park"] else (0.16 if profile == "stroller" else 0.09)
 					if _cur_weather == "rain":
 						pause_chance *= 0.35
-					pr["pause_cd"] = _rng.randf_range(18.0, 38.0)
+					pr["pause_cd"] = _rng.randf_range(16.0, 34.0)
 					if _rng.randf() < pause_chance:
-						pr["state"] = "pause"
-						pr["t"] = _rng.randf_range(4.0, 8.2) if lkind in ["plaza", "park"] else _rng.randf_range(2.2, 5.0)
-						var face_v := d.rotated(_rng.randf_range(-0.65, 0.65))
-						pr["goal"] = Vector3(q.x + face_v.x * 2.0, 0.0, q.y + face_v.y * 2.0)
+						var seat_idx := _claim_seat_near(q, 5.5) if _cur_weather != "rain" else -1
+						if seat_idx >= 0:
+							var st_d: Dictionary = _seats[seat_idx]
+							pr["seat"] = seat_idx
+							pr["state"] = "to_seat"
+							pr["goal"] = st_d["pos"]
+							pr["t"] = _rng.randf_range(16.0, 42.0)
+						else:
+							pr["state"] = "pause"
+							pr["pose"] = 3 if _rng.randf() < 0.65 else 0
+							pr["t"] = _rng.randf_range(4.0, 8.2) if lkind in ["plaza", "park"] else _rng.randf_range(2.2, 5.0)
+							var face_v := d.rotated(_rng.randf_range(-0.65, 0.65))
+							pr["goal"] = Vector3(q.x + face_v.x * 2.0, 0.0, q.y + face_v.y * 2.0)
+		"to_seat":
+			p = pr["pos"]
+			p.y = 0.0
+			var gs: Vector3 = pr["goal"]
+			var to_s := Vector2(gs.x - p.x, gs.z - p.z)
+			if to_s.length() < 0.25:
+				var si := int(pr.get("seat", -1))
+				var is_bench := si >= 0 and si < _seats.size() and String(_seats[si]["kind"]) == "bench"
+				pr["state"] = "sit" if is_bench else "pause"
+				pr["pose"] = 2 if is_bench else 3
+				if si >= 0 and si < _seats.size():
+					var syaw := float(_seats[si]["yaw"])
+					var fdir := Vector2(-sin(syaw), -cos(syaw))
+					pr["goal"] = gs + Vector3(fdir.x, 0.0, fdir.y) * 2.0
+				vel_cur = 0.0
+				fwd = Vector2.ZERO
+			else:
+				fwd = to_s.normalized()
+				vel_cur = move_toward(vel_cur, base_speed * 0.85, dt * 3.0)
+				var mv_s := fwd * minf(vel_cur * dt, to_s.length())
+				p += Vector3(mv_s.x, 0.0, mv_s.y)
+		"sit":
+			vel_cur = 0.0
+			var si := int(pr.get("seat", -1))
+			if si >= 0 and si < _seats.size():
+				var st_pos: Vector3 = _seats[si]["pos"]
+				p = Vector3(st_pos.x, 0.0, st_pos.z)
+				var syaw := float(_seats[si]["yaw"])
+				fwd = Vector2(-sin(syaw), -cos(syaw))
+			else:
+				p = Vector3(prev_xz.x, 0.0, prev_xz.y)
+				fwd = Vector2.ZERO
+			pr["pose"] = 2
+			pr["t"] = float(pr["t"]) - dt
+			if float(pr["t"]) <= 0.0:
+				_release_seat(pr)
+				pr["state"] = "walk"
+				pr["pose"] = 3 if bool(pr.get("phone_walk", false)) else 0
+		"chat":
+			vel_cur = 0.0
+			p = Vector3(prev_xz.x, 0.0, prev_xz.y)
+			var gc: Vector3 = pr["goal"]
+			var to_c := Vector2(gc.x - p.x, gc.z - p.z)
+			fwd = to_c.normalized() if to_c.length_squared() > 0.001 else Vector2.ZERO
+			pr["pose"] = 4
+			pr["t"] = float(pr["t"]) - dt
+			if float(pr["t"]) <= 0.0:
+				pr["state"] = "walk"
+				pr["pose"] = 3 if bool(pr.get("phone_walk", false)) else 0
 		"browse", "pause":
 			vel_cur = move_toward(vel_cur, 0.0, dt * 3.6)
 			var bp := prev_xz
@@ -987,7 +1231,9 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 			fwd = to_g.normalized() if to_g.length_squared() > 0.001 else Vector2.ZERO
 			pr["t"] = float(pr["t"]) - dt
 			if float(pr["t"]) <= 0.0:
+				_release_seat(pr)
 				pr["state"] = "walk"
+				pr["pose"] = 3 if bool(pr.get("phone_walk", false)) else 0
 		"enter":
 			p = pr["pos"]
 			p.y = 0.0
@@ -1057,7 +1303,19 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 				var hero_look := -clampf(ang, -0.9, 0.9) * (1.0 - dist / 6.0)
 				look = lerpf(look, hero_look, clampf(1.0 - dist / 6.0, 0.0, 1.0))
 		pr["look"] = lerpf(float(pr["look"]), look, 1.0 - exp(-4.5 * dt))
-	p.y = float(_ground.call(p.x, p.z))
+	if state == "walk":
+		pr["pose"] = 1 if (profile == "jogger" and not bool(pr["waiting"]) and fear < 0.42) else (3 if bool(pr.get("phone_walk", false)) and fear < 0.25 and not bool(pr.get("crossing", false)) else 0)
+	# Cache ground_y() and only re-query when moved > 1.2 m (cuts terrain lookups ~75%).
+	var dx_g := p.x - float(pr.get("gy_x", 1e9))
+	var dz_g := p.z - float(pr.get("gy_z", 1e9))
+	if not had_pos or dx_g * dx_g + dz_g * dz_g > 1.44 or state in ["sit", "to_seat"]:
+		var gy := float(_ground.call(p.x, p.z))
+		pr["gy_x"] = p.x
+		pr["gy_z"] = p.z
+		pr["gy"] = gy
+		p.y = gy
+	else:
+		p.y = float(pr["gy"])
 	pr["pos"] = p
 	if fwd != Vector2.ZERO:
 		var target_yaw := atan2(-fwd.x, -fwd.y)
@@ -1094,37 +1352,45 @@ func _dodge_for(base: Vector2, d: Vector2, side: Vector2, me: Vector3, eye: Vect
 
 
 func _draw_people() -> void:
+	var n_bodies := _mmis.size()
 	var by_body: Array = []
-	for i in _mmis.size():
+	for i in n_bodies:
 		by_body.append([])
 	for pr in _people:
-		(by_body[int(pr["body"]) % _mmis.size()] as Array).append(pr)
-	for i in _mmis.size():
-		var mm: MultiMesh = (_mmis[i] as MultiMeshInstance3D).multimesh
-		var list: Array = by_body[i]
-		if mm.instance_count != list.size():
-			mm.instance_count = list.size()
-		var buf := PackedFloat32Array()
-		buf.resize(list.size() * 20)
-		var j := 0
-		for pr in list:
-			var b := Basis(Vector3.UP, float(pr["yaw"])).scaled(_person_scale(pr))
-			var o: Vector3 = pr["pos"]
-			for r in 3:
-				buf[j] = b.x[r]
-				buf[j + 1] = b.y[r]
-				buf[j + 2] = b.z[r]
-				buf[j + 3] = o[r]
-				j += 4
-			var c: Color = pr["top"]
-			buf[j] = c.r; buf[j + 1] = c.g; buf[j + 2] = c.b; buf[j + 3] = float(pr.get("fear", 0.0))
-			buf[j + 4] = float(pr["stride"]); buf[j + 5] = float(pr["seed"]); buf[j + 6] = float(pr["walk"]); buf[j + 7] = float(pr["look"])
-			j += 8
-		if not list.is_empty():
-			mm.buffer = buf
+		(by_body[int(pr["body"]) % n_bodies] as Array).append(pr)
+	var focus := _focus()
+	var aabb := AABB(focus - Vector3(KEEP, 20, KEEP), Vector3(KEEP * 2, 60, KEEP * 2))
+	for i in n_bodies:
 		var mmi := _mmis[i] as MultiMeshInstance3D
-		mmi.custom_aabb = AABB(_focus() - Vector3(KEEP, 20, KEEP), Vector3(KEEP * 2, 60, KEEP * 2))
-	_draw_blobs()
+		var mm: MultiMesh = mmi.multimesh
+		var list: Array = by_body[i]
+		var cnt := list.size()
+		if cnt > mm.instance_count:
+			var cap := maxi(8, mm.instance_count)
+			while cap < cnt:
+				cap *= 2
+			mm.instance_count = cap
+			_mm_bufs[i].resize(cap * 20)
+		mm.visible_instance_count = cnt
+		if cnt > 0:
+			var buf: PackedFloat32Array = _mm_bufs[i]
+			var j := 0
+			for pr in list:
+				var b := Basis(Vector3.UP, float(pr["yaw"])).scaled(_person_scale(pr))
+				var o: Vector3 = pr["pos"]
+				buf[j] = b.x.x; buf[j + 1] = b.y.x; buf[j + 2] = b.z.x; buf[j + 3] = o.x
+				buf[j + 4] = b.x.y; buf[j + 5] = b.y.y; buf[j + 6] = b.z.y; buf[j + 7] = o.y
+				buf[j + 8] = b.x.z; buf[j + 9] = b.y.z; buf[j + 10] = b.z.z; buf[j + 11] = o.z
+				var c: Color = pr["top"]
+				buf[j + 12] = c.r; buf[j + 13] = c.g; buf[j + 14] = c.b; buf[j + 15] = float(pr.get("fear", 0.0))
+				# Pack pose_mode * 32 + fade_steps (0..16) + seed (0..1) into INSTANCE_CUSTOM.y.
+				var fk := 16.0 - floorf(clampf(float(pr.get("fade", 1.0)), 0.0, 1.0) * 16.0)
+				var pm := float(int(pr.get("pose", 0))) * 32.0
+				buf[j + 16] = float(pr["stride"]); buf[j + 17] = fposmod(float(pr["seed"]), 1.0) + fk + pm; buf[j + 18] = float(pr["walk"]); buf[j + 19] = float(pr["look"])
+				j += 20
+			mm.buffer = buf
+		mmi.custom_aabb = aabb
+	_draw_blobs(focus, aabb)
 
 
 static func _person_scale(person: Dictionary) -> Vector3:
@@ -1134,35 +1400,36 @@ static func _person_scale(person: Dictionary) -> Vector3:
 
 ## Contact shadows: flat on the pavement under each person, a touch
 ## lighter as they walk away out of the near range (they fade with them).
-func _draw_blobs() -> void:
+func _draw_blobs(focus: Vector3, aabb: AABB) -> void:
 	if _blobs == null:
 		return
 	var mm := _blobs.multimesh
-	if mm.instance_count != _people.size():
-		mm.instance_count = _people.size()
-	if _people.is_empty():
+	var cnt := _people.size()
+	if cnt > mm.instance_count:
+		var cap := maxi(16, mm.instance_count)
+		while cap < cnt:
+			cap *= 2
+		mm.instance_count = cap
+		_blob_buf.resize(cap * 16)
+	mm.visible_instance_count = cnt
+	if cnt == 0:
 		return
-	var focus := _focus()
-	var buf := PackedFloat32Array()
-	buf.resize(_people.size() * 16)
+	var buf := _blob_buf
 	var j := 0
 	for pr in _people:
 		var o: Vector3 = pr["pos"]
 		var scale := _person_scale(pr)
 		scale.y = 1.0
 		var b := Basis(Vector3.UP, float(pr["yaw"])).scaled(scale)
-		for r in 3:
-			buf[j] = b.x[r]
-			buf[j + 1] = b.y[r]
-			buf[j + 2] = b.z[r]
-			buf[j + 3] = o[r] + (0.035 if r == 1 else 0.0)
-			j += 4
+		buf[j] = b.x.x; buf[j + 1] = b.y.x; buf[j + 2] = b.z.x; buf[j + 3] = o.x
+		buf[j + 4] = b.x.y; buf[j + 5] = b.y.y; buf[j + 6] = b.z.y; buf[j + 7] = o.y + 0.035
+		buf[j + 8] = b.x.z; buf[j + 9] = b.y.z; buf[j + 10] = b.z.z; buf[j + 11] = o.z
 		var d := Vector2(o.x - focus.x, o.z - focus.z).length()
-		buf[j] = clampf((NEAR + 6.0 - d) / 12.0, 0.0, 1.0)
-		buf[j + 1] = 0.0; buf[j + 2] = 0.0; buf[j + 3] = 0.0
-		j += 4
+		buf[j + 12] = clampf((NEAR + 6.0 - d) / 12.0, 0.0, 1.0)
+		buf[j + 13] = 0.0; buf[j + 14] = 0.0; buf[j + 15] = 0.0
+		j += 16
 	mm.buffer = buf
-	_blobs.custom_aabb = AABB(focus - Vector3(KEEP, 20, KEEP), Vector3(KEEP * 2, 60, KEEP * 2))
+	_blobs.custom_aabb = aabb
 
 
 ## How many people are out (for the debug readout / tests).

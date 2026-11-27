@@ -53,6 +53,7 @@ var pursuit: StreetPursuit
 var speed_fx: SpeedFx
 const PURSUIT_REWARD := 2500.0
 var traffic_bodies: TrafficBodies
+var near_traffic: NearTrafficPool
 var wrecks: Wrecks
 var street_cars: StreetCars   # stealing cars, lock-up garages
 var career: CareerPlay       # courier runs, shift work, the driver
@@ -268,6 +269,10 @@ func _ready() -> void:
 	traffic_bodies.name = "TrafficBodies"
 	add_child(traffic_bodies)
 	traffic_bodies.setup(self)
+	near_traffic = NearTrafficPool.new()
+	near_traffic.name = "NearTrafficPool"
+	add_child(near_traffic)
+	near_traffic.setup(self)
 	# Dynamic resolution on phones (CitySwing's FrameGovernor; WorldState never
 	# installed it, audit WS-08): eases the 3-D render scale down under load or
 	# heat and back up with headroom, so heavy views stay smooth.

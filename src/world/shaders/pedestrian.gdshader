@@ -13,6 +13,8 @@ render_mode cull_back, diffuse_burley;
 #include "res://src/world/shaders/person_pose.gdshaderinc"
 
 global uniform vec3 player_pos;
+global uniform float wetness;
+global uniform float night;
 uniform float crowd_radius = 0.0;  // m round the hero handed to the CPU crowd (0: none)
 // Pavements follow the road surface (+ kerb, in the instance origin).
 global uniform sampler2D ground_height : filter_linear, repeat_disable;
@@ -20,6 +22,9 @@ global uniform vec4 ground_rect;
 
 varying vec3 v_col;
 varying float v_rough;
+varying float v_foot_y;
+varying flat int v_part;
+varying float v_hand;   // 0 inside the CPU crowd's radius .. 1 beyond: dithered hand-over
 
 vec3 srgb(vec3 c) {
 	return pow(c, vec3(2.2));
@@ -56,6 +61,8 @@ void vertex() {
 	int limb = person_limb(UV);
 	v_col = pick(part, fract(seed * (part == 2 ? 7.13 : (part == 3 ? 13.7 : (part == 6 ? 5.31 : (part == 0 ? 3.9 : 1.0))))), COLOR.rgb);
 	v_rough = person_surface_roughness(part);
+	v_foot_y = VERTEX.y;
+	v_part = part;
 
 	// Reaction to the hero: how close (ground level only), which side, where.
 	vec3 wp = (MODEL_MATRIX * vec4(0.0, 0.0, -d, 1.0)).xyz;
@@ -92,8 +99,10 @@ void vertex() {
 	float s = walking > 0.5 ? mix(1.0, endk, max(1.0 - onscreen, far_k)) : 1.0;
 	// Near the hero the CPU crowd (City Empire's Crowd) takes over the
 	// pavements: these walkers only carry the streets beyond it.
-	// (A hard cut, out where people are specks: no shrinking.)
-	s *= step(crowd_radius, length((player_pos - wp).xz));
+	// (2026-11-27: a 12 m dithered band, not a hard cut – at 92 m a walker
+	// is 15–20 px tall and the cut was a visible pop as you moved.)
+	v_hand = crowd_radius > 0.0 ? smoothstep(crowd_radius - 4.0, crowd_radius + 8.0, length((player_pos - wp).xz)) : 1.0;
+	s *= step(0.001, v_hand);
 	v *= s;
 	v.z -= d;
 	v.y += (gy + INSTANCE_CUSTOM.w * d) / length(MODEL_MATRIX[1].xyz);  // (instances are scaled)
@@ -102,6 +111,18 @@ void vertex() {
 }
 
 void fragment() {
-	ALBEDO = v_col;
-	ROUGHNESS = v_rough;
+	if (v_hand < 0.999) {
+		vec2 g = mod(floor(FRAGCOORD.xy), 4.0);
+		float bayer = (mod(g.x + g.y * 2.0, 4.0) * 4.0 + mod(g.x * 3.0 + g.y, 4.0)) / 16.0;
+		if (v_hand <= bayer) {
+			discard;
+		}
+	}
+	float foot_ao = mix(0.68, 1.0, smoothstep(0.02, 0.58, v_foot_y));
+	float wet = clamp(wetness, 0.0, 1.0);
+	float cloth_wet = v_part == 1 ? 0.06 : 0.18;
+	ALBEDO = v_col * foot_ao * (1.0 - cloth_wet * wet);
+	ROUGHNESS = mix(v_rough, max(0.24, v_rough - 0.26), wet);
+	float edge = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.6);
+	EMISSION = vec3(0.45, 0.58, 0.80) * edge * 0.05 * night;
 }

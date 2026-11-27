@@ -23,6 +23,7 @@ uniform bool has_bake = false;
 // 0 plain, 1 paint (clearcoat), 2 glass (sky reflections), 3 chrome.
 uniform int finish = 0;
 uniform bool is_tail_lamp = false;
+uniform bool is_turn_lamp = false;
 uniform bool is_far_lod = false;
 uniform sampler2D lane_tex : filter_nearest, repeat_disable;
 
@@ -33,6 +34,7 @@ uniform vec3 body_max = vec3(0.9, 1.5, 2.2);
 varying vec3 v_local;
 varying vec3 v_cam;
 varying float v_braking;
+varying float v_turn;
 varying float v_dist;
 
 const float EASE = 12.0;     // Traffic.EASE
@@ -65,6 +67,7 @@ void vertex() {
 		s = u < 2.0 * e ? stop - e + u - u * u / (4.0 * e) : stop;
 	}
 	v_braking = max(INSTANCE_CUSTOM.x, (stop < 1.0e8 && u > 0.0) ? 1.0 : 0.0);
+	v_turn = INSTANCE_CUSTOM.z;
 	int capacity = textureSize(lane_tex, 0).y * TEX_W;
 	bool has_lane = base_f >= 1.0 && base_f < float(capacity - 1);
 	int base = has_lane ? int(base_f + 0.5) : 1;
@@ -74,11 +77,18 @@ void vertex() {
 		bool loop = hd.y > 0.5;
 		vec3 pos;
 		mat3 B = traffic_frame(lane_tex, base, n, loop, s, pos);
-		v_local = VERTEX;
+		vec3 lv = VERTEX;
+		vec3 ln = NORMAL;
+		if (!is_far_lod) {
+			float curv = traffic_curvature(lane_tex, base, n, loop, s);
+			float spd_n = clamp(abs(v) / 14.0, 0.0, 1.0);
+			traffic_apply_suspension(lv, ln, v_braking, curv, spd_n);
+		}
+		v_local = lv;
 		v_cam = transpose(B) * (INV_VIEW_MATRIX[3].xyz - pos);
-		vec3 world = pos + B * VERTEX;
+		vec3 world = pos + B * lv;
 		VERTEX = (VIEW_MATRIX * vec4(world, 1.0)).xyz;
-		NORMAL = normalize(mat3(VIEW_MATRIX) * (B * NORMAL));
+		NORMAL = normalize(mat3(VIEW_MATRIX) * (B * ln));
 		v_dist = length(VERTEX);
 	} else {
 		// The instance has no complete lane; collapse it to one point.
@@ -115,8 +125,12 @@ void fragment() {
 		ALBEDO = max(c, vec3(0.55));
 	}
 	bool brake_on = v_braking > 0.5 && (is_tail_lamp || (emission > 0.5 && tint.r > 0.45 && tint.g < 0.12 && tint.b < 0.12));
+	bool turn_side = (v_turn < -0.5 && v_local.x < -0.1) || (v_turn > 0.5 && v_local.x > 0.1);
+	bool turn_blink = is_turn_lamp && turn_side && fract(traffic_time * 1.7) < 0.52;
 	if (brake_on) {
 		EMISSION = vec3(1.0, 0.04, 0.02) * (3.4 + 2.8 * night);
+	} else if (turn_blink) {
+		EMISSION = vec3(1.0, 0.48, 0.03) * (3.2 + 2.2 * night);
 	} else {
 		EMISSION = tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
 	}

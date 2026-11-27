@@ -158,20 +158,30 @@ func _process(dt: float) -> void:
 			var rem := float(L["len"]) - float(c["s"])
 			if rem < 25.0 and not L["city_end"]:
 				want = minf(want, maxf(rem * 0.5, 4.0))   # (slow into the junction)
-			c["v"] = move_toward(float(c["v"]), want, dt * (3.0 if want > float(c["v"]) else 7.0))
+			var prev_v := float(c["v"])
+			c["v"] = move_toward(prev_v, want, dt * (3.0 if want > prev_v else 7.0))
+			c["braking"] = want < prev_v - 0.6 or float(c["v"]) < 0.8
 			c["s"] = float(c["s"]) + float(c["v"]) * dt
 			if float(c["s"]) >= float(L["len"]):
 				_next_lane(c, L)
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	for c in cars:
 		if float(c["wait"]) > 0.0:
 			c["wait"] = float(c["wait"]) - dt
 			if float(c["wait"]) <= 0.0:
+				# Only re-enter out of view (or far off) so cars never pop in on the bridge mouth.
+				var sp_w := _sample(lanes[int(c["lane"])], 0.0)
+				if cam != null:
+					var to_w: Vector3 = (sp_w[0] as Vector3) - cam.global_position
+					if to_w.length_squared() < 160.0 * 160.0 and to_w.normalized().dot(-cam.global_basis.z) > 0.2:
+						c["wait"] = 1.5
+						continue
 				c["wait"] = 0.0
 	_draw()
 
 
-## At a lane end: on into a lane leaving the junction (one with room at its
-## start), or into the city (and back later, balanced across all city bridges).
+## At a lane end: on into a lane leaving the junction (try every exit so one
+## busy branch never deadlocks the whole approach), or into the city.
 func _next_lane(c: Dictionary, L: Dictionary) -> void:
 	if L["city_end"] and not _city_starts.is_empty():
 		var li: int = _city_starts[_city_start_rr % _city_starts.size()]
@@ -180,19 +190,32 @@ func _next_lane(c: Dictionary, L: Dictionary) -> void:
 		c["s"] = 0.0
 		c["wait"] = _rng.randf_range(4.0, 14.0)   # (in the city a while)
 		return
-	var nxt: Array = L["next"]
+	var nxt: Array = (L["next"] as Array).duplicate()
 	if nxt.is_empty():
 		c["s"] = float(L["len"])
 		c["v"] = 0.0
+		c["braking"] = true
 		return
-	var li2: int = nxt[_rng.randi() % nxt.size()]
-	for c2 in cars:
-		if c2 != c and int(c2["lane"]) == li2 and float(c2["s"]) < GAP and float(c2["wait"]) <= 0.0:
-			c["s"] = float(L["len"])
-			c["v"] = 0.0   # (wait for room)
+	# Shuffle candidate exits and take the first one with clear entry room.
+	for i in range(nxt.size() - 1, 0, -1):
+		var j := _rng.randi_range(0, i)
+		var tmp = nxt[i]
+		nxt[i] = nxt[j]
+		nxt[j] = tmp
+	for cand_li in nxt:
+		var li2 := int(cand_li)
+		var blocked := false
+		for c2 in cars:
+			if c2 != c and int(c2["lane"]) == li2 and float(c2["s"]) < GAP and float(c2["wait"]) <= 0.0:
+				blocked = true
+				break
+		if not blocked:
+			c["lane"] = li2
+			c["s"] = 0.0
 			return
-	c["lane"] = li2
-	c["s"] = 0.0
+	c["s"] = float(L["len"])
+	c["v"] = 0.0   # (all exits busy: wait for room)
+	c["braking"] = true
 
 
 ## Where a car is (its body's transform: on the road, facing its way).
@@ -222,8 +245,9 @@ func _draw() -> void:
 			hd = hd.normalized()
 		var basis := Basis.looking_at((hd + Vector3.UP * d.y).normalized(), Vector3.UP)
 		p.y -= 0.38   # (lanes ride 0.4 m above the road)
-		# The traffic shader's parked pose: 5 m along the car's back axis.
-		(groups[int(c["kind"])] as Array).append([Transform3D(basis, p + basis.z * 5.0), Color(0.0, 5.0, 10.0, 0.0), c["col"]])
+		# The traffic shader's parked pose: 5 m along the car's back axis; alpha = braking.
+		var brk := 1.0 if bool(c.get("braking", false)) else 0.0
+		(groups[int(c["kind"])] as Array).append([Transform3D(basis, p + basis.z * 5.0), Color(0.0, 5.0, 10.0, brk), c["col"]])
 	for k in _mm.size():
 		var mm: MultiMesh = _mm[k]
 		var g: Array = groups[k]

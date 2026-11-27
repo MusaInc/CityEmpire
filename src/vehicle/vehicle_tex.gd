@@ -70,6 +70,8 @@ static func bake(model: String) -> Texture2D:
 		return null
 	if not _bakes.has(model):
 		var p := DIR + model + "_bake.png"
+		if not ResourceLoader.exists(p) and model.ends_with("_traffic"):
+			p = DIR + model.trim_suffix("_traffic") + "_bake.png"
 		_bakes[model] = load(p) if ResourceLoader.exists(p) else null
 	return _bakes[model]
 

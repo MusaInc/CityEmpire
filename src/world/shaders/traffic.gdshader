@@ -33,9 +33,11 @@ uniform vec3 body_min = vec3(-0.9, 0.0, -2.2);
 uniform vec3 body_max = vec3(0.9, 1.5, 2.2);
 varying vec3 v_local;
 varying vec3 v_cam;
+varying float v_braking;
 
 void vertex() {
 	float spd = INSTANCE_CUSTOM.x;
+	v_braking = INSTANCE_CUSTOM.w;
 	v_local = VERTEX;
 	{
 		float d0 = mod(INSTANCE_CUSTOM.y + TIME * spd, INSTANCE_CUSTOM.z);
@@ -104,7 +106,12 @@ void fragment() {
 		ROUGHNESS = 0.16;
 		ALBEDO = max(c, vec3(0.55));
 	}
-	EMISSION += tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
+	bool island_brake = v_braking > 0.5 && emission > 0.5 && tint.r > 0.45 && tint.g < 0.12 && tint.b < 0.12;
+	if (island_brake) {
+		EMISSION += vec3(1.0, 0.04, 0.02) * (3.4 + 2.8 * night);
+	} else {
+		EMISSION += tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
+	}
 	if (finish > 0) {
 		// The city in paint, glass and chrome (fake_reflect.gdshaderinc).
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);

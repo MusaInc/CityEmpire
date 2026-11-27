@@ -56,9 +56,14 @@ void vertex() {
 		bool loop = hd.y > 0.5;
 		vec3 pos;
 		mat3 B = traffic_frame(lane_tex, base, n, loop, s, pos);
-		vec3 world = pos + B * VERTEX;
+		vec3 lv = VERTEX;
+		vec3 ln = NORMAL;
+		float brk = max(INSTANCE_CUSTOM.x, (stop < 1.0e8 && u > 0.0) ? 1.0 : 0.0);
+		float curv = traffic_curvature(lane_tex, base, n, loop, s);
+		traffic_apply_suspension(lv, ln, brk, curv, clamp(abs(v) / 14.0, 0.0, 1.0));
+		vec3 world = pos + B * lv;
 		VERTEX = (VIEW_MATRIX * vec4(world, 1.0)).xyz;
-		NORMAL = normalize(mat3(VIEW_MATRIX) * (B * NORMAL));
+		NORMAL = normalize(mat3(VIEW_MATRIX) * (B * ln));
 	} else {
 		VERTEX = vec3(0.0, 0.0, -1.0);
 	}

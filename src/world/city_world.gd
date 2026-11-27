@@ -117,7 +117,8 @@ var ground_mat: ShaderMaterial
 var water_mat: ShaderMaterial
 const SEABED := "res://assets/world/seabed.png"
 var prop_meshes := {}
-var car_meshes: Array[Mesh] = []  # CAR_KINDS order; null where the model is missing
+var car_meshes: Array[Mesh] = []  # CAR_KINDS order; null where the model is missing (parked cars, with static wheels)
+var car_moving_meshes: Array[Mesh] = []  # near moving traffic: wheels animated separately by NearTrafficPool + night beam
 var car_mid_meshes: Array[Mesh] = []  # "<body>_lod1" (~1.2k tris) between CAR_NEAR and CAR_MID
 var car_far_meshes: Array[Mesh] = []  # two-box stand-ins (24 tris) past CAR_MID
 ## Full car models only in chunks this close (centre distance); 1 650 tris each
@@ -253,7 +254,7 @@ func _ready() -> void:
 		traffic.mid_range = CAR_MID
 		traffic.far_range = CAR_FAR
 		add_child(traffic)
-		traffic.setup(layout, car_meshes, car_far_meshes, traffic_density, car_mid_meshes)
+		traffic.setup(layout, car_moving_meshes if not car_moving_meshes.is_empty() else car_meshes, car_far_meshes, traffic_density, car_mid_meshes)
 		for pole in traffic.signal_poles:
 			var p: Vector3 = (pole[1] as Transform3D).origin
 			var key := CityLayout.chunk_of(Vector2(p.x, p.z))
@@ -749,6 +750,17 @@ var _goal_state := {}  # player instance id -> {road, dir}
 var _boulevards: Array = []
 
 
+## Bench and bus-shelter transforms across this city (for Crowd sitting / waiting).
+func activity_furniture() -> Array:
+	var out: Array = []
+	for items in _furniture_by_chunk.values():
+		for it in items:
+			var k := String(it[0])
+			if k == "bench" or k == "bus_shelter":
+				out.append(it)
+	return out
+
+
 func is_water(p: Vector3) -> bool:
 	return layout.is_water(p)
 
@@ -895,12 +907,18 @@ func _load_props() -> void:
 		# Near model: <body>_traffic.glb when there is one (the catalogue cars
 		# are ~40k tris in full; a ~6k cut for traffic), else the body itself.
 		var near_name := String(kind[2]) + "_traffic"
-		var cm := _traffic_car_mesh(near_name, shader, String(kind[2])) if ResourceLoader.exists(MODEL_VEH + near_name + ".glb") \
-			else _traffic_car_mesh(String(kind[2]), shader)
+		var has_tr := ResourceLoader.exists(MODEL_VEH + near_name + ".glb")
+		var cm := _traffic_car_mesh(near_name, shader, String(kind[2]), true, false) if has_tr \
+			else _traffic_car_mesh(String(kind[2]), shader, "", true, false)
 		if cm == null:  # (the old low-detail model as a fallback)
 			cm = _legacy_car_mesh(String(kind[0]), shader)
 		car_meshes.append(cm)
-		var mid := _traffic_car_mesh(String(kind[2]) + "_lod1", shader, String(kind[2]))
+		# Near moving traffic: omit static wheels (NearTrafficPool animates them
+		# with spin + front-wheel steering) and include the night dipped-beam grid.
+		var cm_mov := _traffic_car_mesh(near_name, shader, String(kind[2]), false, true) if has_tr \
+			else _traffic_car_mesh(String(kind[2]), shader, "", false, true)
+		car_moving_meshes.append(cm_mov if cm_mov else cm)
+		var mid := _traffic_car_mesh(String(kind[2]) + "_lod1", shader, String(kind[2]), true, false)
 		car_mid_meshes.append(mid if mid else cm)
 		car_far_meshes.append(_car_far_mesh(cm) if cm else null)
 	# Four body types (tools/blender/build_street.py), one surface each;
@@ -958,7 +976,7 @@ static func _traffic_bake(body: String, dims_of: String) -> Texture2D:
 	return t
 
 
-func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
+func _traffic_car_mesh(body: String, shader: Shader, dims_of := "", include_wheels := true, include_beam := false) -> Mesh:
 	var path := "res://assets/vehicles/%s.glb" % body
 	var d: Dictionary = BodyDims.DIMS.get(dims_of if dims_of != "" else body, {})
 	if not ResourceLoader.exists(path) or d.is_empty():
@@ -997,6 +1015,11 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 		# Traffic uses opaque reflective glass for both imported pane types.
 		var look: Array = TRAFFIC_MATS.get("glass" if n == "glass_clear" else n, TRAFFIC_DARK)
 		(add.call(look) as SurfaceTool).append_from(_surface_mesh(src, i), 0, Transform3D.IDENTITY)
+	var aabb := src.get_aabb()
+	var beam_fz := aabb.position.z if include_beam else 0.0
+	var beam_w := float(d["W"]) if include_beam else 0.0
+	if not include_wheels:
+		return _commit_traffic(tools, looks, shader, beam_fz, beam_w, aabb, _traffic_bake(body, dims_of), sealed)
 	var wr: float = d["wheel_r"]
 	var tw: float = d["tyre_w"]
 	var track: float = float(d["W"]) - tw - 0.05
@@ -1019,10 +1042,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 						var smat := wm.surface_get_material(si)
 						var sn := String(smat.resource_name) if smat else ""
 						(add.call(TRAFFIC_MATS.get(sn, TRAFFIC_DARK)) as SurfaceTool).append_from(_surface_mesh(wm, si, true), 0, wxf)
-			# The full model only: mid/far LODs carry no beam.
-			# (No road beam: an additive patch on the road at the bumper read as a
-			# light under the car at night, 2026-11-21.)
-			return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), _traffic_bake(body, dims_of), sealed)
+			return _commit_traffic(tools, looks, shader, beam_fz, beam_w, aabb, _traffic_bake(body, dims_of), sealed)
 	var tyre := CylinderMesh.new()
 	tyre.top_radius = wr
 	tyre.bottom_radius = wr
@@ -1040,7 +1060,7 @@ func _traffic_car_mesh(body: String, shader: Shader, dims_of := "") -> Mesh:
 			var xf := Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(side * track * 0.5, wr, -float(az)))
 			(add.call(TRAFFIC_MATS["tyre"]) as SurfaceTool).append_from(_white_uv2(tyre), 0, xf)
 			(add.call(TRAFFIC_MATS["rim"]) as SurfaceTool).append_from(_white_uv2(hub), 0, xf)
-	return _commit_traffic(tools, looks, shader, 0.0, 0.0, src.get_aabb(), _traffic_bake(body, dims_of), sealed)   # (no road beam: the user asked for them gone, 2026-11-18)
+	return _commit_traffic(tools, looks, shader, beam_fz, beam_w, aabb, _traffic_bake(body, dims_of), sealed)
 
 
 const BEAM_SHADER := preload("res://src/world/shaders/traffic_beam.gdshader")

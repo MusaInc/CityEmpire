@@ -33,10 +33,11 @@ const PATH_SHADER := preload("res://src/world/shaders/traffic_path.gdshader")
 const PATH_BEAM_SHADER := preload("res://src/world/shaders/traffic_path_beam.gdshader")
 const PATH_AO_SHADER := preload("res://src/world/shaders/traffic_path_ao.gdshader")
 const LANE_V := {"ring": 13.0, "major": 12.0, "minor": 9.0, "roundabout": 8.0}
-const SPACING := 112.0     # m of lane per car at density 1 (livelier streets without overcrowding)
+const SPACING := 132.0     # quality over quantity: cleaner spacing, fewer queues, smoother flow
+const FOLLOW_STAGGER := 0.38  # s: snappier human launch at green lights (was 0.7)
 
 const SIGNAL_CYCLE := 26.0
-const SIGNAL_GREEN := 0.38
+const SIGNAL_GREEN := 0.43
 const STOP_MARGIN := 11.0     # room for the crossing and the front overhang
 const SIGNAL_LOOK := 24.0     # brake earlier when the junction has a crossing
 static var signal_time := 0.0
@@ -64,6 +65,7 @@ var l_piece := PackedInt32Array()     # road piece (lanes of one piece don't con
 var l_exits: Array = []               # [[s, connector], ...] by s
 var l_ends: Array = []                # connectors from an open lane's end
 var l_feeds: Array = []               # connectors that join this lane
+var l_adj := PackedInt32Array()       # parallel same-direction lane on the same piece (-1 if none)
 var through_signals := {}            # lane -> ordered [junction distance, phase]
 var signal_poles: Array = []
 var pedestrian_crossings: Array = []
@@ -98,6 +100,7 @@ var _groups: Array = []      # per kind: [near MultiMesh, far MultiMesh]
 var _buffers: Array[PackedFloat32Array] = []
 var _drawn: Array = []       # per group index (kind * 3 + band): car ids
 var _cull_t := 0.0
+var _last_cam_fw := Vector3.FORWARD
 var _l_rect: Array[Rect2] = []
 var _dormant := {}           # offscreen cars hibernated by time-of-day modulation
 var _atmo: Atmosphere
@@ -271,6 +274,7 @@ func _add_lane(line2: PackedVector2Array, loop: bool, v: float, piece: int, conn
 	l_exits.append([])
 	l_ends.append([])
 	l_feeds.append([])
+	l_adj.append(-1)
 	l_cars.append([])
 	_lane_pts.append(res)
 	var lr := Rect2(Vector2(res[0].x, res[0].z), Vector2.ZERO)
@@ -637,6 +641,21 @@ func _connect() -> void:
 			l_ends[li].append(c)
 	for li in base_count:
 		(l_exits[li] as Array).sort_custom(func(a, b): return a[0] < b[0])
+	# Pair parallel same-direction lanes on multi-lane roads for obstacle bypass / lane changes.
+	for li in base_count:
+		if l_adj[li] >= 0 or l_piece[li] < 0:
+			continue
+		var d_a := lane_dir(li, l_len[li] * 0.5)
+		var p_a := lane_point(li, l_len[li] * 0.5)
+		for lj in range(li + 1, base_count):
+			if l_piece[lj] != l_piece[li] or l_adj[lj] >= 0 or l_loop[li] != l_loop[lj]:
+				continue
+			if absf(l_len[li] - l_len[lj]) > 14.0:
+				continue
+			if d_a.dot(lane_dir(lj, l_len[lj] * 0.5)) > 0.92 and p_a.distance_to(lane_point(lj, l_len[lj] * 0.5)) < 6.5:
+				l_adj[li] = lj
+				l_adj[lj] = li
+				break
 	_match_signals(base_count)
 	_seg_grid.clear()
 
@@ -986,8 +1005,12 @@ func _process(dt: float) -> void:
 		if not _dormant.has(id) and c_ev[id] <= now:
 			_event(id)
 	_cull_t -= dt
-	if _cull_t <= 0.0:
-		_cull_t = 0.2
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	var rot_changed := cam != null and (-cam.global_basis.z).dot(_last_cam_fw) < 0.988
+	if _cull_t <= 0.0 or rot_changed:
+		_cull_t = 0.14
+		if cam != null:
+			_last_cam_fw = -cam.global_basis.z
 		_cull()
 
 
@@ -1007,8 +1030,9 @@ func _event(id: int) -> void:
 			var ex: Array = l_exits[li][c_xi[id]]
 			c_xi[id] += 1
 			var s := car_s(id, now)
+			var to_lane := l_next[int(ex[1])]
 			if c_stop[id] >= NO_STOP and absf(s - float(ex[0])) < 1.5 and _rng.randf() < TURN_P \
-					and _free(ex[1], now):
+					and _stopped_count(to_lane) < 4 and _free(ex[1], now):
 				_move_to(id, ex[1], 0.0, false)
 			else:
 				_schedule(id)
@@ -1053,7 +1077,7 @@ func _through_signal(id: int) -> void:
 		_next_signal[id] += 1
 		var following := _follower(id)
 		if following >= 0 and c_ek[following] == EV_FOLLOW:
-			c_ev[following] = minf(c_ev[following], now + 0.7)
+			c_ev[following] = minf(c_ev[following], now + FOLLOW_STAGGER)
 		_schedule(id)
 		return
 	var line := junction - STOP_MARGIN
@@ -1133,11 +1157,11 @@ func _decide(id: int) -> void:
 			var f2 := _follower(id)
 			if f2 >= 0:
 				c_ek[f2] = EV_FOLLOW
-				c_ev[f2] = now + 0.7
+				c_ev[f2] = now + FOLLOW_STAGGER
 		if c_wait[id] < 0.0:
 			c_wait[id] = now
 		c_ek[id] = EV_DECIDE
-		c_ev[id] = now + 0.4
+		c_ev[id] = now + 0.32
 		return
 	c_book[id] = pick
 	c_wait[id] = -1.0
@@ -1146,7 +1170,7 @@ func _decide(id: int) -> void:
 		var f := _follower(id)
 		if f >= 0:
 			c_ek[f] = EV_FOLLOW
-			c_ev[f] = now + 0.7
+			c_ev[f] = now + FOLLOW_STAGGER
 	_schedule(id)
 
 
@@ -1187,15 +1211,24 @@ func _follow(id: int) -> void:
 	var stop := NO_STOP
 	if lead >= 0 and c_stop[lead] < NO_STOP:
 		stop = c_stop[lead] - GAP
+		# Multi-lane obstacle bypass: if stuck behind a knocked/held car on a multi-lane
+		# road and the adjacent parallel lane is clear, merge into it instead of deadlocking.
+		var li_cur := c_lane[id]
+		var adj := l_adj[li_cur] if li_cur < l_adj.size() else -1
+		if adj >= 0 and (knocked.has(lead) or _held.has(lead)):
+			var s_cur := car_s(id, now)
+			if s_cur > 10.0 and s_cur < l_len[adj] - LOOK - 8.0 and _lane_slot_clear(adj, s_cur):
+				_move_to(id, adj, s_cur, _at_rest(id))
+				return
 		if stop <= car_s(id, now) + 2.0:
 			c_ek[id] = EV_FOLLOW
-			c_ev[id] = INF
+			c_ev[id] = now + 1.8 if (adj >= 0 and (knocked.has(lead) or _held.has(lead))) else INF
 			return
 	_rebase(id, false, stop)
 	var f := _follower(id)
 	if f >= 0 and c_stop[f] < NO_STOP:
 		c_ek[f] = EV_FOLLOW
-		c_ev[f] = now + 0.7
+		c_ev[f] = now + FOLLOW_STAGGER
 	_schedule(id)
 
 
@@ -1240,8 +1273,18 @@ func _move_to(id: int, to: int, s: float, from_rest: bool) -> void:
 	else:
 		_schedule(id)
 	if f >= 0 and c_ek[f] == EV_FOLLOW:
-		c_ev[f] = minf(c_ev[f], now + 0.7)
+		c_ev[f] = minf(c_ev[f], now + FOLLOW_STAGGER)
 	_dirty(id)
+
+
+func _stopped_count(li: int) -> int:
+	if li < 0 or li >= l_cars.size():
+		return 0
+	var n := 0
+	for cid in l_cars[li]:
+		if c_stop[int(cid)] < NO_STOP:
+			n += 1
+	return n
 
 
 ## No car on (or about to join) the connector's target near where it joins,
@@ -1269,18 +1312,21 @@ func _free(conn: int, t: float, v_in := -1.0, tight := false) -> bool:
 		var ds := car_s(k, arrive) - s_to
 		if l_loop[to]:
 			ds = wrapf(ds, -L * 0.5, L * 0.5)
-		if (ds > -7.0 and ds < 7.0) if tight else (ds > -16.0 - lost and ds < 12.0):
+		# Do not block the box: if a stopped car sits just past s_to, hold at the stop line.
+		if not tight and c_stop[k] < NO_STOP and ds >= -4.0 and ds < GAP * 1.9:
 			return false
-	if tight:
-		return true
+		if (ds > -8.5 and ds < 8.5) if tight else (ds > -16.0 - lost and ds < 12.0):
+			return false
 	# Cars on other connectors into this lane, and cars that have booked one:
-	# where they'll be on the lane when this one joins.
+	# keep clash checking active even when tight (smaller margin) to prevent junction overlaps.
 	var vt := l_v[to]
+	var c_back := 10.0 if tight else (20.0 + lost)
+	var c_fwd := 9.0 if tight else 16.0
 	var clash := func(s_k: float, t_k: float) -> bool:
 		var ds := s_k + (arrive - t_k) * vt * (0.8 if arrive > t_k else 1.0) - s_to
 		if l_loop[to]:
 			ds = wrapf(ds, -L * 0.5, L * 0.5)
-		return ds > -20.0 - lost and ds < 16.0
+		return ds > -c_back and ds < c_fwd
 	for c2 in l_feeds[to]:
 		if c2 == conn:
 			continue
@@ -1342,10 +1388,13 @@ func _make_groups(meshes: Array, far_meshes: Array, mid_meshes: Array) -> void:
 						var tint_v = old.get_shader_parameter("tint")
 						var em_v := float(old.get_shader_parameter("emission"))
 						var is_tail := false
+						var is_turn := false
 						if tint_v is Color:
 							var tc := tint_v as Color
 							is_tail = em_v > 0.5 and tc.r > 0.45 and tc.g < 0.12 and tc.b < 0.12
+							is_turn = em_v > 0.4 and tc.r > 0.85 and tc.g > 0.35 and tc.b < 0.15
 						sm.set_shader_parameter("is_tail_lamp", is_tail)
+						sm.set_shader_parameter("is_turn_lamp", is_turn)
 						sm.set_shader_parameter("is_far_lod", far)
 					sm.set_shader_parameter("lane_tex", _tex)
 					m.surface_set_material(i, sm)
@@ -1379,7 +1428,7 @@ func _cull() -> void:
 		var vs := get_viewport().get_visible_rect().size
 		var aspect := vs.x / maxf(vs.y, 1.0)
 		var half := atan(tan(deg_to_rad(cam.fov) * 0.5) * sqrt(1.0 + aspect * aspect))
-		cos_lim = cos(minf(half + deg_to_rad(18.0), PI * 0.5 - 0.01))
+		cos_lim = cos(minf(half + deg_to_rad(28.0), PI * 0.5 - 0.01))
 	var lists: Array = []
 	for g in _groups.size() * 3:
 		lists.append([])
@@ -1394,7 +1443,10 @@ func _cull() -> void:
 		var d2 := d.length_squared()
 		if _dormant.has(id):
 			# Wake back up out of sight when time-of-day traffic rises and lane is clear.
-			if prio <= tod_share and d2 > nr2 and not knocked.has(id):
+			# (2026-11-27) …and only out of view or far off: past 90 m in plain
+			# sight a car used to materialise on the open road.
+			var seen := d.dot(fw) > sqrt(d2) * cos_lim and d2 < fr2 * 0.72
+			if prio <= tod_share and d2 > nr2 and not seen and not knocked.has(id):
 				var li := c_lane[id]
 				var s_w := clampf(c_s0[id], 0.0, maxf(l_len[li] - 2.0, 0.0))
 				if l_next[li] < 0 and _lane_slot_clear(li, s_w):
@@ -1422,7 +1474,12 @@ func _cull() -> void:
 		if d2 < fr2:
 			var dist := sqrt(d2)
 			if (dist < 35.0 or d.dot(fw) > dist * cos_lim) and not knocked.has(id):
-				g = c_kind[id] * 3 + (0 if d2 < nr2 else (1 if d2 < mr2 else 2))
+				# LOD with hysteresis (±8 m round each switch) so a car holding
+				# station near 90 m / 240 m doesn't flick between models.
+				var was := c_grp[id] % 3 if c_grp[id] >= 0 else -1
+				var nl := near_range + (8.0 if was == 0 else -8.0 if was > 0 else 0.0)
+				var ml := mid_range + (8.0 if was <= 1 and was >= 0 else -8.0 if was == 2 else 0.0)
+				g = c_kind[id] * 3 + (0 if dist < nl else (1 if dist < ml else 2))
 		elif prio > tod_share and not knocked.has(id) and not _held.has(id) and l_next[c_lane[id]] < 0 and _follower(id) < 0:
 			# Quiet-hours thinning: hibernate offscreen cars safely out of l_cars so nothing queues behind them.
 			var li2 := c_lane[id]
@@ -1462,6 +1519,33 @@ func _cull() -> void:
 		_drawn[g] = ids
 
 
+## All car IDs currently rendered in the near band (band 0) for NearTrafficPool.
+func near_drawn_ids() -> Array:
+	var out: Array = []
+	for k in _groups.size():
+		var g := k * 3
+		if g < _drawn.size() and not (_drawn[g] as Array).is_empty():
+			out.append_array(_drawn[g] as Array)
+	return out
+
+
+## Turn indicator direction (-1 left, 0 off, +1 right) when booked onto a curved connector.
+func _turn_signal(id: int) -> float:
+	var conn := c_book[id]
+	if conn < 0:
+		var li := c_lane[id]
+		if l_next[li] >= 0:
+			conn = li
+	if conn < 0 or l_len[conn] < 3.0:
+		return 0.0
+	var d0 := lane_dir(conn, 0.5)
+	var d1 := lane_dir(conn, l_len[conn] - 0.5)
+	var cross_y := d0.x * d1.z - d0.z * d1.x
+	if absf(cross_y) < 0.25:
+		return 0.0
+	return 1.0 if cross_y > 0.0 else -1.0
+
+
 ## Keep the basis invertible for the rendering backend even though the shader
 ## uses these rows as motion data. Powers of two preserve the packed precision.
 func _write(buf: PackedFloat32Array, j: int, id: int) -> void:
@@ -1472,7 +1556,8 @@ func _write(buf: PackedFloat32Array, j: int, id: int) -> void:
 	buf[j + 12] = col.r; buf[j + 13] = col.g; buf[j + 14] = col.b; buf[j + 15] = 1.0
 	var brake_f := 1.0 if _is_braking(id) else 0.0
 	var lod_f := float(c_grp[id] % 3) * 0.5 if c_grp[id] >= 0 else 0.0
-	buf[j + 16] = brake_f; buf[j + 17] = lod_f; buf[j + 18] = 0.0; buf[j + 19] = 0.0
+	var turn_f := _turn_signal(id)
+	buf[j + 16] = brake_f; buf[j + 17] = lod_f; buf[j + 18] = turn_f; buf[j + 19] = 0.0
 
 
 func _motion(id: int) -> Transform3D:
@@ -1489,7 +1574,7 @@ func _dirty(id: int) -> void:
 	if mm == null or c_slot[id] >= mm.instance_count:
 		return
 	mm.set_instance_transform(c_slot[id], _motion(id))
-	mm.set_instance_custom_data(c_slot[id], Color(1.0 if _is_braking(id) else 0.0, float(g % 3) * 0.5, 0.0, 0.0))
+	mm.set_instance_custom_data(c_slot[id], Color(1.0 if _is_braking(id) else 0.0, float(g % 3) * 0.5, _turn_signal(id), 0.0))
 
 
 # ------------------------------------------------------------ yielding

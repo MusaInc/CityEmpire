@@ -69,7 +69,7 @@ vec3 fake_cabin(vec3 p, vec3 d, vec3 bmin, vec3 bmax, vec3 outside, out float th
 			best = ts;
 		}
 	}
-	return col;
+	return col * 0.78;
 }
 
 // The cabin box from the body's bounds (min/max of the whole shell, model space).
