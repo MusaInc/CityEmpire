@@ -1143,6 +1143,7 @@ func _connect_empire() -> void:
 	_brand_sig = "?"
 	_sync_brand()
 	empire.notified.connect(func(t, k): ui.toast(t, k, empire.last_ref))
+	empire.fleet_arrived.connect(func(b: Business, _vid: String): _fleet_drop[b.id] = true)
 	empire.stock_delivered.connect(_show_stock_delivery, CONNECT_DEFERRED)
 	empire.day_ended.connect(func(r):
 		# City500: your position, and the market's day in the news.
@@ -1566,7 +1567,13 @@ func _refresh_signs(unit_id: String) -> void:
 	si.update_signs(trading, false, occupied)
 
 
+## Branches whose delivery is your own fleet's (the van wears your livery).
+var _fleet_drop := {}
+
+
 func _show_stock_delivery(b: Business) -> void:
+	var own := _fleet_drop.has(b.id)
+	_fleet_drop.erase(b.id)
 	if state != "play":
 		return
 	var si: ShopInterior = interiors.get(b.premises["id"])
@@ -1581,6 +1588,53 @@ func _show_stock_delivery(b: Business) -> void:
 		VehicleTex.dress_mesh(truck, "car_van")   # (cached mesh: once)
 		truck.set_meta("dressed", true)
 	si.show_stock_delivery(bay, truck, _delivery_van_start(bay) if truck else Vector3.INF)
+	if args.has("sc-debug"):
+		print("    delivery: own=%s bay=%s truck=%s shown=%s" % [own, bay.origin, truck != null, is_instance_valid(si._delivery_truck)])
+	if own and truck and is_instance_valid(si._delivery_truck):
+		_livery(si._delivery_truck, truck.get_aabb())
+
+
+## Your company's livery on a van: brand-coloured side panels with the name
+## and the logo initials (Company), both sides.
+func _livery(van: Node3D, bounds: AABB) -> void:
+	var cols := Company.colours(empire)
+	var nm := Company.name_of(empire).to_upper()
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = cols[0]
+	mat.roughness = 0.35
+	mat.metallic = 0.2
+	var span := bounds.size.z * 0.56
+	var hgt := bounds.size.y * 0.34
+	var cz := bounds.get_center().z + bounds.size.z * 0.12   # (the load box, behind the cab: front is -Z)
+	var cy := bounds.position.y + bounds.size.y * 0.55
+	for side: float in [-1.0, 1.0]:
+		var q := MeshInstance3D.new()
+		var qm := QuadMesh.new()
+		qm.size = Vector2(span, hgt)
+		q.mesh = qm
+		q.material_override = mat
+		var x := bounds.get_center().x + side * (bounds.size.x * 0.5 + 0.012)
+		q.position = Vector3(x, cy, cz)
+		q.rotation.y = side * PI * 0.5
+		van.add_child(q)
+		var lb := Label3D.new()
+		lb.text = "%s\n%s" % [nm, "Deliveries" if SupplyChain.has_warehouse(empire) else ""]
+		lb.font = ShopStyle.font(String(empire.brand.get("face", ""))) if Company.has_brand(empire) else EmpireStyle.font("black")
+		lb.font_size = 64
+		lb.pixel_size = minf(0.006, span * 0.8 / maxf(nm.length() * 38.0, 1.0))
+		lb.modulate = cols[1]
+		lb.shaded = false
+		lb.double_sided = false
+		lb.outline_size = 0
+		lb.position = Vector3(x + side * 0.004, cy, cz)
+		lb.rotation.y = side * PI * 0.5
+		van.add_child(lb)
+
+
+## A business grew a level: rebuild the shop so the fit-out shows now.
+func refresh_business_world(b: Business) -> void:
+	rebuild_interior(String(b.premises.get("id", "")))
+	Sfx.play("chime", -4.0)
 
 
 ## Keep the delivery van on a free parking strip, clear of an intersection.

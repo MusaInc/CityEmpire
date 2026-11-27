@@ -87,7 +87,7 @@ static func check(e: Empire) -> bool:
 		e.flags["stage"] = index(e) + 1
 		moved = true
 		var s := current(e)
-		e._note("You're a %s now. Next: %s" % [s["name"], String(s["goal"]).to_lower()], "good", {"kind": "tab", "id": "company"})
+		e._note("You're a %s now. Next: %s" % [s["name"], String(s["goal"]).to_lower()], "good", {"kind": "tab", "id": "commerce"})
 	if index(e) == stages().size() - 1 and steps(e).all(func(s): return s["done"]) and not e.flags.get("billionaire", false):
 		e.flags["billionaire"] = true
 		e._note("Billionaire. The city runs on your companies.", "good")

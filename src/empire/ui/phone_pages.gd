@@ -81,9 +81,11 @@ static func _sub_bar(ph: Phone, sec: String, items: Array, default_key: String, 
 	if not valid:
 		cur = default_key
 		st["sub"] = cur
-	body.add_child(G.segmented(items, cur, func(k: String):
+	var pick := func(k: String):
 		Phone.st(sec)["sub"] = k
-		ph.refresh()))
+		ph.refresh()
+	# (More than five tabs scroll as pills rather than squeezing a segment.)
+	body.add_child(G.pills(items, cur, pick) if items.size() > 5 else G.segmented(items, cur, pick))
 	return cur
 
 
@@ -112,8 +114,15 @@ static func overview_hub(ph: Phone, body: VBoxContainer) -> void:
 
 
 static func businesses_hub(ph: Phone, body: VBoxContainer) -> void:
-	var sub := _sub_bar(ph, "businesses", [["shops", "My Businesses"], ["ops", "Operations"], ["reports", "Reports"], ["corporate", "Corporate"], ["city500", "City500"]], "shops", body)
+	var sub := _sub_bar(ph, "businesses", [["empire", "Empire"], ["shops", "Businesses"], ["supply", "Supply chain"], ["ventures", "Ventures"],
+		["ops", "Operations"], ["reports", "Reports"], ["corporate", "Corporate"], ["city500", "City500"]], "empire", body)
 	match sub:
+		"empire":
+			CommercePages.empire(ph, body)
+		"supply":
+			CommercePages.supply(ph, body)
+		"ventures":
+			CommercePages.ventures(ph, body)
 		"ops":
 			CareerPages.operations(ph, body)
 		"reports":

@@ -390,8 +390,10 @@ func _build_shop(st: _Batch) -> void:
 	_decor(st, part_d, cx0, cd0, cd1)
 	if biz and biz.has_upgrade("security"):
 		_build_cctv(st, part_d)
-	if biz and (biz.reputation >= 65.0 or biz.has_upgrade("floor") or biz.has_upgrade("lighting")):
+	if biz and (biz.reputation >= 65.0 or biz.has_upgrade("floor") or biz.has_upgrade("lighting") or biz.level >= 2):
 		_build_shop_prestige(st, part_d, cx0, cx1, cd0, cd1)
+	if biz and biz.level >= 2:
+		_level_fitout(st, part_d)
 	# Back room: racking, office desk, mop.
 	_backroom(st, part_d, dw0, dw1)
 	door_in = R((door.x + door.y) * 0.5, 0.9, 0.0)
@@ -408,7 +410,8 @@ func _build_shop(st: _Batch) -> void:
 	tint = tint.lerp(Color(1.0, 0.93, 0.83), 0.18)
 	if biz and biz.has_upgrade("lighting"):
 		tint = tint.lerp(Color(1.0, 0.9, 0.78), 0.4)
-	if unit.get("flagship", false):
+	if unit.get("flagship", false) or (biz and biz.level >= 3):
+		# (A major retailer and the chain's flagship get the track lighting.)
 		_flagship_lights(st, part_d, tint)
 		_flagship_feature(st, part_d, tint)
 	else:
@@ -545,6 +548,59 @@ func _furniture_contact() -> void:
 func _under_mezzanine(p: Vector3) -> bool:
 	# The west stair and upper gallery are already furnished and have their own rails.
 	return p.x < 6.8 and p.z < -3.25 and p.z > -16.35
+
+
+## Growth levels (Growth, 2026-11-27): an established business hangs your
+## company's lightbox over the shop floor; a major retailer adds a second and
+## a SELF CHECKOUT sign over the extra till; the flagship's is gold-trimmed
+## with FLAGSHIP under the name. All above head height – nothing to walk into.
+func _level_fitout(st: _Batch, part_d: float) -> void:
+	if H < 3.1 or W < 5.0:
+		return
+	var nm := String(ShopStyle.house.get("name", "")) if not ShopStyle.house.is_empty() else ""
+	if nm == "":
+		nm = biz.name
+	var ident := ShopStyle.house_ident(ShopStyle.house) if not ShopStyle.house.is_empty() else {}
+	var prim: Color = ident.get("primary", brand) if ident.get("primary") is Color else brand
+	var acc: Color = ident.get("accent", Color(1, 1, 1)) if ident.get("accent") is Color else Color(1, 1, 1)
+	var trim := Color(0.78, 0.64, 0.34) if biz.level >= 4 else Color(0.16, 0.17, 0.19)
+	var at_d: Array = [part_d * 0.42]
+	if biz.level >= 3 and part_d > 9.0:
+		at_d.append(part_d * 0.78)
+	for d: float in at_d:
+		var y1 := H - 0.22
+		var y0 := y1 - 0.5
+		var hw := minf(W * 0.3, 2.4)
+		# Hangers, frame and the lit face (both sides).
+		for sx: float in [-hw * 0.8, hw * 0.8]:
+			st.box(R(W * 0.5 + sx - 0.01, d - 0.01, y1), R(W * 0.5 + sx + 0.01, d + 0.01, H), trim)
+		st.box(R(W * 0.5 - hw - 0.03, d - 0.07, y0 - 0.03), R(W * 0.5 + hw + 0.03, d + 0.07, y1 + 0.03), trim)
+		st.box(R(W * 0.5 - hw, d - 0.075, y0), R(W * 0.5 + hw, d + 0.075, y1), prim)
+		for side: float in [-1.0, 1.0]:
+			var lb := Label3D.new()
+			lb.text = nm.to_upper() + ("\nFLAGSHIP" if biz.level >= 4 else "")
+			lb.font = ShopStyle.font(String(ShopStyle.house.get("face", ""))) if not ShopStyle.house.is_empty() else EmpireStyle.font("black")
+			lb.font_size = 64 if biz.level < 4 else 56
+			lb.pixel_size = minf(0.0042, hw * 2.0 * 0.86 / maxf(float(nm.length()) * 40.0, 1.0))
+			lb.shaded = false
+			lb.double_sided = false
+			lb.outline_size = 0
+			lb.modulate = acc * 1.25
+			lb.position = R(W * 0.5, d + 0.08 * side, (y0 + y1) * 0.5)
+			lb.rotation.y = 0.0 if side < 0.0 else PI
+			_static.add_child(lb)
+	if biz.level >= 3 and biz.tills() >= 2:
+		var sc := Label3D.new()
+		sc.text = "SELF CHECKOUT"
+		sc.font = EmpireStyle.font("black")
+		sc.font_size = 40
+		sc.pixel_size = 0.003
+		sc.shaded = false
+		sc.modulate = Color(0.95, 0.97, 1.0)
+		sc.outline_size = 0
+		sc.position = R(W * 0.8, 1.2, H - 0.55)
+		sc.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		_static.add_child(sc)
 
 
 func _flagship_lights(st: _Batch, sales_depth: float, tint: Color) -> void:

@@ -1335,13 +1335,14 @@ func open_manage(b: Business, tab := "overview") -> void:
 	_tab = tab
 	var v := _open(b.name, 1060, 650)
 	var tabs := S.hbox(8)
-	for t in [["overview", "Overview"], ["prices", "Prices"], ["stock", "Stock & orders"], ["staff", "Staff"],
+	for t in [["overview", "Overview"], ["growth", "Growth"], ["prices", "Prices"], ["stock", "Stock & orders"], ["staff", "Staff"],
 			["upgrades", "Upgrades"], ["reports", "Reports"]]:
 		var bt := S.button(t[1], func(): open_manage(b, t[0]), t[0] == tab)
 		tabs.add_child(bt)
 	v.add_child(tabs)
 	match tab:
 		"overview": _m_overview(v, b)
+		"growth": CommercePages.growth_tab(self, v, b)
 		"prices": _m_prices(v, b)
 		"stock": _m_stock(v, b)
 		"staff": _m_staff(v, b)

@@ -41,6 +41,12 @@ static func resolve_section(raw: String) -> Array:
 			return ["businesses", "shops"]
 		"company", "corporate":
 			return ["businesses", "corporate"]
+		"commerce", "growth":
+			return ["businesses", "empire"]
+		"supply", "warehouse", "fleet":
+			return ["businesses", "supply"]
+		"ventures", "nightclub", "rental":
+			return ["businesses", "ventures"]
 		"city500":
 			return ["businesses", "city500"]
 		"assets", "property":

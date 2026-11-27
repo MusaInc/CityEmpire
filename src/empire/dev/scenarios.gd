@@ -2525,6 +2525,8 @@ func _run() -> void:
 		await scenario_k()
 	if _which.split(",").has("KS"):
 		await scenario_ks()
+	if _which.split(",").has("BZ"):
+		await scenario_bz()
 	if _which.split(",").has("UI"):
 		await scenario_ui()
 	if _which.split(",").has("U"):
@@ -3506,3 +3508,100 @@ func scenario_ks() -> void:
 	check(flung == 0, "no wreck flung by a bad spawn (%d frames)" % flung)
 	check(leaked == 0, "no traffic slot left knocked without its wreck (%d)" % leaked)
 	game.drive_input.enabled = true
+
+
+## Labels anywhere under n (the phone page / a panel), joined.
+func _texts(n: Node) -> String:
+	var out := PackedStringArray()
+	for c in n.find_children("*", "Label", true, false):
+		out.append((c as Label).text)
+	for c in n.find_children("*", "Button", true, false):
+		out.append((c as Button).text)
+	return " | ".join(out)
+
+
+## The commercial empire (2026-11-27): levels, warehouse → fleet → branch,
+## the phone pages, the Growth tab, the livery van, club / hire / hotel.
+func scenario_bz() -> void:
+	print("--- BZ: the commercial empire in the running game")
+	var e := game.empire
+	var ui := game.ui
+	e.personal_cash = 5000000.0
+	e.transfer_to_company(3000000.0)
+	if not Company.has_brand(e):
+		e.set_brand(ShopStyle.default_house("Crown Goods"))
+	var u := game.starter_unit()
+	var b := e.business_at(String(u["id"]))
+	if b == null:
+		b = e.rent_premises(u, "convenience")
+	check(b != null, "a shop to grow")
+	if b == null:
+		return
+	# Pages build.
+	for sub in [["commerce", "Stage"], ["supply", "Supply chain"], ["ventures", "Nightlife"]]:
+		ui.open_phone(sub[0])
+		await _settle()
+		check(ui.phone != null and _texts(ui.phone).contains(sub[1]), "%s page builds" % sub[0])
+	check(_texts(ui.phone).contains("Nightlife"), "Ventures offers a club")
+	ui.open_phone("commerce")
+	await _settle()
+	check(_texts(ui.phone).contains(Company.name_of(e)), "Empire page shows the company")
+	check(_texts(ui.phone).contains(Progression.current(e)["name"]), "and the career stage")
+	ui.close_panel(true)
+	# Warehouse and a van on the rounds.
+	check(SupplyChain.buy_site(e, "west_depot") == "", "bought the Westbank depot")
+	check(SupplyChain.stock_up(e, SupplyChain.suggested_order(e)) == "", "stocked it for the branches")
+	var v := e.buy_vehicle("van", game.player.global_position + Vector3(6, 0, 0), 0.0)
+	check(SupplyChain.toggle_fleet(e, String(v["id"])) == "", "van and driver on the rounds")
+	var held := e.total_units()
+	var back0 := b.backroom.total_units()
+	# Stand by the shop so the delivery plays out in front of us.
+	await stand(Premises.door_point(u) + Premises.outward(u) * 3.0)
+	await wait(1.0)
+	e.minute = 5.0 * 60.0 + 58.0
+	e.advance(200.0)
+	check(b.backroom.total_units() > back0, "the fleet stocked the shop (%d → %d)" % [back0, b.backroom.total_units()])
+	check(e.total_units() == held, "no stock made or lost")
+	var si: ShopInterior = game.interiors.get(String(u["id"]))
+	var shown := await until(func(): return si != null and is_instance_valid(si._delivery_truck), 6.0)
+	if shown:
+		check(si._delivery_truck.find_children("*", "Label3D", true, false).size() >= 2, "the van that pulled up wears your livery")
+	var probe := Node3D.new()
+	game.add_child(probe)
+	var vm: Mesh = game.world._load_mesh("car_van")
+	game._livery(probe, vm.get_aabb() if vm else AABB(Vector3(-1, 0, -2.5), Vector3(2, 2, 5)))
+	var lbs := probe.find_children("*", "Label3D", true, false)
+	check(lbs.size() == 2 and (lbs[0] as Label3D).text.contains(Company.name_of(e).to_upper()), "fleet livery: name both sides")
+	probe.queue_free()
+	# Growth tab and the fit-out.
+	ui.open_manage(b, "growth")
+	await _settle()
+	check(_texts(ui).contains("Independent shop") and _texts(ui).contains("Grow to"), "Growth tab shows the ladder and the next level")
+	ui.close_panel(true)
+	var shelves := int(b.fixtures.get("shelf", 0))
+	Growth.apply_level(b, 2)
+	Growth.apply_level(b, 3)
+	game.refresh_business_world(b)
+	await _settle()
+	si = game.interiors.get(String(u["id"]))
+	check(int(b.fixtures.get("shelf", 0)) > shelves and b.tills() >= 2, "fit-out: more shelving and a self-checkout")
+	check(si != null and si.find_children("*", "Label3D", true, false).any(func(l): return (l as Label3D).text.contains(Company.name_of(e).to_upper())), "the company lightbox hangs in the shop")
+	# Ventures.
+	check(Trades.buy_club(e, "vault") == "", "bought The Vault")
+	check(Trades.buy_rental(e) == "", "opened car hire")
+	var car := e.buy_vehicle("saloon", game.player.global_position + Vector3(-6, 0, 0), 0.0)
+	Trades.toggle_hire(e, String(car["id"]))
+	check(Ventures.buy_estate(e, "skyport_hotel") == "", "bought the hotel")
+	Trades.build_facility(e, "skyport_hotel", "spa")
+	ui.open_phone("ventures")
+	await _settle()
+	var tx := _texts(ui.phone)
+	if not (tx.contains("The Vault") and tx.contains("Hire fleet") and tx.contains("Spa")):
+		print("    ventures text: ", tx.left(1200))
+	check(tx.contains("The Vault") and tx.contains("Hire fleet") and tx.contains("Spa"), "Ventures shows the club, hire fleet and hotel")
+	ui.close_panel(true)
+	# A whole day of the empire.
+	var w0 := e.net_worth()
+	e.advance(1440.0)
+	check(e.day_reports.size() > 0 and e.day_reports.back().has("profit"), "a day of the empire settles")
+	check(is_finite(e.net_worth()) and e.net_worth() > 0.0, "net worth %s (was %s)" % [EmpireData.money(e.net_worth()), EmpireData.money(w0)])

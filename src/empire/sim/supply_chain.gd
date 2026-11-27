@@ -112,7 +112,7 @@ static func buy_site(e: Empire, id: String) -> String:
 	e.flags["chain"] = {"site": id, "racks": 0, "fleet": {}, "trips": [], "contracts": [], "offers": [], "done": 0, "week": [],
 		"paid": float(s.get("price", 0.0))}
 	stock(e)
-	e._note("%s is yours. Stock it in bulk, then put a van on the rounds." % s["name"], "good", {"kind": "tab", "id": "company"})
+	e._note("%s is yours. Stock it in bulk, then put a van on the rounds." % s["name"], "good", {"kind": "tab", "id": "supply"})
 	e.changed.emit()
 	return ""
 
@@ -231,7 +231,7 @@ static func toggle_fleet(e: Empire, vid: String) -> String:
 		wage = maxf(Staff.wage_for(cand), wage)
 	fl[vid] = {"driver": driver, "wage": wage, "runs": 0, "km": 0.0, "cases": 0}
 	v["fleet"] = true
-	e._note("%s now drives the %s on the rounds" % [driver, EmpireData.vehicle_model(String(v["model"])).get("name", "van")], "good", {"kind": "tab", "id": "company"})
+	e._note("%s now drives the %s on the rounds" % [driver, EmpireData.vehicle_model(String(v["model"])).get("name", "van")], "good", {"kind": "tab", "id": "supply"})
 	e.changed.emit()
 	return ""
 
@@ -428,7 +428,7 @@ static func accept(e: Empire, offer_id: String) -> String:
 			o["shipped"] = 0
 			o["short"] = 0
 			(st["contracts"] as Array).append(o)
-			e._note("Contract signed with %s" % o["client"], "good", {"kind": "tab", "id": "company"})
+			e._note("Contract signed with %s" % o["client"], "good", {"kind": "tab", "id": "supply"})
 			e.changed.emit()
 			return ""
 	return "That offer's gone"
