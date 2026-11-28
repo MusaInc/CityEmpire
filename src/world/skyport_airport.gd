@@ -370,14 +370,21 @@ static func build_link(P: Dictionary, target: Node3D, body: StaticBody3D, isl: S
 			var l1 := c2 + Vector2(side.x, side.z) * 13.5
 			var l2 := c2 - Vector2(side.x, side.z) * 13.5
 			if not _on_road(P, l1, 0.4) and not _on_road(P, l2, 0.4):
+				if SkyportKit.ready():
+					InfraKit.portal(ik, Vector3(l1.x, Y, l1.y), Vector3(l2.x, Y, l2.y), top.y, 1.15, 1.5)
+				else:
+					for l: Vector2 in [l1, l2]:
+						m.beam(Vector3(l.x, Y, l.y), Vector3(l.x, top.y, l.y), 1.0, 1.0, conc)
+					m.beam(Vector3(l1.x, top.y - 0.6, l1.y), Vector3(l2.x, top.y - 0.6, l2.y), 1.2, 1.4, conc)
 				for l: Vector2 in [l1, l2]:
-					m.beam(Vector3(l.x, Y, l.y), Vector3(l.x, top.y, l.y), 1.0, 1.0, conc)
 					_col(body, Vector3(l.x, Y, l.y), Vector3(l.x, top.y, l.y), 1.0, 1.0)
-				m.beam(Vector3(l1.x, top.y - 0.6, l1.y), Vector3(l2.x, top.y - 0.6, l2.y), 1.2, 1.4, conc)
 				_col(body, Vector3(l1.x, top.y - 0.6, l1.y), Vector3(l2.x, top.y - 0.6, l2.y), 1.2, 1.4)
 		s += 34.0
+	if SkyportKit.ready():
+		for i in path.size() - 1:
+			InfraKit.girders(ik, path[i] + Vector3.DOWN * 1.8, path[i + 1] + Vector3.DOWN * 1.8, LINK_W - 0.6, 0.85, i % 2 == 0)
 	# Stations: a wider platform deck, a glazed shelter under a light canopy
-	# and a stair/lift core down to the pavement.
+	# and an architectural glazed stair/lift pavilion with enclosed skywalk.
 	for stn: Array in LINK_STATIONS:
 		var sc: Vector2 = stn[1]
 		var half := float(stn[2]) * 0.5
@@ -391,19 +398,31 @@ static func build_link(P: Dictionary, target: Node3D, body: StaticBody3D, isl: S
 			var o := side * sg * 5.0
 			m.beam(p0 + o + Vector3.DOWN * 0.25, p1 + o + Vector3.DOWN * 0.25, 4.0, 0.5, Color(0.7, 0.7, 0.68))   # platform
 			_col(body, p0 + o + Vector3.DOWN * 0.25, p1 + o + Vector3.DOWN * 0.25, 4.0, 0.5)
+			if SkyportKit.ready():
+				InfraKit.platform_brackets(ik, p0 + side * sg * 2.9 + Vector3.DOWN * 0.45, p1 + side * sg * 2.9 + Vector3.DOWN * 0.45,
+					side * sg, 3.9, 1.45, 7.0, 0.48)
 			m.beam(p0 + side * sg * 7.0 + Vector3.UP * 0.6, p1 + side * sg * 7.0 + Vector3.UP * 0.6, 0.15, 1.1, steel)  # railing
 			var k := 0.0
 			while k <= 1.0:
 				var cp := p0.lerp(p1, k) + side * sg * 6.6
-				m.beam(cp, cp + Vector3.UP * 4.4, 0.25, 0.25, steel)
+				m.beam(cp, cp + Vector3.UP * 4.4, 0.34, 0.34, steel)
 				k += 0.25
-		m.beam(p0 + Vector3.UP * 4.6, p1 + Vector3.UP * 4.6, 15.0, 0.35, Color(0.95, 0.95, 0.95))   # canopy
+		m.beam(p0 + Vector3.UP * 4.6, p1 + Vector3.UP * 4.6, 15.0, 0.38, Color(0.95, 0.95, 0.95))   # canopy
 		_col(body, p0 + Vector3.UP * 4.6, p1 + Vector3.UP * 4.6, 15.0, 0.35)
-		# Lift and stair core at one end, off the road where possible.
+		# Architectural lift and stair pavilion at one end, connected by an enclosed skywalk.
+		var core_side := 1.0
 		var core := Vector2(p0.x, p0.z) + Vector2(side.x, side.z) * 10.5
 		if _on_road(P, core, 0.5):
+			core_side = -1.0
 			core = Vector2(p0.x, p0.z) - Vector2(side.x, side.z) * 15.0
-		m.solid(core.x - 2.6, core.y - 2.6, core.x + 2.6, core.y + 2.6, Y, p0.y + 5.0, Color(0.32, 0.4, 0.46))
+		if SkyportKit.ready():
+			InfraKit.pavilion(ik, Vector3(core.x, Y, core.y), p0.y + 4.6, side * core_side, 5.4, 5.4, 1.35, 2.5)
+			var plat_pt := p0 + side * core_side * 5.0
+			var core_pt := Vector3(core.x, p0.y, core.y) - side * core_side * 2.4
+			if core_pt.distance_to(plat_pt) > 0.8:
+				InfraKit.skywalk(ik, core_pt, plat_pt, 3.0, 3.2, 4.5)
+		else:
+			m.solid(core.x - 2.6, core.y - 2.6, core.x + 2.6, core.y + 2.6, Y, p0.y + 5.0, Color(0.32, 0.4, 0.46))
 		CityWorld._add_box(body, AABB(Vector3(core.x - 2.6, Y, core.y - 2.6), Vector3(5.2, p0.y + 5.0 - Y, 5.2)))
 	isl._mesh_into(m, "SkyportLink", target, 0.0, 2600.0)
 	InfraKit.place(target, ik, 2000.0)

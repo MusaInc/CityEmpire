@@ -49,6 +49,7 @@ class Foot:
 	var stance_u := 0.0       # stance progress 0..1
 	var toe := 0.0            # heel-up roll about the ball (rad)
 	var heel := 0.0           # heel-strike toes-up (rad)
+	var td_heel := 0.0        # touchdown heel pitch (continuous handoff from swing)
 	var pitch := 0.0          # swing foot pitch relative to level (+ = toes up)
 	var settle := false       # standing settle step
 	var quick := false        # settle = just putting a foot in the air down where it is
@@ -75,6 +76,8 @@ var freq := 0.0           # cycles per second
 var duty := 0.6           # stance fraction of the cycle
 var run := 0.0            # 0 walk … 1 run (gait style)
 var everyday := false
+var body_type := "a"
+var heel_pitch := 0.0
 const FOLD_MIN := 0.36    # m: closest an ankle comes to its hip (calf against hamstring)
 var sprint := 0.0         # 0..1 above a jog
 var moving := false       # stepping (false = standing)
@@ -195,7 +198,8 @@ func _plant_at(f: Foot, a: Vector3, ground: Callable) -> void:
 	var hit := _sole_hit(ground, a, f.heading, everyday)
 	f.planted = true
 	f.pos = Vector3(a.x, (hit.position as Vector3).y + ankle_h, a.z) if not hit.is_empty() else a
-	f.normal = hit.normal if not hit.is_empty() else Vector3.UP
+	var hn: Vector3 = hit.normal if not hit.is_empty() else Vector3.UP
+	f.normal = hn.normalized() if hn.length_squared() > 1e-6 else Vector3.UP
 	f.cur = f.pos
 	f.w = 0.0
 	f.due = false
@@ -270,44 +274,52 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 
 	# --- clock -----------------------------------------------------------
 	var steps := cadence(maxf(speed, 0.8))
+	var heel_k := clampf(1.0 - heel_pitch * 1.4, 0.25, 1.0)
 	if everyday:
-		steps = lerpf(1.62, 2.21, smoothstep(0.25, 2.0, speed)) + 1.83 * smoothstep(1.9, 6.4, speed)
+		steps = lerpf(1.64, 2.22, smoothstep(0.25, 2.0, speed)) + 1.88 * smoothstep(1.9, 6.4, speed)
+		if heel_pitch > 0.05:
+			steps *= 1.0 + heel_pitch * 0.20
 	freq = maxf(steps * 0.5, 0.25)
 	var want_duty := lerpf(0.62, 0.43 if everyday else 0.38, run) - 0.1 * sprint
-	# Ground covered while a foot is down must fit the legs' reach.
+	# Ground covered while a foot is down must fit BOTH front and back leg reach
+	# given the front/back split `ahead_frac`, so a planted foot never skates or snaps.
 	var cover_max := reach_f + reach_b
-	duty = minf(want_duty, cover_max * freq / maxf(speed, 0.01))
+	var ahead_frac := lerpf(0.45, 0.37, run) if everyday else lerpf(reach_f / maxf(cover_max, 0.01), 0.35, run)
+	var max_cover_f := reach_f / maxf(ahead_frac, 0.1)
+	var max_cover_b := reach_b / maxf(1.0 - ahead_frac, 0.1)
+	var cover_cap := minf(cover_max, minf(max_cover_f, max_cover_b)) * (0.87 if everyday else 0.96)
+	duty = minf(want_duty, cover_cap * freq / maxf(speed, 0.01))
 	duty = maxf(duty, 0.12)
 	phase = fposmod(phase + freq * dt, 1.0)
 	var cover := speed * duty / freq  # m travelled during one stance
-	# Walking lands well ahead (heel strike); running lands closer under the
-	# hips and pushes off further behind – no reaching, braking overstride.
-	var ahead := cover * lerpf(0.42 if everyday else reach_f / cover_max, 0.24 if everyday else 0.35, run)
-	# Natural human foot track: narrow midline walk/jog, tighter still at a sprint (eliminates wide-legged stance).
-	var width := lerpf(0.056, 0.040, run) if everyday else lerpf(0.082, 0.032, run)
+	var ahead := cover * ahead_frac
+	# Natural human foot track: Jules (narrower frame) walks/runs on a slightly narrower track than Ade.
+	var width := (lerpf(0.046, 0.034, run) if body_type == "b" else lerpf(0.058, 0.042, run)) if everyday else lerpf(0.082, 0.032, run)
+	var td_heel_nom := lerpf(0.24 if everyday else 0.28, 0.05 if everyday else 0.06, run) * heel_k
 
 	for sd in ["l", "r"]:
 		var f: Foot = feet[sd]
+		var other: Foot = feet["r" if sd == "l" else "l"]
 		var u := _u(f)
 		var hip: Vector3 = hips[sd]
 		if f.planted:
 			f.stance_u = clampf(u / duty, 0.0, 1.0) if u < duty else 1.0
-			# Heel strike: walking lands heel first and rolls flat; runners
-			# land on the midfoot.
-			f.heel = (1.0 - smoothstep(0.0, 0.3, f.stance_u)) * lerpf(0.28, 0.06, run)
-			f.toe = smoothstep(0.55, 1.0, f.stance_u) * toe_max * smoothstep(0.4, 1.6, speed)  # (none when coming to a stop)
-			# The heel also comes up early if the flat foot is out of reach.
+			# Heel strike: start seamlessly from touchdown pitch and roll flat smoothly.
+			var heel_base := f.td_heel if f.td_heel > 0.0 else td_heel_nom
+			f.heel = (1.0 - smoothstep(0.0, 0.28, f.stance_u)) * heel_base
+			# Smooth continuous toe-roll (no discrete while-loop jumps).
+			var toe_target := smoothstep(0.52, 1.0, f.stance_u) * toe_max * smoothstep(0.4, 1.6, speed)
+			var flat_support := everyday and run < 0.47 and f.stance_u < 0.62
+			var a_base := _roll(f.pos, f.heading, f.normal, toe_target)
+			if not flat_support:
+				var over := a_base.distance_to(hip) - (LEG_LEN - 0.015)
+				if over > 0.0:
+					toe_target = minf(toe_target + over / (BALL * 0.85), toe_max + 0.2)
+			f.toe = move_toward(f.toe, clampf(toe_target, 0.0, toe_max + 0.2), dt * (8.5 if everyday else 11.0))
 			var a := _roll(f.pos, f.heading, f.normal, f.toe)
-			# Over a walking stance the knee takes the load. Preserve the
-			# sole before toe-off and let the rig lower the pelvis to reach it.
-			var flat_support := everyday and run < 0.47 and f.stance_u < 0.63
-			while not flat_support and f.toe < toe_max + 0.2 and a.distance_to(hip) > LEG_LEN - 0.01:
-				f.toe += 0.04
-				a = _roll(f.pos, f.heading, f.normal, f.toe)
-			# Track the ankle around the planted shoe heel during loading.
+			# Track the ankle around the planted shoe heel during loading (continuous with swing approach).
 			if everyday and f.heel > 0.0:
-				a += f.normal * (HEEL * sin(f.heel) + ankle_h * (cos(f.heel) - 1.0))
-				a -= f.heading * (ankle_h * sin(f.heel) + HEEL * (1.0 - cos(f.heel)))
+				a += _heel_off(f.heading, f.normal, f.heel)
 			f.cur = a
 			_pivot(f, facing, dt)
 			# Lift: the clock says so, or the body has run away from the foot
@@ -315,9 +327,10 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			# leg hyper-extended behind the hip.
 			var rel := a - hip
 			var back := -Vector2(rel.x, rel.z).dot(Vector2(facing.x, facing.z))
-			var reach_limit := LEG_LEN + (0.043 if flat_support else 0.01)
-			var lost := a.distance_to(hip) > reach_limit or atan2(back, maxf(-rel.y, 0.05)) > 0.6 \
-				or Vector2(rel.x, rel.z).length() > LEG_LEN * 0.9
+			var reach_limit := LEG_LEN + (0.043 if flat_support else 0.024)
+			var back_lim := 0.72 if everyday else 0.60
+			var lost := a.distance_to(hip) > reach_limit or atan2(back, maxf(-rel.y, 0.05)) > back_lim \
+				or Vector2(rel.x, rel.z).length() > LEG_LEN * 0.91
 			if (u >= duty and not braking_plant) or lost:
 				f.planted = false
 				f.from = a
@@ -326,6 +339,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				f.pitch = -f.toe
 				f.w = 0.0
 				f.heel = 0.0
+				f.td_heel = 0.0
 				f.target = Vector3.ZERO
 				f.due = false
 				f.rush = INF
@@ -376,7 +390,8 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				land += end_dir * 0.07
 			if not hit.is_empty():
 				land.y = (hit.position as Vector3).y + ankle_h
-				f.target_n = hit.normal
+				var tn: Vector3 = hit.normal
+				f.target_n = tn.normalized() if tn.length_squared() > 1e-6 else Vector3.UP
 			var sharp := _accel_h.length() > 2.5 or braking_plant
 			if f.w < 0.85 or f.target == Vector3.ZERO:
 				f.target = land  # (frozen for the last part: the foot comes down where it's going)
@@ -390,44 +405,42 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			# mid-swing and reaches ahead late; running it reaches a little
 			# past the landing spot and paws back onto it.
 			var e := f.w * f.w * (3.0 - 2.0 * f.w)
-			# (Sprinting the swing foot covers ~5 m of ground in a third of a
-			# second: a rest-to-rest ease left it half a metre behind the hips
-			# early and flung it half a metre ahead late – a straight-legged
-			# kick out front, with the hips sinking to reach it. Near-steady
-			# instead: the leg swings through under the body.)
-			e = lerpf(e, f.w, 0.85 * sprint + (0.13 * run if everyday else 0.0))
-			var paw := (0.018 if everyday else 0.08) * run * smoothstep(0.55, 0.82, f.w) * (1.0 - smoothstep(0.82, 1.0, f.w))
+			e = lerpf(e, f.w, 0.85 * sprint + (0.14 * run if everyday else 0.0))
+			var paw := (0.015 if everyday else 0.08) * run * smoothstep(0.55, 0.82, f.w) * (1.0 - smoothstep(0.82, 1.0, f.w))
 			var p := f.from.lerp(f.target, e) + dir * paw
-			# Height: an early heel kick at a run (the foot folds up behind),
-			# a low clearance arc walking; step up early with extra riser clearance on stairs/kerbs, step down late.
+			# Foot pitch: toes stay pointed after push-off, then rise smoothly to match touchdown heel angle.
+			var land_pitch := td_heel_nom if everyday else lerpf(0.3, 0.08, run)
+			f.pitch = lerpf(-f.lift_toe, land_pitch, smoothstep(0.35, 1.0, f.w))
+			f.world_k = clampf(1.0 - smoothstep(0.0, 0.16, f.w) + smoothstep(0.62, 0.95, f.w), 0.0, 1.0)
+			if f.rush < INF:
+				f.world_k = 1.0
+			# Toes along the travel (a touch out), unless backing or side-stepping.
+			var travel := facing
+			if speed > 0.5 and dir.dot(facing) > 0.5:
+				travel = (dir + right * f.sgn * (0.055 if body_type == "b" else 0.075)).normalized()
+			f.heading = _yaw_to(f.from_heading, travel, e)
+			# Height: natural low clearance walking, athletic (non-marching) knee drive jogging/sprinting.
 			var up := f.target.y - f.from.y
 			var ey := smoothstep(0.0, 0.52, f.w) if up > 0.0 else smoothstep(0.46, 1.0, f.w)
 			p.y = f.from.y + up * ey
-			var step_clear := clampf(up * 0.42, 0.0, 0.09)
-			# (A sprint's heel comes up behind, but not tucked against the seat
-			# for half the stride: that read as running sitting down.)
-			var lift_h := (lerpf(0.072 if everyday else 0.095, (0.28 if everyday else 0.25) + 0.05 * sprint, run) + step_clear) * clampf(speed / 1.2, 0.35, 1.0)
-			# (Peak skewed early running – the heel kicks up behind – with zero
-			# vertical speed at lift and touchdown: no pops.)
+			var step_clear := clampf(up * 0.38, 0.0, 0.085)
+			var heel_lift_k := clampf(1.0 - heel_pitch * 0.45, 0.72, 1.0)
+			var lift_h := (lerpf(0.064 if everyday else 0.095, (0.175 if everyday else 0.25) + 0.045 * sprint, run) * heel_lift_k + step_clear) * clampf(speed / 1.2, 0.35, 1.0)
 			var wk := f.w + 0.15 * f.w * (1.0 - f.w)
 			var h_walk := pow(sin(PI * wk), 2.0)
-			# Running: up fast behind, still well up as the knee comes through
-			# (shin hanging under it), down only at the end.
-			# (Heel kicks up fast behind, highest as it passes under the hip,
-			# comes down as the knee opens and the foot reaches ahead.)
-			var h_run := smoothstep(0.0, 0.32, f.w) * (1.0 - smoothstep(0.48, 1.0, f.w))
+			var h_run := smoothstep(0.0, 0.34, f.w) * (1.0 - smoothstep(0.50, 1.0, f.w))
 			p.y += lift_h * lerpf(h_walk, h_run, run)
-			# Never further than the leg reaches from where the hip is now: a
-			# foot that gets ahead of its hip waits at full reach and comes
-			# down a little short instead of the leg stretching.
+			# Blend in the heel-rocker ankle height on approach so touchdown is 100% continuous (zero 1-frame snap).
+			if everyday and f.pitch > 0.0:
+				var appr := smoothstep(0.58, 1.0, f.w)
+				var tn := f.target_n if f.target_n.length_squared() > 1e-6 else Vector3.UP
+				p += _heel_off(f.heading, tn, f.pitch) * appr
+			# Never further than the leg reaches from where the hip is now.
 			var rel := p - hip
-			var swing_reach := LEG_LEN - (lerpf(0.024, 0.049, run) if everyday else 0.012)
+			var swing_reach := LEG_LEN - (lerpf(0.028, 0.055, run) if everyday else 0.012)
 			if rel.length() > swing_reach:
 				p = hip + rel.normalized() * swing_reach
-			# ...and never closer than a fully folded leg allows: at a sprint the
-			# heel kick carried the ankle right up through the hip joint, where
-			# the leg's direction is undefined and the thigh spun ~100° in a
-			# frame. Below the hip by at least FOLD_MIN (continuous: no pop).
+			# ...and never closer than a fully folded leg allows.
 			var rh := Vector2(rel.x, rel.z).length()
 			if rh < FOLD_MIN:
 				p.y = minf(p.y, hip.y - sqrt(FOLD_MIN * FOLD_MIN - rh * rh))
@@ -435,49 +448,35 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			if not g.is_empty():
 				p.y = maxf(p.y, (g.position as Vector3).y + ankle_h + 0.01 * sin(PI * f.w))
 			f.cur = p
-			# Foot pitch: toes stay pointed after the push-off, then come up
-			# to meet the ground (heel first walking, flat-ish running).
-			var land_pitch := lerpf(0.23 if everyday else 0.3, 0.08, run)
-			# Mid-swing the foot hangs relaxed off the shin (the rig blends to a
-			# shin-relative pose by world_k).
-			f.pitch = lerpf(-f.lift_toe, land_pitch, smoothstep(0.35, 1.0, f.w))
-			f.world_k = clampf(1.0 - smoothstep(0.0, 0.16, f.w) + smoothstep(0.62, 0.95, f.w), 0.0, 1.0)
-			if f.rush < INF:
-				f.world_k = 1.0  # a quick step down: the sole is already lined up to land
-			# Toes along the travel (a touch out), unless the body is backing
-			# or side-stepping: then along where it faces.
-			var travel := facing
-			if speed > 0.5 and dir.dot(facing) > 0.5:
-				travel = (dir + right * f.sgn * 0.08).normalized()
-			f.heading = _yaw_to(f.from_heading, travel, e)
 			f.toe = 0.0
 			if f.w >= 0.985 or ((f.due or f.rush < INF) and f.w > 0.98):
-				# Touchdown. (Brought down early or freq rose before wrap: align the clock
-				# so the newly planted foot begins stance cleanly without immediately lifting.)
-				if not f.due:
+				# Touchdown: avoid hard-jumping phase while the opposite foot is mid-stance.
+				if not f.due and not other.planted:
 					phase = 0.0 if f.side == "l" else 0.5
-				# (On the spot the landing search chose – never re-probed onto a
-				# step edge the heel overhangs.)
 				f.planted = true
-				f.pos = f.cur
-				f.normal = f.target_n
+				f.normal = f.target_n.normalized() if f.target_n.length_squared() > 1e-6 else Vector3.UP
+				f.heading = (f.heading - f.normal * f.heading.dot(f.normal)).normalized()
+				f.td_heel = clampf(f.pitch, 0.0, td_heel_nom) if everyday else td_heel_nom
+				f.heel = f.td_heel
+				var flat_pos := f.cur - (_heel_off(f.heading, f.normal, f.heel) if everyday and f.heel > 0.0 else Vector3.ZERO)
+				f.pos = flat_pos
 				touchdowns += 1
 				last_touchdown = f.cur
-				if f.target != Vector3.ZERO and Vector2(f.cur.x - f.target.x, f.cur.z - f.target.z).length() < 0.06:
+				if f.target != Vector3.ZERO and Vector2(flat_pos.x - f.target.x, flat_pos.z - f.target.z).length() < 0.07:
 					f.pos.y = f.target.y
 				else:
-					var h := _sole_hit(ground, f.cur + Vector3.UP * 0.3, f.heading, everyday)
+					var h := _sole_hit(ground, flat_pos + Vector3.UP * 0.3, f.heading, everyday)
 					if not h.is_empty():
 						f.pos.y = (h.position as Vector3).y + ankle_h
-						f.normal = h.normal
-				f.cur = f.pos
+						var hn: Vector3 = h.normal
+						f.normal = hn.normalized() if hn.length_squared() > 1e-6 else Vector3.UP
+						f.heading = (f.heading - f.normal * f.heading.dot(f.normal)).normalized()
+				f.cur = f.pos + (_heel_off(f.heading, f.normal, f.heel) if everyday and f.heel > 0.0 else Vector3.ZERO)
 				f.w = 0.0
 				f.due = false
 				f.rush = INF
 				f.world_k = 1.0
-				f.heading = (f.heading - f.normal * f.heading.dot(f.normal)).normalized()
 				f.stance_u = 0.0
-				f.heel = lerpf(0.28, 0.06, run)
 
 
 ## Leaving a standstill: the foot that's further back along the travel lifts
@@ -589,18 +588,21 @@ func _stand(dt: float, facing: Vector3, right: Vector3, centre: Vector3, ground:
 
 
 func _standing_spot(centre: Vector3, facing: Vector3, right: Vector3, foot: Foot) -> Vector3:
-	var spot := centre + right * foot.sgn * STAND_W
-	return spot + facing * foot.sgn * 0.025 if everyday else spot
+	var sw := STAND_W * (0.85 if body_type == "b" else 1.0) if everyday else STAND_W
+	var spot := centre + right * foot.sgn * sw
+	return spot + facing * foot.sgn * (0.022 if body_type == "b" else 0.026) if everyday else spot
 
 
 ## A locked foot keeps its heading while the body turns over it, smoothly
 ## easing yaw realignment past ~35° of twist instead of snapping.
 func _pivot(f: Foot, facing: Vector3, dt: float) -> void:
-	var proj := facing - f.normal * facing.dot(f.normal)
+	var n := f.normal.normalized() if f.normal.length_squared() > 1e-6 else Vector3.UP
+	f.normal = n
+	var proj := facing - n * facing.dot(n)
 	if proj.length_squared() < 1e-6:
 		return
 	var face := proj.normalized()
-	var ang := f.heading.signed_angle_to(face, f.normal)
+	var ang := f.heading.signed_angle_to(face, n)
 	var limit := 0.62 if everyday else 0.60
 	if absf(ang) > limit:
 		var excess := ang - signf(ang) * limit
@@ -609,7 +611,12 @@ func _pivot(f: Foot, facing: Vector3, dt: float) -> void:
 		var hard := 0.85
 		if absf(ang - step) > hard:
 			step = ang - signf(ang) * hard
-		f.heading = f.heading.rotated(f.normal, step)
+		f.heading = f.heading.rotated(n, step)
+
+
+func _heel_off(heading: Vector3, normal: Vector3, heel_ang: float) -> Vector3:
+	return normal * (HEEL * sin(heel_ang) + ankle_h * (cos(heel_ang) - 1.0)) \
+		- heading * (ankle_h * sin(heel_ang) + HEEL * (1.0 - cos(heel_ang)))
 
 
 ## How far forward (+1) / back (-1) the left leg is in the cycle; the right

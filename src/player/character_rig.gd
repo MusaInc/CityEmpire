@@ -625,6 +625,7 @@ func set_heel(pitch: float) -> void:
 	ankle_h = ANKLE_H + heel_rise()
 	if _gait:
 		_gait.ankle_h = ankle_h
+		_gait.heel_pitch = heel_pitch
 	# Bare feet in strappy heels: the toes bend flat at the ball (shape key).
 	for mi in _hero_meshes:
 		var k := (mi as MeshInstance3D).find_blend_shape_by_name("Heel") if mi is MeshInstance3D and (mi as MeshInstance3D).mesh else -1
@@ -635,6 +636,8 @@ func set_heel(pitch: float) -> void:
 func apply_look(look: Dictionary) -> void:
 	if String(look.get("body", "a")) != body_type and skeleton != null:
 		_swap_body(String(look.get("body", "a")))
+	if _gait:
+		_gait.body_type = body_type
 	look_state = look
 	_show_variants()
 	_apply_look_tints(look)
@@ -892,6 +895,8 @@ func _connect_player() -> void:
 	# Everyday (City Empire) strides: quicker, shorter steps – the swing
 	# hero's athletic 1.6 m step read as lunging at a 6 m/s jog.
 	_gait.everyday = player.everyday
+	_gait.body_type = body_type
+	_gait.heel_pitch = heel_pitch
 	player.released.connect(_on_released)
 	player.stun_started.connect(_on_stun)
 	player.stun_ended.connect(_on_stun_ended)
@@ -1880,13 +1885,17 @@ func _update_animated(dt: float) -> void:
 	var dive := 0.0
 	if grounded:
 		# Lean into acceleration (sprint start / braking) and into turns.
-		var fa := clampf(la_w.dot(_facing) * 0.007, -0.24, 0.16)
+		var fa := clampf(la_w.dot(_facing) * (0.009 if player.everyday else 0.007), -0.24, 0.18)
 		# Runners lean from the ankles, more as they speed up (a straight line
 		# ankle–hip–shoulder, not a bend at the waist).
-		var run_lean := 0.04 + 0.17 * clampf((hs - 2.0) / 12.0, 0.0, 1.0) if hs > 1.0 else 0.0
+		var run_lean := 0.0
+		if player.everyday:
+			run_lean = (lerpf(0.025, 0.145, _gait.run) + 0.055 * _gait.sprint) * smoothstep(0.35, 1.2, hs)
+		elif hs > 1.0:
+			run_lean = 0.04 + 0.17 * clampf((hs - 2.0) / 12.0, 0.0, 1.0)
 		var bank := clampf(-_yaw_rate * hs * 0.025, -0.35, 0.35)
 		if player.everyday:
-			bank = clampf(la_w.dot(right_w) * 0.012, -0.15, 0.15) * smoothstep(0.6, 2.6, hs)
+			bank = clampf(la_w.dot(right_w) * 0.013, -0.16, 0.16) * smoothstep(0.6, 2.6, hs)
 		if _hard_t > 0.0:
 			# Three-point landing: the whole body pitches forward over the knee.
 			fa = 0.3 * _hard_k()
@@ -1986,7 +1995,7 @@ func _update_animated(dt: float) -> void:
 	var body := _body_basis * Basis(_resid * trick_rot) * Basis(Vector3.RIGHT, _flip)
 	global_basis = body
 	if player.everyday:
-		_step_off = move_toward(_step_off, 0.0, dt * 0.60) * exp(-13.5 * dt)
+		_step_off = move_toward(_step_off, 0.0, dt * 0.42) * exp(-8.5 * dt)
 	else:
 		_step_off = move_toward(_step_off, 0.0, dt * 2.2) * exp(-8.0 * dt)
 	global_position = player.global_position + Vector3.DOWN * _step_off
@@ -2233,52 +2242,55 @@ func _pose_ground(q: Dictionary, dt: float, travel: Vector3, la: Vector3) -> flo
 	var turn_bank := clampf(_yaw_rate * 0.048 * clampf(hs / 3.2, 0.0, 1.25), -0.13, 0.13)
 
 	# --- pelvis: vertical rhythm, turn, list and side shift -----------------
-	# Walking the hips vault over the stance leg (highest mid-stance, lowest
-	# as the feet change); running they sink into the stance and rise in
-	# flight. Kept small: the body glides, it doesn't bounce.
+	# Walking: double-knee loading-response cushion after heel strike + subtle
+	# mid-stance vaulting; running: smooth spring compression and flight rise.
 	var duty2 := minf(g.duty * 2.0, 1.0)
-	var bob_w := (0.013 if player.everyday else 0.017) * cos(TAU * (ps - 0.32)) - 0.015
-	var bob_r := -(0.021 if player.everyday else 0.025) * cos(TAU * (ps - duty2 * 0.5)) - 0.012
-	var bob := lerpf(bob_w, bob_r, run) * amp
-	var hip_yaw := ((0.092 if body_type == "b" else 0.076) if player.everyday else 0.088) + 0.042 * run - 0.028 * spr
+	var heel_bob_k := clampf(1.0 - heel_pitch * 0.65, 0.72, 1.0)
+	var load_l := sin(PI * clampf(fl.stance_u / 0.28, 0.0, 1.0)) if (fl.planted and fl.stance_u < 0.28) else 0.0
+	var load_r := sin(PI * clampf(fr.stance_u / 0.28, 0.0, 1.0)) if (fr.planted and fr.stance_u < 0.28) else 0.0
+	var load_cushion := -0.0075 * maxf(load_l, load_r) * walk if player.everyday else 0.0
+	var bob_w := (0.011 if player.everyday else 0.017) * cos(TAU * (ps - 0.34)) - 0.013 + load_cushion
+	var bob_r := -(0.019 if player.everyday else 0.025) * cos(TAU * (ps - duty2 * 0.5)) - 0.011
+	var bob := lerpf(bob_w, bob_r, run) * amp * heel_bob_k
+	var hip_yaw := ((0.088 if body_type == "b" else 0.072) if player.everyday else 0.088) + 0.044 * run - 0.024 * spr
 	hip_yaw *= amp
-	var list := (sw_l - sw_r) * (((0.052 if body_type == "b" else 0.038) if player.everyday else 0.052) * walk + 0.018 * run) * amp
-	_hip_shift = (sw_l - sw_r) * ((0.021 if body_type == "b" else 0.015) if player.everyday else 0.020) * walk * amp
+	var list := (sw_l - sw_r) * (((0.046 if body_type == "b" else 0.035) if player.everyday else 0.052) * walk + 0.016 * run) * amp
+	_hip_shift = (sw_l - sw_r) * ((0.019 if body_type == "b" else 0.014) if player.everyday else 0.020) * walk * amp
 	q["hips"] = _ry(-lf * hip_yaw) * _rz(list + turn_bank * 0.45)
 	# --- torso ---------------------------------------------------------------
-	# Forward bend (+ = forward; torso bones tilt back on +X): runners lean a
-	# little from the hips on top of the ankle lean; pulling away the weight
-	# goes forward, braking it sits back; landing folds.
-	var lean := (0.022 * walk + (0.115 if player.everyday else 0.185) * run + 0.105 * spr) * amp + push * 0.46 + slope_lean + _land_squash * 0.45 - brake * 0.42
-	var sh_yaw := (lerpf(0.076, 0.114, run) if player.everyday else 0.078 + 0.045 * run) * amp
-	q["spine"] = _rx(-lean * 0.55) * _ry(lf * hip_yaw * 0.62) * _rz(-list * 0.85 + turn_bank * 0.55)
-	q["chest"] = _rx(-lean * 0.45 + 0.022 * walk) * _ry(lf * (hip_yaw * 0.38 + sh_yaw)) \
-		* _rz(-list * 0.35 + lf * 0.028 * run * amp + turn_bank * 0.35)
+	# Forward bend (+ = forward; torso bones tilt back on +X): runners lean
+	# purposefully forward; pulling away transfers weight forward, braking sits back.
+	var heel_poise := heel_pitch * 0.08 if player.everyday else 0.0
+	var lean := (0.020 * walk + (0.145 if player.everyday else 0.185) * run + 0.115 * spr) * amp + push * 0.50 + slope_lean + _land_squash * 0.45 - brake * 0.42 - heel_poise
+	var sh_yaw := ((lerpf(0.068, 0.106, run) if body_type == "b" else lerpf(0.082, 0.122, run)) if player.everyday else 0.078 + 0.045 * run) * amp
+	q["spine"] = _rx(-lean * 0.54) * _ry(lf * hip_yaw * 0.62) * _rz(-list * 0.85 + turn_bank * 0.55)
+	q["chest"] = _rx(-lean * 0.46 + 0.020 * walk) * _ry(lf * (hip_yaw * 0.38 + sh_yaw)) \
+		* _rz(-list * 0.35 + lf * 0.026 * run * amp + turn_bank * 0.35)
 	# Head steady: undo the shoulders' turn, turn bank and body lean; subtle step nod.
 	q["neck"] = _ry(-lf * sh_yaw * 0.55) * _rz(-turn_bank * 0.45)
-	q["head"] = _ry(-lf * sh_yaw * 0.45) * _rx(lean * 0.85 + pitch * 0.8 + 0.014 + 0.008 * walk * amp * sin(TAU * ps)) \
+	q["head"] = _ry(-lf * sh_yaw * 0.45) * _rx(lean * 0.86 + pitch * 0.82 + 0.014 + 0.007 * walk * amp * sin(TAU * ps)) \
 		* _rz(list * 0.55 - turn_bank * 0.65)
 	# --- arms ------------------------------------------------------------------
-	# Opposite arm to leg, with natural pendular forearm phase lag (~0.10 cycle)
-	# so arms swing with relaxed human inertia instead of stiff robotic hinges.
-	var a_amp := (lerpf(0.23 if player.everyday else 0.25, 0.47 if player.everyday else 0.50, run) + 0.24 * spr) * amp
-	var a_base := lerpf(-0.018 if player.everyday else 0.02, -0.055 if player.everyday else -0.1, run) * amp
-	var lf_lag := sin(TAU * (ps - 0.11)) * clampf(amp, 0.0, 1.0)
+	# Opposite arm to leg, with natural pendular forearm phase lag (~0.12 cycle)
+	# walking, and athletic 85–95° pumping elbows beside the ribs when running.
+	var a_amp := (lerpf(0.30 if player.everyday else 0.25, 0.58 if player.everyday else 0.50, run) + 0.24 * spr) * amp
+	var a_base := lerpf(-0.022 if player.everyday else 0.02, -0.14 if player.everyday else -0.1, run) * amp
+	var lf_lag := sin(TAU * (ps - 0.12)) * clampf(amp, 0.0, 1.0)
 	for sd in ["l", "r"]:
 		var sdg := 1.0 if sd == "r" else -1.0
 		var fwd := lf * sdg  # this arm forward when the opposite leg is
-		var fwd_lag := lerpf(fwd, lf_lag * sdg, 0.42 * walk)
+		var fwd_lag := lerpf(fwd, lf_lag * sdg, 0.45 * walk)
 		var arm := a_base + fwd * a_amp
 		var fwd_n := maxf(fwd_lag, 0.0)
 		var back_n := maxf(-fwd_lag, 0.0)
-		var base_abd := (0.044 if body_type == "b" else 0.048) if player.everyday else 0.12
-		var abd := (base_abd + (0.040 if player.everyday else 0.062) * run - 0.042 * run * fwd_n) * sdg
+		var base_abd := (0.036 if body_type == "b" else 0.052) if player.everyday else 0.12
+		var abd := (base_abd + (0.034 if player.everyday else 0.062) * run - 0.038 * run * fwd_n) * sdg
 		q["upper_arm_" + sd] = _rx(arm) * _rz(abd) * _ry((-0.20 + fwd * 0.06 * walk) * sdg)
-		var elbow_w := (0.19 if player.everyday else 0.18) + 0.28 * fwd_n * amp - 0.06 * back_n * amp
-		var elbow_r := (1.18 if player.everyday else 1.15) + 0.12 * spr + 0.25 * fwd_n - 0.24 * back_n
-		q["forearm_" + sd] = _rx(lerpf(elbow_w, elbow_r, run * amp) + 0.09 * amp * walk)
+		var elbow_w := (0.21 if player.everyday else 0.18) + 0.26 * fwd_n * amp - 0.07 * back_n * amp
+		var elbow_r := (1.42 if player.everyday else 1.15) + 0.14 * spr + 0.20 * fwd_n - 0.18 * back_n
+		q["forearm_" + sd] = _rx(lerpf(elbow_w, elbow_r, run * amp) + 0.08 * amp * walk)
 		if player.everyday:
-			q["hand_" + sd] = _rx(-0.06 - 0.05 * run + fwd_lag * 0.055 * amp) * _rz(-sdg * 0.05)
+			q["hand_" + sd] = _rx(-0.06 - 0.05 * run + fwd_lag * 0.06 * amp) * _rz(-sdg * 0.05)
 		if brake > 0.05:
 			# Braking: arms come forward and out to balance the backward lean.
 			# (Elbows bent – balancing, not reaching.)
@@ -2687,7 +2699,10 @@ func _plant_feet(dt: float) -> void:
 		var tgt: Vector3 = desired + _foot_off[sd]
 		targets[sd] = tgt
 		normals[sd] = n
-	_hip_drop = lerpf(_hip_drop, clampf(_hip_drop + drop, 0.0, 0.3), 1.0 - exp(-20.0 * dt))
+	var max_drop := 0.13 if player.everyday else 0.30
+	var want_drop := clampf(_hip_drop + drop, 0.0, max_drop) if drop > -0.5 else 0.0
+	var drop_rate := (11.0 if want_drop > _hip_drop else 7.0) if player.everyday else 20.0
+	_hip_drop = lerpf(_hip_drop, want_drop, 1.0 - exp(-drop_rate * dt))
 	var hb := hips.global_basis.orthonormalized()
 	var wik := _contact
 	for sd in ["l", "r"]:
@@ -2748,7 +2763,10 @@ func _plant_gait(dt: float) -> void:
 		_heel[sd] = f.heel
 		_foot_mode[sd] = f.pos if f.planted else null
 		_foot_off[sd] = Vector3.ZERO
-	_hip_drop = lerpf(_hip_drop, clampf(_hip_drop + drop, 0.0, 0.3), 1.0 - exp(-20.0 * dt))
+	var max_drop := 0.13 if player.everyday else 0.30
+	var want_drop := clampf(_hip_drop + drop, 0.0, max_drop) if drop > -0.5 else 0.0
+	var drop_rate := (11.0 if want_drop > _hip_drop else 7.0) if player.everyday else 20.0
+	_hip_drop = lerpf(_hip_drop, want_drop, 1.0 - exp(-drop_rate * dt))
 	var hb := hips.global_basis.orthonormalized()
 	for sd in ["l", "r"]:
 		var f: Gait.Foot = g.feet[sd]
@@ -2825,6 +2843,7 @@ func _plant_both(trail_toe: float) -> void:
 ## body turns over it, pivoting on the ball only when the twist would pass
 ## ~35° (no feet spinning flat on the ground through a turn).
 func _plant_heading(sd: String, n: Vector3) -> Vector3:
+	n = n.normalized() if n.length_squared() > 1e-6 else Vector3.UP
 	var face := (_facing - n * _facing.dot(n)).normalized()
 	var pl: Array = _plant[sd]
 	if pl.size() < 3:
@@ -3864,8 +3883,8 @@ var _idle_next := 3.0
 var _idle_dur := 1.0
 var _idle_side := 1.0
 var _breath := 0.0
-var _shift := 0.0
-var _shift_goal := 1.0
+var _shift := 0.55
+var _shift_goal := 0.72
 var _shift_next := 4.0
 var _gaze := Vector2.ZERO   # current head yaw/pitch offset (rad)
 var _gaze_goal := Vector2.ZERO
@@ -4015,9 +4034,9 @@ func _idle_pose(q: Dictionary, k: float, dt: float) -> void:
 			var r2 := cos(a_u * TAU)
 			for sd in ["l", "r"]:
 				var s2 := 1.0 if sd == "r" else -1.0
-				q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion) * _rz(s2 * 0.16 * maxf(r, 0.0) * e) * _rx(-0.22 * r2 * e)
-			q["chest"] = (q["chest"] as Quaternion) * _rx(0.07 * r2 * e)
-			q["head"] = (q["head"] as Quaternion) * _rz(0.12 * sin(a_u * PI) * sdg * e)
+				q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion) * _rz(s2 * 0.08 * maxf(r, 0.0) * e) * _rx(-0.14 * r2 * e)
+			q["chest"] = (q["chest"] as Quaternion) * _rx(0.05 * r2 * e)
+			q["head"] = (q["head"] as Quaternion) * _rz(0.09 * sin(a_u * PI) * sdg * e)
 		"shake_out":
 			var f := sin(t * 19.0) * e
 			var f2 := sin(t * 23.0 + 1.1) * e

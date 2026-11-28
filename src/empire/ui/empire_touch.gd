@@ -261,7 +261,11 @@ func _press(k: String, on: bool) -> void:
 
 
 func _apply_stick() -> void:
-	var v := _stick_v if _stick_v.length() >= 0.08 else Vector2.ZERO
+	var raw_len := _stick_v.length()
+	var v := Vector2.ZERO
+	if raw_len >= 0.08:
+		var mag := clampf((raw_len - 0.08) / 0.92, 0.0, 1.0)
+		v = (_stick_v / raw_len) * (mag if _driving() else pow(mag, 1.22))
 	for action in ["move_left", "move_right", "move_forward", "move_back"]:
 		Input.action_release(action)
 	var driving := _driving()

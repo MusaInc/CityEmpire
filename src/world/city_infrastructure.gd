@@ -154,9 +154,15 @@ static func bridge_landing(l: CityLayout) -> void:
 			var field := l.roads.field_at(Vector2(a.x, a.z))
 			var clear_of_road := not l.roads.on_road(Vector2(a.x, a.z)) and absf(field.x) > absf(field.y) + 2.0
 			if a.y - g > 3.5 and clear_of_road:
-				l._kbeam(k, Vector3(a.x, g - 0.4, a.z), a + Vector3.DOWN * 1.8, 1.6, 1.6, stone)
-				l._kbeam(k, a - side * 8 + Vector3.DOWN * 1.7, a + side * 8 + Vector3.DOWN * 1.7, 1.6, 1.0, stone)
-				l._ksolid(k, a.x - 1.5, a.z - 1.5, a.x + 1.5, a.z + 1.5, g - 0.6, g + 0.2, stone)
+				if not k.has("kit_meshes"):
+					k["kit_meshes"] = {}
+				var pier_dir := Vector3(d.x, 0.0, d.z).normalized()
+				InfraKit.pier(k["kit_meshes"], Vector3(a.x, g - 0.15, a.z), a.y - 1.35, pier_dir, 1.85, 17.4, 1.65, 1.85, [-4.2, 4.2])
+				l._box(a.x - 1.1, a.z - 1.1, a.x + 1.1, a.z + 1.1, g - 0.4, a.y - 1.5)
+		if a.y - l.terrain.road_y(a.x, a.z) > 4.2:
+			if not k.has("kit_meshes"):
+				k["kit_meshes"] = {}
+			InfraKit.girders(k["kit_meshes"], a + Vector3.DOWN * 1.30, b + Vector3.DOWN * 1.30, 17.6, 1.15, i % 2 == 0)
 		# Lamps have their normal short visibility range and shared mesh.
 		if i % 7 == 1:
 			for sg: float in [-1.0, 1.0]:
@@ -329,32 +335,50 @@ static func station_access(l: CityLayout, k: Dictionary, c: Vector3, d: Vector3,
 	var top := c.y + 1.0
 	var flights := maxi(2, ceili((top - at.y) / 1.5))
 	var rise := (top - at.y) / flights
-	var steel := Color(0.24, 0.29, 0.29)
-	var stone := Color(0.47, 0.47, 0.43)
-	# Four full-height columns and a roof make the structure legible from afar.
-	for sx: float in [-2.1, 2.1]:
-		for sz: float in [-4.4, 4.4]:
-			var p := at + side * sx + d * sz
-			l._kbeam(k, p - Vector3.UP * 0.2, Vector3(p.x, top + 2.8, p.z), 0.24, 0.24, steel)
-	for f in flights:
-		var sg := 1.0 if f % 2 == 0 else -1.0
-		var a := at + side * sg * 1.0 - d * sg * 3.2 + Vector3.UP * (rise * f)
-		var b := at + side * sg * 1.0 + d * sg * 3.2 + Vector3.UP * (rise * (f + 1))
-		l._kbeam(k, a + Vector3.DOWN * 0.12, b + Vector3.DOWN * 0.12, 1.7, 0.24, stone)
-		for step in 9:
-			var p := a.lerp(b, float(step + 1) / 9)
-			l._kbeam(k, p - d * 0.36, p + d * 0.36, 1.7, 0.1, stone, false)
-		var landing := b + d * sg * 0.6 - side * sg
-		l._kbeam(k, landing - side * 2, landing + side * 2, 1.2, 0.2, stone)
-		l._kbeam(k, a + side * sg * 0.85 + Vector3.UP, b + side * sg * 0.85 + Vector3.UP, 0.08, 0.08, steel, false)
+	var steel := Color(0.18, 0.21, 0.23)
+	var stone := Color(0.56, 0.55, 0.52)
 	var upper := Vector3(at.x, top, at.z)
 	var sg := signf((at - c).dot(side))
 	var platform := c + side * sg * 6.0 + Vector3.UP
-	l._kbeam(k, upper + Vector3.DOWN * 0.15, platform + Vector3.DOWN * 0.15, 2.2, 0.3, stone)
-	for offset: float in [-1.0, 1.0]:
-		l._kbeam(k, upper + d * offset + Vector3.UP, platform + d * offset + Vector3.UP, 0.08, 0.08, steel, false)
-	l._kbeam(k, upper - d * 4.7 + Vector3.UP * 2.8, upper + d * 4.7 + Vector3.UP * 2.8, 4.6, 0.18, steel)
-	furniture(l, "sign_post", at + d * 5.5, 0)
+	var to_plat := Vector3(platform.x - upper.x, 0.0, platform.z - upper.z)
+	var span := to_plat.length()
+	var walk_dir := to_plat / maxf(span, 0.001)
+	if not k.has("kit_meshes"):
+		k["kit_meshes"] = {}
+	# Architectural glazed-and-clad transit access pavilion wrapping the switchback stairs:
+	# heavy granite plinth + street-level entry canopy, curtain-wall glazing with steel
+	# corner piers & concrete lift core, and cantilevered roof crown with warm soffit lighting.
+	InfraKit.pavilion(k["kit_meshes"], at, top + 3.4, d, 5.2, 9.6, 1.55, 2.8)
+	# Internal walkable stair flights & landings (smooth collision ramps preserved for players).
+	for f in flights:
+		var fs := 1.0 if f % 2 == 0 else -1.0
+		var a := at + side * fs * 1.0 - d * fs * 3.1 + Vector3.UP * (rise * f)
+		var b := at + side * fs * 1.0 + d * fs * 3.1 + Vector3.UP * (rise * (f + 1))
+		l._kbeam(k, a + Vector3.DOWN * 0.14, b + Vector3.DOWN * 0.14, 1.75, 0.26, stone)
+		for step in 9:
+			var p := a.lerp(b, float(step + 1) / 9)
+			l._kbeam(k, p - d * 0.34, p + d * 0.34, 1.75, 0.10, stone, false)
+		var landing := b + d * fs * 0.55 - side * fs
+		l._kbeam(k, landing - side * 2.0, landing + side * 2.0, 1.25, 0.22, stone)
+		l._kbeam(k, a + side * fs * 0.88 + Vector3.UP * 0.95, b + side * fs * 0.88 + Vector3.UP * 0.95, 0.08, 0.08, steel, false)
+	# Walkable skywalk floor slab (collision) + enclosed glazed architectural pedestrian bridge.
+	l._kbeam(k, upper + Vector3.DOWN * 0.16, platform + Vector3.DOWN * 0.16, 2.8, 0.32, stone)
+	var bridge_a := upper + walk_dir * 2.2
+	var bridge_b := platform - walk_dir * 0.4
+	if bridge_a.distance_to(bridge_b) > 1.2:
+		InfraKit.skywalk(k["kit_meshes"], bridge_a, bridge_b, 3.2, 3.3, 5.5)
+	# Intermediate engineered pier(s) under long skywalk spans so walkways never look unsupported.
+	if span > 14.0:
+		var mid_n := maxi(1, int(floor(span / 14.0)))
+		for mi in range(1, mid_n + 1):
+			var mp := upper.lerp(platform, float(mi) / float(mid_n + 1))
+			var mp2 := Vector2(mp.x, mp.z)
+			if l.support_clear(mp2, 1.0) and not l.is_water(mp):
+				var gy := l.ground_y(mp.x, mp.z)
+				if mp.y - gy > 4.0:
+					InfraKit.pier(k["kit_meshes"], Vector3(mp.x, gy - 0.1, mp.z), mp.y - 0.95, walk_dir, 1.15, 3.4, 1.05, 1.15)
+					l._box(mp.x - 0.6, mp.z - 0.6, mp.x + 0.6, mp.z + 0.6, gy - 0.3, mp.y - 1.0)
+	furniture(l, "sign_post", at + d * 6.2, 0)
 
 
 ## Finishing the open ground: every plaza gets a planted square (a grid of

@@ -1046,6 +1046,131 @@ def underpass_lamp():
     done("underpass_lamp", [B((1.2, 0.4, 0.15), (0, 0, -0.075), grey), B((1.1, 0.32, 0.03), (0, 0, -0.16), lamp_white)])
 
 
+def transit_pavilion_bay():
+    """Contemporary glazed-and-clad transit access tower storey (1x1x1 unit:
+    X=width, Y=depth, Z=0..1 height). Solid architectural stone/concrete lift
+    core on -Y, full-height tinted glass curtain wall with dark steel mullions
+    and spandrel bands on +Y, -X, +X."""
+    frame = M("tp_frame", srgb("262b30"), "gloss")
+    clad = M("tp_clad", srgb("c4c1b8"))
+    clad_dk = M("tp_clad_dk", srgb("8b8982"))
+    p = []
+    # Four substantial structural corner piers.
+    for sx in (-0.46, 0.46):
+        for sy in (-0.46, 0.46):
+            p.append(B((0.09, 0.09, 1.0), (sx, sy, 0.5), frame))
+    # Horizontal spandrel fascia at top and mid-landing band.
+    for zc, zh in ((0.955, 0.09), (0.045, 0.09)):
+        p.append(B((1.01, 0.06, zh), (0.0, 0.48, zc), clad))
+        p.append(B((1.01, 0.06, zh), (0.0, -0.48, zc), clad))
+        p.append(B((0.06, 1.01, zh), (-0.48, 0.0, zc), clad))
+        p.append(B((0.06, 1.01, zh), (0.48, 0.0, zc), clad))
+    # Solid architectural concrete/stone lift core wall on -Y with vertical shadow ribs.
+    p.append(B((0.88, 0.08, 0.86), (0.0, -0.46, 0.5), clad))
+    for rx in (-0.30, -0.10, 0.10, 0.30):
+        p.append(B((0.035, 0.025, 0.86), (rx, -0.505, 0.5), clad_dk))
+    # Glazed curtain walls on +Y (front) and -X/+X (sides) with crisp mullions & transoms.
+    p.append(B((0.86, 0.02, 0.84), (0.0, 0.47, 0.5), glass))
+    for mx in (-0.22, 0.0, 0.22):
+        p.append(B((0.03, 0.055, 0.84), (mx, 0.48, 0.5), frame))
+    p.append(B((0.88, 0.05, 0.035), (0.0, 0.48, 0.5), frame))
+    for sx in (-1.0, 1.0):
+        p.append(B((0.02, 0.86, 0.84), (sx * 0.47, 0.0, 0.5), glass))
+        for my in (-0.22, 0.0, 0.22):
+            p.append(B((0.055, 0.03, 0.84), (sx * 0.48, my, 0.5), frame))
+        p.append(B((0.05, 0.88, 0.035), (sx * 0.48, 0.0, 0.5), frame))
+    done("transit_pavilion_bay", p)
+
+
+def transit_pavilion_crown():
+    """Architectural cantilevered roof crown for station access pavilions
+    (1x1x1 unit, Z=0..1): deep overhang, dark fascia, parapet coping, warm soffit lamps."""
+    frame = M("tp_crown_frame", srgb("20252a"), "gloss")
+    soffit = M("tp_crown_soffit", srgb("d6d3cb"))
+    cap = M("tp_crown_cap", srgb("5c6166"))
+    p = [
+        # Main cantilevered roof deck & deep fascia perimeter.
+        B((1.16, 1.16, 0.42), (0.0, 0.0, 0.52), frame),
+        # Subtle stepped architectural coping & recessed roof plant well.
+        B((1.18, 1.18, 0.10), (0.0, 0.0, 0.78), cap),
+        B((0.94, 0.94, 0.16), (0.0, 0.0, 0.90), frame),
+        # Recessed underside soffit panel with warm linear luminaires.
+        B((1.06, 1.06, 0.08), (0.0, 0.0, 0.28), soffit),
+        B((0.72, 0.06, 0.04), (0.0, 0.34, 0.23), lamp_warm),
+        B((0.72, 0.06, 0.04), (0.0, -0.34, 0.23), lamp_warm),
+        # Lower collar seated cleanly on the top spandrel.
+        B((1.02, 1.02, 0.24), (0.0, 0.0, 0.12), cap),
+    ]
+    done("transit_pavilion_crown", p)
+
+
+def transit_pavilion_base():
+    """Grounded granite/concrete foundation plinth for transit access towers
+    (1x1x1 unit, sinks to Z=-0.5 so sloped pavements never show gaps), with
+    an integrated street-level projecting entrance canopy on +Y."""
+    plinth = M("tp_plinth", srgb("7d7b74"))
+    reveal = M("tp_reveal", srgb("2b2f34"))
+    canopy = M("tp_canopy", srgb("22272c"), "gloss")
+    p = [
+        # Heavy foundation block below and above pavement level.
+        B((1.08, 1.08, 1.32), (0.0, 0.0, 0.16), plinth),
+        # Recessed dark shadow reveal at top of plinth.
+        B((1.03, 1.03, 0.14), (0.0, 0.0, 0.89), reveal),
+        # Projecting entrance portal canopy on +Y street face with warm soffit light.
+        B((0.92, 0.46, 0.18), (0.0, 0.72, 0.92), canopy),
+        B((0.70, 0.08, 0.04), (0.0, 0.74, 0.82), lamp_warm),
+        # Twin side portal fins framing the doorway.
+        B((0.08, 0.36, 0.96), (-0.44, 0.68, 0.42), plinth),
+        B((0.08, 0.36, 0.96), (0.44, 0.68, 0.42), plinth),
+    ]
+    done("transit_pavilion_base", p)
+
+
+def skywalk_bay():
+    """Enclosed glazed pedestrian skywalk module (X=-0.5..0.5 span, Y=-0.5..0.5
+    width, Z=0 floor to Z=1 roof, with deep tapered structural box girder
+    hanging to Z=-0.26 underneath)."""
+    frame = M("sw_frame", srgb("262b30"), "gloss")
+    deck = M("sw_deck", srgb("b5b2aa"))
+    girder = M("sw_girder", srgb("43484e"))
+    rail = M("sw_rail", srgb("b4b9be"), "gloss")
+    p = [
+        # Structural underside box girder + bottom flange + edge fascias.
+        B((1.0, 0.62, 0.24), (0.0, 0.0, -0.14), girder),
+        B((1.0, 0.76, 0.05), (0.0, 0.0, -0.25), frame),
+        B((1.0, 1.04, 0.09), (0.0, 0.0, -0.02), deck),
+        # Glazed side walls with mullions, waist handrail, and top transom.
+        B((1.0, 0.02, 0.88), (0.0, 0.48, 0.48), glass),
+        B((1.0, 0.02, 0.88), (0.0, -0.48, 0.48), glass),
+        B((1.0, 0.05, 0.035), (0.0, 0.45, 0.34), rail),
+        B((1.0, 0.05, 0.035), (0.0, -0.45, 0.34), rail),
+        B((1.0, 0.05, 0.04), (0.0, 0.49, 0.06), frame),
+        B((1.0, 0.05, 0.04), (0.0, -0.49, 0.06), frame),
+        # Integrated cantilevered roof canopy + recessed ceiling luminaire.
+        B((1.0, 1.14, 0.10), (0.0, 0.0, 0.98), frame),
+        B((0.82, 0.10, 0.03), (0.0, 0.0, 0.92), lamp_warm),
+    ]
+    for mx in (-0.48, 0.0, 0.48):
+        p.append(B((0.045, 0.06, 0.94), (mx, 0.49, 0.48), frame))
+        p.append(B((0.045, 0.06, 0.94), (mx, -0.49, 0.48), frame))
+        # Overhead portal rib connecting both mullions to roof.
+        p.append(B((0.05, 1.02, 0.06), (mx, 0.0, 0.92), frame))
+    done("skywalk_bay", p)
+
+
+def platform_bracket():
+    """Sculpted cantilevered structural support bracket under elevated station
+    platforms (X=0..1 outward reach, Y=-0.5..0.5 thickness, Z=-1..0 depth)."""
+    steel_dk = M("pb_steel", srgb("3b4046"), "gloss")
+    prof = [(0.0, 0.0), (1.0, 0.0), (1.0, -0.22), (0.20, -1.0), (0.0, -1.0)]
+    p = [
+        _prism_xz("pb_web", prof, 0.56, conc_dk),
+        B((1.02, 0.86, 0.09), (0.5, 0.0, -0.045), steel_dk),
+        B((0.18, 0.86, 0.96), (0.09, 0.0, -0.5), steel_dk),
+    ]
+    done("platform_bracket", p)
+
+
 def clearance_sign():
     """Headroom sign for a deck edge over a road (text by Label3D)."""
     done("clearance_sign", [B((2.2, 0.1, 0.9), (0, 0, 0), white), B((2.0, 0.12, 0.7), (0, 0.0, 0), red),
@@ -1099,6 +1224,7 @@ for f in (jet_bridge, gse_tug, gse_cart, gse_belt, gse_pushback, gse_fuel, gse_c
           info_desk, entrance_pod, gantry_sign, taxi_shelter, fuel_canopy, fuel_kiosk, rental_canopy,
           rental_booth, barrier, bus_stop_airport, flag_pole, runway_light_g, runway_light_r, ceiling_lamp,
           flood_head, edge_post, pier_column, pier_head, pier_foot, deck_girders, underpass_lamp, clearance_sign,
+          transit_pavilion_bay, transit_pavilion_crown, transit_pavilion_base, skywalk_bay, platform_bracket,
           clad_bay, clad_bay_blue, clad_bay_sand, dock_door):
     f()
 

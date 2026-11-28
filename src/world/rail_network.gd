@@ -286,7 +286,9 @@ func _viaduct(pts: PackedVector3Array) -> void:
 			L._kbeam(k, deck_a - ext + o + Vector3.UP * 0.5, deck_b + ext + o + Vector3.UP * 0.5, 0.4, 1.0, CONCRETE)
 			var ro := side * sgn * 0.72 + Vector3.DOWN * 0.08
 			L._kbeam(k, a + ro - ext, b + ro + ext, 0.1, 0.16, RAIL_STEEL, false)
-		L.dress_deck_soffit(k, deck_a + Vector3.DOWN * 1.43, deck_b + Vector3.DOWN * 1.43, HALF - 0.3, 0.53)
+		if not k.has("kit_meshes"):
+			k["kit_meshes"] = {}
+		InfraKit.girders(k["kit_meshes"], deck_a + Vector3.DOWN * 1.4, deck_b + Vector3.DOWN * 1.4, HALF * 2.0 - 0.6, 0.92, not water and (i % 20 == 0))
 		var so := Vector3.DOWN * (RAIL_H - 0.04)
 		L._kbeam(k, a + so - ext, b + so + ext, 2.6, 0.12, Color(0.36, 0.33, 0.3), false)  # ballast bed
 		if not water:
@@ -403,6 +405,8 @@ func _station(line: Dictionary, s0: float) -> void:
 	d = d.normalized()
 	var side := Vector3(-d.z, 0.0, d.x)
 	var c := _at(pts, s0)
+	if not k.has("kit_meshes"):
+		k["kit_meshes"] = {}
 	for sgn: float in [-1.0, 1.0]:
 		var off := side * sgn * (PLATFORM_GAP + 1.75)
 		var pa := a + off
@@ -411,34 +415,47 @@ func _station(line: Dictionary, s0: float) -> void:
 		L._kbeam(k, pa + Vector3.DOWN * 0.1, pb + Vector3.DOWN * 0.1, 3.5, 2.2, PLATFORM)
 		L._kbeam(k, pa + side * sgn * -1.72 + Vector3.UP * 0.96, pb + side * sgn * -1.72 + Vector3.UP * 0.96,
 			0.06, 0.04, Color(0.95, 0.8, 0.15), false)  # yellow safety line
-		# Canopy: columns down the outer edge, a roof sloping to the track.
+		# Structural cantilever brackets underneath tying the platform cleanly into the viaduct girder.
+		var br_a := a + side * sgn * (PLATFORM_GAP - 0.15) + Vector3.DOWN * 1.15
+		var br_b := b + side * sgn * (PLATFORM_GAP - 0.15) + Vector3.DOWN * 1.15
+		InfraKit.platform_brackets(k["kit_meshes"], br_a, br_b, side * sgn, 3.55, 1.75, 7.8, 0.55)
+		# Canopy: substantial architectural columns with cross-ribs, glazed wind screen, and deep fascia roof.
 		var t := 4.0
 		while t < STATION_LEN - 2.0:
-			var q := pa.lerp(pb, t / STATION_LEN) + side * sgn * 1.3
-			L._kbeam(k, q + Vector3.UP * 1.0, q + Vector3.UP * 4.6, 0.25, 0.25, CANOPY)
-			t += 10.0
-		var ra := pa + side * sgn * 0.2 + Vector3.UP * 4.75
-		var rb := pb + side * sgn * 0.2 + Vector3.UP * 4.75
-		L._kbeam(k, ra, rb, 4.4, 0.18, CANOPY)
-		L._kbeam(k, ra + side * sgn * -2.15 + Vector3.DOWN * 0.25, rb + side * sgn * -2.15 + Vector3.DOWN * 0.25,
-			0.12, 0.5, Color(0.72, 0.09, 0.08), false)  # crimson fascia
-		# Back wall with a glass screen, and a name board in the middle.
-		L._kbeam(k, pa + side * sgn * 1.7 + Vector3.UP * 1.6, pb + side * sgn * 1.7 + Vector3.UP * 1.6, 0.12, 1.2,
-			Color(0.3, 0.38, 0.42), false)
-		var m := (pa + pb) * 0.5 + side * sgn * 1.55 + Vector3.UP * 3.3
-		L._kbeam(k, m - d * 2.4, m + d * 2.4, 0.1, 0.7, Color(0.08, 0.16, 0.36), false)
+			var q := pa.lerp(pb, t / STATION_LEN) + side * sgn * 1.42
+			L._kbeam(k, q + Vector3.UP * 1.0, q + Vector3.UP * 4.75, 0.38, 0.34, CANOPY)
+			# Cantilever roof rib reaching across the platform.
+			L._kbeam(k, q + Vector3.UP * 4.55, q - side * sgn * 3.35 + Vector3.UP * 4.55, 0.24, 0.28, CANOPY, false)
+			t += 9.5
+		var ra := pa + side * sgn * 0.2 + Vector3.UP * 4.82
+		var rb := pb + side * sgn * 0.2 + Vector3.UP * 4.82
+		L._kbeam(k, ra, rb, 4.7, 0.34, CANOPY)
+		L._kbeam(k, ra + side * sgn * -2.30 + Vector3.DOWN * 0.22, rb + side * sgn * -2.30 + Vector3.DOWN * 0.22,
+			0.14, 0.55, Color(0.72, 0.09, 0.08), false)  # crimson fascia
+		# Back wall with solid architectural dado + glass wind screen, and a name board in the middle.
+		L._kbeam(k, pa + side * sgn * 1.68 + Vector3.UP * 1.38, pb + side * sgn * 1.68 + Vector3.UP * 1.38, 0.18, 0.82,
+			CONCRETE_DK)
+		L._kbeam(k, pa + side * sgn * 1.70 + Vector3.UP * 2.55, pb + side * sgn * 1.70 + Vector3.UP * 2.55, 0.10, 1.55,
+			Color(0.28, 0.38, 0.44), false)
+		var m := (pa + pb) * 0.5 + side * sgn * 1.52 + Vector3.UP * 3.45
+		L._kbeam(k, m - d * 2.6, m + d * 2.6, 0.12, 0.72, Color(0.08, 0.16, 0.36), false)
 	# Switchback stairs down to a clear bit of pavement, a walkway across to
 	# the platform (CityInfrastructure).
 	if c.x > CityLayout.RIVER_EDGE:
 		CityInfrastructure.station_access(L, k, c, d, side)
 	else:
-		# (Westbank's quay plaza: a stair tower on the outside of the loop.)
+		# (Westbank's quay plaza: architectural glazed transit pavilion + enclosed skywalk.)
 		var bend := _at(pts, s0 + 30.0) + _at(pts, s0 - 30.0) - c * 2.0
 		var out := -side if Vector3(bend.x, 0.0, bend.z).dot(side) > 0.0 else side
-		var tw := c + out * 9.0
+		var tw := c + out * 10.5
 		var gy := ground(tw.x, tw.z)
-		L._kbeam(k, Vector3(tw.x, gy, tw.z), Vector3(tw.x, c.y + 5.0, tw.z), 4.0, 4.0, Color(0.36, 0.38, 0.4))
-		L._kbeam(k, Vector3(tw.x, c.y + 5.0, tw.z), Vector3(tw.x, c.y + 5.3, tw.z), 4.6, 4.6, CANOPY)
+		InfraKit.pavilion(k["kit_meshes"], Vector3(tw.x, gy, tw.z), c.y + 4.4, out, 5.4, 6.2, 1.5, 2.8)
+		L._box(tw.x - 2.6, tw.z - 2.6, tw.x + 2.6, tw.z + 2.6, gy - 0.3, c.y + 4.5)
+		var plat_edge := c + out * (PLATFORM_GAP + 3.4) + Vector3.UP
+		var tw_top := Vector3(tw.x, c.y + 1.0, tw.z) - out * 2.6
+		if tw_top.distance_to(plat_edge) > 0.8:
+			InfraKit.skywalk(k["kit_meshes"], tw_top, plat_edge, 3.2, 3.2, 4.5)
+			L._kbeam(k, tw_top + Vector3.DOWN * 0.16, plat_edge + Vector3.DOWN * 0.16, 2.8, 0.32, PLATFORM)
 
 
 # ------------------------------------------------------- the strait bridge

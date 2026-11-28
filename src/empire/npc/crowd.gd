@@ -1373,9 +1373,11 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 	if pr["walk"] < 0.01 and target_walk <= 0.0:
 		pr["walk"] = 0.0
 	if actual_dist > 0.0004:
-		# Keep foot speed locked to ground speed even while decelerating (shader scales swing by walk).
+		# Keep foot speed locked to ground speed even while decelerating, with per-pedestrian
+		# cadence desynchronization from seed so neighbours never march in lockstep.
 		var eff_walk := maxf(float(pr["walk"]), 0.42)
-		pr["stride"] = float(pr["stride"]) + actual_dist / (eff_walk * (1.0 + 0.58 * fear))
+		var cadence_k := lerpf(0.92, 1.08, fposmod(float(pr["seed"]) * 13.7, 1.0)) / maxf(float(pr["scale"]), 0.85)
+		pr["stride"] = float(pr["stride"]) + (actual_dist * cadence_k) / (eff_walk * (1.0 + 0.58 * fear))
 
 	# Natural head glances: check traffic at crossings, scan shop windows, watch approaching cars or hero.
 	if not far:
@@ -1411,7 +1413,7 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 		pr["look"] = lerpf(float(pr["look"]), look, 1.0 - exp(-4.5 * dt))
 	if state == "walk":
 		pr["pose"] = 1 if (profile == "jogger" and not bool(pr["waiting"]) and fear < 0.42) else (3 if bool(pr.get("phone_walk", false)) and fear < 0.25 and not bool(pr.get("crossing", false)) else 0)
-	# Query ground_y tightly nearby (0.45 m) so feet never float or sink on sloped pavements.
+	# Query ground_y tightly nearby (0.45 m) and smooth vertical transition on sloped pavements.
 	var dx_g := p.x - float(pr.get("gy_x", 1e9))
 	var dz_g := p.z - float(pr.get("gy_z", 1e9))
 	var gy_thresh := 0.20 if not far else 1.44
@@ -1420,9 +1422,10 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 		pr["gy_x"] = p.x
 		pr["gy_z"] = p.z
 		pr["gy"] = gy
-		p.y = gy
+		p.y = gy if not had_pos else lerpf((pr["pos"] as Vector3).y, gy, 1.0 - exp(-14.0 * dt))
 	else:
-		p.y = float(pr["gy"])
+		var gy := float(pr["gy"])
+		p.y = gy if not had_pos else lerpf((pr["pos"] as Vector3).y, gy, 1.0 - exp(-14.0 * dt))
 	pr["pos"] = p
 	if fwd != Vector2.ZERO:
 		var target_yaw := atan2(-fwd.x, -fwd.y)

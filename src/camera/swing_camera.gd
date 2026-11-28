@@ -372,7 +372,7 @@ func _process(dt: float) -> void:
 	_bump += _bump_v * dt
 	_tug_v += (-_tug * 90.0 - _tug_v * 14.0) * dt
 	_tug += _tug_v * dt
-	_step_height = 0.0 if _snapped else _step_height * exp(-9.5 * dt)
+	_step_height = 0.0 if _snapped else _step_height * exp((-7.5 if target.everyday else -9.5) * dt)
 	var focus_goal := target.global_position + Vector3.UP * (_height + _lift + _step_height) + ahead + _pick_bias
 	var clear_before := _clear_yaw
 	if rail_at.is_empty() and _indoor < 0.5:

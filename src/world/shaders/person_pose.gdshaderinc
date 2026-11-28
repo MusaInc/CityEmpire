@@ -77,16 +77,18 @@ void person_pose_wk(inout vec3 v, inout vec3 n, int limb, float cw, float lw, fl
 	float cycle = sin(ph);
 	float sw = cycle * walk;
 	float height = v.y;
-	// Per-person walking style: subtle arm-swing vigour and posture personality.
-	float style_arm = mix(0.82, 1.18, fract(seed * 11.3));
-	float style_posture = (fract(seed * 17.9) - 0.5) * 0.045;
+	// Per-person walking style: subtle arm-swing vigour, stride energy, and posture personality.
+	float style_arm = mix(0.80, 1.22, fract(seed * 11.3));
+	float style_posture = (fract(seed * 17.9) - 0.5) * 0.052;
+	float style_stride = mix(0.92, 1.08, fract(seed * 23.7));
 	if (limb == 1 || limb == 2) {
 		float side = limb == 1 ? -1.0 : 1.0;
 		float swing = -cycle * side;
 		float through = cos(ph) * -side;
-		float a = sw * -side * (0.34 + 0.24 * alarm);
-		// The knee flexes during swing, then extends cleanly before heel contact.
-		float k = (max(through, 0.0) * (0.18 + (0.62 + 0.38 * alarm) * max(-swing, 0.0)) + 0.045) * walk;
+		float a = sw * -side * (0.35 * style_stride + 0.24 * alarm);
+		// Swing knee flexion + subtle loading-response cushion right after heel strike.
+		float load_k = max(0.0, swing) * max(0.0, -through) * 0.16;
+		float k = (max(through, 0.0) * (0.20 + (0.64 + 0.38 * alarm) * max(-swing, 0.0)) + load_k + 0.045) * walk;
 		vec3 vk = pitch_about(v, vec3(0.0, y_knee, 0.02 * pivot_k), -k);
 		v = mix(v, vk, lw);
 		n = normalize(mix(n, pitch_dir(n, -k), lw));
@@ -94,18 +96,20 @@ void person_pose_wk(inout vec3 v, inout vec3 n, int limb, float cw, float lw, fl
 		v = mix(v, vh, cw);
 		n = normalize(mix(n, pitch_dir(n, a), cw));
 		float foot = lw * (1.0 - smoothstep(0.065 * pivot_k, 0.15 * pivot_k, height));
-		// Release the toe in swing and level the foot before the next heel strike.
-		float rollover = clamp(k * 0.62 - a * 0.45, -0.17, 0.27);
+		// Natural heel-to-toe rocker: slight dorsiflexion before heel contact, toe-off push behind.
+		float heel_strike = max(0.0, swing) * max(0.0, through) * 0.16 * walk;
+		float toe_off = max(0.0, -swing) * max(0.0, -through) * 0.24 * walk;
+		float rollover = clamp(k * 0.58 - a * 0.42 + heel_strike - toe_off, -0.22, 0.30);
 		vec3 ankle = pitch_about(vec3(0.0, y_ankle, 0.0), vec3(0.0, y_knee, 0.02 * pivot_k), -k);
 		ankle = pitch_about(ankle, vec3(0.0, y_hip, 0.0), a);
 		v = mix(v, pitch_about(v, ankle, rollover), foot);
 		n = normalize(mix(n, pitch_dir(n, rollover), foot));
 	} else if (limb == 3 || limb == 4) {
 		float side = limb == 3 ? -1.0 : 1.0;
-		// Pendular forearm phase lag (~0.45 rad) for natural relaxed human arm swing.
-		float arm_lag = sin(ph - 0.45) * walk;
-		float a = mix((sw * side - cos(ph) * side * walk * 0.14) * (0.30 * style_arm + 0.22 * alarm), 0.30, carry);
-		float e = 0.13 + 0.11 * walk + 1.18 * carry + 0.56 * alarm + max(0.0, arm_lag * side) * 0.26 * style_arm - max(0.0, -arm_lag * side) * 0.05;
+		// Pendular forearm phase lag (~0.52 rad) for natural relaxed human arm swing.
+		float arm_lag = sin(ph - 0.52) * walk;
+		float a = mix((sw * side - cos(ph) * side * walk * 0.16) * (0.32 * style_arm + 0.22 * alarm), 0.30, carry);
+		float e = 0.14 + 0.12 * walk + 1.18 * carry + 0.56 * alarm + max(0.0, arm_lag * side) * 0.28 * style_arm - max(0.0, -arm_lag * side) * 0.06;
 		vec3 ve = pitch_about(v, vec3(0.0, y_el, 0.0), e);
 		v = mix(v, ve, lw);
 		n = normalize(mix(n, pitch_dir(n, e), lw));

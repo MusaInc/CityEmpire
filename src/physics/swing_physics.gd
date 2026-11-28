@@ -314,24 +314,26 @@ static func _everyday_move(v: Vector3, m: Vector3, top: float, indoors: bool, dt
 	var speed := v.length()
 	var strength := m.length()
 	if strength < 0.035:
-		return v.move_toward(Vector3.ZERO, (10.0 + speed * 2.25) * dt)
-	var walk_input := minf(strength / 0.56, 1.0)
-	var run_input := smoothstep(0.51, 1.0, strength)
-	var desired_speed := lerpf(1.85 * walk_input, top, run_input) * pace
+		return v.move_toward(Vector3.ZERO, (10.5 + speed * 2.35) * dt)
+	# Smooth analogue walk -> brisk walk -> jog -> sprint curve with fine indoor precision.
+	var walk_t := clampf((strength - 0.035) / 0.545, 0.0, 1.0)
+	var walk_speed := lerpf(0.42, 1.85, pow(walk_t, 1.08))
+	var run_input := smoothstep(0.54, 1.0, strength)
+	var desired_speed := lerpf(walk_speed, top, run_input) * pace
 	var wish := m / strength
 	var run := smoothstep(1.6, 5.0, speed)
-	var accel := lerpf(9.5, 15.0, run)
+	var accel := lerpf(9.8, 15.2, run)
 	if speed < 0.25:
 		return v.move_toward(wish * desired_speed, accel * dt)
 	var heading := v / speed
 	var angle := heading.signed_angle_to(wish, Vector3.UP)
 	var turn_size := absf(angle)
 	if speed > 1.05 and turn_size > deg_to_rad(118.0):
-		return v.move_toward(Vector3.ZERO, (15.0 + speed * 2.0) * dt)
-	var rate := lerpf(16.0, 4.6, run) * (1.18 if indoors else 1.0)
+		return v.move_toward(Vector3.ZERO, (15.5 + speed * 2.1) * dt)
+	var rate := lerpf(16.0, 4.8, run) * (1.20 if indoors else 1.0)
 	heading = heading.rotated(Vector3.UP, clampf(angle, -rate * dt, rate * dt))
 	var corner := smoothstep(0.34, 1.9, turn_size) * run
-	desired_speed *= 1.0 - corner * 0.52
+	desired_speed *= 1.0 - corner * 0.50
 	var decel := lerpf(13.0, 20.0, corner)
 	# A doorway changes the speed cap mid-stride. Ease into the new pace.
 	if speed > top * pace + 0.15 and turn_size < 0.45:

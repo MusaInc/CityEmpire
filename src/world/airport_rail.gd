@@ -164,7 +164,8 @@ static func build(target: Node3D, body: StaticBody3D, isl: SkyportIsland, layout
 		# Deck slab and its box girder; parapets with a blue line stripe.
 		m.beam(da - ext + Vector3.DOWN * 0.7, db + ext + Vector3.DOWN * 0.7, DECK_HALF * 2.0, 1.4, CONCRETE)
 		if SkyportKit.ready():
-			InfraKit.girders(kit_list, da + Vector3.DOWN * 1.4, db + Vector3.DOWN * 1.4, DECK_HALF * 2.0 - 1.0, 1.1)
+			var on_land := SkyportIsland.contains(da.x, da.z) or not layout.is_water(Vector3(da.x, 0.0, da.z))
+			InfraKit.girders(kit_list, da + Vector3.DOWN * 1.4, db + Vector3.DOWN * 1.4, DECK_HALF * 2.0 - 1.0, 1.1, on_land and (i % 20 == 0))
 		else:
 			m.beam(da - ext + Vector3.DOWN * 1.9, db + ext + Vector3.DOWN * 1.9, 6.0, 1.0, CONCRETE_DK)
 		SkyportIsland._box_beam(body, da - ext + Vector3.DOWN * 0.7, db + ext + Vector3.DOWN * 0.7, DECK_HALF * 2.0, 1.4)
@@ -245,11 +246,16 @@ static func _terminus(m: BuildingMesher, body: StaticBody3D, p: Vector3, dd: Vec
 	for sg: float in [-1.0, 1.0]:
 		var q2 := b + sd * sg * (hw - 0.25)
 		m.beam(Vector3(q2.x, deck - 0.4, q2.z), Vector3(q2.x, deck + 7.2, q2.z), 0.4, 0.4, CANOPY)
-	# Piers down to the ground or the sea bed.
+	# Piers down to the ground or the sea bed (engineered InfraKit piers where available).
 	for f: float in [0.25, 0.75]:
+		if SkyportKit.ready():
+			var pm := a.lerp(b, f)
+			var py := maxf(base, SkyportIsland.SEA_Y + 0.3)
+			InfraKit.pier(kit_list, Vector3(pm.x, py, pm.z), deck - 3.1, dd, 1.8, (hw - 1.2) * 2.0, 1.6, 1.8, [-(hw - 2.0), hw - 2.0])
 		for sg: float in [-1.0, 1.0]:
 			var q3 := a.lerp(b, f) + sd * sg * (hw - 2.0)
-			m.beam(Vector3(q3.x, base - 0.5, q3.z), Vector3(q3.x, deck - 3.2, q3.z), 1.6, 1.6, CONCRETE)
+			if not SkyportKit.ready():
+				m.beam(Vector3(q3.x, base - 0.5, q3.z), Vector3(q3.x, deck - 3.2, q3.z), 1.6, 1.6, CONCRETE)
 			SkyportIsland._box_beam(body, Vector3(q3.x, base - 0.5, q3.z), Vector3(q3.x, deck - 3.2, q3.z), 1.6, 1.6)
 	# The line's roundel on the end wall.
 	var rp := b + dd * 0.35
@@ -311,6 +317,10 @@ static func _station(m: BuildingMesher, body: StaticBody3D, line: Dictionary, st
 		var pb := b + o
 		m.beam(pa + Vector3.DOWN * 0.1, pb + Vector3.DOWN * 0.1, 3.5, 2.2, PLATFORM)
 		SkyportIsland._box_beam(body, pa + Vector3.DOWN * 0.1, pb + Vector3.DOWN * 0.1, 3.5, 2.2)
+		if SkyportKit.ready():
+			var br_a := a + side * sg * (RailNetwork.PAIR + RailNetwork.PLATFORM_GAP - 0.15) + Vector3.DOWN * 1.15
+			var br_b := b + side * sg * (RailNetwork.PAIR + RailNetwork.PLATFORM_GAP - 0.15) + Vector3.DOWN * 1.15
+			InfraKit.platform_brackets(kit_list, br_a, br_b, side * sg, 3.55, 1.75, 7.8, 0.55)
 		m.beam(pa - side * sg * 1.72 + Vector3.UP * 0.96, pb - side * sg * 1.72 + Vector3.UP * 0.96, 0.06, 0.04,
 			Color(0.95, 0.8, 0.15))
 		var t := 4.0
@@ -360,18 +370,29 @@ static func _station(m: BuildingMesher, body: StaticBody3D, line: Dictionary, st
 			var lay := layout.mainland if (name == "Westbank Airport" and layout.mainland) else layout
 			var g := lay.ground_y(tq.x, tq.y)
 			gy = g if not is_nan(g) else BuildingMesher.SEA_SURFACE - 3.0
-		m.beam(Vector3(tower.x, gy, tower.z), Vector3(tower.x, c.y + 5.6, tower.z), 6.0, 6.0, Color(0.36, 0.4, 0.44))
-		m.beam(Vector3(tower.x, c.y + 5.6, tower.z), Vector3(tower.x, c.y + 6.0, tower.z), 6.8, 6.8, LINE_BLUE)
+		var face := (tower - c).normalized()
+		face.y = 0.0
+		face = face.normalized() if face.length() > 0.001 else side
+		if SkyportKit.ready():
+			InfraKit.pavilion(kit_list, Vector3(tower.x, gy, tower.z), c.y + 4.9, face, 6.2, 6.4, 1.5, 2.8)
+		else:
+			m.beam(Vector3(tower.x, gy, tower.z), Vector3(tower.x, c.y + 5.6, tower.z), 6.0, 6.0, Color(0.36, 0.4, 0.44))
+		m.beam(Vector3(tower.x, c.y + 5.6, tower.z), Vector3(tower.x, c.y + 6.0, tower.z), 6.9, 6.9, LINE_BLUE)
 		SkyportIsland._box_beam(body, Vector3(tower.x, gy, tower.z), Vector3(tower.x, c.y + 5.6, tower.z), 6.0, 6.0)
-		# A bridge from the tower to the nearer platform.
+		# Enclosed glazed skywalk from the pavilion to the nearer platform.
 		var near_pl := c + (tower - c).project(side).normalized() * off_pl
 		near_pl.y = c.y
 		m.beam(Vector3(tower.x, c.y - 0.1, tower.z), near_pl + Vector3.DOWN * 0.1, 3.0, 0.4, PLATFORM)
 		SkyportIsland._box_beam(body, Vector3(tower.x, c.y - 0.1, tower.z), near_pl + Vector3.DOWN * 0.1, 3.0, 0.4)
+		if SkyportKit.ready():
+			var sw_dir := (near_pl - Vector3(tower.x, c.y, tower.z))
+			sw_dir.y = 0.0
+			var sw_len := sw_dir.length()
+			if sw_len > 1.2:
+				var sw_u := sw_dir / sw_len
+				InfraKit.skywalk(kit_list, Vector3(tower.x, c.y + 0.1, tower.z) + sw_u * 2.6, near_pl + Vector3.UP * 0.1, 3.2, 3.3, 4.5)
 		# The line's roundel on the tower (a blue disc and white bar).
-		var face := (tower - c).normalized()
-		face.y = 0.0
-		var rp := Vector3(tower.x, c.y + 2.5, tower.z) + face * 3.05
+		var rp := Vector3(tower.x, c.y + 2.5, tower.z) + face * 3.32
 		m.prism(SkyportAirport._ring(Vector2(rp.x, rp.z), 1.2, 12), rp.y - 1.2, rp.y + 1.2, LINE_BLUE)
 	if name == "Airport Central":
 		_airport_central(m, body, st, tower, P)

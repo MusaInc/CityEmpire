@@ -78,6 +78,67 @@ static func girders(list: Dictionary, a: Vector3, b: Vector3, width: float, dept
 			_add(list, "underpass_lamp", Transform3D(Basis(d.normalized(), Vector3.UP, -side), (a + b) * 0.5 + side * sg * width - Vector3.UP * depth * 0.02))
 
 
+## Architectural glazed-and-clad transit access pavilion (stair/lift tower):
+## grounded granite plinth with street-level entrance canopy, stacked glazed
+## curtain-wall storeys with structural corner piers and concrete lift core,
+## and a cantilevered roof crown with warm recessed soffit lighting.
+## `base`: ground centre, `top_y`: platform/roof level, `front`: street-facing unit dir.
+static func pavilion(list: Dictionary, base: Vector3, top_y: float, front: Vector3, width: float, depth: float,
+		crown_h := 1.45, plinth_h := 2.8) -> void:
+	var f := Vector3(front.x, 0.0, front.z)
+	f = f.normalized() if f.length() > 0.001 else Vector3.FORWARD
+	var side := Vector3(-f.z, 0.0, f.x)
+	var b_of := func(sx: float, sy: float, sz: float) -> Basis:
+		return Basis(side * sx, Vector3.UP * sy, -f * sz)
+	var total_h := maxf(top_y - base.y, 4.0)
+	var ph := minf(plinth_h, total_h * 0.35)
+	_add(list, "transit_pavilion_base", Transform3D(b_of.call(width, ph, depth), base))
+	var shaft_h := maxf(total_h - ph, 1.5)
+	var storeys := maxi(1, roundi(shaft_h / 3.8))
+	var sh := shaft_h / float(storeys)
+	for i in storeys:
+		_add(list, "transit_pavilion_bay", Transform3D(b_of.call(width, sh + 0.04, depth),
+			Vector3(base.x, base.y + ph + float(i) * sh, base.z)))
+	_add(list, "transit_pavilion_crown", Transform3D(b_of.call(width, crown_h, depth),
+		Vector3(base.x, base.y + total_h - 0.12, base.z)))
+
+
+## Enclosed glazed pedestrian skywalk bridge from `a` to `b` (floor centre line):
+## structural underside box girder, full-height tinted glass walls with dark steel
+## mullions and handrails, and an integrated cantilevered roof canopy with lighting.
+static func skywalk(list: Dictionary, a: Vector3, b: Vector3, width := 3.2, height := 3.3, bay_len := 5.5) -> void:
+	var d := b - a
+	var L := d.length()
+	if L < 0.8:
+		return
+	var dir := d / L
+	var side := Vector3(-dir.z, 0.0, dir.x).normalized()
+	var n := maxi(1, ceili(L / bay_len))
+	var step := L / float(n)
+	for i in n:
+		var p0 := a.lerp(b, float(i) / float(n))
+		var p1 := a.lerp(b, float(i + 1) / float(n))
+		_add(list, "skywalk_bay", Transform3D(Basis(dir * (step + 0.04), Vector3.UP * height, -side * width),
+			(p0 + p1) * 0.5))
+
+
+## Sculpted cantilevered platform support brackets along a station platform edge,
+## visually tying elevated station platforms into the central viaduct box girder.
+static func platform_brackets(list: Dictionary, a: Vector3, b: Vector3, out_dir: Vector3,
+		reach := 3.4, depth := 1.65, spacing := 7.5, thickness := 0.55) -> void:
+	var d := b - a
+	var L := d.length()
+	if L < 2.0:
+		return
+	var along := d / L
+	var out := Vector3(out_dir.x, 0.0, out_dir.z).normalized()
+	var n := maxi(2, ceili(L / spacing))
+	for i in n + 1:
+		var u := lerpf(0.04, 0.96, float(i) / float(n))
+		var p := a.lerp(b, u)
+		_add(list, "platform_bracket", Transform3D(Basis(out * reach, Vector3.UP * depth, -along * thickness), p))
+
+
 static func place(target: Node3D, list: Dictionary, range_end := 1600.0) -> void:
 	if not SkyportKit.ready():
 		return
