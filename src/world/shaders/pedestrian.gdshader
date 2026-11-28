@@ -16,6 +16,7 @@ global uniform vec3 player_pos;
 global uniform float wetness;
 global uniform float night;
 uniform float crowd_radius = 0.0;  // m round the hero handed to the CPU crowd (0: none)
+uniform float pivot_k = 1.0;       // 1.0 male, 0.925 female
 // Pavements follow the road surface (+ kerb, in the instance origin).
 global uniform sampler2D ground_height : filter_linear, repeat_disable;
 global uniform vec4 ground_rect;
@@ -30,26 +31,47 @@ vec3 srgb(vec3 c) {
 	return pow(c, vec3(2.2));
 }
 
+vec3 pal8(float s, vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4, vec3 c5, vec3 c6, vec3 c7) {
+	if (s < 0.125) return c0;
+	if (s < 0.250) return c1;
+	if (s < 0.375) return c2;
+	if (s < 0.500) return c3;
+	if (s < 0.625) return c4;
+	if (s < 0.750) return c5;
+	if (s < 0.875) return c6;
+	return c7;
+}
+
 vec3 pick(int part, float s, vec3 top) {
+	vec3 skin = srgb(pal8(s,
+		vec3(0.96, 0.81, 0.70), vec3(0.92, 0.74, 0.60), vec3(0.85, 0.65, 0.50), vec3(0.76, 0.55, 0.40),
+		vec3(0.65, 0.45, 0.32), vec3(0.52, 0.35, 0.24), vec3(0.39, 0.26, 0.18), vec3(0.28, 0.19, 0.14)));
 	if (part == 1) {
-		return srgb(s < 0.2 ? vec3(0.95, 0.78, 0.65) : (s < 0.4 ? vec3(0.85, 0.64, 0.5)
-			: (s < 0.6 ? vec3(0.68, 0.48, 0.34) : (s < 0.8 ? vec3(0.5, 0.34, 0.24) : vec3(0.33, 0.22, 0.16)))));
+		return skin;
+	} else if (part == 9) {
+		return skin * vec3(0.78, 0.52, 0.50);
 	} else if (part == 2) {
-		return srgb(s < 0.22 ? vec3(0.16, 0.18, 0.26) : (s < 0.4 ? vec3(0.1, 0.1, 0.11)
-			: (s < 0.58 ? vec3(0.28, 0.36, 0.5) : (s < 0.72 ? vec3(0.62, 0.56, 0.44)
-			: (s < 0.86 ? vec3(0.34, 0.33, 0.33) : vec3(0.36, 0.24, 0.17))))));
+		return srgb(pal8(s,
+			vec3(0.15, 0.17, 0.25), vec3(0.10, 0.10, 0.12), vec3(0.26, 0.34, 0.48), vec3(0.58, 0.52, 0.40),
+			vec3(0.30, 0.30, 0.31), vec3(0.22, 0.26, 0.22), vec3(0.42, 0.34, 0.26), vec3(0.19, 0.21, 0.28)));
 	} else if (part == 3) {
-		return srgb(s < 0.3 ? vec3(0.07, 0.06, 0.05) : (s < 0.55 ? vec3(0.24, 0.15, 0.09)
-			: (s < 0.72 ? vec3(0.42, 0.28, 0.16) : (s < 0.86 ? vec3(0.78, 0.64, 0.38) : vec3(0.62, 0.6, 0.58)))));
+		return srgb(pal8(s,
+			vec3(0.05, 0.04, 0.04), vec3(0.14, 0.09, 0.06), vec3(0.28, 0.17, 0.10), vec3(0.44, 0.24, 0.13),
+			vec3(0.64, 0.48, 0.28), vec3(0.78, 0.65, 0.40), vec3(0.45, 0.44, 0.43), vec3(0.72, 0.71, 0.70)));
 	} else if (part == 4) {
 		return top;
 	} else if (part == 6) {
-		return srgb(s < 0.25 ? vec3(0.45, 0.28, 0.16) : (s < 0.5 ? vec3(0.12, 0.12, 0.14)
-			: (s < 0.7 ? vec3(0.62, 0.15, 0.18) : (s < 0.85 ? vec3(0.85, 0.75, 0.55) : vec3(0.2, 0.32, 0.55)))));
+		return srgb(pal8(s,
+			vec3(0.92, 0.91, 0.89), vec3(0.12, 0.12, 0.14), vec3(0.62, 0.16, 0.19), vec3(0.84, 0.70, 0.36),
+			vec3(0.20, 0.32, 0.54), vec3(0.32, 0.42, 0.30), vec3(0.50, 0.36, 0.24), vec3(0.74, 0.72, 0.68)));
 	} else if (part == 0) {
-		return srgb(s < 0.5 ? vec3(0.09, 0.09, 0.1) : (s < 0.75 ? vec3(0.9, 0.9, 0.88) : vec3(0.35, 0.22, 0.13)));
+		return srgb(pal8(s,
+			vec3(0.92, 0.92, 0.90), vec3(0.09, 0.09, 0.10), vec3(0.86, 0.84, 0.80), vec3(0.34, 0.21, 0.13),
+			vec3(0.18, 0.21, 0.28), vec3(0.46, 0.30, 0.18), vec3(0.24, 0.24, 0.25), vec3(0.62, 0.18, 0.18)));
+	} else if (part == 8) {
+		return vec3(0.88);
 	}
-	return srgb(vec3(0.07, 0.06, 0.06));  // eyes, tights
+	return srgb(vec3(0.06, 0.05, 0.05));  // eyes, tights
 }
 
 void vertex() {
@@ -73,13 +95,14 @@ void vertex() {
 		* (1.0 - smoothstep(2.5, 6.0, abs(player_pos.y - wp.y)));
 
 	float walking = step(0.05, spd);
-	float ph = walking > 0.5 ? d / 0.72 * 3.14159 : 0.0;
+	float y_scale = max(length(MODEL_MATRIX[1].xyz), 0.5) * pivot_k;
+	float ph = walking > 0.5 ? d / (0.80 * y_scale) * 3.14159 : 0.0;
 	vec3 v = VERTEX;
 	vec3 n = NORMAL;
 	// Standing people shift their weight and glance about now and then.
 	float idle_look = (1.0 - walking) * sin(TIME * 0.4 + seed * 40.0) * 0.5 * step(0.4, sin(TIME * 0.13 + seed * 9.0));
 	float a = atan(rel.x, -rel.z);
-	person_pose_w(v, n, limb, UV2.x, 1.0 - UV2.y, ph, walking, 0.0, idle_look + (limb == 5 ? a * k * 0.6 : 0.0), 0.0);
+	person_pose_wk(v, n, limb, UV2.x, 1.0 - UV2.y, ph, walking, 0.0, idle_look + (limb == 5 ? a * k * 0.6 : 0.0), 0.0, pivot_k, seed);
 	if (k > 0.001) {
 		// Turn towards the hero, and step aside.
 		float turn = a * k * 0.35;

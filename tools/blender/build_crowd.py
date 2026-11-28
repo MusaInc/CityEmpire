@@ -4,7 +4,9 @@ Run:  blender -b --factory-startup --python tools/blender/build_crowd.py -- asse
 
 Imports both skinned hero builds, including fitted hair and clothes. For each outfit in
 VARIANTS: poses the arms down from the bind A-pose and the legs together,
-bakes the pose, joins the pieces, decimates to ~TARGET triangles and exports
+bakes the pose, decimates each anatomical bucket (head, hair, top, lower, hands,
+footwear, accessories) to its own triangle budget so neither the head nor the
+garments ever collapse, joins the pieces, grounds the soles at y=0, and exports
 an unskinned mesh `person_<n>` into crowd.glb, one material ("person").
 Per-vertex data the shaders use (crowd.gdshader / person_pose.gdshaderinc):
   UV.x  = part + 0.5 (0 shoes, 1 skin, 2 trousers, 3 hair, 4 top, 5 dark
@@ -15,7 +17,7 @@ Per-vertex data the shaders use (crowd.gdshader / person_pose.gdshaderinc):
   UV2.x = how much the vertex follows that limb (its bones' skin weight)
   UV2.y = how much it follows the lower segment (shin+foot / forearm+hand)
 (glTF flips v on export: the shaders read 0.5 - UV.y and 1 - UV2.y.)
-Pivots (Godot y, metres): hip 0.94, knee 0.49, shoulder 1.5, elbow PRINTed.
+Pivots (Godot y, metres): hip 0.94, knee 0.49, shoulder 1.48, elbow 1.21 (x pivot_k).
 """
 import math
 import os
@@ -27,10 +29,10 @@ from mathutils import Matrix, Vector
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = ARGS[0] if ARGS else "assets/models"
 PREVIEW = ARGS[1] if len(ARGS) > 1 else ""
-TARGET = int(os.environ.get("CROWD_TARGET", "3100"))   # CROWD_TARGET=900 CROWD_OUT=crowd_far.glb: the far walkers
+TARGET = int(os.environ.get("CROWD_TARGET", "3200"))   # CROWD_TARGET=1000 CROWD_OUT=crowd_far.glb: the far walkers
 SEATED_MODE = os.environ.get("CROWD_SEATED", "0") == "1"
 
-# Alternate builds (even = body A male, odd = body B female) across 12 everyday outfits.
+# Alternate builds (even = body A male, odd = body B female) across 16 everyday outfits.
 # Tuple: (slot, face, hair, cut, lower, footwear, acc)
 VARIANTS = {
     "a": [
@@ -40,20 +42,35 @@ VARIANTS = {
         (6, "ade", "crop", "shirt", "chinos", "derbies", "shades"),
         (8, "ade", "buzz", "coat", "chinos", "derbies", ""),
         (10, "ade", "crop", "track", "track", "trainers", "cap"),
+        (12, "ade", "buzz", "bomber", "cargo", "trainers", "headphones"),
+        (14, "ade", "crop", "jumper", "joggers", "trainers", ""),
     ],
     "b": [
         (1, "jules", "bun", "tee", "jeans", "trainers", ""),
-        (3, "jules", "crop", "jumper", "fitjeans", "trainers", ""),
-        (5, "jules", "bun", "polo", "chinos", "trainers", "shades"),
-        (7, "jules", "crop", "coat", "chinos", "trainers", ""),
+        (3, "jules", "crop", "jumper", "fitjeans", "boots", ""),
+        (5, "jules", "bun", "polo", "chinos", "streettrainers", "shades"),
+        (7, "jules", "crop", "coat", "chinos", "boots", ""),
         (9, "jules", "bun", "bomber", "widejeans", "trainers", "beanie"),
-        (11, "jules", "buzz", "track", "leggings", "trainers", "headphones"),
+        (11, "jules", "buzz", "track", "leggings", "streettrainers", "headphones"),
+        (13, "jules", "bun", "hoodie", "joggers", "trainers", "cap"),
+        (15, "jules", "crop", "shirt", "relaxeddenim", "highstreet", ""),
     ],
 }
 
 SEATED_VARIANTS = {
     "a": [(0, "ade", "crop", "coat", "chinos", "trainers", "")],
     "b": [(1, "jules", "bun", "bomber", "jeans", "trainers", "")],
+}
+
+# Per-bucket triangle budgets at TARGET=3200 (scaled proportionally for crowd_far.glb).
+BUCKET_BUDGETS = {
+    "head": (680, 190),
+    "hair": (380, 95),
+    "top": (1020, 290),
+    "lower": (760, 230),
+    "hands": (160, 48),
+    "shoes": (240, 76),
+    "acc": (140, 44),
 }
 
 PART = {"hero_skin": 1, "hero_skin_body": 1, "hero_glove": 1, "hero_lips": 9, "hero_sclera": 8, "hero_iris": 5,
@@ -93,6 +110,22 @@ def part_of(mat_name, obj_name=""):
     if any(k in mat_name.lower() for k in ("iris", "pupil", "lash", "brow")):
         return 5
     return PART.get(mat_name.split(".")[0], 4)
+
+
+def bucket_of(obj_name):
+    if obj_name.startswith("Face_"):
+        return "head"
+    if obj_name.startswith(("Hair_", "Groom_")):
+        return "hair"
+    if obj_name.startswith("Acc_"):
+        return "acc"
+    if obj_name.startswith(("Lower_", "Courier_Cargo", "Courier_Chinos", "Cargo_gusset")):
+        return "lower"
+    if obj_name.startswith(("Footwear_", "Courier_Trainer", "Courier_Soles", "Ankle_Liner")):
+        return "shoes"
+    if obj_name == "Skin_Hands":
+        return "hands"
+    return "top"
 
 
 def load(model):
@@ -145,6 +178,10 @@ def pieces(face, hair, cut, lower="chinos", footwear="trainers", acc=""):
         trouser = {"Lower_fitjeans"}
     elif lower == "widejeans" and "Lower_widejeans" in meshes:
         trouser = {"Lower_widejeans"}
+    elif lower == "relaxeddenim" and "Lower_relaxeddenim" in meshes:
+        trouser = {"Lower_relaxeddenim", "Lower_relaxeddenim_PocketThreadL", "Lower_relaxeddenim_PocketThreadR"}
+    elif lower == "joggers" and "Lower_joggers" in meshes:
+        trouser = {"Lower_joggers"}
     elif lower == "track" and "Lower_track" in meshes:
         trouser = {"Lower_track", "Lower_track_Stripes"}
     elif lower == "leggings" and "Lower_leggings" in meshes:
@@ -153,10 +190,13 @@ def pieces(face, hair, cut, lower="chinos", footwear="trainers", acc=""):
         trouser = {"Courier_Cargo", "Cargo_gusset_l", "Cargo_gusset_r"}
     else:
         trouser = {"Courier_Chinos"}
-    if footwear == "derbies" and "Footwear_derbies" in meshes:
-        shoes = {"Footwear_derbies", "Ankle_Liner"}
+
+    fw_name = "Footwear_" + footwear
+    if footwear != "trainers" and fw_name in meshes:
+        shoes = {fw_name, "Ankle_Liner"}
     else:
         shoes = {"Courier_Trainers", "Courier_Soles", "Ankle_Liner"}
+
     names = trouser | shoes | {"Skin_Hands", "Face_" + face, "Top_" + cut.capitalize(),
                                "Skin_Arms_" + cut.capitalize()}
     if cut == "shirt":
@@ -187,15 +227,32 @@ def pieces(face, hair, cut, lower="chinos", footwear="trainers", acc=""):
            and (o.name in names or o.name.startswith("Topx_" + cut.capitalize() + "_"))]
     assert any(o.name.startswith("Face_") for o in out), "no face for %s/%s" % (face, cut)
     assert any(o.name.startswith(("Hair_", "Groom_")) for o in out), "no hair for %s/%s" % (face, cut)
+    assert any(o.name.startswith("Top_") for o in out), "no top for %s/%s" % (face, cut)
+    assert any(o.name.startswith(("Lower_", "Courier_Chinos", "Courier_Cargo")) for o in out), "no lower for %s/%s" % (face, lower)
     return out
+
+
+def _decimate_bucket(objs, budget):
+    bpy.ops.object.select_all(action="DESELECT")
+    for c in objs:
+        c.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    if len(objs) > 1:
+        bpy.ops.object.join()
+    ob = bpy.context.view_layer.objects.active
+    tris = sum(len(p.vertices) - 2 for p in ob.data.polygons)
+    if tris > budget and budget > 0:
+        dec = ob.modifiers.new("dec_part", "DECIMATE")
+        dec.ratio = max(0.006, min(1.0, budget / float(tris)))
+        dec.use_collapse_triangulate = True
+        bpy.ops.object.modifier_apply(modifier=dec.name)
+    return ob
 
 
 def build(arm, v, face, hair, cut, lower="chinos", footwear="trainers", acc=""):
     objs = pieces(face, hair, cut, lower, footwear, acc)
     bpy.ops.object.select_all(action="DESELECT")
-    dup = []
-    # Tag each source object's faces with its resolved part ID via a temporary material
-    # BEFORE joining, so part_of() can inspect obj.name (Hair_/Groom_/Acc_/Lower_) accurately.
+    buckets = {}
     for o in objs:
         c = o.copy()
         c.data = o.data.copy()
@@ -203,7 +260,6 @@ def build(arm, v, face, hair, cut, lower="chinos", footwear="trainers", acc=""):
         if c.data.shape_keys:
             c.shape_key_clear()
         orig_name = o.name
-        is_head_detail = orig_name.startswith(("Face_", "Hair_", "Groom_"))
         # Remap materials to canonical "__part_<id>" so join() preserves exact part IDs.
         for mi, mat in enumerate(list(c.data.materials)):
             pid = part_of(mat.name if mat else "", orig_name)
@@ -213,27 +269,7 @@ def build(arm, v, face, hair, cut, lower="chinos", footwear="trainers", acc=""):
             pid = part_of("", orig_name)
             mname = "__part_%d" % pid
             c.data.materials.append(bpy.data.materials.get(mname) or bpy.data.materials.new(mname))
-        # Protect head/face/hair and shoe soles during decimation so eyes/hair/soles never collapse.
-        vg = c.vertex_groups.new(name="_decimate_body")
-        is_sole = orig_name.startswith(("Courier_Soles", "Courier_Trainers", "Footwear_"))
-        if is_head_detail:
-            all_vi = [vert.index for vert in c.data.vertices]
-            if all_vi:
-                vg.add(all_vi, 0.0, "REPLACE")
-        elif is_sole:
-            low_vi = [vert.index for vert in c.data.vertices if vert.co.z < 0.14]
-            hi_vi = [vert.index for vert in c.data.vertices if vert.co.z >= 0.14]
-            if low_vi:
-                vg.add(low_vi, 0.0, "REPLACE")
-            if hi_vi:
-                vg.add(hi_vi, 1.0, "REPLACE")
-        else:
-            all_vi = [vert.index for vert in c.data.vertices]
-            if all_vi:
-                vg.add(all_vi, 1.0, "REPLACE")
-        dup.append(c)
-    # Bake the pose (armature modifier), keep the vertex groups.
-    for c in dup:
+        # Bake the pose (armature modifier), keeping vertex groups for limb weights.
         bpy.context.view_layer.objects.active = c
         for m in list(c.modifiers):
             if m.type == "ARMATURE":
@@ -241,11 +277,24 @@ def build(arm, v, face, hair, cut, lower="chinos", footwear="trainers", acc=""):
                 bpy.ops.object.modifier_apply(modifier=m.name)
         c.parent = None
         c.matrix_world = Matrix.Identity(4)
+        bname = bucket_of(orig_name)
+        buckets.setdefault(bname, []).append(c)
+
+    scale = TARGET / 3200.0
+    part_objs = []
+    raw_tris = 0
+    for bname, bobjs in buckets.items():
+        raw_tris += sum(sum(len(p.vertices) - 2 for p in o.data.polygons) for o in bobjs)
+        base_b, min_b = BUCKET_BUDGETS.get(bname, (200, 60))
+        budget = max(min_b, int(round(base_b * scale)))
+        part_objs.append(_decimate_bucket(bobjs, budget))
+
     bpy.ops.object.select_all(action="DESELECT")
-    for c in dup:
-        c.select_set(True)
-    bpy.context.view_layer.objects.active = dup[0]
-    bpy.ops.object.join()
+    for po in part_objs:
+        po.select_set(True)
+    bpy.context.view_layer.objects.active = part_objs[0]
+    if len(part_objs) > 1:
+        bpy.ops.object.join()
     ob = bpy.context.view_layer.objects.active
     ob.name = ("driver_%d" if SEATED_MODE else "person_%d") % v
     ob.data.name = ob.name
@@ -255,7 +304,6 @@ def build(arm, v, face, hair, cut, lower="chinos", footwear="trainers", acc=""):
         import bmesh
         bm = bmesh.new()
         bm.from_mesh(me)
-        # Pelvis in Blender Z-up is at ~0.92 m; trim anything below z < 0.72 m (shins/feet).
         drop = [vert for vert in bm.verts if vert.co.z < 0.72]
         if drop:
             bmesh.ops.delete(bm, geom=drop, context="VERTS")
@@ -263,19 +311,13 @@ def build(arm, v, face, hair, cut, lower="chinos", footwear="trainers", acc=""):
             vert.co.z -= 0.90
         bm.to_mesh(me)
         bm.free()
-    tris = sum(len(p.vertices) - 2 for p in me.polygons)
-    if tris > TARGET:
-        # Protected-head decimation: decimate body/garments first, then gentle overall pass if still over.
-        dec = ob.modifiers.new("dec_body", "DECIMATE")
-        dec.vertex_group = "_decimate_body"
-        dec.ratio = max(0.08, min(1.0, (TARGET * 0.72) / max(tris, 1)))
-        bpy.ops.object.modifier_apply(modifier=dec.name)
-        tris2 = sum(len(p.vertices) - 2 for p in ob.data.polygons)
-        if tris2 > TARGET:
-            dec2 = ob.modifiers.new("dec_all", "DECIMATE")
-            dec2.ratio = min(1.0, TARGET / max(tris2, 1))
-            bpy.ops.object.modifier_apply(modifier=dec2.name)
-    me = ob.data
+    else:
+        # Ground soles cleanly at z=0 so pedestrians never float or sink into pavements.
+        if me.vertices:
+            min_z = min(vert.co.z for vert in me.vertices)
+            if abs(min_z) > 0.002:
+                for vert in me.vertices:
+                    vert.co.z -= min_z
     me.validate(clean_customdata=False)
     # Per-vertex limb and weights from the skin.
     gname = {g.index: g.name for g in ob.vertex_groups}
@@ -285,8 +327,6 @@ def build(arm, v, face, hair, cut, lower="chinos", footwear="trainers", acc=""):
         tot = 0.0
         for g in vert.groups:
             n = gname.get(g.group, "")
-            if n == "_decimate_body":
-                continue
             w[n] = w.get(n, 0.0) + g.weight
             tot += g.weight
         tot = max(tot, 1e-6)
@@ -303,25 +343,32 @@ def build(arm, v, face, hair, cut, lower="chinos", footwear="trainers", acc=""):
         me.uv_layers.remove(me.uv_layers[0])
     uv1 = me.uv_layers.new(name="UVMap")
     uv2 = me.uv_layers.new(name="UV2")
-    hair_polys = 0
+    part_polys = {}
     for poly in me.polygons:
         mname = me.materials[poly.material_index].name if me.materials and poly.material_index < len(me.materials) else "__part_4"
         part = int(mname.split("_")[-1]) if mname.startswith("__part_") else 4
-        if part == 3:
-            hair_polys += 1
+        part_polys[part] = part_polys.get(part, 0) + 1
         poly.use_smooth = True
         for li in poly.loop_indices:
             vi = me.loops[li].vertex_index
             limb, cw, lw = vdata[vi]
             uv1.data[li].uv = (part + 0.5, limb + 0.5)
             uv2.data[li].uv = (cw, lw)
-    assert hair_polys > 0, "hair vanished after decimation on %s" % ob.name
+    assert part_polys.get(1, 0) > 40, "face/skin vanished on %s" % ob.name
+    assert part_polys.get(3, 0) > 20, "hair vanished on %s" % ob.name
+    assert part_polys.get(4, 0) + part_polys.get(6, 0) > 80, "top vanished on %s" % ob.name
+    if not SEATED_MODE:
+        assert part_polys.get(2, 0) > 60, "lower vanished on %s" % ob.name
+        assert part_polys.get(0, 0) > 20, "shoes vanished on %s" % ob.name
     me.materials.clear()
     me.materials.append(bpy.data.materials.get("person") or bpy.data.materials.new("person"))
     for g in list(ob.vertex_groups):
         ob.vertex_groups.remove(g)
-    print("%s: %s/%s/%s/%s %d -> %d tris (hair_polys=%d)" % (
-        ob.name, face, hair, cut, lower, tris, sum(len(p.vertices) - 2 for p in me.polygons), hair_polys))
+    final_tris = sum(len(p.vertices) - 2 for p in me.polygons)
+    print("%s: %s/%s/%s/%s/%s %d -> %d tris (skin=%d hair=%d top=%d low=%d shoe=%d)" % (
+        ob.name, face, hair, cut, lower, footwear, raw_tris, final_tris,
+        part_polys.get(1, 0), part_polys.get(3, 0), part_polys.get(4, 0) + part_polys.get(6, 0),
+        part_polys.get(2, 0), part_polys.get(0, 0)))
     return ob
 
 
@@ -338,7 +385,8 @@ def main():
         people.extend(build(arm, *spec) for spec in variants)
         for obj in objects:
             bpy.data.objects.remove(obj, do_unlink=True)
-    for i, p in enumerate(people):
+    people.sort(key=lambda o: int(o.name.split("_")[1]))
+    for p in people:
         p.location = (0, 0, 0)
     bpy.ops.object.select_all(action="DESELECT")
     for p in people:
@@ -350,19 +398,19 @@ def main():
     print("CROWD DONE")
     if PREVIEW:
         for i, p in enumerate(people):
-            p.location = (i * 0.9 - len(people) * 0.45, 0, 0)
+            p.location = (i * 0.85 - (len(people) - 1) * 0.425, 0, 0)
         scn = bpy.context.scene
         cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam"))
         scn.collection.objects.link(cam)
-        cam.location = (0, -9.0, 1.1)
-        cam.rotation_euler = (math.radians(88), 0, 0)
-        cam.data.lens = 40
+        cam.location = (0, -11.8, 1.05)
+        cam.rotation_euler = (math.radians(89), 0, 0)
+        cam.data.lens = 42
         scn.camera = cam
         scn.render.engine = "BLENDER_WORKBENCH"
         scn.display.shading.light = "STUDIO"
         scn.display.shading.color_type = "SINGLE"
-        scn.render.resolution_x = 1600
-        scn.render.resolution_y = 600
+        scn.render.resolution_x = 1800
+        scn.render.resolution_y = 520
         scn.render.filepath = PREVIEW
         bpy.ops.render.render(write_still=True)
 

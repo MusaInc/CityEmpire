@@ -65,42 +65,51 @@ void person_pose(inout vec3 v, inout vec3 n, int limb, float ph, float walk, flo
 // limbs blend by their skin weights instead of a hard tag, so hips,
 // shoulders, knees and elbows bend smoothly. cw: how much the vertex follows
 // its limb; lw: how much it follows the lower segment (shin / forearm).
-// Pivots are the hero rig's (metres up): hip 0.94, knee 0.49, shoulder 1.5,
-// elbow 1.21.
-void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float ph, float walk, float carry, float look, float alarm) {
+// Pivots scale by pivot_k (1.0 male, ~0.925 female) so every body bends at its
+// true anatomical joints without clothing shear or limb stretching.
+void person_pose_wk(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float ph, float walk, float carry, float look, float alarm, float pivot_k, float seed) {
+	float y_hip = 0.94 * pivot_k;
+	float y_knee = 0.49 * pivot_k;
+	float y_ankle = 0.070 * pivot_k;
+	float y_sh = 1.48 * pivot_k;
+	float y_el = 1.21 * pivot_k;
+	float y_neck = 1.56 * pivot_k;
 	float cycle = sin(ph);
 	float sw = cycle * walk;
 	float height = v.y;
+	// Per-person walking style: subtle arm-swing vigour and posture personality.
+	float style_arm = mix(0.82, 1.18, fract(seed * 11.3));
+	float style_posture = (fract(seed * 17.9) - 0.5) * 0.045;
 	if (limb == 1 || limb == 2) {
 		float side = limb == 1 ? -1.0 : 1.0;
 		float swing = -cycle * side;
 		float through = cos(ph) * -side;
-		float a = sw * -side * (0.33 + 0.23 * alarm);
-		// The knee flexes during swing, then extends before heel contact.
-		float k = (max(through, 0.0) * (0.17 + (0.61 + 0.37 * alarm) * max(-swing, 0.0)) + 0.045) * walk;
-		vec3 vk = pitch_about(v, vec3(0.0, 0.49, 0.02), -k);
+		float a = sw * -side * (0.34 + 0.24 * alarm);
+		// The knee flexes during swing, then extends cleanly before heel contact.
+		float k = (max(through, 0.0) * (0.18 + (0.62 + 0.38 * alarm) * max(-swing, 0.0)) + 0.045) * walk;
+		vec3 vk = pitch_about(v, vec3(0.0, y_knee, 0.02 * pivot_k), -k);
 		v = mix(v, vk, lw);
 		n = normalize(mix(n, pitch_dir(n, -k), lw));
-		vec3 vh = pitch_about(v, vec3(0.0, 0.94, 0.0), a);
+		vec3 vh = pitch_about(v, vec3(0.0, y_hip, 0.0), a);
 		v = mix(v, vh, cw);
 		n = normalize(mix(n, pitch_dir(n, a), cw));
-		float foot = lw * (1.0 - smoothstep(0.065, 0.15, height));
-		// Release the toe in swing and level the foot before the next step.
+		float foot = lw * (1.0 - smoothstep(0.065 * pivot_k, 0.15 * pivot_k, height));
+		// Release the toe in swing and level the foot before the next heel strike.
 		float rollover = clamp(k * 0.62 - a * 0.45, -0.17, 0.27);
-		vec3 ankle = pitch_about(vec3(0.0, 0.070, 0.0), vec3(0.0, 0.49, 0.02), -k);
-		ankle = pitch_about(ankle, vec3(0.0, 0.94, 0.0), a);
+		vec3 ankle = pitch_about(vec3(0.0, y_ankle, 0.0), vec3(0.0, y_knee, 0.02 * pivot_k), -k);
+		ankle = pitch_about(ankle, vec3(0.0, y_hip, 0.0), a);
 		v = mix(v, pitch_about(v, ankle, rollover), foot);
 		n = normalize(mix(n, pitch_dir(n, rollover), foot));
 	} else if (limb == 3 || limb == 4) {
 		float side = limb == 3 ? -1.0 : 1.0;
 		// Pendular forearm phase lag (~0.45 rad) for natural relaxed human arm swing.
 		float arm_lag = sin(ph - 0.45) * walk;
-		float a = mix((sw * side - cos(ph) * side * walk * 0.14) * (0.30 + 0.21 * alarm), 0.30, carry);
-		float e = 0.14 + 0.11 * walk + 1.18 * carry + 0.55 * alarm + max(0.0, arm_lag * side) * 0.26 - max(0.0, -arm_lag * side) * 0.05;
-		vec3 ve = pitch_about(v, vec3(0.0, 1.21, 0.0), e);
+		float a = mix((sw * side - cos(ph) * side * walk * 0.14) * (0.30 * style_arm + 0.22 * alarm), 0.30, carry);
+		float e = 0.13 + 0.11 * walk + 1.18 * carry + 0.56 * alarm + max(0.0, arm_lag * side) * 0.26 * style_arm - max(0.0, -arm_lag * side) * 0.05;
+		vec3 ve = pitch_about(v, vec3(0.0, y_el, 0.0), e);
 		v = mix(v, ve, lw);
 		n = normalize(mix(n, pitch_dir(n, e), lw));
-		vec3 vs = pitch_about(v, vec3(0.0, 1.48, 0.0), a);
+		vec3 vs = pitch_about(v, vec3(0.0, y_sh, 0.0), a);
 		v = mix(v, vs, cw);
 		n = normalize(mix(n, pitch_dir(n, a), cw));
 	} else if (limb == 5 && abs(look) > 0.001) {
@@ -108,28 +117,45 @@ void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, flo
 		float s = sin(look * cw);
 		v.xz = vec2(v.x * c - v.z * s, v.x * s + v.z * c);
 		n.xz = vec2(n.x * c - n.z * s, n.x * s + n.z * c);
+		// Subtle natural head tilt into turns/glances.
+		float tilt_z = -look * 0.08 * cw;
+		vec3 hr = v - vec3(0.0, y_neck, 0.0);
+		float cz = cos(tilt_z);
+		float sz = sin(tilt_z);
+		v = vec3(0.0, y_neck, 0.0) + vec3(hr.x * cz - hr.y * sz, hr.x * sz + hr.y * cz, hr.z);
+		n = vec3(n.x * cz - n.y * sz, n.x * sz + n.y * cz, n.z);
 	}
-	float lean = -alarm * (0.10 + 0.14 * walk) * smoothstep(0.91, 1.34, height);
-	v = pitch_about(v, vec3(0.0, 0.94, 0.0), lean);
+	float lean = (-alarm * (0.10 + 0.14 * walk) + style_posture) * smoothstep(y_hip * 0.97, y_sh * 0.91, height);
+	v = pitch_about(v, vec3(0.0, y_hip, 0.0), lean);
 	n = pitch_dir(n, lean);
-	float torso = smoothstep(0.89, 1.55, height);
+	float torso = smoothstep(y_hip * 0.95, y_sh * 1.05, height);
 	float yaw = sw * (0.078 * torso - 0.032) * (1.0 - 0.75 * carry);
 	float c = cos(yaw);
 	float s = sin(yaw);
 	v.xz = mat2(vec2(c, s), vec2(-s, c)) * v.xz;
 	n.xz = mat2(vec2(c, s), vec2(-s, c)) * n.xz;
-	v.y += (1.0 - cos(ph * 2.0)) * 0.009 * walk * smoothstep(0.06, 0.7, height);
+	v.y += (1.0 - cos(ph * 2.0)) * 0.009 * pivot_k * walk * smoothstep(0.06 * pivot_k, 0.70 * pivot_k, height);
 	// Natural stance-side lateral hip weight transfer, counter-balanced by upper torso.
-	v.x += cycle * 0.015 * walk * smoothstep(0.15, 0.98, height) - cycle * 0.007 * walk * smoothstep(1.05, 1.62, height);
+	v.x += cycle * 0.015 * pivot_k * walk * smoothstep(0.15 * pivot_k, y_hip * 1.04, height)
+		- cycle * 0.007 * pivot_k * walk * smoothstep(y_hip * 1.12, y_neck * 1.04, height);
+}
+
+void person_pose_w(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float ph, float walk, float carry, float look, float alarm) {
+	person_pose_wk(v, n, limb, cw, lw, ph, walk, carry, look, alarm, 1.0, 0.5);
 }
 
 // Subtle standing life for stopped/browsing/waiting people: chest breathing,
 // gentle asynchronous weight shift across the feet, and soft head/arm motion.
-void person_pose_idle(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float walk, float carry, float t, float seed) {
+void person_pose_idle_k(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float walk, float carry, float t, float seed, float pivot_k) {
 	float idle = clamp(1.0 - walk, 0.0, 1.0);
 	if (idle <= 0.001) {
 		return;
 	}
+	float y_hip = 0.94 * pivot_k;
+	float y_knee = 0.49 * pivot_k;
+	float y_sh = 1.48 * pivot_k;
+	float y_el = 1.21 * pivot_k;
+	float y_neck = 1.56 * pivot_k;
 	float height = v.y;
 	float b_ph = t * (1.45 + fract(seed * 5.71) * 0.45) + seed * 6.28318;
 	float breath = sin(b_ph) * idle;
@@ -143,42 +169,47 @@ void person_pose_idle(inout vec3 v, inout vec3 n, int limb, float cw, float lw, 
 		float unload = max(0.0, -side * shift);
 		float k = unload * 0.065;
 		if (k > 0.001) {
-			vec3 vk = pitch_about(v, vec3(0.0, 0.49, 0.02), -k);
+			vec3 vk = pitch_about(v, vec3(0.0, y_knee, 0.02 * pivot_k), -k);
 			v = mix(v, vk, lw);
 			n = normalize(mix(n, pitch_dir(n, -k), lw));
-			vec3 vh = pitch_about(v, vec3(0.0, 0.94, 0.0), k * 0.45);
+			vec3 vh = pitch_about(v, vec3(0.0, y_hip, 0.0), k * 0.45);
 			v = mix(v, vh, cw);
 			n = normalize(mix(n, pitch_dir(n, k * 0.45), cw));
 		}
 	} else if ((limb == 3 || limb == 4) && carry < 0.5) {
 		float side = limb == 3 ? -1.0 : 1.0;
 		float arm_sway = (sin(b_ph - 0.55) * 0.018 + shift * side * 0.028) * idle * (1.0 - carry);
-		vec3 vs = pitch_about(v, vec3(0.0, 1.48, 0.0), arm_sway);
+		vec3 vs = pitch_about(v, vec3(0.0, y_sh, 0.0), arm_sway);
 		v = mix(v, vs, cw);
 		n = normalize(mix(n, pitch_dir(n, arm_sway), cw));
 		float el_relax = sin(b_ph - 0.8) * 0.022 * idle * (1.0 - carry);
-		vec3 ve = pitch_about(v, vec3(0.0, 1.21, 0.0), el_relax);
+		vec3 ve = pitch_about(v, vec3(0.0, y_el, 0.0), el_relax);
 		v = mix(v, ve, lw);
 		n = normalize(mix(n, pitch_dir(n, el_relax), lw));
 	} else if (limb == 5) {
 		float nod = breath * 0.014;
-		vec3 vh = pitch_about(v, vec3(0.0, 1.56, 0.0), nod);
+		vec3 vh = pitch_about(v, vec3(0.0, y_neck, 0.0), nod);
 		v = mix(v, vh, cw);
 		n = normalize(mix(n, pitch_dir(n, nod), cw));
 	}
 
 	// Subtle ribcage breath expansion and lateral weight shift with upper-spine counter-balance.
-	float torso = smoothstep(0.90, 1.55, height);
-	float chest = smoothstep(0.98, 1.46, height) * (1.0 - smoothstep(1.52, 1.72, height));
-	v.y += breath * 0.006 * torso;
-	v.z -= breath * 0.0045 * chest * (1.0 - smoothstep(-0.02, 0.14, v.z));
-	v.x += shift * 0.022 * smoothstep(0.18, 0.96, height) - shift * 0.008 * smoothstep(1.06, 1.66, height);
+	float torso = smoothstep(y_hip * 0.96, y_sh * 1.05, height);
+	float chest = smoothstep(y_hip * 1.04, y_sh * 0.99, height) * (1.0 - smoothstep(y_sh * 1.03, y_neck * 1.10, height));
+	v.y += breath * 0.006 * pivot_k * torso;
+	v.z -= breath * 0.0045 * pivot_k * chest * (1.0 - smoothstep(-0.02, 0.14, v.z));
+	v.x += shift * 0.022 * pivot_k * smoothstep(0.18 * pivot_k, y_hip * 1.02, height)
+		- shift * 0.008 * pivot_k * smoothstep(y_hip * 1.13, y_neck * 1.06, height);
 
 	float i_yaw = shift * 0.042 * torso * (1.0 - 0.7 * carry);
 	float ic = cos(i_yaw);
 	float is_ = sin(i_yaw);
 	v.xz = mat2(vec2(ic, is_), vec2(-is_, ic)) * v.xz;
 	n.xz = mat2(vec2(ic, is_), vec2(-is_, ic)) * n.xz;
+}
+
+void person_pose_idle(inout vec3 v, inout vec3 n, int limb, float cw, float lw, float walk, float carry, float t, float seed) {
+	person_pose_idle_k(v, n, limb, cw, lw, walk, carry, t, seed, 1.0);
 }
 
 // Living-world activity poses layered onto the crowd's procedural rig:

@@ -1776,8 +1776,17 @@ static func _front_key(at: Vector2) -> Vector2i:
 	return Vector2i((at / FRONT_CELL).floor())
 
 
+var _last_district := ""
+
+
 func _stream_street_rooms(focus: Vector3, radius: float, budget: int) -> void:
 	var xy := Vector2(focus.x, focus.z)
+	if layout != null:
+		var dist_now := layout.mainland.district(focus.x, focus.z) if (focus.x < CityLayout.RIVER_EDGE and layout.mainland != null) else layout.district(focus.x, focus.z)
+		if dist_now != _last_district:
+			if _last_district != "":
+				_trim_unused_caches()
+			_last_district = dist_now
 	for id: String in _front_rooms.keys():
 		if id == floor_unit:
 			continue
@@ -3109,6 +3118,7 @@ func _finish_vehicle_entry(_stand: Vector3, _from: Transform3D, _fov: float, vid
 		c.visual.enable_headlights(false)
 	Sfx.play("click", -6.0)
 	car_audio.set_car(c, EmpireData.vehicle_model(String(empire.vehicle(vid).get("model", ""))))
+	_trim_unused_caches()
 
 
 func exit_vehicle(animate := false) -> void:
@@ -4444,12 +4454,30 @@ func load_game() -> bool:
 	return true
 
 
+func _trim_unused_caches() -> void:
+	if empire == null:
+		return
+	var keep: Array = []
+	for v in empire.vehicles:
+		var m: Dictionary = EmpireData.vehicle_model(String(v.get("model", "")))
+		var b := String(m.get("body", ""))
+		if b != "" and b not in keep:
+			keep.append(b)
+	CarVisual.trim_caches(keep)
+	VehicleTex.trim_unused(keep)
+	if garage and garage.inside and crowd:
+		crowd.trim_pool()
+
+
 func _exit_tree() -> void:
 	SafeSave.settle()   # (an autosave still writing finishes before teardown)
 	if _cloud_sync.is_valid() and get_tree() and get_tree().process_frame.is_connected(_cloud_sync):
 		get_tree().process_frame.disconnect(_cloud_sync)
 	_cloud_sync = Callable()
 	CarVisual.trim_caches()
+	VehicleTex.clear_cache()
+	ShopPerson.clear_cache()
+	CityWorld._box_shapes.clear()
 
 
 func _notification(what: int) -> void:

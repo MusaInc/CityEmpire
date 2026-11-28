@@ -22,16 +22,28 @@ const DROP := 150.0           # past this anyone goes, seen or not (a few pixels
 const SPACING := 26.0         # quality over quantity: cleaner spacing, richer individual behaviour & lower CPU
 const LANES := [1.7, 3.0]     # m in from the block edge (as CityWorld)
 const MODEL := "res://assets/models/crowd.glb"
-const TOPS := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.12, 0.12), Color(0.16, 0.28, 0.5),
-	Color(0.36, 0.42, 0.3), Color(0.45, 0.45, 0.48), Color(0.62, 0.36, 0.5), Color(0.2, 0.45, 0.48), Color(0.5, 0.2, 0.55),
-	Color(0.85, 0.7, 0.2), Color(0.25, 0.55, 0.75), Color(0.9, 0.45, 0.35), Color(0.75, 0.72, 0.62), Color(0.3, 0.3, 0.32)]
+const TOPS := [
+	Color(0.86, 0.85, 0.82), Color(0.11, 0.12, 0.15), Color(0.54, 0.14, 0.15), Color(0.16, 0.28, 0.48),
+	Color(0.34, 0.42, 0.30), Color(0.45, 0.45, 0.48), Color(0.60, 0.36, 0.48), Color(0.19, 0.43, 0.46),
+	Color(0.44, 0.24, 0.48), Color(0.82, 0.68, 0.24), Color(0.24, 0.50, 0.68), Color(0.82, 0.44, 0.34),
+	Color(0.75, 0.71, 0.61), Color(0.26, 0.27, 0.30), Color(0.20, 0.25, 0.34), Color(0.68, 0.58, 0.46),
+	Color(0.38, 0.24, 0.18), Color(0.22, 0.36, 0.28), Color(0.74, 0.28, 0.24), Color(0.56, 0.62, 0.68),
+	Color(0.88, 0.82, 0.72), Color(0.32, 0.36, 0.44), Color(0.66, 0.46, 0.28), Color(0.16, 0.18, 0.20),
+]
+const OBS_RADII := {
+	"bench": 0.72, "bin": 0.42, "hydrant": 0.38, "bollard": 0.32, "sign_post": 0.36,
+	"bus_shelter": 1.05, "planter": 0.82, "streetlight": 0.38, "traffic_light": 0.42,
+	"tree": 0.62, "tree_tall": 0.68,
+}
 
 var game: EmpireGame
 var density := 1.0
 var _loops: Array = []        # {pts, cum, len, dir, rect, crossings, city_crossing, kind}
 var _grid := {}               # Vector2i(100 m cell) -> [loop index]
 var _people: Array = []       # see _spawn
+var _pool: Array = []         # recycled pedestrian dicts (zero GC churn on spawn/despawn)
 var _mmis: Array = []         # MultiMeshInstance3D per body
+var _by_body: Array = []      # reusable per-body scratch arrays (zero per-frame allocs)
 var _mm_bufs: Array[PackedFloat32Array] = []  # persistent buffers (zero per-frame allocs)
 var _blob_buf := PackedFloat32Array()
 var _blobs: MultiMeshInstance3D   # contact shadows (one draw for everyone)
@@ -39,6 +51,7 @@ var _doors: Array = []        # [Vector3 door, Vector3 outward, unit id]
 var _door_grid := {}          # Vector2i(100 m cell) -> [door entry]
 var _seats: Array = []        # [{pos: Vector3, yaw: float, kind: String, busy: bool}]
 var _seat_grid := {}          # Vector2i(100 m cell) -> [seat idx]
+var _obs_grid := {}           # Vector2i(50 m cell) -> [[Vector2 pos, float radius]]
 var _rng := RandomNumberGenerator.new()
 var _acc := 0.0
 var _first := true
@@ -137,52 +150,74 @@ func setup(p_game: EmpireGame) -> void:
 			(_door_grid[dk] as Array).append(entry)
 	_seats.clear()
 	_seat_grid.clear()
+	_obs_grid.clear()
 	for city: CityWorld in [game.world, game.world.mainland]:
-		if city == null or not city.has_method("activity_furniture"):
+		if city == null:
 			continue
-		for item in city.activity_furniture():
-			var fkind := String(item[0])
-			var fxf: Transform3D = item[1]
-			var fwd := fxf.basis.z
-			var yaw := atan2(-fwd.x, -fwd.z)
-			if fkind == "bench":
-				# Two seat slots per bench, offset ±0.42 m along the bench's X axis.
-				for sx: float in [-0.42, 0.42]:
-					var sp := fxf * Vector3(sx, 0.0, 0.16)
-					_register_seat(sp, yaw, "bench")
-			elif fkind == "bus_shelter":
-				# One bench seat + one standing wait spot under the shelter.
-				_register_seat(fxf * Vector3(-0.55, 0.0, 0.25), yaw, "bench")
-				_register_seat(fxf * Vector3(0.65, 0.0, 0.35), yaw, "shelter_wait")
+		if city.has_method("activity_furniture"):
+			for item in city.activity_furniture():
+				var fkind := String(item[0])
+				var fxf: Transform3D = item[1]
+				var fwd := fxf.basis.z
+				var yaw := atan2(-fwd.x, -fwd.z)
+				if fkind == "bench":
+					# Two seat slots per bench, offset ±0.42 m along the bench's X axis.
+					for sx: float in [-0.42, 0.42]:
+						var sp := fxf * Vector3(sx, 0.0, 0.16)
+						_register_seat(sp, yaw, "bench")
+				elif fkind == "bus_shelter":
+					# One bench seat + one standing wait spot under the shelter.
+					_register_seat(fxf * Vector3(-0.55, 0.0, 0.25), yaw, "bench")
+					_register_seat(fxf * Vector3(0.65, 0.0, 0.35), yaw, "shelter_wait")
+		# Index pavement furniture, lampposts, and trees so pedestrians steer around them.
+		for items in city._furniture_by_chunk.values():
+			for it in items:
+				var rad := float(OBS_RADII.get(String(it[0]), 0.0))
+				if rad > 0.0:
+					_register_obstacle((it[1] as Transform3D).origin, rad)
+		for items in city._props_by_chunk.values():
+			for it in items:
+				var rad := float(OBS_RADII.get(String(it[0]), 0.0))
+				if rad > 0.0:
+					_register_obstacle((it[1] as Transform3D).origin, rad)
 	var scene: PackedScene = load(MODEL)
 	if scene == null:
 		return
 	var inst := scene.instantiate()
 	var mis := inst.find_children("*", "MeshInstance3D", true, false)
-	mis.sort_custom(func(a, b): return String(a.name) < String(b.name))
+	mis.sort_custom(func(a, b):
+		var na := int(String(a.name).trim_prefix("person_"))
+		var nb := int(String(b.name).trim_prefix("person_"))
+		return na < nb)
+	var crowd_sh: Shader = load("res://src/empire/npc/crowd.gdshader")
 	var mat_male := ShaderMaterial.new()
-	mat_male.shader = load("res://src/empire/npc/crowd.gdshader")
+	mat_male.shader = crowd_sh
 	mat_male.set_shader_parameter("pivot_k", 1.0)
+	mat_male.set_shader_parameter("fade_out_start", NEAR - 4.0)
+	mat_male.set_shader_parameter("fade_out_end", NEAR + 8.0)
 	var mat_female := ShaderMaterial.new()
-	mat_female.shader = load("res://src/empire/npc/crowd.gdshader")
+	mat_female.shader = crowd_sh
 	mat_female.set_shader_parameter("pivot_k", 0.925)
+	mat_female.set_shader_parameter("fade_out_start", NEAR - 4.0)
+	mat_female.set_shader_parameter("fade_out_end", NEAR + 8.0)
 	_mm_bufs.clear()
+	_by_body.clear()
 	for mi in mis:
-		var m: Mesh = (mi as MeshInstance3D).mesh.duplicate()
 		var nstr := String(mi.name)
 		var body_num := int(nstr.trim_prefix("person_")) if nstr.begins_with("person_") else 0
-		m.surface_set_material(0, mat_female if (body_num % 2 == 1) else mat_male)
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_colors = true
 		mm.use_custom_data = true
-		mm.mesh = m
+		mm.mesh = (mi as MeshInstance3D).mesh
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
+		mmi.material_override = mat_female if (body_num % 2 == 1) else mat_male
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mmi)
 		_mmis.append(mmi)
 		_mm_bufs.append(PackedFloat32Array())
+		_by_body.append([])
 	inst.free()
 	# Contact shadows: a soft disc under each person.
 	var q := QuadMesh.new()
@@ -313,6 +348,63 @@ func _register_seat(pos: Vector3, yaw: float, kind: String) -> void:
 	if not _seat_grid.has(sk):
 		_seat_grid[sk] = []
 	(_seat_grid[sk] as Array).append(idx)
+
+
+func _register_obstacle(pos: Vector3, radius: float) -> void:
+	var ok := Vector2i(floori(pos.x / 50.0), floori(pos.z / 50.0))
+	if not _obs_grid.has(ok):
+		_obs_grid[ok] = []
+	(_obs_grid[ok] as Array).append([Vector2(pos.x, pos.z), radius])
+
+
+func _obs_clear(p: Vector2, pad := 0.35) -> bool:
+	var cx := floori(p.x / 50.0)
+	var cz := floori(p.y / 50.0)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for ob in _obs_grid.get(Vector2i(cx + dx, cz + dz), []):
+				var r := float(ob[1]) + pad
+				if p.distance_squared_to(ob[0] as Vector2) < r * r:
+					return false
+	return true
+
+
+func _obstacle_avoid(q: Vector2, d: Vector2) -> Vector2:
+	var cx := floori(q.x / 50.0)
+	var cz := floori(q.y / 50.0)
+	var push := Vector2.ZERO
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for ob in _obs_grid.get(Vector2i(cx + dx, cz + dz), []):
+				var op: Vector2 = ob[0]
+				var clear := float(ob[1]) + 0.42
+				var rel := q - op
+				var d2 := rel.length_squared()
+				if d2 >= clear * clear or d2 < 0.0001:
+					continue
+				var dist := sqrt(d2)
+				var away := rel / dist
+				var tang := Vector2(-away.y, away.x)
+				if tang.dot(d) < 0.0:
+					tang = -tang
+				var w := clampf((clear - dist) / clear, 0.2, 1.0)
+				push += (away * 0.72 + tang * 0.68).normalized() * (w * 0.9)
+	return push.limit_length(1.1)
+
+
+func _acquire_person() -> Dictionary:
+	return _pool.pop_back() if not _pool.is_empty() else {}
+
+
+func _recycle_person(pr: Dictionary) -> void:
+	_release_seat(pr)
+	if _pool.size() < 96:
+		_pool.append(pr)
+
+
+## Release pooled dictionaries when entering interiors/garage to free idle RAM.
+func trim_pool() -> void:
+	_pool.clear()
 
 
 func _claim_seat_near(q: Vector2, max_r: float) -> int:
@@ -550,17 +642,21 @@ func _spawn(li: int, s: float) -> void:
 	if profile == "jogger" and _mmis.size() >= 12:
 		body_pick = 10 if _rng.randf() < 0.5 else 11
 	elif profile == "commuter" and _mmis.size() >= 9 and _rng.randf() < 0.55:
-		var comm_bodies := [2, 6, 7, 8]
+		var comm_bodies := [2, 6, 7, 8, 15] if _mmis.size() >= 16 else [2, 6, 7, 8]
 		body_pick = comm_bodies[_rng.randi() % comm_bodies.size()]
 	var phone_walk := (profile in ["commuter", "stroller", "default"]) and _cur_weather != "storm" and _rng.randf() < 0.16
-	_people.append({"loop": li, "s": s, "dir": 1 if is_city_cross else int(l["dir"]) * (1 if _rng.randf() < 0.85 else -1),
-		"speed": spd, "vel_cur": spd * _speed_scale, "profile": profile, "body": body_pick, "seed": _rng.randf(), "slot": _rng.randi() % 6, "fade": 1.0 if _first else 0.0,
-		"top": TOPS[_rng.randi() % TOPS.size()], "scale": _rng.randf_range(0.93, 1.06), "lane": _rng.randf_range(-0.35, 0.35),
-		"stride": _rng.randf() * 3.0, "look": 0.0, "glance": 0.0, "glance_t": _rng.randf_range(0.7, 2.4),
-		"state": "walk", "t": 0.0, "goal": Vector3.ZERO, "pos": Vector3.ZERO, "yaw": 0.0, "walk": 1.0,
-		"browsed": false, "dodge": 0.0, "avoid": Vector2.ZERO, "pace": 1.0, "crossed": false, "cross_cd": 0.0,
-		"pause_cd": _rng.randf_range(9.0, 26.0), "waiting": false, "pose": 1 if profile == "jogger" else (3 if phone_walk else 0),
-		"seat": -1, "phone_walk": phone_walk, "gy_x": 1e9, "gy_z": 1e9, "gy": 0.0})
+	var pr := _acquire_person()
+	pr["loop"] = li; pr["s"] = s; pr["dir"] = 1 if is_city_cross else int(l["dir"]) * (1 if _rng.randf() < 0.85 else -1)
+	pr["speed"] = spd; pr["vel_cur"] = spd * _speed_scale; pr["profile"] = profile; pr["body"] = body_pick
+	pr["seed"] = _rng.randf(); pr["slot"] = _rng.randi() % 6; pr["fade"] = 1.0 if _first else 0.0
+	pr["top"] = TOPS[_rng.randi() % TOPS.size()]; pr["scale"] = _rng.randf_range(0.92, 1.07); pr["lane"] = _rng.randf_range(-0.35, 0.35)
+	pr["stride"] = _rng.randf() * 3.0; pr["look"] = 0.0; pr["glance"] = 0.0; pr["glance_t"] = _rng.randf_range(0.7, 2.4)
+	pr["state"] = "walk"; pr["t"] = 0.0; pr["goal"] = Vector3.ZERO; pr["pos"] = Vector3.ZERO; pr["yaw"] = 0.0; pr["walk"] = 1.0
+	pr["browsed"] = false; pr["dodge"] = 0.0; pr["avoid"] = Vector2.ZERO; pr["pace"] = 1.0; pr["crossed"] = false; pr["cross_cd"] = 0.0
+	pr["pause_cd"] = _rng.randf_range(9.0, 26.0); pr["waiting"] = false; pr["pose"] = 1 if profile == "jogger" else (3 if phone_walk else 0)
+	pr["seat"] = -1; pr["phone_walk"] = phone_walk; pr["gy_x"] = 1e9; pr["gy_z"] = 1e9; pr["gy"] = 0.0
+	pr["fear"] = 0.0; pr["alarm"] = 0.0; pr["firsthand"] = 0.0; pr["fleeing"] = false; pr["crossing"] = false; pr["lag"] = 0.0
+	_people.append(pr)
 
 
 func _populate(focus: Vector3) -> void:
@@ -609,8 +705,11 @@ func _populate(focus: Vector3) -> void:
 		if sp2[2] in _loops[w[0]]["crossings"]:
 			continue
 		var p := Vector3(sp2[0].x, focus.y, sp2[0].y)
-		# Never spawn in plain sight inside NEAR (92 m): strict frustum check out to 96 m.
-		if not _first and not _unseen(p, 96.0):
+		# Never spawn in plain sight inside NEAR (92 m): strict frustum check out to 100 m,
+		# and never spawn inside street furniture, lampposts, or trees.
+		if not _first and not _unseen(p, 100.0):
+			continue
+		if not _obs_clear(sp2[0] as Vector2, 0.4):
 			continue
 		var clear := true
 		for q in _people:
@@ -640,26 +739,27 @@ func _populate(focus: Vector3) -> void:
 				var d2: Vector2 = sp2[1]
 				var p_a := Vector3(sp2[0].x, float(_ground.call(sp2[0].x, sp2[0].y)), sp2[0].y)
 				var p_b := p_a + Vector3(d2.x, 0.0, d2.y) * 1.05
-				p_b.y = float(_ground.call(p_b.x, p_b.z))
-				var chat_t := _rng.randf_range(14.0, 34.0)
-				spawned["pos"] = p_a
-				spawned["state"] = "chat"
-				spawned["pose"] = 4
-				spawned["walk"] = 0.0
-				spawned["vel_cur"] = 0.0
-				spawned["t"] = chat_t
-				spawned["goal"] = p_b
-				spawned["yaw"] = atan2(-(p_b.x - p_a.x), -(p_b.z - p_a.z))
-				_spawn(int(w[0]), s2 + 1.05)
-				var partner: Dictionary = _people[_people.size() - 1]
-				partner["pos"] = p_b
-				partner["state"] = "chat"
-				partner["pose"] = 4
-				partner["walk"] = 0.0
-				partner["vel_cur"] = 0.0
-				partner["t"] = chat_t + _rng.randf_range(-1.5, 1.5)
-				partner["goal"] = p_a
-				partner["yaw"] = atan2(-(p_a.x - p_b.x), -(p_a.z - p_b.z))
+				if _obs_clear(Vector2(p_b.x, p_b.z), 0.4):
+					p_b.y = float(_ground.call(p_b.x, p_b.z))
+					var chat_t := _rng.randf_range(14.0, 34.0)
+					spawned["pos"] = p_a
+					spawned["state"] = "chat"
+					spawned["pose"] = 4
+					spawned["walk"] = 0.0
+					spawned["vel_cur"] = 0.0
+					spawned["t"] = chat_t
+					spawned["goal"] = p_b
+					spawned["yaw"] = atan2(-(p_b.x - p_a.x), -(p_b.z - p_a.z))
+					_spawn(int(w[0]), s2 + 1.05)
+					var partner: Dictionary = _people[_people.size() - 1]
+					partner["pos"] = p_b
+					partner["state"] = "chat"
+					partner["pose"] = 4
+					partner["walk"] = 0.0
+					partner["vel_cur"] = 0.0
+					partner["t"] = chat_t + _rng.randf_range(-1.5, 1.5)
+					partner["goal"] = p_a
+					partner["yaw"] = atan2(-(p_a.x - p_b.x), -(p_a.z - p_b.z))
 			if city_route:
 				_crossing_counts[w[0]] = int(_crossing_counts.get(w[0], 0)) + 1
 
@@ -689,13 +789,16 @@ func _process(dt: float) -> void:
 		if _island_check_t <= 0.0:
 			_island_traffic = get_tree().get_first_node_in_group("island_traffic") as IslandTraffic
 			_island_check_t = 1.0 if _island_traffic == null else 0.0
-	_collect_vehicles(focus)
+	var frame := Engine.get_process_frames()
+	if (frame & 3) == 0 or _vehicles.is_empty():
+		_collect_vehicles(focus)
 	_panic_calls.clear()
 	for pr in _people:
 		if float(pr.get("fear", 0.0)) > 0.64 and float(pr.get("firsthand", 0.0)) > 0.0:
 			var at: Vector3 = pr["pos"]
 			_panic_calls.append(Vector2(at.x, at.z))
-	_queue_up(focus)
+	if frame % 3 == 0:
+		_queue_up(focus)
 	var keep: Array = []
 	var crossing_people := PackedVector3Array()
 	var occupied := {}
@@ -706,7 +809,6 @@ func _process(dt: float) -> void:
 	var fz := focus.z
 	var over_budget := _target_count > 0 and _people.size() > _target_count + 4
 	var keep_r := KEEP * 0.72 if over_budget else KEEP
-	var frame := Engine.get_process_frames()
 	for pr in _people:
 		if float(pr.get("fade", 1.0)) < 1.0:
 			pr["fade"] = minf(float(pr["fade"]) + dt / 0.9, 1.0)
@@ -726,12 +828,12 @@ func _process(dt: float) -> void:
 			_step(pr, minf(lag, 0.1), me, eye, d2_focus)
 		var p: Vector3 = pr["pos"]
 		if pr["state"] == "gone":
-			_release_seat(pr)
+			_recycle_person(pr)
 			continue
-		# Out of range: they leave only off camera (or once they're specks).
+		# Out of range: they leave only off camera (or once they're specks beyond DROP).
 		var dd := Vector2(p.x - fx, p.z - fz).length()
-		if dd > DROP or dd > keep_r and _unseen(p, 96.0):
-			_release_seat(pr)
+		if dd > DROP or dd > keep_r and _unseen(p, 108.0):
+			_recycle_person(pr)
 			continue
 		keep.append(pr)
 		if pr.get("crossing", false):
@@ -1084,10 +1186,12 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 						break
 			var dodge := 0.0 if (now_crossing or far) else _dodge_for(base, d, side, me, eye, float(pr["dodge"]))
 			pr["dodge"] = move_toward(float(pr["dodge"]), dodge, dt * 1.1)
-			# Smooth steered avoidance around very close hero or approaching vehicles (no sideways shove-sliding).
+			# Smooth steered avoidance around very close hero, static pavement obstacles, or approaching vehicles.
 			var want_avoid := veh_escape
 			if not far:
 				var candidate := base + side * float(pr["dodge"]) + avoid
+				if not now_crossing:
+					want_avoid += _obstacle_avoid(candidate, d)
 				var rel_hero := Vector2(me.x - candidate.x, me.z - candidate.y)
 				var hdist := rel_hero.length()
 				if not now_crossing and hdist < 1.05 and hdist > 0.001:
@@ -1098,7 +1202,7 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 					var steer_away := (away_h * 0.72 + tang * 0.68).normalized()
 					want_avoid += steer_away * clampf((1.05 - hdist) / 1.05, 0.25, 1.0) * 0.85
 			want_avoid = want_avoid.limit_length(1.35)
-			if running and not now_crossing and want_avoid.length_squared() > 0.04:
+			if not now_crossing and want_avoid.length_squared() > 0.04:
 				var streets := game.layout.roads
 				if base.x < CityLayout.FAR_SHORE and game.layout.mainland != null:
 					streets = game.layout.mainland.roads
@@ -1307,10 +1411,11 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 		pr["look"] = lerpf(float(pr["look"]), look, 1.0 - exp(-4.5 * dt))
 	if state == "walk":
 		pr["pose"] = 1 if (profile == "jogger" and not bool(pr["waiting"]) and fear < 0.42) else (3 if bool(pr.get("phone_walk", false)) and fear < 0.25 and not bool(pr.get("crossing", false)) else 0)
-	# Cache ground_y() and only re-query when moved > 1.2 m (cuts terrain lookups ~75%).
+	# Query ground_y tightly nearby (0.45 m) so feet never float or sink on sloped pavements.
 	var dx_g := p.x - float(pr.get("gy_x", 1e9))
 	var dz_g := p.z - float(pr.get("gy_z", 1e9))
-	if not had_pos or dx_g * dx_g + dz_g * dz_g > 1.44 or state in ["sit", "to_seat"]:
+	var gy_thresh := 0.20 if not far else 1.44
+	if not had_pos or dx_g * dx_g + dz_g * dz_g > gy_thresh or state in ["sit", "to_seat"]:
 		var gy := float(_ground.call(p.x, p.z))
 		pr["gy_x"] = p.x
 		pr["gy_z"] = p.z
@@ -1321,7 +1426,8 @@ func _step(pr: Dictionary, dt: float, me: Vector3, eye: Vector3, d2_focus := 0.0
 	pr["pos"] = p
 	if fwd != Vector2.ZERO:
 		var target_yaw := atan2(-fwd.x, -fwd.y)
-		pr["yaw"] = target_yaw if not had_pos else lerp_angle(float(pr["yaw"]), target_yaw, 1.0 - exp(-7.5 * dt))
+		var turn_rate := 8.5 if vel_cur < 0.35 else 6.8
+		pr["yaw"] = target_yaw if not had_pos else lerp_angle(float(pr["yaw"]), target_yaw, 1.0 - exp(-turn_rate * dt))
 
 
 ## The sidestep (m along `side`) that keeps a walker at `base` heading `d`
@@ -1355,17 +1461,16 @@ func _dodge_for(base: Vector2, d: Vector2, side: Vector2, me: Vector3, eye: Vect
 
 func _draw_people() -> void:
 	var n_bodies := _mmis.size()
-	var by_body: Array = []
 	for i in n_bodies:
-		by_body.append([])
+		(_by_body[i] as Array).clear()
 	for pr in _people:
-		(by_body[int(pr["body"]) % n_bodies] as Array).append(pr)
+		(_by_body[int(pr["body"]) % n_bodies] as Array).append(pr)
 	var focus := _focus()
 	var aabb := AABB(focus - Vector3(KEEP, 20, KEEP), Vector3(KEEP * 2, 60, KEEP * 2))
 	for i in n_bodies:
 		var mmi := _mmis[i] as MultiMeshInstance3D
 		var mm: MultiMesh = mmi.multimesh
-		var list: Array = by_body[i]
+		var list: Array = _by_body[i]
 		var cnt := list.size()
 		if cnt > mm.instance_count:
 			var cap := maxi(8, mm.instance_count)
@@ -1396,7 +1501,7 @@ func _draw_people() -> void:
 
 
 static func _person_scale(person: Dictionary) -> Vector3:
-	var width := lerpf(0.92, 1.09, fposmod(float(person["seed"]) * 7.31, 1.0))
+	var width := lerpf(0.90, 1.11, fposmod(float(person["seed"]) * 7.31, 1.0))
 	return Vector3(width, 1.0, lerpf(1.0, width, 0.58)) * float(person["scale"])
 
 

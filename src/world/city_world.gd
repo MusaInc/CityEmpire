@@ -131,6 +131,8 @@ const CAR_MID := 240.0
 const CAR_FAR := 520.0
 var walker_mesh: Mesh
 var walker_meshes: Array = []   # one per body type
+var _walker_mat_male: ShaderMaterial
+var _walker_mat_female: ShaderMaterial
 ## Within this many metres of the hero a CPU crowd draws the pavements (0: none).
 static var walker_crowd_radius := 0.0
 var furniture_mat: Material
@@ -947,7 +949,12 @@ func _load_meshes(name: String) -> Array:
 		return []
 	var inst := (load(path) as PackedScene).instantiate()
 	var mis := inst.find_children("*", "MeshInstance3D", true, false)
-	mis.sort_custom(func(a, b): return String(a.name) < String(b.name))
+	mis.sort_custom(func(a, b):
+		var sa := String(a.name)
+		var sb := String(b.name)
+		if sa.begins_with("person_") and sb.begins_with("person_"):
+			return int(sa.trim_prefix("person_")) < int(sb.trim_prefix("person_"))
+		return sa < sb)
 	var out: Array = []
 	for mi in mis:
 		out.append((mi as MeshInstance3D).mesh)
@@ -967,6 +974,8 @@ func _share_props_from(src: CityWorld) -> void:
 	car_far_meshes = src.car_far_meshes
 	walker_meshes = src.walker_meshes
 	walker_mesh = src.walker_mesh
+	_walker_mat_male = src._walker_mat_male
+	_walker_mat_female = src._walker_mat_female
 	_walk_paths = _pavement_paths()
 	_furn_src = src._furn_src
 	_fol_src = src._fol_src
@@ -1037,13 +1046,15 @@ func _load_props() -> void:
 	_lp.call("cars")
 	walker_meshes = _load_meshes("crowd_far") if ResourceLoader.exists("res://assets/models/crowd_far.glb") else _load_meshes("pedestrians")
 	if not walker_meshes.is_empty():
-		var wm := ShaderMaterial.new()
-		wm.shader = load("res://src/world/shaders/pedestrian.gdshader")
-		wm.set_shader_parameter("crowd_radius", walker_crowd_radius)
-		for i in walker_meshes.size():
-			var m: Mesh = walker_meshes[i].duplicate()
-			m.surface_set_material(0, wm)
-			walker_meshes[i] = m
+		var wsh: Shader = load("res://src/world/shaders/pedestrian.gdshader")
+		_walker_mat_male = ShaderMaterial.new()
+		_walker_mat_male.shader = wsh
+		_walker_mat_male.set_shader_parameter("crowd_radius", walker_crowd_radius)
+		_walker_mat_male.set_shader_parameter("pivot_k", 1.0)
+		_walker_mat_female = ShaderMaterial.new()
+		_walker_mat_female.shader = wsh
+		_walker_mat_female.set_shader_parameter("crowd_radius", walker_crowd_radius)
+		_walker_mat_female.set_shader_parameter("pivot_k", 0.925)
 		walker_mesh = walker_meshes[0]
 	_lp.call("walkers")
 	_walk_paths = _pavement_paths()
@@ -1758,12 +1769,11 @@ func _build_collision() -> void:
 				else:
 					_add_box(body, box)
 			for hull: PackedVector3Array in BuildingMesher.collision_hulls(b):
-				var cs := CollisionShape3D.new()
 				var cp := ConvexPolygonShape3D.new()
 				cp.points = hull
-				cs.shape = cp
-				cs.transform = X
-				body.add_child(cs)
+				var oid := body.create_shape_owner(body)
+				body.shape_owner_set_transform(oid, X)
+				body.shape_owner_add_shape(oid, cp)
 		add_child(body)
 	var street := StaticBody3D.new()
 	street.name = "Street"
@@ -1916,7 +1926,7 @@ func _build_prop_collision() -> void:
 			var bx: Array = car_boxes[int(pc[1])]
 			_shape_by_key[item_key((pc[0] as Transform3D).origin)] = _add_oriented_box(solid, pc[0], bx[0], bx[1])
 		for b2 in [body, solid]:
-			if b2.get_child_count() > 0:
+			if b2.get_shape_owners().size() > 0:
 				add_child(b2)
 			else:
 				b2.free()
@@ -1937,13 +1947,13 @@ static func _shared_box(size: Vector3) -> BoxShape3D:
 
 
 ## A box of `size` at `centre` in the frame `xf` (uniform scale baked into the size).
-static func _add_oriented_box(body: StaticBody3D, xf: Transform3D, size: Vector3, centre: Vector3) -> CollisionShape3D:
+## Uses direct shape owners instead of CollisionShape3D nodes (~26k fewer SceneTree nodes).
+static func _add_oriented_box(body: StaticBody3D, xf: Transform3D, size: Vector3, centre: Vector3) -> Array:
 	var sc := xf.basis.get_scale()
-	var shape := CollisionShape3D.new()
-	shape.shape = _shared_box(size * sc)
-	shape.transform = Transform3D(xf.basis.orthonormalized(), xf * centre)
-	body.add_child(shape)
-	return shape
+	var oid := body.create_shape_owner(body)
+	body.shape_owner_set_transform(oid, Transform3D(xf.basis.orthonormalized(), xf * centre))
+	body.shape_owner_add_shape(oid, _shared_box(size * sc))
+	return [body, oid]
 
 
 static func item_key(p: Vector3) -> Vector3i:
@@ -1954,18 +1964,18 @@ static func item_key(p: Vector3) -> Vector3i:
 func break_item(p: Vector3) -> void:
 	var k := item_key(p)
 	broken[k] = true
-	var sh: CollisionShape3D = _shape_by_key.get(k)
-	if sh and is_instance_valid(sh):
-		sh.set_deferred("disabled", true)
+	var entry = _shape_by_key.get(k)
+	if entry is Array and entry.size() == 2 and is_instance_valid(entry[0]):
+		(entry[0] as StaticBody3D).call_deferred("shape_owner_set_disabled", int(entry[1]), true)
 
 
 ## Puts a driven-off parked car back (a near miss that never touched it).
 func unbreak_item(p: Vector3) -> void:
 	var k := item_key(p)
 	broken.erase(k)
-	var sh: CollisionShape3D = _shape_by_key.get(k)
-	if sh and is_instance_valid(sh):
-		sh.set_deferred("disabled", false)
+	var entry = _shape_by_key.get(k)
+	if entry is Array and entry.size() == 2 and is_instance_valid(entry[0]):
+		(entry[0] as StaticBody3D).call_deferred("shape_owner_set_disabled", int(entry[1]), false)
 
 
 ## Rebuilds a loaded chunk's props and furniture (after something broke).
@@ -2124,19 +2134,17 @@ static func _add_faces(body: StaticBody3D, m: BuildingMesher) -> void:
 static func _add_box_xf(body: StaticBody3D, box: AABB, xf: Transform3D) -> void:
 	if box.size.x <= 0.0 or box.size.y <= 0.0 or box.size.z <= 0.0:
 		return
-	var shape := CollisionShape3D.new()
-	shape.shape = _shared_box(box.size)
-	shape.transform = xf * Transform3D(Basis(), box.get_center())
-	body.add_child(shape)
+	var oid := body.create_shape_owner(body)
+	body.shape_owner_set_transform(oid, xf * Transform3D(Basis(), box.get_center()))
+	body.shape_owner_add_shape(oid, _shared_box(box.size))
 
 
 static func _add_box(body: StaticBody3D, box: AABB) -> void:
 	if box.size.x <= 0.0 or box.size.y <= 0.0 or box.size.z <= 0.0:
 		return
-	var shape := CollisionShape3D.new()
-	shape.shape = _shared_box(box.size)
-	shape.position = box.get_center()
-	body.add_child(shape)
+	var oid := body.create_shape_owner(body)
+	body.shape_owner_set_transform(oid, Transform3D(Basis(), box.get_center()))
+	body.shape_owner_add_shape(oid, _shared_box(box.size))
 
 
 ## Ground outside the streamed chunks: the mainland across the strait.
@@ -3185,6 +3193,8 @@ func _add_walkers(root: Node3D, key: Vector2i, buffers: Array) -> void:
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "Walkers%d" % gi
 		mmi.multimesh = mm
+		if _walker_mat_male != null and _walker_mat_female != null:
+			mmi.material_override = _walker_mat_female if (gi % 2 == 1) else _walker_mat_male
 		mmi.visibility_range_end = WALKER_RANGE
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mmi)

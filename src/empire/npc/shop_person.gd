@@ -8,7 +8,8 @@ extends Node3D
 
 const MODEL := Crowd.MODEL
 static var _meshes: Array = []
-static var _mat: ShaderMaterial
+static var _mat_male: ShaderMaterial
+static var _mat_female: ShaderMaterial
 static var _carry_mats := {}
 
 var speed := 1.25
@@ -31,7 +32,7 @@ var _wait_t := 0.0
 var _excused := false
 
 
-## The crowd body types (person_0..), sharing the npc shader material.
+## The crowd body types (person_0..), sharing the npc shader material without duplicating mesh data.
 static func meshes() -> Array:
 	if not _meshes.is_empty():
 		return _meshes
@@ -40,15 +41,28 @@ static func meshes() -> Array:
 		return _meshes
 	var inst := scene.instantiate()
 	var mis := inst.find_children("*", "MeshInstance3D", true, false)
-	mis.sort_custom(func(a, b): return String(a.name) < String(b.name))
-	_mat = ShaderMaterial.new()
-	_mat.shader = load("res://src/empire/npc/npc.gdshader")
+	mis.sort_custom(func(a, b):
+		var na := int(String(a.name).trim_prefix("person_"))
+		var nb := int(String(b.name).trim_prefix("person_"))
+		return na < nb)
+	var sh: Shader = load("res://src/empire/npc/npc.gdshader")
+	_mat_male = ShaderMaterial.new()
+	_mat_male.shader = sh
+	_mat_male.set_shader_parameter("pivot_k", 1.0)
+	_mat_female = ShaderMaterial.new()
+	_mat_female.shader = sh
+	_mat_female.set_shader_parameter("pivot_k", 0.925)
 	for mi in mis:
-		var m: Mesh = (mi as MeshInstance3D).mesh.duplicate()
-		m.surface_set_material(0, _mat)
-		_meshes.append(m)
+		_meshes.append((mi as MeshInstance3D).mesh)
 	inst.free()
 	return _meshes
+
+
+static func clear_cache() -> void:
+	_meshes.clear()
+	_mat_male = null
+	_mat_female = null
+	_carry_mats.clear()
 
 
 static func base_mesh() -> Mesh:
@@ -62,8 +76,10 @@ func _init(seed := 0, staff := false) -> void:
 	_mi = MeshInstance3D.new()
 	var ms := meshes()
 	# Staff: the plain body (the apron goes over its top); shoppers any of them.
+	var body_idx := 0 if staff else (rng.randi() % maxi(ms.size(), 1))
 	if not ms.is_empty():
-		_mi.mesh = ms[0] if staff else ms[rng.randi() % ms.size()]
+		_mi.mesh = ms[body_idx]
+		_mi.material_override = _mat_female if (body_idx % 2 == 1) else _mat_male
 	_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var s := rng.randf_range(0.94, 1.06)
 	_mi.scale = Vector3(s, s * rng.randf_range(0.95, 1.06), s)

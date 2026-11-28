@@ -171,3 +171,34 @@ static func dress(root: Node, model: String) -> void:
 				continue
 			var n := sm.resource_name.get_slice(".", 0)
 			mi.set_surface_override_material(i, surface(n, sm, model))
+
+
+## Evict cached bake textures and materials for vehicle models no longer in use.
+static func trim_unused(keep_models: Array) -> void:
+	_mx.lock()
+	var keep_set := {}
+	for m in keep_models:
+		var s := String(m)
+		keep_set[s] = true
+		keep_set[s + "_traffic"] = true
+		keep_set[s + "_lod1"] = true
+	for k in _bakes.keys():
+		var ks := String(k)
+		if ks.begins_with("civ_") or ks.begins_with("wheel_") or ks.begins_with("car_") or keep_set.has(ks):
+			continue
+		_bakes.erase(k)
+	for k in _mats.keys():
+		var parts := String(k).split("@")
+		if parts.size() >= 2:
+			var model := parts[1]
+			if not model.begins_with("civ_") and not model.begins_with("wheel_") and not model.begins_with("car_") and not keep_set.has(model):
+				_mats.erase(k)
+	_mx.unlock()
+
+
+static func clear_cache() -> void:
+	_mx.lock()
+	_tex.clear()
+	_bakes.clear()
+	_mats.clear()
+	_mx.unlock()
