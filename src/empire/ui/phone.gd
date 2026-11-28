@@ -222,7 +222,7 @@ func _build() -> void:
 	_frame = null
 	var vs := get_viewport_rect().size
 	_built_size = vs
-	compact = vs.x < 980.0
+	compact = _want_compact(vs)
 	Glass.set_dark(Glass.want_dark(game.empire.minute if game and game.empire else -1.0))
 	theme = EmpireStyle.theme()
 	var safe := _safe_insets(vs)
@@ -847,8 +847,11 @@ func present_sheet(title: String, w: float, h: float) -> VBoxContainer:
 		if ev is InputEventMouseButton and ev.pressed or ev is InputEventScreenTouch and ev.pressed:
 			dismiss_sheet())
 	layer.add_child(dim)
-	var sw := minf(maxf(w * 1.12, 640.0), vs.x - 80.0) if not compact else vs.x
-	var sh := minf(h * 1.15 + 90.0, vs.y - (40.0 if not compact else 70.0))
+	var safe := _safe_insets(vs)
+	var avail_w := vs.x - safe[0] - safe[2]
+	var avail_h := vs.y - safe[1] - safe[3]
+	var sw := minf(maxf(w * 1.12, 640.0), avail_w - 40.0) if not compact else avail_w
+	var sh := minf(h * 1.15 + 90.0, avail_h - (24.0 if not compact else 44.0))
 	var sheet := PanelContainer.new()
 	var sb := Glass.box(Glass.CARD if Glass.dark else Color(0.97, 0.97, 0.98, 1.0), 34, 0)
 	if compact:
@@ -859,7 +862,7 @@ func present_sheet(title: String, w: float, h: float) -> VBoxContainer:
 	sheet.add_theme_stylebox_override("panel", sb)
 	sheet.size = Vector2(sw, sh)
 	sheet.custom_minimum_size = Vector2(sw, sh)
-	var rest := Vector2((vs.x - sw) * 0.5, (vs.y - sh) * 0.5) if not compact else Vector2(0, vs.y - sh)
+	var rest := Vector2(safe[0] + (avail_w - sw) * 0.5, safe[1] + (avail_h - sh) * 0.5) if not compact else Vector2(safe[0], vs.y - sh - safe[3])
 	sheet.position = rest + Vector2(0, vs.y * 0.4 if compact else 40.0)
 	sheet.modulate.a = 0.0 if not compact else 1.0
 	layer.add_child(sheet)
@@ -873,7 +876,11 @@ func present_sheet(title: String, w: float, h: float) -> VBoxContainer:
 		v.add_child(grab)
 		_drag_to_close(sheet, rest)
 	var head := Glass.hbox(10)
-	head.add_child(Glass.line(title, "title2"))
+	var t_lbl := Glass.line(title, "title2")
+	t_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	t_lbl.clip_text = true
+	t_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	head.add_child(t_lbl)
 	head.add_child(Glass.icon_button("close", func(): dismiss_sheet(), false, 48))
 	v.add_child(head)
 	# Older detail screens were laid out for a wide panel: they scroll

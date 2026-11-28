@@ -64,7 +64,13 @@ func setup(l: CityLayout) -> void:
 
 func set_night(n: float) -> void:
 	if _lamp_mat:
-		_lamp_mat.emission_energy_multiplier = lerpf(0.4, 5.0, n)
+		# Unshaded materials ignore emission_energy_multiplier; scale HDR albedo directly.
+		var glow := lerpf(0.75, 3.6, n)
+		_lamp_mat.albedo_color = Color(glow, glow, glow)
+	if _wake_mat:
+		# Dim unshaded foam wakes at night so they don't glow pure white on dark water.
+		var wk := lerpf(1.0, 0.28, n)
+		_wake_mat.albedo_color = Color(wk, wk, wk, 1.0)
 
 
 # ------------------------------------------------------------ materials

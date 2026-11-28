@@ -202,7 +202,10 @@ static func dealership_box(ui: EmpireUI) -> Control:
 		return box
 	var dl: Dictionary = e.flags["dealership"]
 	box.add_child(S.label("YOUR DEALERSHIP · %d sold · yesterday %s" % [int(dl["sold"]), EmpireData.money(float(dl.get("last", 0.0)), true)], 14, S.AMBER, "black"))
-	var row := S.hbox(6)
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", 6)
+	row.add_theme_constant_override("v_separation", 6)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for m in Ventures.DEALER_MODELS:
 		var mm := String(m)
 		row.add_child(S.button("%s ×%d · +%s" % [String(EmpireData.vehicle_model(mm)["name"]).get_slice(" ", 0), int(dl["stock"].get(mm, 0)),
@@ -242,7 +245,10 @@ static func imports(ui: EmpireUI) -> void:
 		_imp_biz = String((e.businesses[0] as Business).id)
 	var b: Business = e.business(_imp_biz)
 	# Which shop, which supplier.
-	var shops := S.hbox(6)
+	var shops := HFlowContainer.new()
+	shops.add_theme_constant_override("h_separation", 6)
+	shops.add_theme_constant_override("v_separation", 6)
+	shops.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	shops.add_child(S.label("For", 15, S.MUTED))
 	for bb: Business in e.businesses:
 		var bid := String(bb.id)
@@ -251,7 +257,10 @@ static func imports(ui: EmpireUI) -> void:
 			_imp_lines = {}
 			imports(ui)))
 	v.add_child(shops)
-	var sups := S.hbox(6)
+	var sups := HFlowContainer.new()
+	sups.add_theme_constant_override("h_separation", 6)
+	sups.add_theme_constant_override("v_separation", 6)
+	sups.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for s in Ventures.SUPPLIERS:
 		var sid := String(s["id"])
 		sups.add_child(S.chip_button("%s · %s" % [s["how"], s["name"]], sid == _imp_sup, func():
@@ -308,7 +317,10 @@ static func imports(ui: EmpireUI) -> void:
 
 static func terminal(ui: EmpireUI) -> void:
 	var v := ui._open("Skyport Airport", 620, 360)
-	v.add_child(S.label("Departures and arrivals keep the island busy. Your own aircraft live on the stands and in the hangars; buy them at Skyport Aviation (Hangar 1).", 17, S.MUTED))
+	var term_desc := S.label("Departures and arrivals keep the island busy. Your own aircraft live on the stands and in the hangars; buy them at Skyport Aviation (Hangar 1).", 17, S.MUTED)
+	term_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	term_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_child(term_desc)
 	v.add_child(S.button("GPS to Skyport Aviation", func():
 		ui.game.set_gps(ui.game.skyport_play.site("aviation")["door"], "Skyport Aviation", {"kind": "place", "id": "aviation"})
 		ui.close_panel(true), true, 300))
@@ -327,13 +339,13 @@ static func estates(ui: EmpireUI, v: VBoxContainer) -> void:
 		var cv := ui._card()
 		var c: VBoxContainer = cv[1]
 		# The building's photo beside its details (tap: the gallery).
-		var row := S.hbox(16)
+		var row := S.hbox(14)
 		var pic := Button.new()
 		pic.focus_mode = Control.FOCUS_NONE
-		pic.custom_minimum_size = Vector2(250, 140)
+		pic.custom_minimum_size = Vector2(200, 120)
 		for stn in ["normal", "hover", "pressed", "focus"]:
 			pic.add_theme_stylebox_override(stn, StyleBoxEmpty.new())
-		var fr := PhotoBook.frame(id, "front", Vector2(250, 140), Ventures.estate_at(d))
+		var fr := PhotoBook.frame(id, "front", Vector2(200, 120), Ventures.estate_at(d))
 		fr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		pic.add_child(fr)
 		var dd: Dictionary = d
@@ -353,8 +365,14 @@ static func estates(ui: EmpireUI, v: VBoxContainer) -> void:
 		top.add_child(S.spacer())
 		top.add_child(S.label(EmpireData.money(Ventures.valuation(e, id) if owned else float(d["price"])), 20, S.AMBER if not owned else S.GREEN, "black"))
 		c.add_child(top)
-		c.add_child(S.label(String(d["desc"]), 15, S.MUTED))
-		var acts := S.hbox(8)
+		var desc_l := S.label(String(d["desc"]), 15, S.MUTED)
+		desc_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		desc_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		c.add_child(desc_l)
+		var acts := HFlowContainer.new()
+		acts.add_theme_constant_override("h_separation", 8)
+		acts.add_theme_constant_override("v_separation", 6)
+		acts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if owned:
 			var st: Dictionary = e.flags["estates"][id]
 			if int(d["units"]) > 0:
@@ -367,7 +385,6 @@ static func estates(ui: EmpireUI, v: VBoxContainer) -> void:
 						ui.open_phone("property")))
 			else:
 				c.add_child(S.label("Condition %d%% · upkeep %s a day" % [int(float(st["cond"]) * 100.0), EmpireData.money(float(d["upkeep"]))], 16, S.PAPER, "bold"))
-			acts.add_child(S.spacer())
 			if Ventures.renovate_block(e, id) != "":
 				acts.add_child(S.chip("Top condition", S.GREEN))
 			else:
@@ -395,7 +412,6 @@ static func estates(ui: EmpireUI, v: VBoxContainer) -> void:
 			acts.add_child(sell_btn)
 		else:
 			c.add_child(S.label("%s" % ("Up to %s a day in rent" % EmpireData.money(float(d["rent"]) * float(d["units"])) if int(d["units"]) > 0 else "Upkeep %s a day" % EmpireData.money(float(d["upkeep"]))), 15, S.PAPER))
-			acts.add_child(S.spacer())
 			acts.add_child(S.button("GPS", func():
 				ui.game.set_gps(Ventures.estate_at(d), String(d["name"]), {"kind": "place", "id": id})
 				ui.close_panel(true), false, 80))

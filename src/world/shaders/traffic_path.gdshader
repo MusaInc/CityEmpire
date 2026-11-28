@@ -135,7 +135,8 @@ void fragment() {
 		EMISSION = tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
 	}
 	if (finish == 2 && sealed && v_dist < 220.0) {
-		// See-through windows on sealed shells: the traced cabin (2026-11-26).
+		// See-through windows on sealed shells: smooth fade out over 195..220 m.
+		float cab_k = smoothstep(220.0, 195.0, v_dist);
 		vec3 bmin, bmax;
 		cabin_box(body_min, body_max, bmin, bmax);
 		vec3 dl = normalize(v_local - v_cam);
@@ -143,12 +144,17 @@ void fragment() {
 		float through;
 		vec3 inside = fake_cabin(v_local, dl, bmin, bmax, cabin_outside(dw, sky_horizon, sky_top, night), through);
 		float amb = dot(sky_horizon, vec3(0.3, 0.55, 0.15)) * 1.15 + 0.02;
-		ALBEDO = vec3(0.012);
-		EMISSION += mix(inside * amb, inside, through) * vec3(0.80, 0.86, 0.88);
+		ALBEDO = mix(ALBEDO, vec3(0.012), cab_k);
+		EMISSION += mix(inside * amb, inside, through) * vec3(0.80, 0.86, 0.88) * cab_k;
 	}
 	if (finish > 0) {
-		if (!is_far_lod && v_dist < 140.0) {
-			// The city in paint, glass and chrome (fake_reflect.gdshaderinc).
+		float fres_far = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
+		vec3 sky_far = mix(sky_horizon, sky_top, 0.45) * (1.0 - 0.55 * night);
+		float k_far = finish == 1 ? mix(0.08, 0.24, fres_far) : (finish == 2 ? mix(0.10, 0.34, fres_far) : 0.45);
+		vec3 far_emit = sky_far * k_far;
+		if (!is_far_lod && v_dist < 145.0) {
+			// Smoothly blend city reflection into far sky sheen over 125..145 m.
+			float refl_k = smoothstep(145.0, 125.0, v_dist);
 			vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 			vec3 vw = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 			vec3 rw = reflect(-vw, nw);
@@ -158,13 +164,10 @@ void fragment() {
 			float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), finish == 2 ? 3.0 : 4.0);
 			float k = finish == 1 ? mix(0.09, 0.36, fres) : (finish == 2 ? mix(0.11, 0.48, fres) : 0.65);
 			float glint = pow(max(dot(rw, normalize(sun_dir)), 0.0), finish == 1 ? 220.0 : 300.0) * (finish == 1 ? 0.9 : 0.75);
-			EMISSION += (env * k * fake_keep() + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night) * bk.r;
+			vec3 near_emit = (env * k * fake_keep() + vec3(glint) * (1.0 - night)) * (1.0 - 0.55 * night) * bk.r;
+			EMISSION += mix(far_emit, near_emit, refl_k);
 		} else {
-			// Far-LOD lightweight sky sheen (skips INV_VIEW_MATRIX & procedural skyline reflection).
-			float fres_far = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-			vec3 sky_far = mix(sky_horizon, sky_top, 0.45) * (1.0 - 0.55 * night);
-			float k_far = finish == 1 ? mix(0.08, 0.24, fres_far) : (finish == 2 ? mix(0.10, 0.34, fres_far) : 0.45);
-			EMISSION += sky_far * k_far;
+			EMISSION += far_emit;
 		}
 	}
 }

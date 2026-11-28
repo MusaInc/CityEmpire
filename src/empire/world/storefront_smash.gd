@@ -93,6 +93,9 @@ func _physics_process(dt: float) -> void:
 	if _check_t <= 0.0:
 		_check_t = 2.0
 		_restore(rooms)
+		for cid in _watched.keys():
+			if not is_instance_id_valid(int(cid)):
+				_watched.erase(cid)
 
 
 func _test(c: Car, si: ShopInterior) -> void:

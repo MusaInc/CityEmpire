@@ -85,10 +85,11 @@ func _pre_draw() -> void:
 	var k := 0.5 if quality >= 2 else 0.34
 	var w := clampi(int(scr.x * k), 160, 1024 if quality >= 2 else 640)
 	var sz := Vector2i(w, maxi(90, int(w * scr.y / maxf(scr.x, 1.0))))
-	if vp.size != sz:
+	var resized := vp.size != sz
+	if resized:
 		vp.size = sz
-	# Medium: every other frame (the waves hide the lag).
-	if quality < 2 and _frame % 2 == 1:
+	# Medium: every other frame (always render on resize to avoid a black flash).
+	if quality < 2 and _frame % 2 == 1 and not resized:
 		vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		return
 	# The mirrored camera: position and axes reflected in y = PLANE_Y; the
@@ -110,12 +111,28 @@ func _pre_draw() -> void:
 	if _env == null or _frame % 12 == 0:
 		var we: Environment = main.environment if main.environment else get_viewport().find_world_3d().environment
 		if we:
-			_env = we.duplicate()
-			_env.fog_height_density = 0.0
-			_env.volumetric_fog_enabled = false
-			_env.ssao_enabled = false
-			_env.ssil_enabled = false
-			_env.sdfgi_enabled = false
+			if _env == null:
+				_env = we.duplicate()
+				_env.fog_height_density = 0.0
+				_env.volumetric_fog_enabled = false
+				_env.ssao_enabled = false
+				_env.ssil_enabled = false
+				_env.sdfgi_enabled = false
+			else:
+				# Update persistent Environment in-place (zero per-second RID churn on iOS).
+				_env.sky = we.sky
+				_env.background_mode = we.background_mode
+				_env.ambient_light_color = we.ambient_light_color
+				_env.ambient_light_energy = we.ambient_light_energy
+				_env.ambient_light_sky_contribution = we.ambient_light_sky_contribution
+				_env.tonemap_exposure = we.tonemap_exposure
+				_env.fog_enabled = we.fog_enabled
+				_env.fog_light_color = we.fog_light_color
+				_env.fog_light_energy = we.fog_light_energy
+				_env.fog_density = we.fog_density
+				_env.fog_depth_begin = we.fog_depth_begin
+				_env.fog_depth_end = we.fog_depth_end
+				_env.fog_aerial_perspective = we.fog_aerial_perspective
 	cam.environment = _env
 	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	var proj := cam.get_camera_projection()

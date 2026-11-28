@@ -107,7 +107,17 @@ func free_slot(kind: String) -> Array:
 				if hp.y < SkyportIsland.LAND_Y + 1.0:
 					opts.append([hp, SkyportIsland.wyaw(PI)])
 		"plane":
-			opts = P["stands"]
+			# Dedicated clear GA parking slots on the hangar apron (away from static Parked_0/2/4/5 and active AirTraffic gates).
+			var ga_local := [
+				Vector3(1635.0, SkyportIsland.LAND_Y, 345.0),
+				Vector3(1750.0, SkyportIsland.LAND_Y, 345.0),
+				Vector3(1855.0, SkyportIsland.LAND_Y, 345.0),
+				Vector3(1635.0, SkyportIsland.LAND_Y, 315.0),
+				Vector3(1855.0, SkyportIsland.LAND_Y, 315.0),
+			]
+			var ga_yaw := SkyportIsland.wyaw(PI)
+			for lp: Vector3 in ga_local:
+				opts.append([SkyportIsland.w(lp), ga_yaw])
 		_:
 			opts = P["berths"]
 	for i in opts.size():
@@ -124,7 +134,7 @@ func free_slot(kind: String) -> Array:
 		if not taken:
 			return o
 	var last: Array = opts[opts.size() - 1]
-	return [(last[0] as Vector3) + SkyportIsland.wd(Vector3(0, 0, 30.0 * crafts.size())), last[1]]
+	return [(last[0] as Vector3) + SkyportIsland.wd(Vector3(24.0 * crafts.size(), 0, 0)), last[1]]
 
 
 func buy(model: String) -> String:

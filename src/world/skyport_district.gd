@@ -191,20 +191,42 @@ static func build_terminal_interior(target: Node3D, body: StaticBody3D, isl: Sky
 	m.solid(H.position.x + 0.3, bz, H.end.x - 0.3, H.end.y - 0.3, Y + BALCONY_Y - 0.35, Y + BALCONY_Y, Color(0.86, 0.86, 0.85))
 	m.solid(H.position.x + 0.3, bz - 0.05, H.end.x - 0.3, bz + 0.05, Y + BALCONY_Y - 0.6, Y + BALCONY_Y - 0.35, Color(0.65, 0.66, 0.68))
 	_box(body, H.position.x + 0.3, bz, H.end.x - 0.3, H.end.y - 0.3, Y + BALCONY_Y - 0.35, Y + BALCONY_Y)
-	_glass_panel(gl, Vector3(H.position.x + 0.3, Y + BALCONY_Y, bz), Vector3(H.end.x - 0.3, Y + BALCONY_Y, bz), 1.1)
-	m.solid(H.position.x + 0.3, bz - 0.05, H.end.x - 0.3, bz + 0.05, Y + BALCONY_Y + 1.08, Y + BALCONY_Y + 1.16, Color(0.75, 0.76, 0.78))
+	# Split glass balustrade & top handrail around every gate staircase opening.
+	var stair_xs: Array[float] = []
+	for gi in SkyportAirport.STANDS_AT.size():
+		stair_xs.append(float(SkyportAirport.STANDS_AT[gi]) + 14.0)
+	stair_xs.sort()
+	var bx0 := H.position.x + 0.3
+	var bx_end := H.end.x - 0.3
+	for gx: float in stair_xs:
+		var seg_end := clampf(gx - 1.25, bx0, bx_end)
+		if seg_end > bx0 + 0.15:
+			_glass_panel(gl, Vector3(bx0, Y + BALCONY_Y, bz), Vector3(seg_end, Y + BALCONY_Y, bz), 1.1)
+			m.solid(bx0, bz - 0.05, seg_end, bz + 0.05, Y + BALCONY_Y + 1.08, Y + BALCONY_Y + 1.16, Color(0.75, 0.76, 0.78))
+		bx0 = clampf(gx + 1.25, bx0, bx_end)
+	if bx_end > bx0 + 0.15:
+		_glass_panel(gl, Vector3(bx0, Y + BALCONY_Y, bz), Vector3(bx_end, Y + BALCONY_Y, bz), 1.1)
+		m.solid(bx0, bz - 0.05, bx_end, bz + 0.05, Y + BALCONY_Y + 1.08, Y + BALCONY_Y + 1.16, Color(0.75, 0.76, 0.78))
 	for gi in SkyportAirport.STANDS_AT.size():
 		var gx: float = float(SkyportAirport.STANDS_AT[gi]) + 14.0
 		var steps := 16
+		var run_len := steps * 0.42
+		var rise_h := BALCONY_Y - FLOOR
 		for k in steps:
-			var t0 := float(k) / steps
-			var zz := bz - 0.0 - (k + 1) * 0.42
-			var yy := Y + BALCONY_Y - (k + 1) * (BALCONY_Y - FLOOR) / steps
-			m.solid(gx - 1.2, zz, gx + 1.2, zz + 0.42, yy - 0.12, yy + (BALCONY_Y - FLOOR) / steps, Color(0.82, 0.82, 0.8))
-			if t0 < 0.0:
-				pass
-		m.beam(Vector3(gx - 1.25, Y + BALCONY_Y + 1.0, bz), Vector3(gx - 1.25, fy + 1.0, bz - steps * 0.42), 0.06, 0.08, Color(0.75, 0.76, 0.78))
-		m.beam(Vector3(gx + 1.25, Y + BALCONY_Y + 1.0, bz), Vector3(gx + 1.25, fy + 1.0, bz - steps * 0.42), 0.06, 0.08, Color(0.75, 0.76, 0.78))
+			var zz := bz - (k + 1) * 0.42
+			var yy := Y + BALCONY_Y - (k + 1) * rise_h / steps
+			m.solid(gx - 1.2, zz, gx + 1.2, zz + 0.42, yy - 0.12, yy + rise_h / steps, Color(0.82, 0.82, 0.8))
+		# Sloped stair ramp collider so players walk smoothly up/down to the gate balcony.
+		var rcs := CollisionShape3D.new()
+		var rsh := BoxShape3D.new()
+		var rlen := sqrt(run_len * run_len + rise_h * rise_h)
+		rsh.size = Vector3(2.4, 0.18, rlen)
+		rcs.shape = rsh
+		rcs.position = Vector3(gx, Y + FLOOR + rise_h * 0.5 - 0.08, bz - run_len * 0.5)
+		rcs.rotation.x = -atan2(rise_h, run_len)
+		body.add_child(rcs)
+		m.beam(Vector3(gx - 1.25, Y + BALCONY_Y + 1.0, bz), Vector3(gx - 1.25, fy + 1.0, bz - run_len), 0.06, 0.08, Color(0.75, 0.76, 0.78))
+		m.beam(Vector3(gx + 1.25, Y + BALCONY_Y + 1.0, bz), Vector3(gx + 1.25, fy + 1.0, bz - run_len), 0.06, 0.08, Color(0.75, 0.76, 0.78))
 	# Always-on luminaires. Static surfaces share the same lighting grid as
 	# this fixture layout. Real lights are drawn from a small nearby pool.
 	var light_points := PackedVector3Array()
@@ -240,7 +262,7 @@ static func build_terminal_interior(target: Node3D, body: StaticBody3D, isl: Sky
 	isl._mesh_into(balcony_fixtures, "TerminalBalconyFixtures", target, 0.0, 420.0)
 	var fixtures := target.get_node("TerminalBalconyFixtures") as MeshInstance3D
 	var diffuser := StandardMaterial3D.new()
-	diffuser.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	diffuser.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
 	diffuser.albedo_color = Color(1.0, 0.97, 0.91)
 	diffuser.emission_enabled = true
 	diffuser.emission = diffuser.albedo_color
@@ -847,7 +869,7 @@ static func build_clad(P: Dictionary, target: Node3D, isl: SkyportIsland) -> voi
 			# Roof: cap, parapet line, rooflight strips (only the top tier
 			# shows its roof).
 			m.solid(x0 - 0.15, z0 - 0.15, x1 + 0.15, z1 + 0.15, y1, y1 + 0.3, Color(0.55, 0.57, 0.6))
-			if ti == tiers.size() - 1 or (tiers.size() > 1 and ti == 0):
+			if ti == tiers.size() - 1:
 				var rx := x0 + 6.0
 				while rx < x1 - 4.0:
 					m.solid(rx - 0.7, z0 + 4.0, rx + 0.7, z1 - 4.0, y1 + 0.3, y1 + 0.42, Color(0.78, 0.85, 0.9))

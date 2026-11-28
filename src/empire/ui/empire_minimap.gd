@@ -181,21 +181,21 @@ func _draw_overlay() -> void:
 		if pri == 1 and dc > near_r * 0.8:
 			continue
 		MapKit.draw_marker(ov, sp2, kind, k)
+	# North tick on the rim (drawn before destination pin so due-north pins stay visible).
+	var north := (_to_map(_focus() + Vector3(0, 0, -50)) - ctr).normalized()
+	var n := ctr + north * (size.x * 0.5 - 10.0)
+	ov.draw_circle(n, 8.0, Color(EmpireStyle.INK, 0.9))
+	ov.draw_string(EmpireStyle.font("black"), n + Vector2(-4.5, 5), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
 	# Destination: on the disc, or pinned to the rim pointing at it.
 	if gps and gps.active():
 		var gp := _to_map(gps.dest)
 		var off := gp - ctr
-		if off.length() > rad - 10.0:
-			gp = ctr + off.normalized() * (rad - 10.0)
+		if off.length() > rad - 13.0:
+			gp = ctr + off.normalized() * (rad - 13.0)
 			ov.draw_circle(gp, 8.0, Color(0, 0, 0, 0.55))
 			ov.draw_circle(gp, 6.5, Gps.COLOUR)
 		else:
 			MapKit.draw_destination(ov, gp, 0.85)
 	# You: always in the middle, pointing up (the map turns under you).
 	MapKit.draw_player(ov, ctr, Vector2.UP, 0.9)
-	# North tick on the rim.
-	var north := (_to_map(_focus() + Vector3(0, 0, -50)) - ctr).normalized()
-	var n := ctr + north * (size.x * 0.5 - 10.0)
-	ov.draw_circle(n, 8.0, Color(EmpireStyle.INK, 0.9))
-	ov.draw_string(EmpireStyle.font("black"), n + Vector2(-4.5, 5), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
 	# (The next turn is the HUD's turn panel under the disc.)

@@ -35,6 +35,8 @@ static func build(edges: Array, width := 6.0) -> Shoreline:
 		_mat.shader = load("res://src/world/shaders/shore_foam.gdshader")
 	sl.material_override = _mat
 	sl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Keep shoreline foam off the planar water-mirror reflection pass.
+	sl.layers = WaterMirror.LAYER
 	return sl
 
 

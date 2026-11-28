@@ -83,13 +83,13 @@ static func _nav_bulb(radius: float, col: Color, pos: Vector3) -> MeshInstance3D
 
 
 func _add_nav_lights(node: Node3D) -> Dictionary:
-	var nav_l := _nav_bulb(0.32, Color(1.0, 0.08, 0.06), Vector3(-16.6, 2.2, 2.0))
-	var nav_r := _nav_bulb(0.32, Color(0.08, 1.0, 0.22), Vector3(16.6, 2.2, 2.0))
-	var strobe_l := _nav_bulb(0.36, Color(1.0, 0.98, 0.94), Vector3(-16.8, 2.2, 2.4))
-	var strobe_r := _nav_bulb(0.36, Color(1.0, 0.98, 0.94), Vector3(16.8, 2.2, 2.4))
-	var strobe_t := _nav_bulb(0.34, Color(1.0, 0.98, 0.94), Vector3(0.0, 7.6, 16.5))
-	var beacon := _nav_bulb(0.36, Color(1.0, 0.06, 0.04), Vector3(0.0, 4.7, -2.0))
-	var landing := _nav_bulb(0.45, Color(1.0, 0.96, 0.85), Vector3(0.0, 1.2, -16.4))
+	var nav_l := _nav_bulb(0.32, Color(1.0, 0.08, 0.06), Vector3(-17.25, 5.70, 8.3))
+	var nav_r := _nav_bulb(0.32, Color(0.08, 1.0, 0.22), Vector3(17.25, 5.70, 8.3))
+	var strobe_l := _nav_bulb(0.36, Color(1.0, 0.98, 0.94), Vector3(-17.35, 5.70, 8.6))
+	var strobe_r := _nav_bulb(0.36, Color(1.0, 0.98, 0.94), Vector3(17.35, 5.70, 8.6))
+	var strobe_t := _nav_bulb(0.34, Color(1.0, 0.98, 0.94), Vector3(0.0, 5.25, 17.9))
+	var beacon := _nav_bulb(0.36, Color(1.0, 0.06, 0.04), Vector3(0.0, 5.95, 2.0))
+	var landing := _nav_bulb(0.45, Color(1.0, 0.96, 0.85), Vector3(0.0, 1.5, -13.8))
 	for m in [nav_l, nav_r, strobe_l, strobe_r, strobe_t, beacon, landing]:
 		node.add_child(m)
 	return {"nav": [nav_l, nav_r], "strobes": [strobe_l, strobe_r, strobe_t], "beacon": beacon, "landing": landing}
@@ -136,17 +136,17 @@ func _timeline(a: Vector3, b: Vector3, stand: Vector3) -> Array:
 	# Arrive over the open sea from the east, land westbound (never over the
 	# city's towers), roll out, turn off onto the taxiway to the stand.
 	add.call(40.0, b + Vector3(2600, 180, 0), b + Vector3(60, 14, 0), west, west, "approach")
-	add.call(4.0, b + Vector3(60, 14, 0), b + Vector3(-120, 0.2, 0), west, west, "approach")
-	add.call(16.0, b + Vector3(-120, 0.2, 0), Vector3(stand.x - 140.0, y + 0.2, a.z), west, west, "rollout")
-	add.call(10.0, Vector3(stand.x - 140.0, y + 0.2, a.z), Vector3(stand.x - 140.0, y + 0.2, 395.0), west, north, "taxi")
-	add.call(14.0, Vector3(stand.x - 140.0, y + 0.2, 395.0), tw + Vector3(0, 0.2, 0), north, east, "taxi")
-	add.call(8.0, tw + Vector3(0, 0.2, 0), stand + Vector3(0, 0.2, 10.0), east, north, "taxi")
-	add.call(90.0, stand + Vector3(0, 0.2, 10.0), stand + Vector3(0, 0.2, 10.0), north, north, "parked")   # turnaround
-	add.call(10.0, stand + Vector3(0, 0.2, 10.0), tw + Vector3(0, 0.2, 0), north, west, "pushback")        # push back
-	add.call(18.0, tw + Vector3(0, 0.2, 0), Vector3(a.x + 40.0, y + 0.2, 395.0), west, west, "taxi")
-	add.call(10.0, Vector3(a.x + 40.0, y + 0.2, 395.0), a + Vector3(40, 0.2, 0), west, east, "taxi")
-	add.call(26.0, a + Vector3(40, 0.2, 0), a + Vector3(620, 0.2, 0), east, east, "takeoff")              # takeoff roll
-	add.call(40.0, a + Vector3(620, 0.2, 0), b + Vector3(2400, 320, -400), east, east, "climb")           # climb out
+	add.call(4.0, b + Vector3(60, 14, 0), b + Vector3(-120, 0.02, 0), west, west, "approach")
+	add.call(16.0, b + Vector3(-120, 0.02, 0), Vector3(stand.x - 140.0, y + 0.02, a.z), west, west, "rollout")
+	add.call(10.0, Vector3(stand.x - 140.0, y + 0.02, a.z), Vector3(stand.x - 140.0, y + 0.02, 395.0), west, north, "taxi")
+	add.call(14.0, Vector3(stand.x - 140.0, y + 0.02, 395.0), tw + Vector3(0, 0.02, 0), north, east, "taxi")
+	add.call(8.0, tw + Vector3(0, 0.02, 0), stand + Vector3(0, 0.02, 10.0), east, north, "taxi")
+	add.call(90.0, stand + Vector3(0, 0.02, 10.0), stand + Vector3(0, 0.02, 10.0), north, north, "parked")   # turnaround
+	add.call(10.0, stand + Vector3(0, 0.02, 10.0), tw + Vector3(0, 0.02, 0), north, west, "pushback")        # push back
+	add.call(18.0, tw + Vector3(0, 0.02, 0), Vector3(a.x + 40.0, y + 0.02, 395.0), west, west, "taxi")
+	add.call(10.0, Vector3(a.x + 40.0, y + 0.02, 395.0), a + Vector3(40, 0.02, 0), west, east, "taxi")
+	add.call(26.0, a + Vector3(40, 0.02, 0), a + Vector3(620, 0.02, 0), east, east, "takeoff")              # takeoff roll
+	add.call(40.0, a + Vector3(620, 0.02, 0), b + Vector3(2400, 320, -400), east, east, "climb")           # climb out
 	return segs
 
 
@@ -202,6 +202,9 @@ func _process(dt: float) -> void:
 					yaw = lerp_angle(float(s[4]), float(s[5]), smoothstep(0.0, 1.0, u))
 				var pitch := clampf(atan2(d.y, hlen + 0.01) * 0.8, -0.12, 0.25)
 				node.transform = Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch), p)
+				var gear := node.get_node_or_null("Gear")
+				if gear:
+					gear.visible = p.y < SkyportIsland.LAND_Y + 25.0
 				break
 		var dist := node.global_position.distance_to(cam.global_position)
 		if dist > ACTIVE:

@@ -4,7 +4,7 @@
 // Tinted by the advert on screen right now (the atlas's lowest mips are its
 // average colour), so the street changes colour with the screens.
 shader_type spatial;
-render_mode unshaded, blend_add, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
+render_mode unshaded, blend_add, depth_draw_never, cull_disabled, shadows_disabled;
 
 #include "res://src/world/shaders/ad_common.gdshaderinc"
 

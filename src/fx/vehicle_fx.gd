@@ -136,9 +136,11 @@ var _skid_uv := PackedVector2Array()
 var _skid_idx := PackedInt32Array()
 var _skid_dirty := false
 var _skid_upload := 0.0
-var debris_budget := 48
-var _debris: Array = []        # [RigidBody3D, age]
+var debris_budget := 22
+var _debris: Array = []        # [{body, age, still, frozen, fading, fade_t}]
 var _debris_mesh: BoxMesh
+var _debris_phys: PhysicsMaterial
+var _debris_mats := {}         # Color hex -> StandardMaterial3D (cached for iOS)
 var _t := 0.0
 var _rng := RandomNumberGenerator.new()
 var _spray_rng := RandomNumberGenerator.new()
@@ -148,7 +150,8 @@ var _spray_interval := 0.0
 func _ready() -> void:
 	var st := get_node_or_null("/root/Settings")
 	if st:
-		debris_budget = int(st.preset().get("debris", 32))
+		var q := int(st.preset().get("debris", 32))
+		debris_budget = 10 if q <= 16 else (18 if q <= 32 else 26)
 	smoke = Pool.new(260, _mat(false, 0.85), self)
 	smoke.drag = 1.6
 	smoke.gravity = -0.6
@@ -250,15 +253,47 @@ func _process(dt: float) -> void:
 	sparks.step(dt)
 	fire.step(dt)
 	_step_ripples(dt)
-	# Debris lifetime.
+	# Debris lifecycle: freeze settled chunks (0 physics CPU on iOS) and
+	# smoothly sink/shrink expired or distant chunks before freeing.
 	var keep: Array = []
-	for d in _debris:
-		d[1] += dt
-		var b: RigidBody3D = d[0]
-		if d[1] > 7.0 or b.global_position.y < -50.0:
-			b.queue_free()
-		else:
-			keep.append(d)
+	for d: Dictionary in _debris:
+		var b = d["body"]
+		if not is_instance_valid(b):
+			continue
+		var rb := b as RigidBody3D
+		d["age"] = float(d["age"]) + dt
+		if rb.global_position.y < -50.0:
+			rb.queue_free()
+			continue
+		var far := cam != null and rb.global_position.distance_squared_to(cp) > 85.0 * 85.0
+		if not bool(d["frozen"]) and not bool(d["fading"]):
+			if rb.sleeping or (rb.linear_velocity.length_squared() < 0.04 and rb.angular_velocity.length_squared() < 0.08):
+				d["still"] = float(d["still"]) + dt
+				if float(d["still"]) >= 0.45:
+					rb.freeze = true
+					rb.collision_layer = 0
+					rb.collision_mask = 0
+					d["frozen"] = true
+			else:
+				d["still"] = 0.0
+		if not bool(d["fading"]) and (float(d["age"]) > 7.5 or far):
+			d["fading"] = true
+			d["fade_t"] = 0.0
+			rb.freeze = true
+			rb.collision_layer = 0
+			rb.collision_mask = 0
+		if bool(d["fading"]):
+			var ft := float(d["fade_t"]) + dt
+			d["fade_t"] = ft
+			var k := clampf(1.0 - ft / 0.45, 0.0, 1.0)
+			rb.global_position.y -= dt * 0.2
+			for ch in rb.get_children():
+				if ch is MeshInstance3D:
+					(ch as MeshInstance3D).scale = (d["base_scale"] as Vector3) * maxf(k, 0.01)
+			if ft >= 0.45:
+				rb.queue_free()
+				continue
+		keep.append(d)
 	_debris = keep
 
 
@@ -440,10 +475,11 @@ func _on_damaged(kind: String, what: Variant, at: Vector3, c: Car) -> void:
 		return
 	if kind == "glass":
 		var lvl := float((what as Array)[1]) if what is Array else 0.5
-		var shards := 10 if lvl >= 1.0 else 3
+		var shards := 18 if lvl >= 1.0 else 5
 		for i in shards:
-			sparks.emit(at + Vector3.UP * 0.4, c.linear_velocity * 0.5 + Vector3(_rng.randf_range(-2, 2), _rng.randf_range(0.5, 3.0), _rng.randf_range(-2, 2)),
-				_rng.randf_range(0.5, 0.9), 0.06, 0.035, Color(0.78, 0.86, 0.9, 0.9))
+			var vel := c.linear_velocity * 0.45 + Vector3(_rng.randf_range(-2.6, 2.6), _rng.randf_range(0.8, 3.4), _rng.randf_range(-2.6, 2.6))
+			sparks.emit(at + Vector3(_rng.randf_range(-0.35, 0.35), 0.35, _rng.randf_range(-0.35, 0.35)), vel,
+				_rng.randf_range(0.55, 1.05), _rng.randf_range(0.05, 0.085), 0.025, Color(0.82, 0.90, 0.95, 0.92))
 	elif kind == "lamp":
 		var red := String(what).begins_with("tail")
 		for i in 6:
@@ -470,33 +506,55 @@ func impact(at: Vector3, normal: Vector3, strength: float, paint: Color) -> void
 			_chunk(at, normal, strength, paint if i % 2 == 0 else Color(0.05, 0.05, 0.06))
 
 
+func _chunk_mat(col: Color) -> StandardMaterial3D:
+	var key := col.to_html(false)
+	if _debris_mats.has(key):
+		return _debris_mats[key]
+	if _debris_mats.size() > 24:
+		_debris_mats.clear()
+	var m := StandardMaterial3D.new()
+	m.albedo_color = col
+	m.metallic = 0.42
+	m.roughness = 0.42
+	_debris_mats[key] = m
+	return m
+
+
 func _chunk(at: Vector3, normal: Vector3, strength: float, col: Color) -> void:
 	if _debris.size() >= debris_budget:
-		var old: Array = _debris.pop_front()
-		(old[0] as Node).queue_free()
+		var old: Dictionary = _debris.pop_front()
+		var ob = old.get("body")
+		if is_instance_valid(ob):
+			ob.queue_free()
+	if _debris_phys == null:
+		_debris_phys = PhysicsMaterial.new()
+		_debris_phys.friction = 0.72
+		_debris_phys.bounce = 0.16
+	var sc := Vector3(_rng.randf_range(0.55, 1.35), _rng.randf_range(0.55, 1.15), _rng.randf_range(0.55, 1.35))
 	var b := RigidBody3D.new()
 	b.collision_layer = 1 << 5
-	b.collision_mask = 1 | (1 << 3)
-	b.mass = 3.0
+	b.collision_mask = 1
+	b.physics_material_override = _debris_phys
+	b.linear_damp = 0.25
+	b.angular_damp = 0.55
+	b.can_sleep = true
+	b.mass = 2.2
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
-	bs.size = _debris_mesh.size
+	# Match collider dimensions to visual scale so chunks never float or clip!
+	bs.size = _debris_mesh.size * sc
 	cs.shape = bs
 	b.add_child(cs)
 	var mi := MeshInstance3D.new()
 	mi.mesh = _debris_mesh
-	var m := StandardMaterial3D.new()
-	m.albedo_color = col
-	m.metallic = 0.4
-	m.roughness = 0.4
-	mi.material_override = m
-	mi.scale = Vector3.ONE * _rng.randf_range(0.6, 1.6)
+	mi.material_override = _chunk_mat(col)
+	mi.scale = sc
 	b.add_child(mi)
 	add_child(b)
-	b.global_position = at + normal * 0.3 + Vector3.UP * 0.3
-	b.linear_velocity = normal * _rng.randf_range(2, 6) + Vector3(_rng.randf_range(-3, 3), _rng.randf_range(2, 6), _rng.randf_range(-3, 3)) * clampf(strength / 20.0, 0.5, 2.0)
-	b.angular_velocity = Vector3(_rng.randf_range(-12, 12), _rng.randf_range(-12, 12), _rng.randf_range(-12, 12))
-	_debris.append([b, 0.0])
+	b.global_position = at + normal * 0.25 + Vector3.UP * 0.22
+	b.linear_velocity = normal * _rng.randf_range(1.8, 5.0) + Vector3(_rng.randf_range(-2.6, 2.6), _rng.randf_range(1.5, 4.5), _rng.randf_range(-2.6, 2.6)) * clampf(strength / 20.0, 0.5, 1.8)
+	b.angular_velocity = Vector3(_rng.randf_range(-10, 10), _rng.randf_range(-10, 10), _rng.randf_range(-10, 10))
+	_debris.append({"body": b, "age": 0.0, "still": 0.0, "frozen": false, "fading": false, "fade_t": 0.0, "base_scale": sc})
 
 
 func emit_ripple(at: Vector3, r0: float, r1: float, life: float, alpha := 0.72) -> void:

@@ -70,8 +70,10 @@ static func place(root: Node3D, by_species: Dictionary, begin: float, end: float
 		# Fades in over the band the real trees fade out in (TreeKit.FADE before
 		# their `ends_at`, which callers pass as begin + 20).
 		var fb := begin + 20.0
-		mi.visibility_range_begin = maxf(0.0, fb - TreeKit.FADE - 4.0) if begin > 0.0 else 0.0
+		var pad := mm.get_aabb().size.length() * 0.5 + 4.0
+		mi.visibility_range_begin = maxf(0.0, fb - TreeKit.FADE - pad) if begin > 0.0 else 0.0
 		if begin > 0.0:
 			mi.set_instance_shader_parameter("lod_fade_in", Vector2(fb - TreeKit.FADE, fb))
-		mi.visibility_range_end = end
+		mi.set_instance_shader_parameter("lod_fade_out", Vector2(maxf(0.0, end - 80.0), end))
+		mi.visibility_range_end = end + pad
 		root.add_child(mi)

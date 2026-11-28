@@ -22,7 +22,7 @@ static func tab(ui: EmpireUI, v: VBoxContainer) -> void:
 	v.add_child(body)
 	# ---- left: you
 	var left := S.vbox(10)
-	left.custom_minimum_size.x = 360
+	left.custom_minimum_size.x = 300
 	body.add_child(left)
 	var card := _panel(Color(S.AMBER, 0.10), Color(S.AMBER, 0.55))
 	var cv := S.vbox(4)
@@ -58,7 +58,7 @@ static func tab(ui: EmpireUI, v: VBoxContainer) -> void:
 	left.add_child(g)
 	var how := S.label("Valued like every company here: what you own at book value, less debt, plus %.1f years of your trading profit (last 7 days). Moving cash around adds nothing – profit does." % City500.EARN_MULTIPLE, 13, S.MUTED)
 	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	how.custom_minimum_size.x = 350
+	how.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left.add_child(how)
 	var news := S.vbox(4)
 	news.add_child(S.label("MARKET TODAY", 13, S.AMBER, "black"))
@@ -66,14 +66,17 @@ static func tab(ui: EmpireUI, v: VBoxContainer) -> void:
 		var l := S.label(("▲ " if h[1] == "good" else ("▼ " if h[1] in ["bad", "warn"] else "• ")) + String(h[0]), 14,
 			S.GREEN if h[1] == "good" else (S.RED if h[1] in ["bad", "warn"] else S.PAPER))
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		l.custom_minimum_size.x = 350
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		news.add_child(l)
 	left.add_child(news)
 	# ---- right: the table
 	var right := S.vbox(8)
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_child(right)
-	var tools := S.hbox(8)
+	var tools := HFlowContainer.new()
+	tools.add_theme_constant_override("h_separation", 8)
+	tools.add_theme_constant_override("v_separation", 6)
+	tools.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var q := LineEdit.new()
 	q.placeholder_text = "Search companies"
 	q.text = query

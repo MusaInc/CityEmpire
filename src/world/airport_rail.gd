@@ -206,7 +206,7 @@ static func build(target: Node3D, body: StaticBody3D, isl: SkyportIsland, layout
 	for st: Dictionary in P["rail_stations"]:
 		_station(m, body, line, st, layout, P)
 	isl._mesh_into(m, "AirportRail_%d" % chunk, target, 0.0, 3800.0)
-	InfraKit.place(target, kit_list, 2600.0)
+	InfraKit.place(target, kit_list, 3800.0)
 	kit_list = {}
 
 
@@ -359,7 +359,7 @@ static func _station(m: BuildingMesher, body: StaticBody3D, line: Dictionary, st
 		else:
 			var lay := layout.mainland if (name == "Westbank Airport" and layout.mainland) else layout
 			var g := lay.ground_y(tq.x, tq.y)
-			gy = g if not is_nan(g) else 0.0
+			gy = g if not is_nan(g) else BuildingMesher.SEA_SURFACE - 3.0
 		m.beam(Vector3(tower.x, gy, tower.z), Vector3(tower.x, c.y + 5.6, tower.z), 6.0, 6.0, Color(0.36, 0.4, 0.44))
 		m.beam(Vector3(tower.x, c.y + 5.6, tower.z), Vector3(tower.x, c.y + 6.0, tower.z), 6.8, 6.8, LINE_BLUE)
 		SkyportIsland._box_beam(body, Vector3(tower.x, gy, tower.z), Vector3(tower.x, c.y + 5.6, tower.z), 6.0, 6.0)

@@ -299,7 +299,11 @@ func _layout_hud() -> void:
 	_turn_sub.custom_minimum_size.x = mm - 80.0
 	_anchor(_phone_btn, 1.0, 0.0, Vector2(-mm - 16.0 - 62.0, 12.0), Vector2(52, 52))
 	# Objective text wraps before it reaches the toasts' column.
-	_obj.custom_minimum_size.x = clampf(hud.size.x * 0.24, 260.0, 380.0)
+	_obj.custom_minimum_size.x = clampf(hud.size.x * 0.24, 240.0, 360.0)
+	# Keep toasts clear of the top-left money/objective column and top-right phone button on all viewports.
+	var toast_y := 12.0 if hud.size.x >= 940.0 else 64.0
+	var toast_w := clampf(hud.size.x - 540.0, 240.0, 400.0) if hud.size.x >= 800.0 else clampf(hud.size.x - 160.0, 220.0, 320.0)
+	_anchor(_toasts, 0.5, 0.0, Vector2(-toast_w * 0.5, toast_y), Vector2(toast_w, 120.0))
 
 
 ## Anchors a control at (ax, ay) of the screen with its top-left `off` from
@@ -559,7 +563,7 @@ func toast(text: String, kind := "info", ref := {}) -> void:
 	while _toasts.get_child_count() > 2:
 		_toasts.get_child(0).queue_free()
 		_toasts.remove_child(_toasts.get_child(0))
-	var tw := create_tween()
+	var tw := p.create_tween()
 	tw.tween_interval(4.2)
 	tw.tween_property(p, "modulate:a", 0.0, 0.5)
 	tw.tween_callback(p.queue_free)
@@ -4136,23 +4140,64 @@ func open_opening_offer(choices: Array) -> void:
 
 
 ## The lift's floor buttons: from the cabin (apartment / lobby / Vehicle
-## Collection) or from the garage's lift (lobby / apartment).
+## Collection) or from the garage's lift (origin lobby / apartment / any owned property).
 func open_lift_floors(hid: String, from_garage: bool) -> void:
-	var v := _open("Lift", 560, 300)
+	var v := _open("Lift Control Panel", 560, 420)
+	var list := S.vbox(8)
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if from_garage:
-		var home := game.home_by_id(hid)
-		v.add_child(S.button("▲  %s" % String(home.get("name", "Your apartment")), func():
-			close_panel(true)
-			game.arrive_from_garage(hid, true), true, 480))
-		v.add_child(S.button("▲  Lobby · G", func():
-			close_panel(true)
-			game.arrive_from_garage(hid, false), false, 480))
+		if hid != "":
+			var home := game.home_by_id(hid)
+			list.add_child(S.button("▲  %s" % String(home.get("name", "Your apartment")), func():
+				close_panel(true)
+				game.arrive_from_garage(hid, true), true, 460))
+			list.add_child(S.button("▲  Lobby · G", func():
+				close_panel(true)
+				game.arrive_from_garage(hid, false), false, 460))
+		elif game.garage and is_instance_valid(game.garage.from_lift):
+			var fl := game.garage.from_lift
+			list.add_child(S.button("▲  %s Lobby · G" % fl.home_name, func():
+				close_panel(true)
+				game.arrive_from_garage("", false), true, 460))
+		# Universal Vehicle Collection also connects intuitively to every owned residence.
+		for h: Dictionary in game.owned_lift_homes():
+			var ohid := String(h["id"])
+			if ohid == hid:
+				continue
+			list.add_child(S.button("▲  %s · %s" % [String(h["name"]), game.elevators[ohid].top_floor_label], func():
+				close_panel(true)
+				game.arrive_from_garage(ohid, true), false, 460))
+		var sc := _scroll(list, 280)
+		sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		v.add_child(sc)
 		return
 	for f in game.lift_floors(hid):
 		var which: String = f[1]
 		var here: bool = f[2]
-		var b := S.button(String(f[0]) + ("   (you're here)" if here else ""), func():
+		var b := S.button(String(f[0]) + ("   (current floor)" if here else ""), func():
 			close_panel(true)
-			game.choose_floor(hid, which), which == "garage", 480)
+			game.choose_floor(hid, which), which == "garage", 460)
 		b.disabled = here
-		v.add_child(b)
+		list.add_child(b)
+	var sc2 := _scroll(list, 280)
+	sc2.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(sc2)
+
+
+## Commercial lobby elevator panel (Hotels, Office Towers, Corporate HQ).
+func open_commercial_lift_floors(unit_id: String) -> void:
+	var si: ShopInterior = game.interiors.get(unit_id)
+	if si == null or si.elevator == null:
+		return
+	var el := si.elevator
+	var v := _open("%s · Lift" % el.home_name, 560, 340)
+	var upper_lbl := "▲  Executive Floors · HQ" if el.building_style == "hq" else ("▲  Guest Suites & Concierge" if el.building_style == "hotel" else "▲  Office Floors")
+	v.add_child(S.button(upper_lbl, func():
+		close_panel(true)
+		game.open_commercial_upper(unit_id), false, 480))
+	var g_btn := S.button("●  Lobby · G   (current floor)", func(): close_panel(true), false, 480)
+	g_btn.disabled = true
+	v.add_child(g_btn)
+	v.add_child(S.button("▼  Vehicle Collection · %s" % VehicleGarage.BAY_LEVEL, func():
+		close_panel(true)
+		game.ride_commercial_to_garage(unit_id), true, 480))

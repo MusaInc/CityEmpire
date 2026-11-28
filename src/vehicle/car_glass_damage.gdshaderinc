@@ -45,16 +45,24 @@ float glass_crack() {
 		float which = side_pane ? (nn.x < 0.0 ? crack.z : crack.w) : (v_p.z < 0.0 ? crack.x : crack.y);
 		cuv = side_pane ? v_p.zy : v_p.xy;
 		if (which >= 0.999 && (side_pane || v_p.z > 0.0)) {
-			return -1.0;   // (tempered side / rear glass: gone, a clean hole)
+			// Tempered side/rear glass: cleanly blown out (zero floating pane).
+			return -1.0;
 		}
-		// Cracks spread from a point low on the pane; the field grows denser and
-		// reaches further with the crack level.
-		vec2 hit = side_pane ? vec2(0.0, 0.95) : vec2(0.25, 0.9);
-		float reach = which * 1.8;
-		float near_hit = 1.0 - smoothstep(reach * 0.4, reach + 0.01, length(cuv - hit));
-		float lines = 1.0 - smoothstep(0.0, 0.045 + 0.02 * which, craze(cuv * mix(6.0, 16.0, which)));
-		float rays = 1.0 - smoothstep(0.0, 0.03, abs(fract(atan(cuv.y - hit.y, cuv.x - hit.x) * 3.2 + hash2(floor(cuv * 2.0)).x * 0.2) - 0.5) * length(cuv - hit) * 0.6);
-		cr = clamp(max(lines, rays * step(0.15, which)) * near_hit * clamp(which * 2.0, 0.0, 1.0), 0.0, 1.0);
+		if (which <= 0.001) {
+			return 0.0;
+		}
+		// Multi-scale spiderweb impact fracture: tight frosted core, concentric
+		// Voronoi rings and sharp radial fracture rays.
+		vec2 hit = side_pane ? vec2(0.0, 0.95) : vec2(0.22, 0.92);
+		float dist = length(cuv - hit);
+		float reach = 0.25 + which * 1.65;
+		float near_hit = 1.0 - smoothstep(reach * 0.35, reach + 0.02, dist);
+		float fine = 1.0 - smoothstep(0.0, 0.042 + 0.024 * which, craze(cuv * mix(8.0, 20.0, which)));
+		float coarse = 1.0 - smoothstep(0.0, 0.032 + 0.015 * which, craze(cuv * 5.2 + vec2(1.7, 3.1)));
+		float ang = atan(cuv.y - hit.y, cuv.x - hit.x);
+		float rays = 1.0 - smoothstep(0.0, 0.028, abs(fract(ang * 3.8 + hash2(floor(cuv * 2.5)).x * 0.22) - 0.5) * dist * 0.55);
+		float core_frost = (1.0 - smoothstep(0.04, 0.16 + 0.14 * which, dist)) * smoothstep(0.35, 0.9, which) * 0.65;
+		cr = clamp(max(max(fine, coarse * 0.7), max(rays * step(0.12, which), core_frost)) * near_hit * clamp(which * 2.2, 0.0, 1.0), 0.0, 1.0);
 	}
 	return cr;
 }

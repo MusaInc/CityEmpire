@@ -417,7 +417,7 @@ func ship(basin: Rect2) -> void:
 	# Bridge house aft.
 	L._ksolid(k, x0 + 1.0, c.y - 6.0, x0 + 12.0, c.y + 6.0, deck, deck + 9.0, WHITE)
 	L._ksolid(k, x0 + 7.0, c.y - 7.5, x0 + 12.0, c.y + 7.5, deck + 9.0, deck + 12.0, WHITE)  # wheelhouse + wings
-	L._ksolid(k, x0 + 7.4, c.y - 7.0, x0 + 11.6, c.y + 7.0, deck + 9.8, deck + 11.2, Color(0.15, 0.2, 0.25), false)
+	L._ksolid(k, x0 + 6.95, c.y - 7.55, x0 + 12.05, c.y + 7.55, deck + 9.8, deck + 11.2, Color(0.15, 0.2, 0.25), false)
 	L._ksolid(k, x0 + 2.0, c.y - 1.8, x0 + 5.6, c.y + 1.8, deck + 9.0, deck + 16.0, Color(0.12, 0.12, 0.13))  # funnel
 	L._ksolid(k, x0 + 1.9, c.y - 1.9, x0 + 5.7, c.y + 1.9, deck + 13.0, deck + 14.2, RED, false)
 	# Containers on deck, in rows across the ship; clear under the quay crane's load.
@@ -488,6 +488,7 @@ func lighthouse() -> void:
 		var a: Vector2 = ring[i]
 		var b: Vector2 = ring[(i + 1) % ring.size()]
 		L._kbeam(k, Vector3(a.x, y + 1.6, a.y), Vector3(b.x, y + 1.6, b.y), 0.08, 0.08, STEEL, false)  # railing
+		L._kbeam(k, Vector3(a.x, y + 0.55, a.y), Vector3(a.x, y + 1.6, a.y), 0.07, 0.07, STEEL, false)  # stanchion post
 		L._anchor(Vector3(a.x, y - 0.2, a.y), Vector3(b.x, y - 0.2, b.y))
 	L._kprism(k, _ngon(c, r - 0.8, 12), y + 0.6, y + 4.6, Color(0.95, 0.9, 0.6))  # lantern
 	L._kprism(k, _ngon(c, r - 0.4, 12), y + 4.6, y + 5.4, RED.darkened(0.2))

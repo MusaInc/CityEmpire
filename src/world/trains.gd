@@ -200,7 +200,7 @@ func hit_test(p: Vector3) -> Vector3:
 			# to the shoulder of the roof: above that you're riding it.)
 			if absf(lp.x) < 1.46 + 0.4 and absf(lp.z) < CAR_LEN * 0.5 + 0.4 and lp.y > 0.2 \
 					and lp.y < 3.4:
-				return -xf.basis.z.normalized() * v
+				return -xf.basis.z.normalized() * v * float(tr.get("travel_dir", 1.0))
 	return Vector3.ZERO
 
 
@@ -238,6 +238,7 @@ func _place_all() -> void:
 		var t := fposmod(_clock + float(tr["phase"]), float(tr["cycle"]))
 		var s := 0.0
 		var v := 0.0
+		var travel_dir := 1.0
 		for leg in tr["legs"]:
 			var T: float = leg[2]
 			if t < DWELL:
@@ -246,12 +247,14 @@ func _place_all() -> void:
 			t -= DWELL
 			if t < T:
 				var sv := _leg_pos(absf(leg[1]), T, t)
-				s = float(leg[0]) + sv.x * signf(leg[1])
+				travel_dir = signf(leg[1])
+				s = float(leg[0]) + sv.x * travel_dir
 				v = sv.y
 				break
 			t -= T
 		tr["s"] = s
 		tr["v"] = v
+		tr["travel_dir"] = travel_dir
 		_place(tr, s)
 		var au: AudioStreamPlayer3D = tr.get("audio")
 		if au:

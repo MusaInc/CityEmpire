@@ -1918,8 +1918,7 @@ func _build_prop_collision() -> void:
 			var target := solid if kind in SOLID_PROPS else body
 			for bx in cache[kind]:
 				var sh := _add_oriented_box(target, it[1], bx[0], bx[1])
-				if target == body:
-					_shape_by_key[item_key((it[1] as Transform3D).origin)] = sh
+				_shape_by_key[item_key((it[1] as Transform3D).origin)] = sh
 		# Parked cars: solid to vehicles (you used to drive through them);
 		# Wrecks turns one into a real car when you hit it.
 		for pc in parked_cars(key):
@@ -2365,8 +2364,8 @@ func _process(dt: float) -> void:
 	var p := src.global_position
 	if _last_pos != Vector3.INF and dt > 0.0:
 		var v := (p - _last_pos) / dt
-		# (A teleport – entering a car, a respawn – isn't speed.)
-		_vel = _vel.lerp(v, 1.0 - exp(-3.0 * dt)) if v.length() < 120.0 else Vector3.ZERO
+		# (A teleport – entering a car, a respawn – isn't speed; allow supersonic/jet flight up to 260 m/s.)
+		_vel = _vel.lerp(v, 1.0 - exp(-3.0 * dt)) if (p - _last_pos).length() < 45.0 and v.length() < 260.0 else Vector3.ZERO
 	_last_pos = p
 	update_streaming(p)
 
@@ -2779,7 +2778,7 @@ func _add_chunk_human_collision(root: Node3D, key: Vector2i, col_human: Array) -
 			cache[kind] = _prop_boxes(kind)
 		for bx in cache[kind]:
 			_add_oriented_box(soft, it[1], bx[0], bx[1])
-	if soft.get_child_count() > 0:
+	if soft.get_shape_owners().size() > 0:
 		root.add_child(soft)
 	else:
 		soft.free()

@@ -73,7 +73,7 @@ func setup(p_kind: String, p_model: String, p_spec: Dictionary) -> void:
 	var sz: Vector3 = spec.get("size", Vector3(3, 2, 8))
 	bs.size = Vector3(sz.x * (0.5 if kind == "plane" else 0.9), sz.y * 0.7, sz.z * 0.9)
 	cs.shape = bs
-	cs.position = Vector3(0, sz.y * 0.4, 0)
+	cs.position = Vector3(0, bs.size.y * 0.5, 0)
 	add_child(cs)
 	_visual = CraftModels.build(kind, model, spec)
 	add_child(_visual)
@@ -103,6 +103,7 @@ func place(xf: Transform3D) -> void:
 	state = "moored" if kind == "boat" else ("parked" if kind == "plane" else "landed")
 	crashed_t = 0.0
 	throttle = 0.0
+	rotor = 0.0
 	gear_down = 1.0
 	if _gear:
 		_gear.scale = Vector3.ONE
@@ -344,7 +345,7 @@ func _plane(dt: float) -> void:
 	var cruise: float = spec.get("cruise", 70.0)
 	var vmax: float = spec.get("vmax", 95.0)
 	var thrust: float = spec.get("thrust", 6.0)
-	rotor = move_toward(rotor, 1.0 if on or state == "air" else 0.0, dt * 0.6)
+	rotor = move_toward(rotor, 1.0 if on or state in ["air", "stall"] else 0.0, dt * 0.6)
 	var fwd := forward()
 	var v := maxf(forward_speed, 0.0)
 	match state:
@@ -380,8 +381,11 @@ func _plane(dt: float) -> void:
 					if get_slide_collision(i).get_normal().y < 0.5:
 						_crash()
 						return
-			if not is_nan(g) and global_position.y > g + 0.05:
-				global_position.y = maxf(g, global_position.y - dt * 6.0)
+			if not is_nan(g):
+				if global_position.y > g + 0.05:
+					global_position.y = maxf(g, global_position.y - dt * 6.0)
+				elif global_position.y < g:
+					global_position.y = g
 		"air", "stall":
 			# Speed: hold = cruise, up = full power and climb, down = descend.
 			# Deployed landing gear adds subtle aerodynamic drag on approach.

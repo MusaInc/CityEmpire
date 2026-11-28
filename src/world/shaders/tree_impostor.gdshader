@@ -11,7 +11,7 @@ uniform sampler2D atlas : source_color, filter_linear_mipmap, repeat_disable;
 varying float v_tint;
 
 void vertex() {
-	v_lod_d = lod_fade_dist(MODEL_MATRIX, INV_VIEW_MATRIX);
+	v_lod_d = lod_fade_dist(MODEL_MATRIX, MAIN_CAM_INV_VIEW_MATRIX);
 	vec3 o = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
 	v_tint = fract(sin(dot(o.xz, vec2(12.9898, 78.233))) * 43758.5453);
 	NORMAL = normalize(NORMAL * 0.35 + vec3(0.0, 0.75, 0.0));

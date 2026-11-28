@@ -8,7 +8,7 @@ extends Node3D
 const WHEEL_MODEL := "res://assets/vehicles/wheel_traffic.glb"
 const DRIVER_MODEL := "res://assets/models/crowd_seated.glb"
 const ENTRIES_PATH := "res://config/empire/vehicle_entries.json"
-const DRIVER_RANGE := 62.0   # m: visible occupants inside transparent cabins
+const DRIVER_RANGE := 86.0   # m: visible occupants inside transparent cabins (matches CAR_NEAR)
 
 var game: EmpireGame
 var _wheel_mmi: MultiMeshInstance3D
@@ -208,7 +208,7 @@ func _process(dt: float) -> void:
 			if not d.is_empty():
 				_append_occupants(drv_groups, idx_i, xf.origin, xf.basis, body_name, d, 0.0)
 
-	var aabb := AABB(cp - Vector3(110, 30, 110), Vector3(220, 80, 220))
+	var aabb := AABB(cp - Vector3(110, 110, 110), Vector3(220, 220, 220))
 	_upload_wheels(wheel_xfs, aabb)
 	_upload_drivers(drv_groups, aabb)
 	_step_parked_exits(dt, cp)
@@ -318,7 +318,7 @@ func _upload_drivers(groups: Array, aabb: AABB) -> void:
 				var xf: Transform3D = item[0]
 				var b := xf.basis
 				var o := xf.origin
-				var c: Color = item[1]
+				var c: Color = (item[1] as Color).srgb_to_linear()
 				buf[j] = b.x.x; buf[j + 1] = b.y.x; buf[j + 2] = b.z.x; buf[j + 3] = o.x
 				buf[j + 4] = b.x.y; buf[j + 5] = b.y.y; buf[j + 6] = b.z.y; buf[j + 7] = o.y
 				buf[j + 8] = b.x.z; buf[j + 9] = b.y.z; buf[j + 10] = b.z.z; buf[j + 11] = o.z

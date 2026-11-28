@@ -61,7 +61,7 @@ void vertex() {
 			vec3(0.05, 0.04, 0.04), vec3(0.14, 0.09, 0.06), vec3(0.28, 0.17, 0.10), vec3(0.44, 0.24, 0.13),
 			vec3(0.64, 0.48, 0.28), vec3(0.78, 0.65, 0.40), vec3(0.45, 0.44, 0.43), vec3(0.72, 0.71, 0.70)));
 	} else if (part == 4) {
-		v_col = shirt;
+		v_col = srgb(shirt);
 	} else if (part == 6) {
 		v_col = srgb(pal8(fract(seed * 5.31),
 			vec3(0.92, 0.91, 0.89), vec3(0.12, 0.12, 0.14), vec3(0.62, 0.16, 0.19), vec3(0.84, 0.70, 0.36),
@@ -105,7 +105,7 @@ void fragment() {
 	}
 	vec3 c = v_col;
 	if (v_part == 4 && apron > 0.5 && v_front < -0.06) {
-		c = apron_col;  // staff apron (the studio's green, or your brand's)
+		c = srgb(apron_col);  // staff apron (the studio's green, or your brand's)
 	}
 	ALBEDO = person_cloth(c, v_surface, 1.0 - smoothstep(7.0, 23.0, length(VERTEX)), v_part);
 	SPECULAR = v_part == 1 || v_part == 3 ? 0.32 : 0.24;

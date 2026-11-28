@@ -561,7 +561,10 @@ static func carousel(sep := 16, h := 0.0) -> Array:
 
 
 static func width(ph: Phone) -> float:
-	return ph._page_host.size.x
+	var w := ph._page_host.size.x
+	if w <= 40.0 and ph._frame != null:
+		w = ph._frame.size.x - 40.0
+	return w if w > 40.0 else 680.0
 
 
 static func cols(ph: Phone, min_w: float, of := -1.0) -> int:
@@ -1452,10 +1455,13 @@ static func _stagger_rows(ph: Phone, grp: VBoxContainer, makers: Array) -> void:
 ## Adds makers' Controls to `box` a few per frame (with G.group separators
 ## when `rule`).
 static func _stagger_into(ph: Phone, box: Container, makers: Array, rule := false) -> void:
-	var inner := box
+	var inner_ref: WeakRef = weakref(box)
+	var ph_ref: WeakRef = weakref(ph)
 	var queue := makers.duplicate()
 	var step := func(self_ref: Array) -> void:
-		if not is_instance_valid(inner) or not inner.is_inside_tree():
+		var inner := inner_ref.get_ref() as Container
+		var ph_now := ph_ref.get_ref() as Phone
+		if inner == null or ph_now == null or not inner.is_inside_tree():
 			return
 		for k in STAGGER_PER_FRAME:
 			if queue.is_empty():
@@ -1470,7 +1476,7 @@ static func _stagger_into(ph: Phone, box: Container, makers: Array, rule := fals
 				inner.add_child(G.margin(hr, 76 if last and last.has_meta("icon") else 22, 0, 0, 0))
 			inner.add_child(row)
 		if not queue.is_empty():
-			ph.get_tree().process_frame.connect(func(): (self_ref[0] as Callable).call(self_ref), CONNECT_ONE_SHOT)
+			ph_now.get_tree().process_frame.connect(func(): (self_ref[0] as Callable).call(self_ref), CONNECT_ONE_SHOT)
 	var holder := [step]
 	ph.get_tree().process_frame.connect(func(): step.call(holder), CONNECT_ONE_SHOT)
 

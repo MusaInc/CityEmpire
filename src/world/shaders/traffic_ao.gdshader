@@ -8,6 +8,16 @@ render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabl
 global uniform float night;
 uniform float strength = 0.72;
 
+void vertex() {
+	// Mirror traffic.gdshader's INSTANCE_CUSTOM longitudinal offset so parked-car
+	// contact shadows sit directly under the car instead of 5 m behind it.
+	float spd = INSTANCE_CUSTOM.r;
+	float phase = INSTANCE_CUSTOM.g;
+	float span = max(INSTANCE_CUSTOM.b, 0.001);
+	float d = mod(TIME * spd + phase, span);
+	VERTEX.z -= d;
+}
+
 void fragment() {
 	vec2 q = (UV - 0.5) * 2.0;
 	vec2 d = abs(q) - vec2(0.58, 0.68);

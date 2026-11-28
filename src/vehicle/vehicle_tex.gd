@@ -184,14 +184,14 @@ static func trim_unused(keep_models: Array) -> void:
 		keep_set[s + "_lod1"] = true
 	for k in _bakes.keys():
 		var ks := String(k)
-		if ks.begins_with("civ_") or ks.begins_with("wheel_") or ks.begins_with("car_") or keep_set.has(ks):
+		if ks.begins_with("civ_") or ks.begins_with("wheel_") or ks.begins_with("car_") or ks.begins_with("train_") or ks.begins_with("liner") or keep_set.has(ks):
 			continue
 		_bakes.erase(k)
 	for k in _mats.keys():
 		var parts := String(k).split("@")
 		if parts.size() >= 2:
 			var model := parts[1]
-			if not model.begins_with("civ_") and not model.begins_with("wheel_") and not model.begins_with("car_") and not keep_set.has(model):
+			if not model.begins_with("civ_") and not model.begins_with("wheel_") and not model.begins_with("car_") and not model.begins_with("train_") and not model.begins_with("liner") and not keep_set.has(model):
 				_mats.erase(k)
 	_mx.unlock()
 

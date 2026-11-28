@@ -140,6 +140,15 @@ func _buttons() -> Dictionary:
 	return out
 
 
+func _over_hud(pos: Vector2) -> bool:
+	if ui == null:
+		return false
+	for ctrl in [ui._phone_btn, ui.minimap, ui._obj.get_parent() if ui._obj else null]:
+		if ctrl is Control and (ctrl as Control).visible and (ctrl as Control).get_global_rect().grow(6.0).has_point(pos):
+			return true
+	return false
+
+
 func _input(event: InputEvent) -> void:
 	if not visible or ui.panel_open() or ui.game == null or ui.game.state != "play":
 		return
@@ -148,6 +157,8 @@ func _input(event: InputEvent) -> void:
 		var t := event as InputEventScreenTouch
 		var driving := _driving()
 		if t.pressed:
+			if _over_hud(t.position):
+				return
 			var bs := _buttons()
 			for k in bs:
 				if (bs[k] as Rect2).grow(14).has_point(t.position):
@@ -389,13 +400,13 @@ func _draw() -> void:
 	var f := EmpireStyle.font("black")
 	var k := ui_k()
 	var sr := _safe()
-	var radius := R * Settings.touch_size
+	var radius := R * k
 	if _stick_id >= 0:
 		draw_circle(_stick_o, radius, Color(1, 1, 1, 0.08))
 		draw_arc(_stick_o, radius, 0, TAU, 48, Color(1, 1, 1, 0.3), 2.0, true)
-		draw_circle(_stick_o + _stick_v * radius, 30 * Settings.touch_size, Color(1, 1, 1, 0.45))
+		draw_circle(_stick_o + _stick_v * radius, 30 * k, Color(1, 1, 1, 0.45))
 	else:
-		var home := Vector2(sr.position.x + 150 * Settings.touch_size + Settings.touch_inset, sr.end.y - 150 * Settings.touch_size)
+		var home := Vector2(sr.position.x + 150 * k + Settings.touch_inset, sr.end.y - 150 * k)
 		draw_arc(home, radius, 0, TAU, 48, Color(1, 1, 1, 0.12), 2.0, true)
 		if _driving():
 			_label(f, home + Vector2(0, radius + 22), "STEER", 13, Color(1, 1, 1, 0.4))
@@ -423,6 +434,8 @@ func _draw() -> void:
 		draw_circle(c, rad, col)
 		draw_arc(c, rad, 0, TAU, 48, Color(1, 1, 1, 0.25), 2.0, true)
 		var fs := int((22 if txt.length() < 7 else 16) * (k if rad < 60 else 1.0))
+		while fs > 11 and f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > rad * 1.72:
+			fs -= 1
 		_label(f, c + Vector2(0, fs * 0.35), txt, fs, ink)
 
 

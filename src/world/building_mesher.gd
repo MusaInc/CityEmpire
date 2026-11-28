@@ -499,7 +499,8 @@ func _frontage_courses(t: Array, style: int, seed: float, col: Color, trim: Colo
 func _shopfront_frames(t: Array, style: int, seed: float, col: Color, trim: Color, unit: Dictionary) -> void:
 	if bool(unit.get("ground", false)) or style == CityLayout.Style.WAREHOUSE or (unit.has("core") and not unit.get("ground", false)):
 		return
-	if fposmod(seed * 5.37 + 0.21, 1.0) >= 0.5:
+	var q := floorf(fposmod(seed, 1.0) * 256.0) / 256.0
+	if fposmod(q * 5.37 + 0.21, 1.0) >= 0.5:
 		return
 	var base := float(t[4])
 	if float(t[5]) - base < 5.0:
@@ -518,14 +519,17 @@ func _shopfront_frames(t: Array, style: int, seed: float, col: Color, trim: Colo
 		_trim_box(_fbox(face, 0.06, span - 0.06, -0.01, 0.18, base + 3.60, base + 3.74), frame_col.darkened(0.08))
 		# Stall-riser plinth sill along the base of the display windows.
 		_trim_box(_fbox(face, 0.06, span - 0.06, -0.01, 0.14, base + 0.52, base + 0.64), frame_col)
-		# Projecting bay piers (every 6 m) + central recessed-door canopy hoods.
-		var bays := maxi(1, int(floor(span / 6.0)))
-		for b_i in range(bays + 1):
-			var px := clampf(float(b_i) * 6.0, 0.18, span - 0.18)
+		# Projecting bay piers (every 6 m, aligned to continuous perimeter u matching
+		# building.gdshader and awning_runs) + central recessed-door canopy hoods.
+		var origin: float = face[4]
+		var bay0 := ceili(origin / 6.0)
+		var bay1 := floori((origin + span) / 6.0)
+		for bay in range(bay0, bay1 + 1):
+			var px := clampf(float(bay) * 6.0 - origin, 0.18, span - 0.18)
 			_trim_box(_fbox(face, px - 0.18, px + 0.18, -0.01, 0.22, base, base + 4.52), frame_col.darkened(0.06))
-		for b_i in range(bays):
-			var cx := float(b_i) * 6.0 + 3.0
-			if cx + 0.85 < span - 0.25:
+		for bay in range(bay0 - 1, bay1 + 1):
+			var cx := float(bay) * 6.0 + 3.0 - origin
+			if cx - 0.85 > 0.25 and cx + 0.85 < span - 0.25:
 				# Projecting doorway canopy / transom hood over the central shop door.
 				_trim_box(_fbox(face, cx - 0.72, cx + 0.72, -0.01, 0.34, base + 2.54, base + 2.68), metal_col)
 				# Vertical display mullions flanking the doorway.
@@ -1166,10 +1170,9 @@ static func _roof_crowns(out: Dictionary, b: Dictionary, tt: Array, ry: float, s
 				pl = _aabb(xx, z0 + 1.5, xx + 1.0, z1 - 1.5, ry, ry + 0.34)
 			out["draw"].append([pl, trim])
 			out["col"].append(pl)
-			var top := pl
-			top.position.y = ry + 0.34
-			top.size.y = 0.3
-			out["draw"].append([top.grow(-0.08), leaf[crng.randi() % 3]])
+			var hedge := AABB(Vector3(pl.position.x + 0.08, ry + 0.34, pl.position.z + 0.08),
+				Vector3(maxf(0.1, pl.size.x - 0.16), 0.3, maxf(0.1, pl.size.z - 0.16)))
+			out["draw"].append([hedge, leaf[crng.randi() % 3]])
 			# A few small trees along it.
 			var n := 2 + crng.randi() % 3
 			for i in n:
@@ -1540,22 +1543,22 @@ func _pitched_roof(b: Dictionary, t: Array, ry: float, overhang: float, wall_col
 		if detailed:
 			beam(ridge_a, ridge_b, 0.22, 0.16, roof_c.darkened(0.22))
 	else:
-		# Gabled roof: two main slopes + masonry gable end triangles.
+		# Gabled roof: two main slopes + masonry gable end triangles (explicit outward normals).
 		var gable_c := wall_col.darkened(0.06)
 		if along_x:
 			ridge_a = Vector3(x0, ry + peak_h, cz)
 			ridge_b = Vector3(x1, ry + peak_h, cz)
 			_roof_quad(p00, p10, ridge_b, ridge_a, eave_c, ridge_c, seed)
 			_roof_quad(p11, p01, ridge_a, ridge_b, eave_c, ridge_c, seed)
-			_roof_tri(p01, p00, ridge_a, gable_c, gable_c, gable_c, seed, KIND_TRIM)
-			_roof_tri(p10, p11, ridge_b, gable_c, gable_c, gable_c, seed, KIND_TRIM)
+			_tri(p00, p01, ridge_a, Vector3.LEFT, gable_c)
+			_tri(p11, p10, ridge_b, Vector3.RIGHT, gable_c)
 		else:
 			ridge_a = Vector3(cx, ry + peak_h, z0)
 			ridge_b = Vector3(cx, ry + peak_h, z1)
 			_roof_quad(p10, p11, ridge_b, ridge_a, eave_c, ridge_c, seed)
 			_roof_quad(p01, p00, ridge_a, ridge_b, eave_c, ridge_c, seed)
-			_roof_tri(p00, p10, ridge_a, gable_c, gable_c, gable_c, seed, KIND_TRIM)
-			_roof_tri(p11, p01, ridge_b, gable_c, gable_c, gable_c, seed, KIND_TRIM)
+			_tri(p10, p00, ridge_a, Vector3.FORWARD, gable_c)
+			_tri(p01, p11, ridge_b, Vector3.BACK, gable_c)
 		if detailed:
 			beam(ridge_a, ridge_b, 0.22, 0.16, roof_c.darkened(0.22))
 	if collision_only:
@@ -1747,11 +1750,20 @@ func _awning(a: Vector3, b: Vector3, out: Vector3, col: Color, drop: Color) -> v
 	var hem_c := col.lightened(0.26) if col.get_luminance() < 0.45 else drop.darkened(0.30)
 	quad(fa + down_trim, fa + down_hem, fb + down_hem, fb + down_trim, n,
 		Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, hem_c, KIND_TRIM, 0, 0)
-	# Side gussets closing both ends (a side and b side).
+	# Side gussets closing both ends (a side and b side, explicit outward normals).
 	var side_dir := (a - b).normalized()
 	var gusset_c := drop.darkened(0.14)
-	_roof_tri(a + up_wall, fa + up_front, fa + down_hem, gusset_c.darkened(0.12), gusset_c, gusset_c, 0.0, KIND_TRIM)
-	_roof_tri(a + up_wall, fa + down_hem, a, gusset_c.darkened(0.12), gusset_c, gusset_c.darkened(0.18), 0.0, KIND_TRIM)
+	var ga0 := a + up_wall
+	var ga1 := fa + up_front
+	var ga2 := fa + down_hem
+	var ga3 := a
+	for tri_v in [[ga0, ga1, ga2], [ga0, ga2, ga3]]:
+		var p0: Vector3 = tri_v[0]
+		var p1: Vector3 = tri_v[1]
+		var p2: Vector3 = tri_v[2]
+		if (p1 - p0).cross(p2 - p0).dot(side_dir) > 0.0:
+			var tv := p1; p1 = p2; p2 = tv
+		_tri(p0, p1, p2, side_dir, gusset_c)
 	# Opposite side gusset (normal pointing along -side_dir).
 	var gb0 := b + up_wall
 	var gb1 := fb + up_front

@@ -348,9 +348,11 @@ func _apply(dt: float, instant: bool) -> void:
 		sun.light_color = _ramp(el, [[0.0, Color(1.0, 0.66, 0.42)], [8.0, Color(1.0, 0.80, 0.62)],
 			[25.0, Color(1.0, 0.92, 0.82)], [60.0, Color(1.0, 0.97, 0.92)]])
 		sun.light_energy = day_light * _rampf(el, [[0.0, 1.55], [10.0, 2.08], [25.0, 2.48], [60.0, 2.62]])
-		sky_mat.set_shader_parameter("sun_glow", 1.05)
+		# Fade sky disc & glow to 0 right at the -3° crossover so sun->moon never snaps.
+		var sun_vis := smoothstep(-3.0, 1.5, el)
+		sky_mat.set_shader_parameter("sun_glow", 1.05 * sun_vis)
 		sky_mat.set_shader_parameter("disc_size", 0.999989)
-		sky_mat.set_shader_parameter("disc_k", 6.5)
+		sky_mat.set_shader_parameter("disc_k", 6.5 * sun_vis)
 		sky_mat.set_shader_parameter("sun_tint", sun.light_color)
 	else:
 		# Moon: high in the south-east, cool and crisp.
@@ -358,11 +360,12 @@ func _apply(dt: float, instant: bool) -> void:
 		# (Night rebalance 2026-11-26: 0.56 near-white lit the city like an
 		# overcast day; the moon is a cool key a quarter of that.)
 		sun.light_color = Color(0.64, 0.74, 1.0)
+		var moon_vis := 1.0 - smoothstep(-12.0, -3.0, el)
 		# (Brighter again 2026-11-26 – "still too dark outside": 0.34.)
-		sun.light_energy = 0.34 * (1.0 - smoothstep(-12.0, -3.0, el))
-		sky_mat.set_shader_parameter("sun_glow", 0.28)
+		sun.light_energy = 0.34 * moon_vis
+		sky_mat.set_shader_parameter("sun_glow", 0.28 * moon_vis)
 		sky_mat.set_shader_parameter("disc_size", 0.999984)
-		sky_mat.set_shader_parameter("disc_k", 2.4)
+		sky_mat.set_shader_parameter("disc_k", 2.4 * moon_vis)
 		sky_mat.set_shader_parameter("sun_tint", Color(0.78, 0.86, 1.0))
 	var punch := float(w["punch"])
 	var hz := float(w["haze"])
@@ -447,13 +450,14 @@ func _apply(dt: float, instant: bool) -> void:
 		_interior_target = InteriorKit.camera_weight(get_tree(), cam.global_position) if cam else 0.0
 	_interior_mix = lerpf(_interior_mix, _interior_target, 1.0 if instant else 1.0 - exp(-dt * 3.8))
 	var street_exposure := lerpf(1.02, 1.3, night) * lerpf(1.0, 1.08, overcast) * (1.0 + 0.03 * hz * day_light)
-	env.tonemap_exposure = lerpf(street_exposure, 1.13, _interior_mix)
+	env.tonemap_exposure = street_exposure
 	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
 	var hk := lerpf(1.0, 0.58, hz)
 	# (Fair weather: clear air – the distance was washed out from 185 m.)
 	env.fog_depth_begin = lerpf(320.0, 26.0, fog) * lerpf(1.0, 0.7, hz) * (1.0 + 0.8 * alt * (1.0 - fog))
 	env.fog_depth_end = lerpf(3400.0, 620.0, fog) * hk * (1.0 + 0.45 * alt * (1.0 - fog))
-	env.fog_density = lerpf(lerpf(0.24, 0.46, hz), 0.90, fog) * (1.0 - 0.14 * alt * (1.0 - fog))   # (0.34 base read milky)
+	# Fade outdoor depth fog out indoors so large interiors (terminal, garage, venues) stay crisp.
+	env.fog_density = lerpf(lerpf(0.24, 0.46, hz), 0.90, fog) * (1.0 - 0.14 * alt * (1.0 - fog)) * (1.0 - _interior_mix)
 	env.fog_depth_curve = lerpf(1.45, 1.15, hz)
 	env.fog_light_color = fog_col
 	env.fog_light_energy = lerpf(1.0, 0.42, night)

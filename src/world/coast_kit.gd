@@ -181,7 +181,12 @@ func _steps(p: Vector2, n: Vector2, top: float, row: Array) -> void:
 	for sg: float in [-1.0, 1.0]:
 		var a2 := p + t * sg * 1.55
 		var b2 := e + t * sg * 1.55
+		var m2 := (a2 + b2) * 0.5
+		var my := (top + sand) * 0.5
 		L._kbeam(k, Vector3(a2.x, top + 0.9, a2.y), Vector3(b2.x, sand + 0.9, b2.y), 0.06, 0.06, IRON, false)
+		L._kbeam(k, Vector3(a2.x, top - 0.1, a2.y), Vector3(a2.x, top + 0.9, a2.y), 0.06, 0.06, IRON, false)
+		L._kbeam(k, Vector3(m2.x, my - 0.2, m2.y), Vector3(m2.x, my + 0.9, m2.y), 0.06, 0.06, IRON, false)
+		L._kbeam(k, Vector3(b2.x, sand - 0.2, b2.y), Vector3(b2.x, sand + 0.9, b2.y), 0.06, 0.06, IRON, false)
 	var lb := p - t * 2.6 - n * 0.6
 	L._kbeam(k, Vector3(lb.x, top, lb.y), Vector3(lb.x, top + 1.5, lb.y), 0.1, 0.1, Color(0.85, 0.2, 0.16), false)
 	L._kbeam(k, Vector3(lb.x, top + 1.05, lb.y) - Vector3(t.x, 0, t.y) * 0.3, Vector3(lb.x, top + 1.05, lb.y) + Vector3(t.x, 0, t.y) * 0.3,
@@ -318,10 +323,12 @@ func _viewpoint(f: Dictionary, o: PackedVector2Array, i: int) -> void:
 		var a1 := TAU * (a + 1) / 16.0
 		if a >= 11 and a <= 13:
 			continue  # (the way in, from inland)
-		var q0 := c + Vector2(cos(a0), sin(a0)) * 5.0
-		var q1 := c + Vector2(cos(a1), sin(a1)) * 5.0
-		var m0 := c + Vector2(cos(a0), sin(a0)) * 4.6
-		var m1 := c + Vector2(cos(a1), sin(a1)) * 4.6
+		var d0 := t * cos(a0) + nn * sin(a0)
+		var d1 := t * cos(a1) + nn * sin(a1)
+		var q0 := c + d0 * 5.0
+		var q1 := c + d1 * 5.0
+		var m0 := c + d0 * 4.6
+		var m1 := c + d1 * 4.6
 		L._kprism(k, PackedVector2Array([q0, q1, m1, m0]), y + 0.25, y + 0.95, STONE.lightened(0.06))
 	_bench(k, c - nn * 1.8 + t * 1.6, nn, y + 0.25)
 	_bench(k, c - nn * 1.8 - t * 1.6, nn, y + 0.25)

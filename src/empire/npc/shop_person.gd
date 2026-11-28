@@ -140,7 +140,9 @@ func set_carry(on: bool, colour := Color(0.7, 0.55, 0.35)) -> void:
 		carry_box = MeshInstance3D.new()
 		carry_box.mesh = ShopInterior.shape_mesh("case")
 		carry_box.material_override = ShopInterior._mat("goods")
-		carry_box.position = Vector3(0, 1.08, -0.38)
+		var is_fem := _mi != null and _mi.material_override == _mat_female
+		var sc := _mi.scale if _mi != null else Vector3.ONE
+		carry_box.position = Vector3(0.0, 1.08 * sc.y * (0.925 if is_fem else 1.0), -0.38 * sc.z)
 		carry_box.scale = Vector3.ONE * 0.85
 		add_child(carry_box)
 	if carry_box:
@@ -244,3 +246,6 @@ func _process(dt: float) -> void:
 	_mi.set_instance_shader_parameter("stride", stride)
 	_mi.set_instance_shader_parameter("walk", walk)
 	_mi.set_instance_shader_parameter("carry", carry)
+	if carry_box and carry > 0.5:
+		var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+		carry_box.visible = cam == null or cam.global_position.distance_squared_to(global_position + Vector3(0.0, 0.9, 0.0)) > 1.44

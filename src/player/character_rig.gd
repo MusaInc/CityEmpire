@@ -808,7 +808,7 @@ func _show_variants() -> void:
 				_focus_index = mi.find_blend_shape_by_name("Focus")
 		elif n.begins_with("Hair_") or n.begins_with("Groom_"):
 			var style_face := "%s_%s" % [style, face]
-			mi.visible = n.ends_with("_" + style_face) and not mask in Shop.HAIR_MASKS and (hat != "beanie" or hat_fitted)
+			mi.visible = n.ends_with("_" + style_face) and not mask in Shop.HAIR_MASKS and (hat not in ["beanie", "cap"] or hat_fitted)
 			if n.begins_with("Groom_") and hat in ["cap", "beanie"]:
 				mi.visible = false
 		elif n.begins_with("Acc_"):

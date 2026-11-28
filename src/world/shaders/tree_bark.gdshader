@@ -10,7 +10,7 @@ uniform bool has_normal = false;
 uniform float roughness = 0.9;
 
 void vertex() {
-	v_lod_d = lod_fade_dist(MODEL_MATRIX, INV_VIEW_MATRIX);
+	v_lod_d = lod_fade_dist(MODEL_MATRIX, MAIN_CAM_INV_VIEW_MATRIX);
 }
 
 void fragment() {

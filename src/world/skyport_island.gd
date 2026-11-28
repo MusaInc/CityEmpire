@@ -1835,6 +1835,8 @@ func _road_lamp_xforms() -> Array[Transform3D]:
 	var o := outline()
 	var placed: Array[Vector2] = []
 	for r in plan_data.get("roads", []):
+		if r.size() > 3 and bool(r[3]):
+			continue
 		var rname := String(r[0])
 		if rname in ["Airside Service Road", "Parking Access", "Fuel Farm Road"]:
 			continue
@@ -1853,7 +1855,7 @@ func _road_lamp_xforms() -> Array[Transform3D]:
 				var nv := Vector3(-dv.z, 0.0, dv.x).normalized()
 				var outward := nv * side_toggle
 				var pole := pa + outward * (hw + 1.15)
-				pole.y = LAND_Y
+				pole.y = LAND_Y + knoll_h(pole.x, pole.z)
 				var q := Vector2(pole.x, pole.z)
 				var ok := Geometry2D.is_point_in_polygon(q, o) \
 					and road_clearance(plan_data, q) >= 0.75 \

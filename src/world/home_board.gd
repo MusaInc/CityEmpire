@@ -42,6 +42,10 @@ func refresh() -> void:
 
 
 static func board_text(d: Dictionary, home_tier: int) -> String:
+	var has_swing := int(d.get("jobs_done", 0)) > 0 or float(d.get("total_distance_m", 0.0)) > 0.0 or not (d.get("tokens", []) as Array).is_empty()
+	if not has_swing:
+		var title := "PENTHOUSE RESIDENCE" if home_tier == 4 else ("SKY RESIDENCE" if home_tier == 3 else ("LOFT RESIDENCE" if home_tier == 2 else "RESIDENCE"))
+		return "%s\nWORLDSTATE\nCITY500 · PRIVATE PORTFOLIO\nPROPERTY DESK\nVEHICLE COLLECTION" % title
 	var rep := int(d.get("rep", 0))
 	var lines: Array[String] = []
 	lines.append("HALL OF FAME" if home_tier == 4 else ("THE BOARD" if home_tier == 0 else "PROGRESS"))

@@ -19,8 +19,21 @@ const CLEAR_AWAY := 110.0     # m: a settled wreck clears once you're this far
 var game: EmpireGame
 var wrecks: Array = []        # {car, t, traffic: id or -1, hit, spawn_y, parked: [CityWorld, key, xf, kind, col] or [], island: Dictionary or null}
 const UNTOUCHED_BACK := 1.6   # s: a swapped car nothing touched goes back to traffic / the kerb
-var _parked := {}             # [CityWorld, chunk key] -> [[Transform3D, kind]]
+var _parked := {}             # Vector3i(key.x, key.y, world_idx) -> [[Transform3D, kind]]
+var _prune_t := 0.0
 var _rng := RandomNumberGenerator.new()
+
+
+func _p_key(w: CityWorld, key: Vector2i) -> Vector3i:
+	return Vector3i(key.x, key.y, 0 if w == game.world else 1)
+
+
+func _prune_parked() -> void:
+	for k in _parked.keys():
+		var vk: Vector3i = k
+		var w: CityWorld = game.world if vk.z == 0 else game.world.mainland
+		if w == null or not w._loaded.has(Vector2i(vk.x, vk.y)):
+			_parked.erase(k)
 
 
 func setup(g: EmpireGame) -> void:
@@ -78,6 +91,10 @@ func _physics_process(dt: float) -> void:
 	for world in [game.world, game.world.mainland]:
 		if world and world.traffic:
 			world.traffic.obstacles = obs
+	_prune_t += dt
+	if _prune_t >= 4.0:
+		_prune_t = 0.0
+		_prune_parked()
 
 
 ## Undo a swap: the physical car goes, the traffic slot / parked car comes back.
@@ -92,7 +109,7 @@ func _restore(w: Dictionary, tr: Traffic) -> void:
 		if is_instance_valid(cw):
 			cw.unbreak_item((pk[2] as Transform3D).origin)
 			cw.refresh_parked(pk[1])
-			var ck := [cw, pk[1]]
+			var ck := _p_key(cw, pk[1])
 			if _parked.has(ck):
 				(_parked[ck] as Array).append([pk[2], pk[3], pk[4]] if pk.size() > 4 else [pk[2], pk[3]])
 	var ic = w.get("island")
@@ -157,7 +174,7 @@ func _look_ahead(me: Car) -> void:
 				var key := c0 + Vector2i(dx, dz)
 				if not w._loaded.has(key):
 					continue
-				var ck := [w, key]
+				var ck := _p_key(w, key)
 				if not _parked.has(ck):
 					_parked[ck] = w.parked_cars(key)
 				var list: Array = _parked[ck]
@@ -277,7 +294,7 @@ func stealable(p: Vector3, reach: float) -> Dictionary:
 				var key := c0 + Vector2i(dx, dz)
 				if not w._loaded.has(key):
 					continue
-				var ck := [w, key]
+				var ck := _p_key(w, key)
 				if not _parked.has(ck):
 					_parked[ck] = w.parked_cars(key)
 				var list: Array = _parked[ck]
@@ -330,7 +347,7 @@ func take(c: Dictionary) -> Array:
 		"parked":
 			var w: CityWorld = c["w"]
 			var key: Vector2i = c["key"]
-			var list: Array = _parked.get([w, key], [])
+			var list: Array = _parked.get(_p_key(w, key), [])
 			list.erase(c["entry"])
 			w.break_item(xf.origin)
 			w.refresh_parked(key)

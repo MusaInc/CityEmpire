@@ -1740,10 +1740,11 @@ func _stream_interiors() -> void:
 		if u.has("street_use"):
 			continue
 		var d := Vector2(focus.x, focus.z).distance_to(Vector2(float(u["pos"][0]), float(u["pos"][2])))
+		var dy := absf(focus.y - float(u["pos"][1]))
 		var id: String = u["id"]
-		if d < STREAM_IN and not interiors.has(id):
+		if d < STREAM_IN and dy < 45.0 and not interiors.has(id):
 			to_build.append([d, u])
-		elif d > STREAM_OUT and interiors.has(id) and floor_unit != id:
+		elif (d > STREAM_OUT or dy > 65.0) and interiors.has(id) and floor_unit != id:
 			interiors[id].queue_free()
 			interiors.erase(id)
 	if not to_build.is_empty():
@@ -2088,6 +2089,10 @@ func _update_indoors() -> void:
 		var p := player.global_position
 		for id in interiors:
 			var si: ShopInterior = interiors[id]
+			if si.elevator and is_instance_valid(si.elevator) and si.elevator.is_inside_cabin(p):
+				ceiling = si.elevator.global_position.y + si.elevator.cabin_y + ApartmentElevator.CAB_H - 0.05
+				in_elev = true
+				break
 			if si.global_transform.origin.distance_squared_to(p) < 6400.0 and si.contains(p):
 				ceiling = si.global_transform.origin.y + si.H
 				break
@@ -2273,11 +2278,24 @@ func _update_spot() -> void:
 			best_d = float(sk["d"])
 	if garage and not in_vehicle() and not player.stunned:
 		# The Vehicle Collection: a button beside every lift you own (down),
-		# the lift doors in the garage (back up).
+		# the lift doors in the garage (back up), and commercial lifts (hotels, offices, HQ).
 		var gs := garage.spot_near(player.global_position)
 		if not gs.is_empty() and float(gs["d"]) < best_d:
 			best = gs
 			best_d = float(gs["d"])
+		for si: ShopInterior in interiors.values():
+			var cel := si.elevator
+			if cel == null or not is_instance_valid(cel):
+				continue
+			if cel.is_inside_cabin(player.global_position):
+				if cel.state == "idle_g":
+					best = {"kind": "comm_elev_select", "unit": String(si.unit["id"]), "world": cel.cabin_panel_world()}
+					best_d = 0.08
+					break
+			var cd := player.global_position.distance_to(cel.ground_call_world() + Vector3.UP * 0.95)
+			if cd < 2.0 and cel.state == "idle_g" and cel._g_door_open < 0.5 and cd < best_d:
+				best = {"kind": "comm_elev_call", "unit": String(si.unit["id"]), "world": cel.ground_call_world()}
+				best_d = cd
 		for hid: String in elevators:
 			if not empire.owns_property(hid):
 				continue
@@ -2481,6 +2499,10 @@ func spot_prompt() -> Array:
 			return ["CALL ELEVATOR TO %s" % (el_t.top_floor_label if el_t else "APARTMENT"), true]
 		"elev_select":
 			return ["CHOOSE A FLOOR", true]
+		"comm_elev_select":
+			return ["LIFT · CHOOSE A FLOOR", true]
+		"comm_elev_call":
+			return ["CALL ELEVATOR", true]
 		"home_down":
 			return ["CALL ELEVATOR TO STREET", true]
 		"home_bed":
@@ -2694,6 +2716,13 @@ func act() -> void:
 				el_u.call_to(true)
 		"elev_select":
 			ui.open_lift_floors(String(spot["home"]), false)
+		"comm_elev_select":
+			ui.open_commercial_lift_floors(String(spot["unit"]))
+		"comm_elev_call":
+			var csi: ShopInterior = interiors.get(String(spot["unit"]))
+			if csi and csi.elevator:
+				Sfx.play("elev_btn", -5.0)
+				csi.elevator.call_to(false)
 		"home_down":
 			var el_d: ApartmentElevator = elevators.get(spot["home"])
 			if el_d:
@@ -4012,8 +4041,6 @@ func _build_elevators() -> void:
 
 
 func _tick_elevators(dt: float) -> void:
-	if elevators.is_empty():
-		return
 	var riding := false
 	for hid: String in elevators:
 		var el: ApartmentElevator = elevators[hid]
@@ -4028,6 +4055,13 @@ func _tick_elevators(dt: float) -> void:
 		if el.is_riding():
 			riding = true
 			_riding_el = el
+	for si: ShopInterior in interiors.values():
+		var cel := si.elevator
+		if cel and is_instance_valid(cel):
+			cel.tick(dt, player, true)
+			if cel.is_riding():
+				riding = true
+				_riding_el = cel
 	if garage and garage.inside and garage.lift and garage.lift.is_riding():
 		riding = true
 		_riding_el = garage.lift
@@ -4056,6 +4090,9 @@ func reset_all_elevators() -> void:
 	for el: ApartmentElevator in elevators.values():
 		if is_instance_valid(el):
 			el.reset_safe()
+	for si: ShopInterior in interiors.values():
+		if si.elevator and is_instance_valid(si.elevator):
+			si.elevator.reset_safe()
 	if garage and garage.lift and is_instance_valid(garage.lift):
 		garage.lift.reset_safe()
 	_elev_riding = false
@@ -4115,11 +4152,42 @@ func choose_floor(hid: String, which: String) -> void:
 				el.settle_closed())
 
 
+## Commercial lobby elevator (Hotel / Office / HQ) → Vehicle Collection Garage.
+func ride_commercial_to_garage(unit_id: String) -> void:
+	var si: ShopInterior = interiors.get(unit_id)
+	if si == null or si.elevator == null or garage == null:
+		return
+	var cel := si.elevator
+	_face_lift_doors(cel)
+	cel.trip(["B1", VehicleGarage.BAY_LEVEL], func():
+		var from := cel.cabin_xf()
+		garage.enter("", false, cel)
+		garage.lift.arrive_sealed(false, VehicleGarage.BAY_LEVEL)
+		_carry_rider(from, garage.lift)
+		cel.settle_closed())
+
+
+## Commercial lobby elevator → building's upper management/suite panel.
+func open_commercial_upper(unit_id: String) -> void:
+	var si: ShopInterior = interiors.get(unit_id)
+	if si == null:
+		return
+	var k := String(si.kind)
+	if k == "hq":
+		ui.open_hq()
+	elif k == "office":
+		ui.open_office(si.unit)
+	else:
+		ui.open_phone("property")
+
+
 ## From the garage's lift back up (the floor panel in its cabin): the same
-## ride in reverse – B1, G – into the apartment lift's cabin at the lobby,
+## ride in reverse – B1, G – into the apartment or commercial lift's cabin,
 ## which opens there or rides on up to the home.
 func arrive_from_garage(hid: String, to_top: bool) -> void:
-	var el: ApartmentElevator = elevators.get(hid)
+	var el: ApartmentElevator = elevators.get(hid) if hid != "" else null
+	if el == null and garage and is_instance_valid(garage.from_lift):
+		el = garage.from_lift
 	if el == null or garage.lift == null:
 		return
 	var gl := garage.lift
@@ -4127,15 +4195,36 @@ func arrive_from_garage(hid: String, to_top: bool) -> void:
 	gl.trip(["B1", "G"], func():
 		var from := gl.cabin_xf()
 		garage.leave_quietly()
-		el.arrive_sealed(false, "G", to_top)
+		el.arrive_sealed(false, "G", to_top and not el.commercial_stop)
 		_carry_rider(from, el))
 
 
+## List of owned (non-let) apartment homes reachable from the universal lift network.
+func owned_lift_homes() -> Array:
+	var out: Array = []
+	for home in homes():
+		var hid := String(home["id"])
+		if not elevators.has(hid) or not empire.owns_property(hid):
+			continue
+		var is_let := false
+		for p: Dictionary in empire.properties:
+			if p["id"] == hid:
+				is_let = bool(p.get("let", false))
+				break
+		if not is_let:
+			out.append(home)
+	return out
+
+
 ## Moves you from one lift cabin to another at the same place inside it
-## (doors shut both ends: nothing to see). The camera keeps its framing.
+## (doors shut both ends: nothing to see). Clamps strictly inside the cabin's
+## safe standing zone so players never clip doors/walls or spawn off-floor.
 func _carry_rider(from: Transform3D, to_el: ApartmentElevator) -> void:
 	var to := to_el.cabin_xf()
 	var rel := from.affine_inverse() * player.global_position
+	rel.x = clampf(rel.x, -ApartmentElevator.CAB_W * 0.28, ApartmentElevator.CAB_W * 0.28)
+	rel.z = clampf(rel.z, -ApartmentElevator.SHAFT_D + 0.48, -0.52)
+	rel.y = 0.95
 	var p := to * rel
 	vehicle_access.interrupt()
 	player.respawn(p)
@@ -4458,11 +4547,19 @@ func _trim_unused_caches() -> void:
 	if empire == null:
 		return
 	var keep: Array = []
+	for k in CityWorld.CAR_KINDS:
+		var ks := String(k[2]) if k is Array and (k as Array).size() > 2 else ""
+		if ks != "" and ks not in keep:
+			keep.append(ks)
 	for v in empire.vehicles:
-		var m: Dictionary = EmpireData.vehicle_model(String(v.get("model", "")))
-		var b := String(m.get("body", ""))
-		if b != "" and b not in keep:
-			keep.append(b)
+		var mid := String(v.get("model", ""))
+		if mid != "" and mid not in keep:
+			keep.append(mid)
+		var m: Dictionary = EmpireData.vehicle_model(mid)
+		for field in ["body", "art"]:
+			var b := String(m.get(field, ""))
+			if b != "" and b not in keep:
+				keep.append(b)
 	CarVisual.trim_caches(keep)
 	VehicleTex.trim_unused(keep)
 	if garage and garage.inside and crowd:

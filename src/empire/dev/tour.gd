@@ -21,6 +21,10 @@ func _run() -> void:
 	var lines := FileAccess.get_file_as_string(path).split("\n", false)
 	var only := String(args.get("tour-only", ""))
 	await get_tree().create_timer(4.0).timeout
+	if game.has_method("choose_opening"):
+		game.call("choose_opening", {})
+	if game.get("ui") and (game.get("ui") as Object).has_method("close_panel"):
+		(game.get("ui") as Object).call("close_panel", true)
 	if args.has("tour-tree"):
 		for c1 in get_tree().root.get_node("EmpireGame").get_children():
 			var names := []

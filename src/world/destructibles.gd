@@ -132,6 +132,16 @@ func _tick_restore(dt: float) -> void:
 			continue
 		w.unbreak_item(xf.origin)
 		_dirty[[w, it[2]]] = 0.1
+		if r.size() > 2:
+			var b_list: Array = r[2]
+			if not b_list.is_empty():
+				var bk := Vector2i(roundi(xf.origin.x * 2.0), roundi(xf.origin.z * 2.0))
+				for b in b_list:
+					var bw: CityWorld = b[2]
+					if is_instance_valid(bw):
+						bw.unbreak_item((b[0] as Transform3D).origin)
+						_dirty[[bw, b[1]]] = 0.1
+				_banners[bk] = b_list
 		var c := Vector2i(floori(xf.origin.x / CELL), floori(xf.origin.z / CELL))
 		if not _grid.has(c):
 			_grid[c] = []
@@ -178,9 +188,11 @@ func _break(it: Array, car: Car) -> void:
 	var w: CityWorld = it[3]
 	w.break_item(xf.origin)
 	_dirty[[w, it[2]]] = 0.15
+	var broken_banners: Array = []
 	if kind == "streetlight":
 		var bk := Vector2i(roundi(xf.origin.x * 2.0), roundi(xf.origin.z * 2.0))
-		for b in _banners.get(bk, []):
+		broken_banners = (_banners.get(bk, []) as Array).duplicate()
+		for b in broken_banners:
 			w.break_item((b[0] as Transform3D).origin)
 			_dirty[[b[2], b[1]]] = 0.15
 		_banners.erase(bk)
@@ -198,7 +210,7 @@ func _break(it: Array, car: Car) -> void:
 	if to_item.length() > 0.01 and car.has_method("external_impact"):
 		var at := car.global_position + to_item.normalized() * minf(to_item.length(), (car.spec["size"] as Vector3).z * 0.5) + Vector3.UP * 0.45
 		car.external_impact(at, -to_item.normalized(), dv)
-	_restore.append([0.0, it])
+	_restore.append([0.0, it, broken_banners])
 	_throw(kind, xf, car, w)
 	broke.emit(kind, xf.origin, car)
 

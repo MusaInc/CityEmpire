@@ -43,6 +43,8 @@ const BAY_LEVEL := "B2"
 var game: EmpireGame
 var bays := 0
 var from_home := ""
+var from_lift: ApartmentElevator
+var from_style := "apartment"
 var inside := false
 var lift: ApartmentElevator
 var _vis: Node3D
@@ -52,12 +54,14 @@ var _shutter_open := 0.0
 var _lights: Array[Light3D] = []
 var _plaques: Array[Label3D] = []
 var _lift_tier := -1
+var _lift_style := ""
 var _anchor: Node3D
 var _exit: Dictionary = {}        # the road spot outside, found as you climb
 var _wash: ColorRect
 var _wash_layer: CanvasLayer
 var _wash_t := 0.0                # >0 fading in, <0 fading out
 var _exiting: Car
+var _day_mat: StandardMaterial3D
 
 
 func setup(g: EmpireGame) -> void:
@@ -131,16 +135,21 @@ func _home_tier(hid: String) -> int:
 ## Into the garage: every car into its bay, the lights on, the city kept
 ## streaming round the building you came from. `teleport` false: the lift
 ## hand-off has already placed you (in this garage's cabin).
-func enter(home_id: String, teleport := true) -> void:
+func enter(home_id: String, teleport := true, commercial_lift: ApartmentElevator = null) -> void:
 	from_home = home_id
+	from_lift = commercial_lift
 	var cars := _cars()
 	var need := maxi(MIN_BAYS, ((cars.size() + 2 + 1) / 2) * 2)
 	if need != bays:
 		_build(need)
-	var tier := _home_tier(home_id)
-	if tier != _lift_tier:
-		_build_lift(tier)
+	var tier := commercial_lift.tier if commercial_lift else _home_tier(home_id)
+	var style := commercial_lift.building_style if commercial_lift else "apartment"
+	from_style = style
+	if tier != _lift_tier or style != _lift_style:
+		_build_lift(tier, style)
 	_set_visible(true)
+	if _day_mat:
+		_day_mat.albedo_color = _daylight()
 	inside = true
 	_exit = {}
 	for p in _plaques:
@@ -172,8 +181,8 @@ func enter(home_id: String, teleport := true) -> void:
 	game.player.kill_plane_floor = ORIGIN.y - 30.0   # (below the world on purpose)
 	# The street above stays streamed (and its traffic and people) while
 	# you're down here: the way out is ready before you reach it.
-	var el: ApartmentElevator = game.elevators.get(home_id)
-	_anchor.global_position = el.street_door_world() if el else game.player.global_position
+	var el: ApartmentElevator = from_lift if is_instance_valid(from_lift) else game.elevators.get(home_id)
+	_anchor.global_position = (el.ground_call_world() if el and el.commercial_stop else el.street_door_world()) if el else game.player.global_position
 	game.world.stream_anchor = _anchor
 	if game.layout.mainland and game.world.mainland:
 		game.world.mainland.stream_anchor = _anchor
@@ -202,20 +211,22 @@ func leave_quietly() -> void:
 
 ## Back up on foot without the ride (Settings "Stuck?", tests).
 func leave_on_foot() -> void:
+	var ret_lift := from_lift if is_instance_valid(from_lift) else null
 	leave_quietly()
-	var home := game.home_by_id(from_home)
-	var el: ApartmentElevator = game.elevators.get(from_home)
+	var el: ApartmentElevator = ret_lift if ret_lift else game.elevators.get(from_home)
 	if el:
 		game._teleport(el.ground_call_world() + el.global_basis.z * 1.6 + Vector3.UP * 1.0, el.global_basis.get_euler().y)
-	elif not home.is_empty():
+		return
+	var home := game.home_by_id(from_home)
+	if not home.is_empty():
 		game._teleport(game.home_lift(home) + Vector3.UP, 0.0)
 
 
 ## The road outside: the nearest safe spot by the building's street door,
 ## facing along the road (picked as you start up the ramp).
 func _find_exit(c: Car) -> Dictionary:
-	var el: ApartmentElevator = game.elevators.get(from_home)
-	var near := el.street_door_world() if el else _anchor.global_position
+	var el: ApartmentElevator = from_lift if is_instance_valid(from_lift) else game.elevators.get(from_home)
+	var near := (el.ground_call_world() if el and el.commercial_stop else el.street_door_world()) if el else _anchor.global_position
 	var r: Dictionary = game.safe.road_spot(near + Vector3.DOWN * 0.9, c.spec["size"], {"exclude": [c.get_rid()], "min_d": 4.0})
 	if not r["ok"]:
 		r = game.safe.road_spot(near + Vector3.DOWN * 0.9, c.spec["size"], {"exclude": [c.get_rid()], "min_d": 4.0, "max_r": 120.0})
@@ -323,13 +334,14 @@ func _set_visible(on: bool) -> void:
 
 
 # ------------------------------------------------------------ geometry
-func _build_lift(tier: int) -> void:
+func _build_lift(tier: int, style := "apartment") -> void:
 	_lift_tier = tier
+	_lift_style = style
 	if lift:
 		remove_child(lift)
 		lift.queue_free()
 		lift = null
-	lift = ApartmentElevator.build_garage_stop(tier, BAY_LEVEL)
+	lift = ApartmentElevator.build_garage_stop(tier, BAY_LEVEL, style)
 	add_child(lift)
 	lift.visible = inside
 
@@ -445,7 +457,8 @@ func _build(n: int) -> void:
 	var stop_m := _mat(Color(0.2, 0.2, 0.21), 0.8)
 	var day_m := StandardMaterial3D.new()
 	day_m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	day_m.albedo_color = Color(1.0, 0.98, 0.94)
+	day_m.albedo_color = _daylight() if game else Color(1.0, 0.98, 0.94)
+	_day_mat = day_m
 	var pool_m := StandardMaterial3D.new()
 	pool_m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	pool_m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -531,8 +544,8 @@ func _build(n: int) -> void:
 			var px := sx * (lw + 0.25 + k * 0.32)
 			_box(_vis, Vector3(0.16, 3.2, 0.06), Vector3(px, 1.75, 0.03), oak)
 		_box(_vis, Vector3(2.3, 3.2, 0.02), Vector3(sx * (lw + 1.2), 1.75, 0.005), warm_m)
-	_label("VEHICLE COLLECTION", 72, 0.0055, Color(0.95, 0.9, 0.8), Vector3(0, 3.95, 0.4), Vector3.ZERO)
-	_label("RESIDENTS' LIFT  ·  LEVEL %s" % BAY_LEVEL, 40, 0.004, Color(0.85, 0.82, 0.74), Vector3(0, 3.55, 0.4), Vector3.ZERO)
+	_label("VEHICLE COLLECTION", 72, 0.0055, Color(0.95, 0.9, 0.8), Vector3(0, 3.95, 0.05), Vector3.ZERO)
+	_label("RESIDENTS' LIFT  ·  LEVEL %s" % BAY_LEVEL, 40, 0.004, Color(0.85, 0.82, 0.74), Vector3(0, 3.55, 0.05), Vector3.ZERO)
 	# ---- bays: lines, wheel stops, numbers (floor + wall), LED backlights,
 	# columns between bay pairs, a pool of light in front of each car
 	for i in n:
@@ -598,20 +611,22 @@ func _build(n: int) -> void:
 		var t := (k + 0.5) * 2.2
 		var p := Vector3(0, 0.0, L) + Vector3(0, sin(ang), cos(ang)) * t + Vector3(0, 0.012, 0)
 		_chevron(p, -ang, yellow_m)
+	var kerb_m := _mat(Color(0.62, 0.62, 0.6), 0.8)
 	for sx: float in [-1.0, 1.0]:
 		var kx := sx * (RAMP_W * 0.5 + 0.25)
-		_box(_vis, Vector3(0.5, 0.15, slope), rc + Vector3(kx, 0.17, 0), _mat(Color(0.62, 0.62, 0.6), 0.8), false, -ang)
+		_box(_vis, Vector3(0.5, 0.15, slope), rc + Vector3(kx, 0.17, 0), kerb_m, false, -ang)
 		_box(_vis, Vector3(0.06, 0.04, slope), rc + Vector3(sx * (RAMP_W * 0.5 + 0.02), 0.27, 0), led_m, false, -ang)
 		_box(_vis, Vector3(0.3, H + RAMP_RISE + 0.6, RAMP_LEN + 6.0), Vector3(sx * (RAMP_W * 0.5 + 0.65), (H + RAMP_RISE) * 0.5, L + (RAMP_LEN + 6.0) * 0.5), wall_m, true)
-	# ceiling over the ramp follows it up (stepped slabs)
-	for k in 7:
-		var z0 := L + k * (RAMP_LEN + 6.0) / 7.0
-		var y0 := minf(RAMP_RISE, (z0 - L) * tan(ang)) + H + 0.2
-		_box(_vis, Vector3(RAMP_W + 1.6, 0.3, (RAMP_LEN + 6.0) / 7.0 + 0.05), Vector3(0, y0 + 0.15, z0 + (RAMP_LEN + 6.0) / 14.0), ceil_m, true)
-		_box(_vis, Vector3(0.6, 0.04, 1.2), Vector3(0, y0 - 0.02, z0 + (RAMP_LEN + 6.0) / 14.0), warm_m)
-	_box(_vis, Vector3(RAMP_W + 1.6, 0.5, 0.1), Vector3(0, H + 0.1, L + 0.4), sign_m)
-	_label("WAY OUT  ·  STREET", 60, 0.0055, Color(1.0, 0.95, 0.85), Vector3(0, H + 0.1, L + 0.34), Vector3(0, PI, 0), 0)
-	_label("WAY OUT  ·  STREET", 60, 0.0055, Color(1.0, 0.95, 0.85), Vector3(0, H + 0.1, L + 0.46), Vector3.ZERO, 0)
+	# Continuous sloped ceiling over the ramp (no stepped void gaps) + warm ceiling lights.
+	_box(_vis, Vector3(RAMP_W + 1.6, 0.3, slope + 0.8), rc + Vector3(0, H + 0.28, 0), ceil_m, true, -ang)
+	_box(_vis, Vector3(RAMP_W + 1.6, 0.3, 6.2), Vector3(0, RAMP_RISE + H + 0.15, ramp_end() + 3.0), ceil_m, true)
+	for k in 6:
+		var z0 := L + (k + 0.5) * RAMP_LEN / 6.0
+		var y0 := (z0 - L) * tan(ang) + H - 0.01
+		_box(_vis, Vector3(0.6, 0.04, 1.2), Vector3(0, y0, z0), warm_m, false, -ang)
+	_box(_vis, Vector3(RAMP_W + 1.6, 0.46, 0.1), Vector3(0, H - 0.45, L + 0.4), sign_m)
+	_label("WAY OUT  ·  STREET", 60, 0.0055, Color(1.0, 0.95, 0.85), Vector3(0, H - 0.45, L + 0.34), Vector3(0, PI, 0), 0)
+	_label("WAY OUT  ·  STREET", 60, 0.0055, Color(1.0, 0.95, 0.85), Vector3(0, H - 0.45, L + 0.46), Vector3.ZERO, 0)
 	# the shutter and the daylight past it
 	_shutter = Node3D.new()
 	_shutter.position = Vector3.ZERO

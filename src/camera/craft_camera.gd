@@ -20,7 +20,7 @@ func _ready() -> void:
 	var look := LookFilter.new()
 	look.name = "Look"
 	cam.add_child(look)
-	_ray.collision_mask = 1
+	_ray.collision_mask = 1 | (1 << 3)
 
 
 var _blend := 0.0
@@ -75,6 +75,7 @@ func _process(dt: float) -> void:
 	var hit := get_world_3d().direct_space_state.intersect_ray(_ray)
 	if not hit.is_empty():
 		p = (hit["position"] as Vector3) + ((_ray.from - p).normalized()) * 1.0
+	p.y = maxf(p.y, Craft.SEA_Y + 0.8)
 	cam.global_position = p
 	if (_look - p).length() > 0.1:
 		cam.look_at(_look, Vector3.UP)

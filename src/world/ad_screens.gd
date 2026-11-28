@@ -726,7 +726,16 @@ func _screen_geo(g: Dictionary, s: Dictionary) -> void:
 		var e0: Vector3 = pts[0] - (pts[1] - pts[0]).normalized() * 2.0
 		var e1: Vector3 = pts[-1] + (pts[-1] - pts[-2]).normalized() * 2.0
 		var u := Vector3.UP
-		_quad(G, [Vector3(e0.x, gy, e0.z), Vector3(e1.x, gy, e1.z), Vector3(e1.x, gy, e1.z) + nm * reach, Vector3(e0.x, gy, e0.z) + nm * reach],
+		var p00 := Vector3(e0.x, gy, e0.z)
+		var p10 := Vector3(e1.x, gy, e1.z)
+		var p11 := Vector3(e1.x, gy, e1.z) + nm * reach
+		var p01 := Vector3(e0.x, gy, e0.z) + nm * reach
+		if not free:
+			p00.y = layout.ground_y(p00.x, p00.z) + 0.06
+			p10.y = layout.ground_y(p10.x, p10.z) + 0.06
+			p11.y = layout.ground_y(p11.x, p11.z) + 0.06
+			p01.y = layout.ground_y(p01.x, p01.z) + 0.06
+		_quad(G, [p00, p10, p11, p01],
 			[u, u, u, u], [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)], code, gc)
 
 

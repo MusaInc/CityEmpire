@@ -622,6 +622,9 @@ func apply_visual_state(d: Dictionary) -> void:
 	if not (d.get("lost", []) as Array).is_empty():
 		_ensure_copy()
 		_rebuild()
+		for part in d.get("lost", []):
+			if not String(part).begins_with("plate"):
+				_spawn_internals(String(part))
 	refresh_damage()
 
 
@@ -813,6 +816,7 @@ func _process(dt: float) -> void:
 		_ground_shadow(dt)
 	_t += dt
 	_dent_cooldown -= dt
+	_tick_debris(dt, get_viewport().get_camera_3d())
 	for i in 4:
 		var p := wheels[i]
 		p.position = car.wheel_local(i)
@@ -905,8 +909,9 @@ func _dent_local(c: Vector3, d: Vector3, amount: float, radius: float) -> void:
 	_ensure_copy()
 	var r2 := radius * radius
 	var size: Vector3 = car.spec["size"]
-	# (vertices move at most 35 cm from rest: search the rest cells round
-	# the dent, grown by that much)
+	var aabb := body.mesh.get_aabb()
+	var body_center := Vector3(0.0, aabb.position.y + aabb.size.y * 0.45, aabb.get_center().z)
+	# (vertices are indexed by their rest positions in 0.5 m cells)
 	var reach := radius + 0.36
 	var lo := Vector3i(((c - Vector3.ONE * reach) / DENT_CELL).floor())
 	var hi := Vector3i(((c + Vector3.ONE * reach) / DENT_CELL).floor())
@@ -916,7 +921,13 @@ func _dent_local(c: Vector3, d: Vector3, amount: float, radius: float) -> void:
 		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 		var rest: PackedVector3Array = _rest[s]
 		var cells: Dictionary = _cells[s]
+		var skind: String = _surf_kinds[s] if s < _surf_kinds.size() else ""
+		var is_brittle := skind in ["glass", "glass_clear"]
+		var is_interior := skind in ["interior", "headliner"]
+		var surf_scale := 0.22 if is_brittle else (0.30 if is_interior else 1.0)
+		var max_off := 0.055 if is_brittle else (0.09 if is_interior else 0.28)
 		var hit := false
+		var moved := {}
 		for cx in range(lo.x, hi.x + 1):
 			for cy in range(lo.y, hi.y + 1):
 				for cz in range(lo.z, hi.z + 1):
@@ -924,20 +935,42 @@ func _dent_local(c: Vector3, d: Vector3, amount: float, radius: float) -> void:
 					if ids == null:
 						continue
 					for i: int in (ids as PackedInt32Array):
-						var q := v[i]
-						var dd := q.distance_squared_to(c)
+						var r0 := rest[i]
+						var dd := r0.distance_squared_to(c)
 						if dd < r2:
 							var f := 1.0 - dd / r2
-							var np := q + d * amount * f * f
-							# Never crumple more than 35 cm from the original shape.
-							var off := np - rest[i]
-							if off.length() > 0.35:
-								np = rest[i] + off.normalized() * 0.35
+							var f2 := f * f
+							# Ensure impacts always crumple inward into the chassis,
+							# never pulling spikes outward or distorting pillars.
+							var inward := (body_center - r0)
+							if inward.length_squared() > 0.0001:
+								inward = inward.normalized()
+							var push_dir := d
+							if push_dir.dot(inward) < 0.15:
+								push_dir = push_dir.lerp(inward, 0.65).normalized()
+							var ny := (r0.y - aabb.position.y) / maxf(aabb.size.y, 0.01)
+							var pillar_k := 0.58 if (ny > 0.68 and d.y > -0.45 and not is_brittle) else 1.0
+							var disp := amount * f2 * surf_scale * pillar_k
+							# Subtle deterministic sheet-metal crease buckling on outer panels.
+							var crease := 0.0
+							if not is_brittle and not is_interior:
+								var hval := sin(r0.x * 29.0 + r0.z * 23.0 + r0.y * 37.0)
+								crease = hval * amount * f * (1.0 - f) * 0.22
+							var np := v[i] + push_dir * (disp + crease)
+							var off := np - r0
+							var off_len := off.length()
+							if off_len > max_off:
+								np = r0 + off * (max_off / off_len)
+							# Keep deformed vertices strictly inside chassis silhouette bounds.
 							np.x = clampf(np.x, -size.x * 0.5, size.x * 0.5)
+							np.y = maxf(np.y, aabb.position.y - 0.02)
 							v[i] = np
+							moved[i] = true
 							hit = true
 		if hit:
 			arr[Mesh.ARRAY_VERTEX] = v
+			if not is_brittle and arr[Mesh.ARRAY_NORMAL] != null and _rest_idx[s].size() >= 3:
+				arr[Mesh.ARRAY_NORMAL] = _recompute_normals(v, _rest_idx[s], arr[Mesh.ARRAY_NORMAL] as PackedVector3Array, moved)
 			touched = true
 	if touched:
 		_rebuild()
@@ -947,7 +980,35 @@ func _dent_local(c: Vector3, d: Vector3, amount: float, radius: float) -> void:
 		for ch in _mods.get_children():
 			var n3 := ch as Node3D
 			if n3 and n3.visible and n3.position.distance_to(c) < radius + 0.8:
-				n3.position += d * amount * 0.25
+				n3.position += d * minf(amount * 0.22, 0.08)
+
+
+## Fast localized normal recomputation for dented vertices so crumpled metal
+## catches light with realistic creases instead of flat showroom shading.
+static func _recompute_normals(v: PackedVector3Array, idx: PackedInt32Array, old_nrm: PackedVector3Array, moved: Dictionary) -> PackedVector3Array:
+	var nrm := old_nrm.duplicate()
+	var accum := {}
+	var tri_count := idx.size() / 3
+	for t in tri_count:
+		var i0 := idx[t * 3]
+		var i1 := idx[t * 3 + 1]
+		var i2 := idx[t * 3 + 2]
+		if not (moved.has(i0) or moved.has(i1) or moved.has(i2)):
+			continue
+		var fn := (v[i1] - v[i0]).cross(v[i2] - v[i0])
+		if fn.length_squared() < 1e-10:
+			continue
+		for vi: int in [i0, i1, i2]:
+			if moved.has(vi):
+				accum[vi] = (accum.get(vi, Vector3.ZERO) as Vector3) + fn
+	for vi: int in accum:
+		var n: Vector3 = accum[vi]
+		if n.length_squared() > 1e-10:
+			n = n.normalized()
+			if n.dot(old_nrm[vi]) < 0.0:
+				n = -n
+			nrm[vi] = old_nrm[vi].lerp(n, 0.78).normalized()
+	return nrm
 
 
 func _ensure_copy() -> void:
@@ -962,9 +1023,12 @@ func _ensure_copy() -> void:
 	# a dent then only copies the working arrays (native copies).
 	var cache: Dictionary = warm_dent_cache(path, src)
 	_part_idx = _part_lists(path, cache["idx"], _part_tri)
+	_surf_kinds = cache["kinds"]
 	for s in (cache["arrays"] as Array).size():
 		var arr: Array = (cache["arrays"][s] as Array).duplicate()
 		arr[Mesh.ARRAY_VERTEX] = (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate()
+		if arr[Mesh.ARRAY_NORMAL] != null:
+			arr[Mesh.ARRAY_NORMAL] = (arr[Mesh.ARRAY_NORMAL] as PackedVector3Array).duplicate()
 		_arrays.append(arr)
 		_rest.append(cache["rest"][s])
 		_rest_idx.append(cache["idx"][s])
@@ -1035,15 +1099,17 @@ static func warm_dent_cache(path: String, src: Mesh = null) -> Dictionary:
 		return _dent_cache[path]
 	if src == null:
 		src = load_mesh(path)
-	var c := {"arrays": [], "rest": [], "idx": [], "cells": []}
+	var c := {"arrays": [], "rest": [], "idx": [], "cells": [], "kinds": []}
 	if src != null:
 		for s in src.get_surface_count():
 			var arr := src.surface_get_arrays(s)
 			var rv := (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).duplicate()
+			var sm := src.surface_get_material(s)
 			c["arrays"].append(arr)
 			c["rest"].append(rv)
 			c["idx"].append((arr[Mesh.ARRAY_INDEX] as PackedInt32Array).duplicate())
 			c["cells"].append(_cells_for(rv))
+			c["kinds"].append(sm.resource_name if sm else "")
 		_part_lists(path, c["idx"], part_map(path, src))   # (panels: loading, not mid-crash)
 	_dent_cache[path] = c
 	_dent_cache_order.erase(path)
@@ -1131,32 +1197,50 @@ const KEEP_MATS := ["glass", "glass_clear", "lens", "lens_red", "reflex", "inter
 static var _part_cache := {}
 static var _profile_cache := {}
 static var _frame_mat: StandardMaterial3D
+static var _engine_mat: StandardMaterial3D
+static var _radiator_mat: StandardMaterial3D
 static var _steel_mat: StandardMaterial3D
 static var _spike_mat: StandardMaterial3D
-static var _debris: Array = []
-const DEBRIS_MAX := 16
-const DEBRIS_LIFE := 9.0
+static var _debris_phys_mat: PhysicsMaterial
+static var _debris: Array = []        # [{body, age, still, frozen, fading, fade_t}]
+static var _debris_frame := -1
+const DEBRIS_LIFE := 10.0
 
 var _part_tri: Array = []        # per surface: PackedByteArray
 var _rest_idx: Array = []        # per surface: original index array
+var _surf_kinds: Array = []      # per surface: material name
 var _lost := {}                  # part -> true
-var _frames: Array = []          # bare-frame meshes where panels came off
+var _frames: Array = []          # chassis-anchored exposed internals where panels came off
 var _mods: Node3D                # Workshop kit
+
+
+static func _debris_budget() -> int:
+	var loop := Engine.get_main_loop() as SceneTree
+	if loop and loop.root:
+		var st := loop.root.get_node_or_null("Settings")
+		if st and st.has_method("preset"):
+			var q := int(st.preset().get("debris", 32))
+			if q <= 16:
+				return 6
+			if q <= 32:
+				return 10
+			return 14
+	return 10
 
 
 static func part_of(c: Vector3, aabb: AABB) -> int:
 	var nx := (c.x - aabb.get_center().x) / maxf(aabb.size.x * 0.5, 0.01)
 	var ny := (c.y - aabb.position.y) / maxf(aabb.size.y, 0.01)
 	var nz := (c.z - aabb.get_center().z) / maxf(aabb.size.z * 0.5, 0.01)
-	if nz < -0.78 and ny < 0.44:
+	if nz < -0.76 and ny < 0.44:
 		return 0  # bumper_f
-	if nz > 0.8 and ny < 0.46:
+	if nz > 0.78 and ny < 0.46:
 		return 1  # bumper_r
-	if nz < -0.4 and ny >= 0.42:
+	if nz < -0.36 and ny >= 0.42 and ny < 0.78 and absf(nx) < 0.88:
 		return 2  # hood
-	if nz > 0.52 and ny >= 0.46:
+	if nz > 0.50 and ny >= 0.44 and ny < 0.78 and absf(nx) < 0.88:
 		return 3  # boot
-	if absf(nx) > 0.72 and nz >= -0.4 and nz <= 0.52 and ny > 0.1 and ny < 0.7:
+	if absf(nx) > 0.68 and nz >= -0.36 and nz <= 0.48 and ny > 0.12 and ny < 0.68:
 		return 4 if nx < 0.0 else 5  # door_l / door_r
 	return NO_PART
 
@@ -1241,12 +1325,39 @@ static func profile(body_name: String, mesh: Mesh) -> Dictionary:
 static func _mat_frame() -> StandardMaterial3D:
 	if _frame_mat == null:
 		_frame_mat = StandardMaterial3D.new()
-		# Bare primed steel with a rusty tint: obviously "panel missing".
-		_frame_mat.albedo_color = Color(0.38, 0.33, 0.29)
-		_frame_mat.metallic = 0.55
-		_frame_mat.roughness = 0.7
-		_frame_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		# Structural stamped steel chassis rails & crash beams.
+		_frame_mat.albedo_color = Color(0.18, 0.19, 0.21)
+		_frame_mat.metallic = 0.72
+		_frame_mat.roughness = 0.52
 	return _frame_mat
+
+
+static func _mat_engine() -> StandardMaterial3D:
+	if _engine_mat == null:
+		_engine_mat = StandardMaterial3D.new()
+		# Cast aluminium engine block, valve cover & exhaust components.
+		_engine_mat.albedo_color = Color(0.56, 0.58, 0.60)
+		_engine_mat.metallic = 0.82
+		_engine_mat.roughness = 0.38
+	return _engine_mat
+
+
+static func _mat_radiator() -> StandardMaterial3D:
+	if _radiator_mat == null:
+		_radiator_mat = StandardMaterial3D.new()
+		# Dark finned radiator core, hoses & recessed engine-bay tub.
+		_radiator_mat.albedo_color = Color(0.08, 0.085, 0.095)
+		_radiator_mat.metallic = 0.45
+		_radiator_mat.roughness = 0.68
+	return _radiator_mat
+
+
+static func _debris_phys() -> PhysicsMaterial:
+	if _debris_phys_mat == null:
+		_debris_phys_mat = PhysicsMaterial.new()
+		_debris_phys_mat.friction = 0.72
+		_debris_phys_mat.bounce = 0.14
+	return _debris_phys_mat
 
 
 static func steel_mat() -> StandardMaterial3D:
@@ -1269,8 +1380,9 @@ static func spike_mat() -> StandardMaterial3D:
 	return _spike_mat
 
 
-## A panel comes off: it leaves the body (bare frame showing where it was)
-## and tumbles away as debris.
+## A panel comes off: it leaves the body, exposes solid chassis-anchored
+## internal components (no floating ghost shells), shatters any window glass
+## belonging to a detached door, and tumbles away as grounded physical debris.
 func detach(part: String, world_at: Vector3, normal: Vector3) -> void:
 	if body == null or body.mesh == null or _lost.has(part):
 		return
@@ -1281,12 +1393,11 @@ func detach(part: String, world_at: Vector3, normal: Vector3) -> void:
 	if pid < 0:
 		return
 	_ensure_copy()
-	# The panel's triangles (as dented now), by surface/material.
-	var st_frame := SurfaceTool.new()
-	st_frame.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var piece := ArrayMesh.new()
-	var piece_mats: Array = []
-	var any := false
+	# First pass: collect detached vertices and compute true geometric centroid
+	# so the physical RigidBody3D rotates and settles around its real center.
+	var surf_data: Array = []
+	var bounds := AABB()
+	var has_bounds := false
 	for s in _arrays.size():
 		var arr: Array = _arrays[s]
 		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
@@ -1294,55 +1405,157 @@ func detach(part: String, world_at: Vector3, normal: Vector3) -> void:
 		var tan = arr[Mesh.ARRAY_TANGENT]
 		var uv0 = arr[Mesh.ARRAY_TEX_UV]
 		var uv1 = arr[Mesh.ARRAY_TEX_UV2]
+		var mine: PackedInt32Array = (_part_idx[s] as Dictionary).get(pid, PackedInt32Array()) if s < _part_idx.size() else PackedInt32Array()
+		if mine.is_empty():
+			continue
 		var pv := PackedVector3Array()
 		var pn := PackedVector3Array()
 		var pt := PackedFloat32Array()
 		var pu := PackedVector2Array()
 		var pu2 := PackedVector2Array()
-		var mine: PackedInt32Array = (_part_idx[s] as Dictionary).get(pid, PackedInt32Array()) if s < _part_idx.size() else PackedInt32Array()
 		for vi: int in mine:
 			var q := v[vi]
 			var qn: Vector3 = nrm[vi] if nrm != null else Vector3.UP
 			pv.append(q)
 			pn.append(qn)
-			# (UVs and tangents too: the loose panel keeps its paint and bake.)
+			if not has_bounds:
+				bounds = AABB(q, Vector3.ZERO)
+				has_bounds = true
+			else:
+				bounds = bounds.expand(q)
 			if uv0 != null:
 				pu.append(uv0[vi])
 			if uv1 != null:
 				pu2.append(uv1[vi])
 			if tan != null:
 				pt.append_array([tan[vi * 4], tan[vi * 4 + 1], tan[vi * 4 + 2], tan[vi * 4 + 3]])
-			# The frame underneath: the same shape a few cm in, bare metal.
-			st_frame.set_normal(qn)
-			st_frame.add_vertex(q - qn * 0.045)
-		if pv.is_empty():
-			continue
-		any = true
+		surf_data.append([pv, pn, pu, pu2, pt, body.get_surface_override_material(s)])
+	_lost[part] = true
+	_rebuild()
+	# Shatter door glass when a door detaches so window panes never float in mid-air.
+	if part == "door_l" and float(car.glass.get("left", 0.0)) < 1.0:
+		car.glass["left"] = 1.0
+		car.damaged.emit("glass", ["left", 1.0], world_at)
+		refresh_damage()
+	elif part == "door_r" and float(car.glass.get("right", 0.0)) < 1.0:
+		car.glass["right"] = 1.0
+		car.damaged.emit("glass", ["right", 1.0], world_at)
+		refresh_damage()
+	if not has_bounds or surf_data.is_empty():
+		return
+	var center := bounds.get_center()
+	var piece := ArrayMesh.new()
+	var piece_mats: Array = []
+	for sd: Array in surf_data:
+		var pv: PackedVector3Array = sd[0]
+		for k in pv.size():
+			pv[k] -= center
 		var a := []
 		a.resize(Mesh.ARRAY_MAX)
 		a[Mesh.ARRAY_VERTEX] = pv
-		a[Mesh.ARRAY_NORMAL] = pn
-		if pu.size() == pv.size():
-			a[Mesh.ARRAY_TEX_UV] = pu
-		if pu2.size() == pv.size():
-			a[Mesh.ARRAY_TEX_UV2] = pu2
-		if pt.size() == pv.size() * 4:
-			a[Mesh.ARRAY_TANGENT] = pt
+		a[Mesh.ARRAY_NORMAL] = sd[1]
+		if (sd[2] as PackedVector2Array).size() == pv.size():
+			a[Mesh.ARRAY_TEX_UV] = sd[2]
+		if (sd[3] as PackedVector2Array).size() == pv.size():
+			a[Mesh.ARRAY_TEX_UV2] = sd[3]
+		if (sd[4] as PackedFloat32Array).size() == pv.size() * 4:
+			a[Mesh.ARRAY_TANGENT] = sd[4]
 		piece.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
-		if pu.size() == pv.size() and pt.size() != pv.size() * 4:
+		if (sd[2] as PackedVector2Array).size() == pv.size() and (sd[4] as PackedFloat32Array).size() != pv.size() * 4:
 			piece.regen_normal_maps()
-		piece_mats.append(body.get_surface_override_material(s))
-	_lost[part] = true
-	_rebuild()
-	if not any:
+		piece_mats.append(sd[5])
+	_spawn_internals(part)
+	_throw(piece, piece_mats, Transform3D(Basis.IDENTITY, center), normal, part)
+
+
+## Solid, chassis-anchored internal vehicle components revealed when a panel
+## detaches (replaces the old floating normal-offset ghost shell).
+func _spawn_internals(part: String) -> void:
+	if body == null or body.mesh == null:
 		return
-	var fm := MeshInstance3D.new()
-	fm.name = "Frame_" + part
-	fm.mesh = st_frame.commit()
-	fm.material_override = _mat_frame()
-	add_child(fm)
-	_frames.append(fm)
-	_throw(piece, piece_mats, Transform3D.IDENTITY, normal)
+	var pr := profile(String(car.spec["body"]), load_mesh(String(car.spec["body"])))
+	var aabb: AABB = pr["aabb"]
+	var w := aabb.size.x
+	var h := aabb.size.y
+	var l := aabb.size.z
+	var y0 := aabb.position.y
+	var fz := aabb.position.z
+	var rz := aabb.end.z
+	var cz := aabb.get_center().z
+	var hood_y: float = pr["hood_y"]
+	var boot_y: float = pr["boot_y"]
+	var st_frame := SurfaceTool.new()
+	st_frame.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var st_eng := SurfaceTool.new()
+	st_eng.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var st_rad := SurfaceTool.new()
+	st_rad.begin(Mesh.PRIMITIVE_TRIANGLES)
+	match part:
+		"bumper_f":
+			var by := y0 + h * 0.23
+			# Front crash beam + twin steel chassis rail mounts, tucked safely
+			# inside the nose so heavy frontal crumpling never exposes a protruding bar.
+			_add_box(st_frame, Vector3(w * 0.60, h * 0.085, 0.09), Vector3(0.0, by, fz + 0.38))
+			for sx: float in [-1.0, 1.0]:
+				_add_box(st_frame, Vector3(0.09, h * 0.10, 0.28), Vector3(sx * w * 0.24, by, fz + 0.52))
+			# Lower radiator / intercooler core recessed behind crash beam
+			_add_box(st_rad, Vector3(w * 0.50, h * 0.20, 0.07), Vector3(0.0, by + h * 0.06, fz + 0.46))
+			_add_box(st_eng, Vector3(w * 0.46, h * 0.055, 0.08), Vector3(0.0, by - h * 0.05, fz + 0.44))
+		"hood":
+			var ey := y0 + h * 0.32
+			var ez := fz + l * 0.17
+			# Recessed dark engine bay tub & firewall
+			_add_box(st_rad, Vector3(w * 0.68, h * 0.18, l * 0.24), Vector3(0.0, ey, ez))
+			# Cast aluminium engine block + ribbed valve cover + intake
+			_add_box(st_eng, Vector3(w * 0.30, h * 0.22, l * 0.15), Vector3(0.0, ey + h * 0.11, ez + 0.02))
+			_add_box(st_frame, Vector3(w * 0.24, h * 0.06, l * 0.13), Vector3(0.0, ey + h * 0.23, ez + 0.02))
+			# Front radiator + top coolant hose + strut towers + battery
+			_add_box(st_rad, Vector3(w * 0.56, h * 0.22, 0.08), Vector3(0.0, ey + h * 0.10, fz + 0.22))
+			_add_box(st_frame, Vector3(0.06, 0.05, l * 0.10), Vector3(-w * 0.10, ey + h * 0.20, fz + 0.34))
+			for sx: float in [-1.0, 1.0]:
+				_add_box(st_frame, Vector3(0.14, h * 0.20, 0.16), Vector3(sx * w * 0.30, ey + h * 0.12, ez))
+			_add_box(st_rad, Vector3(0.18, 0.15, 0.14), Vector3(w * 0.22, ey + h * 0.15, fz + 0.36))
+		"bumper_r":
+			var ry := y0 + h * 0.24
+			# Rear steel crash bar + chassis rail mounts, recessed inside tail.
+			_add_box(st_frame, Vector3(w * 0.60, h * 0.085, 0.09), Vector3(0.0, ry, rz - 0.36))
+			for sx: float in [-1.0, 1.0]:
+				_add_box(st_frame, Vector3(0.09, h * 0.10, 0.26), Vector3(sx * w * 0.24, ry, rz - 0.48))
+			# Exhaust muffler & tailpipe
+			_add_box(st_eng, Vector3(0.28, 0.13, 0.32), Vector3(w * 0.20, ry - h * 0.07, rz - 0.46))
+			_add_box(st_eng, Vector3(0.07, 0.07, 0.18), Vector3(w * 0.22, ry - h * 0.08, rz - 0.28))
+		"boot":
+			var by := y0 + h * 0.34
+			var bz := rz - l * 0.14
+			# Recessed trunk bay floor & structural cross-brace
+			_add_box(st_rad, Vector3(w * 0.66, h * 0.16, l * 0.18), Vector3(0.0, by, bz))
+			_add_box(st_frame, Vector3(w * 0.68, 0.06, 0.08), Vector3(0.0, minf(boot_y - 0.08, by + h * 0.14), rz - 0.18))
+		"door_l", "door_r":
+			var sx := -1.0 if part == "door_l" else 1.0
+			var dx := sx * (w * 0.41)
+			var dy := y0 + h * 0.36
+			# Reinforced door sill / rocker beam + A/B pillar inner jambs + hinges
+			_add_box(st_frame, Vector3(0.09, 0.10, l * 0.38), Vector3(dx, y0 + h * 0.14, cz + l * 0.02))
+			_add_box(st_frame, Vector3(0.08, h * 0.44, 0.09), Vector3(dx, dy, cz - l * 0.16))
+			_add_box(st_frame, Vector3(0.08, h * 0.44, 0.09), Vector3(dx, dy, cz + l * 0.20))
+			for hy: float in [y0 + h * 0.24, y0 + h * 0.46]:
+				_add_box(st_eng, Vector3(0.06, 0.05, 0.06), Vector3(dx + sx * 0.03, hy, cz - l * 0.15))
+		_:
+			return
+	var root := Node3D.new()
+	root.name = "Internals_" + part
+	for pair: Array in [[st_frame, _mat_frame()], [st_eng, _mat_engine()], [st_rad, _mat_radiator()]]:
+		var m := (pair[0] as SurfaceTool).commit()
+		if m and m.get_surface_count() > 0:
+			var mi := MeshInstance3D.new()
+			mi.mesh = m
+			mi.material_override = pair[1]
+			root.add_child(mi)
+	if root.get_child_count() > 0:
+		add_child(root)
+		_frames.append(root)
+	else:
+		root.queue_free()
 
 
 func _detach_plate(part: String, normal: Vector3) -> void:
@@ -1353,45 +1566,115 @@ func _detach_plate(part: String, normal: Vector3) -> void:
 	if n == null or not n.visible:
 		return
 	n.visible = false
-	_throw(n.mesh, [n.material_override], n.transform, normal)
+	_throw(n.mesh, [n.material_override], n.transform, normal, part)
 
 
-## Debris: a loose panel with a box collider, flung off the car. Shared
-## budget across all cars; each piece is cleared after a few seconds.
-func _throw(mesh: Mesh, mats: Array, local: Transform3D, normal: Vector3) -> void:
+## Debris: a recentered loose panel with a tight, grounded box collider,
+## flung off the car. Budgeted for iOS; freezes once settled on the ground
+## and fades out smoothly at end of lifetime.
+func _throw(mesh: Mesh, mats: Array, local: Transform3D, normal: Vector3, part := "") -> void:
 	var world := car.get_parent()
 	if world == null or not car.is_inside_tree():
 		return
-	while _debris.size() >= DEBRIS_MAX:
-		var old = _debris.pop_front()
-		if is_instance_valid(old):
-			old.queue_free()
+	var budget := _debris_budget()
+	while _debris.size() >= budget:
+		var old: Dictionary = _debris.pop_front()
+		var ob = old.get("body")
+		if is_instance_valid(ob):
+			ob.queue_free()
 	var b := RigidBody3D.new()
+	b.name = "Debris_" + part if part != "" else "DebrisPanel"
 	b.collision_layer = 1 << 5
-	b.collision_mask = 1 | (1 << 3)
+	b.collision_mask = 1
+	b.physics_material_override = _debris_phys()
+	b.linear_damp = 0.28
+	b.angular_damp = 0.65
+	b.can_sleep = true
 	var aabb := mesh.get_aabb()
-	b.mass = clampf(aabb.size.x * aabb.size.y * aabb.size.z * 60.0, 6.0, 40.0)
+	var sz := aabb.size
+	# Tight collider matching the panel's true thin profile so doors, bonnets
+	# and bumpers settle flat on the asphalt instead of hovering on AABB corners.
+	var col_sz := Vector3(maxf(sz.x * 0.86, 0.07), maxf(sz.y * 0.86, 0.07), maxf(sz.z * 0.86, 0.07))
+	if part in ["hood", "boot"]:
+		col_sz.y = clampf(col_sz.y, 0.07, 0.14)
+	elif part in ["door_l", "door_r"]:
+		col_sz.x = clampf(col_sz.x, 0.07, 0.14)
+	elif part in ["bumper_f", "bumper_r"]:
+		col_sz.z = clampf(col_sz.z, 0.10, 0.24)
+		col_sz.y = clampf(col_sz.y, 0.12, 0.34)
+	b.mass = clampf(col_sz.x * col_sz.y * col_sz.z * 85.0, 5.0, 28.0)
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
-	bs.size = aabb.size.max(Vector3.ONE * 0.08)
+	bs.size = col_sz
 	cs.shape = bs
 	cs.position = aabb.get_center()
 	b.add_child(cs)
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	for i in mini(mats.size(), mesh.get_surface_count()):
 		if mats[i]:
 			mi.set_surface_override_material(i, mats[i])
 	b.add_child(mi)
 	world.add_child(b)
 	b.global_transform = global_transform * local
-	var out := normal if normal.length() > 0.1 else (global_transform.basis * aabb.get_center()).normalized()
-	b.linear_velocity = car.linear_velocity * randf_range(0.55, 0.85) + out * randf_range(2.0, 4.5) + Vector3.UP * randf_range(2.5, 5.0)
-	b.angular_velocity = Vector3(randf_range(-6, 6), randf_range(-4, 4), randf_range(-6, 6))
-	_debris.append(b)
-	b.get_tree().create_timer(DEBRIS_LIFE).timeout.connect(func():
-		if is_instance_valid(b):
-			b.queue_free())
+	var out := normal if normal.length() > 0.1 else (global_transform.basis * local.origin).normalized()
+	if out.length_squared() < 0.01:
+		out = global_transform.basis.y
+	b.linear_velocity = car.linear_velocity * randf_range(0.45, 0.72) + out * randf_range(1.6, 3.6) + Vector3.UP * randf_range(1.2, 2.8)
+	b.angular_velocity = Vector3(randf_range(-4.5, 4.5), randf_range(-3.5, 3.5), randf_range(-4.5, 4.5))
+	_debris.append({"body": b, "age": 0.0, "still": 0.0, "frozen": false, "fading": false, "fade_t": 0.0})
+
+
+## Shared once-per-frame debris manager: freezes settled panels (0 physics CPU
+## on iOS) and smoothly sinks/cleans expired or distant debris.
+static func _tick_debris(dt: float, cam: Camera3D) -> void:
+	var f := Engine.get_process_frames()
+	if f == _debris_frame or _debris.is_empty():
+		return
+	_debris_frame = f
+	var cam_p := cam.global_position if cam else Vector3.ZERO
+	var has_cam := cam != null
+	var keep: Array = []
+	for d: Dictionary in _debris:
+		var b = d["body"]
+		if not is_instance_valid(b):
+			continue
+		var rb := b as RigidBody3D
+		d["age"] = float(d["age"]) + dt
+		if rb.global_position.y < -40.0:
+			rb.queue_free()
+			continue
+		var far := has_cam and rb.global_position.distance_squared_to(cam_p) > 95.0 * 95.0
+		if not bool(d["frozen"]) and not bool(d["fading"]):
+			if rb.sleeping or (rb.linear_velocity.length_squared() < 0.04 and rb.angular_velocity.length_squared() < 0.08):
+				d["still"] = float(d["still"]) + dt
+				if float(d["still"]) >= 0.55:
+					rb.freeze = true
+					rb.collision_layer = 0
+					rb.collision_mask = 0
+					d["frozen"] = true
+			else:
+				d["still"] = 0.0
+		if not bool(d["fading"]) and (float(d["age"]) >= DEBRIS_LIFE or far):
+			d["fading"] = true
+			d["fade_t"] = 0.0
+			rb.freeze = true
+			rb.collision_layer = 0
+			rb.collision_mask = 0
+		if bool(d["fading"]):
+			var ft := float(d["fade_t"]) + dt
+			d["fade_t"] = ft
+			var k := clampf(1.0 - ft / 0.55, 0.0, 1.0)
+			rb.global_position.y -= dt * 0.25
+			for ch in rb.get_children():
+				if ch is MeshInstance3D:
+					(ch as MeshInstance3D).scale = Vector3.ONE * maxf(k, 0.01)
+			if ft >= 0.55:
+				rb.queue_free()
+				continue
+		keep.append(d)
+	_debris = keep
 
 
 # ------------------------------------------------------------------ Workshop kit

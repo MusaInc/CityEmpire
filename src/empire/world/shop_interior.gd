@@ -70,6 +70,7 @@ var pile_pos := Vector3.ZERO
 var _mid_used := false            # did fixtures take the middle of the floor?
 var street_drop := 0.0            # m the floor stands above the pavement outside      # where cases put down on the floor stack up
 var office_pos := Vector3.ZERO
+var elevator: ApartmentElevator
 var walk := {}            # Vector2i cell -> true when free
 
 var _static: Node3D
@@ -208,8 +209,10 @@ func to_world(p: Vector3) -> Vector3:
 func rebuild() -> void:
 	for c in get_children():
 		c.queue_free()
+	elevator = null
 	placed.clear()
 	_fitting_clear = Rect2()
+	_elev_clear = Rect2()
 	_headers.clear()
 	spots.clear()
 	slot_pick.clear()
@@ -435,6 +438,7 @@ func _build_shop(st: _Batch) -> void:
 
 
 var _fitting_clear := Rect2()
+var _elev_clear := Rect2()
 
 
 func _fitting_room(st: _Batch, depth: float) -> Rect2:
@@ -499,6 +503,8 @@ func _fit_wall_bays() -> void:
 		blocked.append(Rect2(p.x - 0.66, p.z - 0.66, 1.32, 1.32))
 	if _fitting_clear.has_area():
 		blocked.append(_fitting_clear)
+	if _elev_clear.has_area():
+		blocked.append(_elev_clear)
 	var depth := D - BACKROOM - 0.14 if kind == "shop" else D
 	if kind == "shop":
 		var stockroom_door := _door_at.x
@@ -834,9 +840,9 @@ func _shell(st: _Batch, wall: Color, trim: Color) -> void:
 	var stone_style := 7 if use in ["hotel", "restaurant", "bank", "residential"] else plaster_style
 	var side_span := Vector2(D - 0.35, H - 0.022)
 	var side_center := -(D + 0.29) * 0.5
-	_wall_finish(Vector3(0.024, H * 0.5, side_center), PI * 0.5, side_span, wall, stone_style)
-	_wall_finish(Vector3(W - 0.024, H * 0.5, side_center), -PI * 0.5, side_span, wall, plaster_style)
-	_wall_finish(Vector3(W * 0.5, H * 0.5, -D + 0.024), 0.0, Vector2(W - 0.05, H - 0.022), wall.darkened(0.06), stone_style)
+	_wall_finish(Vector3(0.036, H * 0.5, side_center), PI * 0.5, side_span, wall, stone_style)
+	_wall_finish(Vector3(W - 0.036, H * 0.5, side_center), -PI * 0.5, side_span, wall, plaster_style)
+	_wall_finish(Vector3(W * 0.5, H * 0.5, -D + 0.036), 0.0, Vector2(W - 0.05, H - 0.022), wall.darkened(0.06), stone_style)
 	st.box(R(0.046, D - 0.065, 0.0), R(W - 0.046, D - 0.022, 0.12), trim)
 	var ceil_col: Color = look.get("ceiling", Color(0.78, 0.78, 0.76)) if not look.is_empty() else Color(0.78, 0.78, 0.76)
 	st.box(R(0.0, 0.0, H - 0.01), R(W, D, H + 0.05), ceil_col)
@@ -2850,6 +2856,8 @@ func _build_street(st: _Batch) -> void:
 
 	else:
 		_street_lobby_furnishings(st, use, accent)
+	if use == "hotel" and W >= 8.2 and D >= 8.2:
+		_add_lobby_elevator(st, "hotel", String(unit["name"]), "SUITE", clampf(D * 0.48, 3.2, D - 3.2), Color(0.84, 0.80, 0.72), Color(0.76, 0.62, 0.34))
 	var desk := D - 2.1
 	var half := minf(W * 0.29, 2.25)
 	_wall_box(st, mid - half, mid + half, desk, desk + 0.72, 0.0, 1.03, accent)
@@ -2903,7 +2911,7 @@ func _street_lobby_furnishings(st: _Batch, use: String, accent: Color) -> void:
 			st.cylinder(R(2.17, seating_depth, 0.38), 0.44, 0.051, Color(0.56, 0.54, 0.48), 18)
 			_solid(R(1.74, seating_depth - 0.43, 0.0), R(2.60, seating_depth + 0.43, 0.44))
 			st.box(R(2.00, seating_depth - 0.15, 0.433), R(2.31, seating_depth + 0.11, 0.451), accent.lightened(0.25))
-	if use in ["hotel", "office", "bank"] and W >= 7.6:
+	if use in ["hotel", "office", "bank"] and W >= 7.6 and not (use == "hotel" and W >= 8.2 and D >= 8.2):
 		var d := minf(D - 3.0, seating_depth + 0.44)
 		var board := Color(0.19, 0.23, 0.22)
 		_wall_box(st, W - 0.14, W - 0.03, d - 0.71, d + 0.71, 1.11, 2.12, board)
@@ -2993,6 +3001,30 @@ func _populate_public_room() -> void:
 	set_process(true)
 
 
+func _add_lobby_elevator(st: _Batch, style: String, title: String, top_label: String, elev_d: float, clad: Color, trim_col: Color) -> void:
+	var x_face := W - ApartmentElevator.SHAFT_D - 0.16
+	var hw := ApartmentElevator.PORTAL_HW + 0.35
+	var ph := ApartmentElevator.PORTAL_H
+	if x_face < 3.6 or elev_d - hw < 0.8 or elev_d + hw > D - 0.8:
+		return
+	_elev_clear = Rect2(x_face - 0.85, -(elev_d + hw + 0.25), W - (x_face - 0.85), (hw + 0.25) * 2.0)
+	# Architectural floor-to-ceiling core cladding enclosing the elevator shaft
+	# completely inside the hollowed lobby footprint (zero gaps, zero wall clipping).
+	if H > ph + 0.02:
+		st.box(R(x_face - 0.02, elev_d - hw, ph), R(W - 0.02, elev_d + hw, H), clad)
+		_solid(R(x_face - 0.02, elev_d - hw, ph), R(W - 0.02, elev_d + hw, H))
+	for sd: float in [-1.0, 1.0]:
+		var d0 := elev_d + sd * hw
+		var d1 := d0 + sd * 0.08
+		st.box(R(x_face - 0.02, minf(d0, d1), 0.0), R(W - 0.02, maxf(d0, d1), H), clad)
+		_solid(R(x_face - 0.02, minf(d0, d1), 0.0), R(W - 0.02, maxf(d0, d1), H))
+		st.box(R(x_face - 0.03, minf(d0, d1), 0.0), R(W - 0.02, maxf(d0, d1), 0.12), trim_col)
+	elevator = ApartmentElevator.build_commercial_stop(style, String(unit.get("id", style)), title, top_label)
+	elevator.position = R(x_face, elev_d, 0.0)
+	elevator.rotation.y = -PI * 0.5
+	add_child(elevator)
+
+
 func _build_lobby(st: _Batch) -> void:
 	var is_office := kind == "office"
 	var ours := (not office.is_empty()) if is_office else ShopStyle.hq_tier > 0
@@ -3067,6 +3099,8 @@ func _build_lobby(st: _Batch) -> void:
 	# Reception desk: a stone-topped block with a brand-coloured front (widens and gains bronze inlays at higher HQ tiers).
 	var dd := D * 0.55
 	var desk_hw := 2.2 if tier < 2 else (2.6 if tier == 2 else 3.0)
+	var elev_x := W - ApartmentElevator.SHAFT_D - 0.16
+	desk_hw = minf(desk_hw, maxf(1.2, elev_x - cx - 1.4))
 	st.box(R(cx - desk_hw, dd, 0.0), R(cx + desk_hw, dd + 0.8, 1.05), walnut)
 	st.box(R(cx - desk_hw - 0.05, dd - 0.05, 1.05), R(cx + desk_hw + 0.05, dd + 0.85, 1.12), stone)
 	st.box(R(cx - desk_hw, dd - 0.02, 0.1), R(cx + desk_hw, dd, 0.98), prim if ours else Color(0.16, 0.17, 0.19))
@@ -3084,22 +3118,27 @@ func _build_lobby(st: _Batch) -> void:
 		desk_sig.modulate = bronze if tier >= 3 else acc
 		desk_sig.position = R(cx, dd - 0.036, 0.54)
 		_static.add_child(desk_sig)
-	for mx: float in [-1.2, 1.2]:
+	var mon_off := minf(1.2, desk_hw - 0.35)
+	for mx: float in [-mon_off, mon_off]:
 		st.box(R(cx + mx - 0.25, dd + 0.25, 1.12), R(cx + mx + 0.25, dd + 0.3, 1.45), Color(0.05, 0.05, 0.06))
 		_glow_quad(R(cx + mx - 0.23, dd + 0.245, 1.15), R(cx + mx + 0.23, dd + 0.245, 1.43), Color(0.35, 0.55, 0.85))
 	_solid(R(cx - desk_hw - 0.05, dd - 0.05, 0.0), R(cx + desk_hw + 0.05, dd + 0.85, 1.12))
 	spots.append({"kind": "office_desk" if is_office else "hq_desk", "pos": R(cx, dd - 0.9, 0.0), "label": "RECEPTION"})
-	# Lifts on the side wall: brushed steel doors, lit call panels.
-	for i in 3:
-		var lz := D * 0.25 + i * 2.1
-		if lz + 1.0 > D - 0.4:
-			break
-		st.box(R(W - 0.1, lz - 0.62, 0.0), R(W - 0.04, lz + 0.62, 2.5), Color(0.7, 0.71, 0.72))
-		st.box(R(W - 0.105, lz - 0.01, 0.0), R(W - 0.03, lz + 0.01, 2.5), Color(0.3, 0.3, 0.31))
-		st.box(R(W - 0.12, lz - 0.7, 2.5), R(W - 0.03, lz + 0.7, 2.62), Color(0.55, 0.42, 0.25))
-		_glow_quad(R(W - 0.125, lz - 0.15, 2.66), R(W - 0.125, lz + 0.15, 2.76), Color(1.0, 0.75, 0.35) * 1.5)
-		st.box(R(W - 0.1, lz + 0.8, 1.1), R(W - 0.05, lz + 0.92, 1.35), Color(0.6, 0.6, 0.62))
-		_glow_quad(R(W - 0.105, lz + 0.83, 1.17), R(W - 0.105, lz + 0.89, 1.23), Color(0.6, 0.9, 1.0) * 1.6)
+	# Working architectural elevator core integrated cleanly into the right lobby wall.
+	var elev_style := "office" if is_office else "hq"
+	var elev_top := "OFFICES" if is_office else "EXEC"
+	var elev_d := clampf(D * 0.44, 2.8, D - 2.6)
+	_add_lobby_elevator(st, elev_style, title, elev_top, elev_d, stone if is_office else Color(0.16, 0.16, 0.18), bronze)
+	# Companion brushed-steel lift bay beside the active lift when lobby depth allows.
+	var comp_d := elev_d + 3.1
+	if comp_d + 0.9 < D - 0.5:
+		var cx_wall := W - ApartmentElevator.SHAFT_D - 0.16
+		st.box(R(cx_wall, comp_d - 0.95, 0.0), R(W - 0.02, comp_d + 0.95, H), stone if is_office else Color(0.16, 0.16, 0.18))
+		_solid(R(cx_wall, comp_d - 0.95, 0.0), R(W - 0.02, comp_d + 0.95, H))
+		st.box(R(cx_wall - 0.03, comp_d - 0.62, 0.0), R(cx_wall, comp_d + 0.62, 2.32), Color(0.72, 0.73, 0.75))
+		st.box(R(cx_wall - 0.036, comp_d - 0.01, 0.0), R(cx_wall, comp_d + 0.01, 2.32), Color(0.12, 0.12, 0.13))
+		st.box(R(cx_wall - 0.05, comp_d - 0.70, 2.32), R(cx_wall, comp_d + 0.70, 2.44), bronze)
+		_glow_quad(R(cx_wall - 0.055, comp_d - 0.18, 2.52), R(cx_wall - 0.055, comp_d + 0.18, 2.64), Color(1.0, 0.75, 0.35) * 1.4)
 	# Waiting area by the window: two sofas round a low table, tall plants.
 	var sx := 2.2
 	for side: float in [-1.0, 1.0]:

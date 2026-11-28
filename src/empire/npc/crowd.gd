@@ -1466,7 +1466,7 @@ func _draw_people() -> void:
 	for pr in _people:
 		(_by_body[int(pr["body"]) % n_bodies] as Array).append(pr)
 	var focus := _focus()
-	var aabb := AABB(focus - Vector3(KEEP, 20, KEEP), Vector3(KEEP * 2, 60, KEEP * 2))
+	var aabb := AABB(focus - Vector3(DROP, 80, DROP), Vector3(DROP * 2, 160, DROP * 2))
 	for i in n_bodies:
 		var mmi := _mmis[i] as MultiMeshInstance3D
 		var mm: MultiMesh = mmi.multimesh
@@ -1488,7 +1488,7 @@ func _draw_people() -> void:
 				buf[j] = b.x.x; buf[j + 1] = b.y.x; buf[j + 2] = b.z.x; buf[j + 3] = o.x
 				buf[j + 4] = b.x.y; buf[j + 5] = b.y.y; buf[j + 6] = b.z.y; buf[j + 7] = o.y
 				buf[j + 8] = b.x.z; buf[j + 9] = b.y.z; buf[j + 10] = b.z.z; buf[j + 11] = o.z
-				var c: Color = pr["top"]
+				var c: Color = (pr["top"] as Color).srgb_to_linear()
 				buf[j + 12] = c.r; buf[j + 13] = c.g; buf[j + 14] = c.b; buf[j + 15] = float(pr.get("fear", 0.0))
 				# Pack pose_mode * 32 + fade_steps (0..16) + seed (0..1) into INSTANCE_CUSTOM.y.
 				var fk := 16.0 - floorf(clampf(float(pr.get("fade", 1.0)), 0.0, 1.0) * 16.0)

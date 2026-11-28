@@ -126,6 +126,7 @@ func _instantiate(all_now := false) -> void:
 			var mesh := ArrayMesh.new()
 			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
 			var mi := MeshInstance3D.new()
+			mi.name = "Low" if part[0] == "low" else "Ground"
 			mi.mesh = mesh
 			mi.material_override = part[1]
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -149,5 +150,6 @@ func triangle_count() -> int:
 	var n := 0
 	for key in _nodes:
 		for mi in (_nodes[key] as Node3D).get_children():
-			n += (mi as MeshInstance3D).mesh.get_faces().size() / 3
+			if mi is MeshInstance3D and (mi as MeshInstance3D).mesh:
+				n += (mi as MeshInstance3D).mesh.get_faces().size() / 3
 	return n

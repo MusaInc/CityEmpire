@@ -27,7 +27,9 @@ func _ready() -> void:
 	_streams["bell"] = _tone([[2093.0, 0.35]], 0.25, true)
 	_streams["error"] = _tone([[220.0, 0.12], [0.0, 0.04], [196.0, 0.16]], 0.3)
 	_streams["click"] = _tone([[2400.0, 0.012]], 0.25)
-	_streams["elev_tick"] = _tone([[1320.0, 0.025]], 0.18, true)
+	_streams["elev_tick"] = _tone([[1320.0, 0.025]], 0.16, true)
+	_streams["elev_btn"] = _tone([[1760.0, 0.018]], 0.20, true)
+	_streams["elev_chime"] = _tone([[1046.5, 0.16], [783.99, 0.34]], 0.24, true)
 	_streams["elev_door"] = _elev_door()
 	_streams["elev_hum"] = _elev_hum()
 
@@ -79,18 +81,22 @@ static func _tone(notes: Array, amp: float, ring := false, thud := false) -> Aud
 
 static func _elev_door() -> AudioStreamWAV:
 	var rate := 22050
-	var dur := 0.42
+	var dur := 0.52
 	var n := int(dur * rate)
 	var data := PackedByteArray()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 41
 	var lp := 0.0
+	var lp2 := 0.0
 	for i in n:
 		var t := float(i) / rate
-		var env := sin(PI * clampf(t / dur, 0.0, 1.0))
-		lp = lerpf(lp, rng.randf_range(-1.0, 1.0), 0.12)
-		var glide := sin(TAU * (155.0 + 30.0 * (t / dur)) * t) * 0.22
-		var v := (lp * 0.42 + glide) * env * 0.32
+		var u := clampf(t / dur, 0.0, 1.0)
+		var env := sin(PI * u)
+		lp = lerpf(lp, rng.randf_range(-1.0, 1.0), 0.09)
+		lp2 = lerpf(lp2, lp, 0.18)
+		var glide := sin(TAU * (128.0 + 24.0 * u) * t) * 0.18
+		var latch := exp(-t * 48.0) * sin(TAU * 420.0 * t) * 0.16
+		var v := (lp2 * 0.45 + glide) * env * 0.26 + latch
 		var s := int(clampf(v, -1.0, 1.0) * 32767.0)
 		data.append(s & 0xff)
 		data.append((s >> 8) & 0xff)
@@ -104,13 +110,18 @@ static func _elev_door() -> AudioStreamWAV:
 
 static func _elev_hum() -> AudioStreamWAV:
 	var rate := 22050
-	var dur := 0.95
+	var dur := 1.05
 	var n := int(dur * rate)
 	var data := PackedByteArray()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 73
+	var air := 0.0
 	for i in n:
 		var t := float(i) / rate
-		var env := minf(t / 0.18, 1.0) * minf((dur - t) / 0.22, 1.0)
-		var v := (sin(TAU * 98.0 * t) * 0.55 + sin(TAU * 196.0 * t) * 0.22 + sin(TAU * 294.0 * t) * 0.08) * env * 0.18
+		var env := minf(t / 0.20, 1.0) * minf((dur - t) / 0.24, 1.0)
+		air = lerpf(air, rng.randf_range(-1.0, 1.0), 0.04)
+		var motor := sin(TAU * 72.0 * t) * 0.52 + sin(TAU * 144.0 * t) * 0.20 + sin(TAU * 216.0 * t) * 0.06
+		var v := (motor + air * 0.18) * env * 0.15
 		var s := int(clampf(v, -1.0, 1.0) * 32767.0)
 		data.append(s & 0xff)
 		data.append((s >> 8) & 0xff)

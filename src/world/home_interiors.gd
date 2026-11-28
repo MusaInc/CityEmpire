@@ -702,7 +702,7 @@ func _frame(tier: int) -> void:
 
 
 func _rug(x0: float, x1: float, z0: float, z1: float, c: Color) -> void:
-	box(x0, x1, z0, z1, 0.0, 0.015, c)
+	box(x0, x1, z0, z1, 0.012, 0.028, c)
 
 
 ## Shared metric furniture; no per-home material duplication. x/z are room coordinates.
@@ -924,8 +924,14 @@ func feature(side: String, at: float, a0: float, a1: float, y0: float, y1: float
 
 ## Your progress on a board (HomeBoard): side/at as feature(); centre along, y.
 func board(side: String, at: float, along: float, y: float, width: float, frame: Color) -> void:
-	boards.append([side, at, along, y, width])
 	var hh := width * 0.42
+	if side in ["back", "front"]:
+		if _in_core(along - width * 0.5, along + width * 0.5, at - 0.04, at + 0.04, y - hh * 0.5):
+			return
+	else:
+		if _in_core(at - 0.04, at + 0.04, along - width * 0.5, along + width * 0.5, y - hh * 0.5):
+			return
+	boards.append([side, at, along, y, width])
 	match side:
 		"back":
 			box(along - width * 0.5 - 0.06, along + width * 0.5 + 0.06, at - 0.04, at, y - hh * 0.5 - 0.06, y + hh * 0.5 + 0.06, frame)
@@ -1529,8 +1535,8 @@ func _penthouse(pal: Array) -> void:
 	pane(SW + 0.1, W - 0.2, mz + 0.02, mz + 0.06, my + 0.25, my + 1.25)
 	col_boxes.append(AABB(P(SW + 0.1, mz + 0.02, my).min(P(W - 0.2, mz + 0.06, my + 1.25)), (P(SW + 0.1, mz + 0.02, my) - P(W - 0.2, mz + 0.06, my + 1.25)).abs()))
 	tube(Vector3(SW + 0.1, my + 1.25, mz + 0.04), Vector3(W - 0.2, my + 1.25, mz + 0.04), 0.03, BRASS, 6)
-	var steps := 12  # 0.28 m risers (STEP_MAX 0.35 with the physics margin)
-	var rise := my / steps
+	var steps := 12  # visual treads match ramp top (my + 0.25) so feet never float
+	var rise := (my + 0.25) / steps
 	for i in steps:
 		var z0 := mz - (steps - i) * 0.42
 		var top := (i + 1) * rise

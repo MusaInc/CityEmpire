@@ -120,14 +120,15 @@ static func _add_lods(parent: Node3D, placements: Array, far_mesh: Mesh, near_me
 	# in front of you (2026-11-26). The far level fades out over the last
 	# FADE metres before `ends_at`, where the impostors fade in.
 	var far := _instance_lod(parent, placements, far_mesh)
+	var pad := far.multimesh.get_aabb().size.length() * 0.5 + 4.0
 	far.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	far.visibility_range_end = ends_at + 4.0
+	far.visibility_range_end = ends_at + pad
 	far.set_instance_shader_parameter("lod_fade_out", Vector2(ends_at - FADE, ends_at))
 	if near_mesh_resource != null:
-		far.visibility_range_begin = maxf(0.0, detail_range - FADE * 0.5 - 4.0)
+		far.visibility_range_begin = maxf(0.0, detail_range - FADE * 0.5 - pad)
 		far.set_instance_shader_parameter("lod_fade_in", Vector2(detail_range - FADE * 0.5, detail_range + FADE * 0.5))
 		var near := _instance_lod(parent, placements, near_mesh_resource)
-		near.visibility_range_end = detail_range + FADE * 0.5 + 4.0
+		near.visibility_range_end = detail_range + FADE * 0.5 + pad
 		near.set_instance_shader_parameter("lod_fade_out", Vector2(detail_range - FADE * 0.5, detail_range + FADE * 0.5))
 
 

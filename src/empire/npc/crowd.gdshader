@@ -89,7 +89,6 @@ void vertex() {
 	float ph = INSTANCE_CUSTOM.x / (0.80 * y_scale) * 3.14159;
 	if (pose_mode == 2) {
 		person_pose_activity(v, n, limb, UV2.x, 1.0 - UV2.y, ph, 0.0, INSTANCE_CUSTOM.w, 2, pivot_k, TIME, seed);
-		person_pose_idle_k(v, n, limb, UV2.x, 1.0 - UV2.y, 0.0, 0.0, TIME, seed, pivot_k);
 	} else {
 		person_pose_wk(v, n, limb, UV2.x, 1.0 - UV2.y, ph, INSTANCE_CUSTOM.z, 0.0, INSTANCE_CUSTOM.w, COLOR.a, pivot_k, seed);
 		person_pose_idle_k(v, n, limb, UV2.x, 1.0 - UV2.y, INSTANCE_CUSTOM.z, 0.0, TIME, seed, pivot_k);

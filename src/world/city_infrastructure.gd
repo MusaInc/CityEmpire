@@ -81,10 +81,12 @@ static func bridge_walk(l: CityLayout) -> void:
 			var q := walk[i] + side * s * 9.8
 			var p := Vector3(q.x, l.ground_y(q.x, q.y) + CityTerrain.KERB, q.y)
 			lawn(l, p, yaw, Vector2(4.4, 2.7))
-			var seat := p - Vector3(side.x, 0, side.y) * s * 2.35
+			var seat_xz := q - side * s * 2.35
+			var seat := Vector3(seat_xz.x, l.ground_y(seat_xz.x, seat_xz.y) + CityTerrain.KERB, seat_xz.y)
 			furniture(l, "bench", seat, -yaw + (PI if s < 0.0 else 0.0))
 			if i == 2:
-				furniture(l, "bin", seat + Vector3(forward.x, 0, forward.y) * 1.8, 0.0)
+				var bin_xz := seat_xz + forward * 1.8
+				furniture(l, "bin", Vector3(bin_xz.x, l.ground_y(bin_xz.x, bin_xz.y) + CityTerrain.KERB, bin_xz.y), 0.0)
 	# End the central path where the underside draws close to the ground.
 	var end := walk[8]
 	var a := end - side * 8.5
@@ -144,14 +146,14 @@ static func bridge_landing(l: CityLayout) -> void:
 			b - crossfall[i + 1], 1.3, Color(0.19, 0.19, 0.19), Vector2(along, along + a.distance_to(b)))
 		along += a.distance_to(b)
 		for sg: float in [-1.0, 1.0]:
-			var o := side * sg * 9.8
-			# End barriers before the junction mouth, leaving turning space.
+			# Mitred parapet endpoints matching the deck's crossfall so barriers meet seamlessly at bends.
 			if i < l.bridge_ramp.size() - 3:
-				l._kbeam(k, a + o + Vector3.UP * 0.5, b + o + Vector3.UP * 0.5, 0.35, 1.0, stone)
+				l._kbeam(k, a + crossfall[i] * 0.98 * sg + Vector3.UP * 0.5, b + crossfall[i + 1] * 0.98 * sg + Vector3.UP * 0.5, 0.35, 1.0, stone)
 		if i % 6 == 0:
 			var g := l.terrain.road_y(a.x, a.z)
 			var field := l.roads.field_at(Vector2(a.x, a.z))
-			if a.y - g > 3.5 and field.w > 2.5:
+			var clear_of_road := not l.roads.on_road(Vector2(a.x, a.z)) and absf(field.x) > absf(field.y) + 2.0
+			if a.y - g > 3.5 and clear_of_road:
 				l._kbeam(k, Vector3(a.x, g - 0.4, a.z), a + Vector3.DOWN * 1.8, 1.6, 1.6, stone)
 				l._kbeam(k, a - side * 8 + Vector3.DOWN * 1.7, a + side * 8 + Vector3.DOWN * 1.7, 1.6, 1.0, stone)
 				l._ksolid(k, a.x - 1.5, a.z - 1.5, a.x + 1.5, a.z + 1.5, g - 0.6, g + 0.2, stone)
@@ -839,8 +841,8 @@ static func fountain(l: CityLayout, p: Vector3) -> void:
 			var a := i * TAU / 12.0
 			out.append(Vector2(p.x + cos(a) * r, p.z + sin(a) * r))
 		return out
-	l._kprism(k, ring.call(5.2), p.y - 0.2, p.y + 0.55, stone)
-	l._kprism(k, ring.call(4.7), p.y + 0.55, p.y + 0.6, Color(0.2, 0.36, 0.42))   # the water
+	l._kprism(k, ring.call(5.2), p.y - 0.2, p.y + 0.64, stone)
+	l._kprism(k, ring.call(4.7), p.y + 0.56, p.y + 0.62, Color(0.2, 0.36, 0.42))   # the water recessed inside rim
 	l._kprism(k, ring.call(0.7), p.y + 0.6, p.y + 2.2, stone)
 	l._kprism(k, ring.call(1.8), p.y + 2.2, p.y + 2.5, stone)
 	l._kprism(k, ring.call(0.35), p.y + 2.5, p.y + 3.4, stone)
@@ -856,7 +858,7 @@ static func kiosk(l: CityLayout, p: Vector3, ang: float, rng: RandomNumberGenera
 	var box := func(cx: float, cz: float, hx: float, hz: float) -> PackedVector2Array:
 		var c := Vector2(p.x, p.z) + ax * cx + az * cz
 		return PackedVector2Array([c - ax * hx - az * hz, c + ax * hx - az * hz, c + ax * hx + az * hz, c - ax * hx + az * hz])
-	l._kprism(k, box.call(0, 0, 1.6, 1.3), p.y, p.y + 2.5, Color(0.86, 0.84, 0.78))
+	l._kprism(k, box.call(0, 0, 1.6, 1.3), p.y - 0.35, p.y + 2.5, Color(0.86, 0.84, 0.78))
 	l._kprism(k, box.call(0, 1.32, 1.1, 0.04), p.y + 1.0, p.y + 1.9, Color(0.12, 0.13, 0.15))
 	l._kprism(k, box.call(0, 0.3, 1.85, 1.9), p.y + 2.5, p.y + 2.68, awn)
 

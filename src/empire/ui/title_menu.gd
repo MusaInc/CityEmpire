@@ -189,13 +189,15 @@ func _layout() -> void:
 	var l := PAD + float(_inset[0])
 	var t := PAD * 0.72 + float(_inset[1])
 	var r := PAD + float(_inset[2])
-	var b := PAD * 0.8 + minf(float(_inset[3]), 20.0)
+	var b := PAD * 0.8 + float(_inset[3])
 	wordmark.position = Vector2(l, t)
 	wordmark.size = wordmark.get_combined_minimum_size()
 	_actions.size = _actions.get_combined_minimum_size()
 	_actions.position = Vector2(l - 18.0, vs.y - b - _actions.size.y)
-	_caption.size = Vector2(420, _caption.get_combined_minimum_size().y)
-	_caption.position = Vector2(vs.x - r - 420.0, vs.y - b - _caption.size.y)
+	var cap_w := minf(420.0, maxf(180.0, vs.x - l - r - _actions.size.x - 24.0))
+	_caption.visible = vs.x - l - r - _actions.size.x >= 220.0
+	_caption.size = Vector2(cap_w, _caption.get_combined_minimum_size().y)
+	_caption.position = Vector2(vs.x - r - cap_w, vs.y - b - _caption.size.y)
 
 
 ## Where the wordmark's W sits on screen (the boot W lands here).

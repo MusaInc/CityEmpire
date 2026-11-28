@@ -40,7 +40,7 @@ static func forms(layout: CityLayout = null) -> Array:
 			[Vector2(W - 84, -270), "beach"], [Vector2(W - 46, -222), "rock"], [Vector2(W - 12, -204), "rock"],
 			[Vector2(W + 0.3, -200), "attach"]]],
 		["Lighthouse Point", 1, [
-			[Vector2(W + 0.3, 440), "attach"], [Vector2(W - 18, 442), "rock"], [Vector2(W - 54, 470), "beach"],
+			[Vector2(W + 0.3, 440), "rock"], [Vector2(W - 18, 442), "rock"], [Vector2(W - 54, 470), "beach"],
 			[Vector2(W - 78, 524), "beach"], [Vector2(W - 84, 590), "beach"], [Vector2(W - 64, 650), "rock"],
 			[Vector2(W - 22, 690), "rock"], [Vector2(W + 0.3, 610), "attach"]]],
 		["North Mole", -1, _mole([Vector2(E - 0.3, -421), Vector2(E + 40, -418), Vector2(E + 84, -394), Vector2(E + 106, -352)], 16.0)],
@@ -50,9 +50,9 @@ static func forms(layout: CityLayout = null) -> Array:
 			[Vector2(E + 98, -540), "beach"], [Vector2(E + 104, -492), "beach"], [Vector2(E + 74, -456), "rock"],
 			[Vector2(E + 26, -444), "rock"], [Vector2(E - 0.3, -442), "attach"]]],
 		["Southstrand", -1, [
-			[Vector2(E - 0.3, 400), "attach"], [Vector2(E + 24, 402), "rock"], [Vector2(E + 70, 428), "beach"],
+			[Vector2(E - 0.3, 400), "rock"], [Vector2(E + 24, 402), "rock"], [Vector2(E + 70, 428), "beach"],
 			[Vector2(E + 92, 480), "beach"], [Vector2(E + 74, 540), "rock"], [Vector2(E + 30, 566), "rock"],
-			[Vector2(E - 0.3, 480), "rock"]]],
+			[Vector2(E - 0.3, 480), "attach"]]],
 		# (Joined along the Commercial Island's own south coast – not a
 		# straight quay – so it follows the sea wall exactly: "coast".)
 		["Harbour Strand", 1, [
@@ -101,7 +101,7 @@ static func forms(layout: CityLayout = null) -> Array:
 			[Vector2(-860, 552), "beach"], [Vector2(-826, 524), "beach"], [Vector2(-830, 472), "rock"],
 			[Vector2(-862, 414), "attach"]], "coast"],
 		["Strand Park", -1, [
-			[Vector2(E - 0.3, 100), "attach"], [Vector2(E + 22, 96), "rock"], [Vector2(E + 70, 124), "beach"],
+			[Vector2(E - 0.3, 100), "rock"], [Vector2(E + 22, 96), "rock"], [Vector2(E + 70, 124), "beach"],
 			[Vector2(E + 100, 180), "beach"], [Vector2(E + 96, 248), "beach"], [Vector2(E + 62, 296), "rock"],
 			[Vector2(E + 20, 312), "rock"], [Vector2(E - 0.3, 310), "attach"]]],
 	]

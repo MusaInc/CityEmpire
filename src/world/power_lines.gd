@@ -133,7 +133,7 @@ static func pylon_mesh() -> ArrayMesh:
 	var waist := 32.0
 	var leg := func(h: float) -> float: return lerpf(base, top, pow(clampf(h / waist, 0.0, 1.0), 0.8)) if h <= waist else top
 	var corners := [Vector2(1, 1), Vector2(-1, 1), Vector2(-1, -1), Vector2(1, -1)]
-	var levels := [0.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0, 43.0, PYLON_H]
+	var levels := [-6.0, 0.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0, 43.0, PYLON_H]
 	# Legs.
 	for c: Vector2 in corners:
 		for i in levels.size() - 1:

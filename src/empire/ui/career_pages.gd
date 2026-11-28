@@ -98,7 +98,10 @@ static func operations(ph: Phone, body: VBoxContainer) -> void:
 		var t: Dictionary = tg.get(b.id, {})
 		if not t.is_empty():
 			c.add_child(G.para("Today's target: %s · bonus %s" % [String(t["label"]), EmpireData.money(float(t["bonus"]))], "body"))
-		var row := G.hbox(8)
+		var row := HFlowContainer.new()
+		row.add_theme_constant_override("h_separation", 8)
+		row.add_theme_constant_override("v_separation", 6)
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if not b.has_role("manager"):
 			row.add_child(G.button("Auto-restock: %s" % ("on" if bool(p["auto"]) else "off"), func():
 				p["auto"] = not bool(p["auto"])
@@ -118,7 +121,10 @@ static func operations(ph: Phone, body: VBoxContainer) -> void:
 	var lim := Careers.credit_limit(e)
 	fc.add_child(G.text("Credit line", "title3"))
 	fc.add_child(G.para("Borrow against your businesses at 0.12%% a day: %s drawn of %s." % [EmpireData.money(float(st["credit"])), EmpireData.money(lim)], "footnote"))
-	var fr := G.hbox(8)
+	var fr := HFlowContainer.new()
+	fr.add_theme_constant_override("h_separation", 8)
+	fr.add_theme_constant_override("v_separation", 6)
+	fr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for amt: float in [5000.0, 25000.0, 100000.0]:
 		var bd := G.button("Draw %s" % EmpireData.money(amt), func():
 			var err := Careers.draw_credit(e, amt)
@@ -143,7 +149,10 @@ static func reports(ph: Phone, body: VBoxContainer) -> void:
 	var tot: Dictionary = r["total"]
 	var head := _card(v)
 	head.add_child(G.text("Last 7 days", "title2"))
-	var fig := G.hbox(16)
+	var fig := HFlowContainer.new()
+	fig.add_theme_constant_override("h_separation", 16)
+	fig.add_theme_constant_override("v_separation", 8)
+	fig.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	fig.add_child(G.figure("Revenue", EmpireData.money(float(tot["revenue"]))))
 	fig.add_child(G.figure("Profit", EmpireData.money(float(tot["profit"])), G.GREEN if float(tot["profit"]) >= 0.0 else G.RED))
 	fig.add_child(G.figure("Customers", str(int(tot["customers"]))))
