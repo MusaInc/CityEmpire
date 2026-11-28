@@ -1220,7 +1220,16 @@ if True:
     arm_skin, _ = part('Skin_Arms_Oversize', [i for i in body if all(inside_over(j) for j in bf[i])], RB, weights)
     arm_skin.data.materials.append(armskin)
     skin_arms.append(arm_skin)
-for cut in ('Jumper', 'Hoodie', 'Bomber', 'Long', 'Track', 'Coat') + (('Blazer',) if BODY == 'a' else ()):
+if BODY == 'a':
+    def inside_linen(j):
+        p = RB[j]
+        arm = frames()[1]['l' if p.x < 0 else 'r']
+        tt, _, radius = arm.polar(p)
+        return tt > SHORT_T - .047 and radius < .105 and wsum(j, 'hand_l', 'hand_r') < .35
+    arm_skin, _ = part('Skin_Arms_Linen', [i for i in body if all(inside_linen(j) for j in bf[i])], RB, weights)
+    arm_skin.data.materials.append(armskin)
+    skin_arms.append(arm_skin)
+for cut in ('Jumper', 'Hoodie', 'Bomber', 'Long', 'Track', 'Coat') + (('Blazer', 'Leather', 'Qzip') if BODY == 'a' else ()):
     wrist_skin = next(o for o in skin_arms if o.name == 'Skin_Arms_Shirt')
     copy = wrist_skin.copy()
     copy.data = wrist_skin.data.copy()
@@ -1242,9 +1251,9 @@ for side in ('l','r'):
         all_meshes.append(pocket)
 
 for ob in all_meshes:
-    if ob.name in ('Courier_Cargo','Courier_Chinos','Lower_jeans','Lower_joggers','Lower_track','Lower_fitjeans','Lower_leggings','Lower_widejeans','Lower_bikershorts'):
+    if ob.name in ('Courier_Cargo','Courier_Chinos','Lower_tailored','Lower_jeans','Lower_joggers','Lower_track','Lower_fitjeans','Lower_leggings','Lower_widejeans','Lower_bikershorts'):
         bend_corrective(ob,'Knee')
-    elif ob.name in ('Top_Shirt','Top_Hoodie','Top_Bomber','Top_Jumper','Top_Blazer','Top_Fashion_Racer','Top_Fashion_Pullover','Top_Oversize','Top_Track','Top_Coat'):
+    elif ob.name in ('Top_Shirt','Top_Hoodie','Top_Bomber','Top_Jumper','Top_Blazer','Top_Leather','Top_Qzip','Top_Fashion_Racer','Top_Fashion_Pullover','Top_Oversize','Top_Track','Top_Coat'):
         bend_corrective(ob,'Elbow')
     if BODY=='b' and (ob.name in ('Top_Vest','Skin_Arms_Vest','Top_Hoodie','Top_Bomber','Top_Blazer','Top_Oversize','Top_Track','Top_Coat',
                                   'Top_Tee','Top_Shirt','Top_Jumper','Topx_Hoodie_Fold','Top_Polo','Fashion_Torso_Skin',
@@ -1295,7 +1304,12 @@ for ob in all_meshes:
         for li in face.loop_indices:
             p=ob.data.vertices[ob.data.loops[li].vertex_index].co
             freedom=0
-            if (ob in tops or ob in loose_tops or ob.name=='Topx_Bomber_Trims') and abs(p.x)<.24:freedom=max(0,min(.15,(1.12-p.z)*.85))
+            if (ob in tops or ob in loose_tops or ob.name=='Topx_Bomber_Trims') and abs(p.x)<.24:
+                max_f = 0.22 if ob.name in ('Top_Coat', 'Top_Linen', 'Top_Oversize') else 0.15
+                freedom = max(0, min(max_f, (1.12 - p.z) * 0.85))
+            elif ob.name.endswith('skirt') or ob.name.endswith('_Skirt'):
+                # Lightweight hem sway on skirts and dresses during walking/running (pinned at waist).
+                freedom = max(0, min(0.20, (0.86 - p.z) * 0.42))
             sole=1-max(0,min(1,(p.z-.027)/.012)) if ob==shoes else 0
             if density is not None:
                 sole = density.data[li].uv.y

@@ -370,7 +370,7 @@ def fitted_leather_shoe(obj, joints, skin, style):
                  clear_ankle(last(.049, .034, .116, -.043, .016), .005),
                  lip], upper)
             add([lip, [p.lerp(Vector((ankle.x, .008, p.z - .002)), .075) for p in lip],
-                 [p.lerp(Vector((ankle.x, .008, p.z - .030)), .10) for p in lip]], edge)
+                 [p.lerp(Vector((ankle.x, .008, p.z - .022)), .12) for p in lip]], upper)
 
     insert_parts(obj, parts, replace=True)
     weights_from(obj, skin, lambda p: smooth(.037, .066, p.z) * (1 - smooth(.050, .103, p.y)))

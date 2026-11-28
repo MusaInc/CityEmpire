@@ -372,12 +372,12 @@ def finish_jules_collection(collection, output):
 
     # Delicate flush pocket topstitching seated tightly onto the denim with outward +Y normals!
     denim = models['Lower_relaxeddenim']
-    thread = collection.material('hero_jules_denim_thread', (.76, .64, .44), .84)
+    thread = collection.material('hero_jules_denim_thread', (.52, .42, .28), .86)
     for side, tag in [(-1, 'L'), (1, 'R')]:
         points = [(side * (0.072 + .066*t + .026*t*t), 1.010 - .110*t)
                   for t in (i/21 for i in range(22))]
         t_name = f'Lower_relaxeddenim_PocketThread{tag}'
-        collection.surface_strip(t_name, denim, points, .00035, thread, .00075)
+        collection.surface_strip(t_name, denim, points, .0009, thread, .0013)
         t_ob = models.get(t_name)
         if t_ob is not None:
             for poly in t_ob.data.polygons:
@@ -386,20 +386,40 @@ def finish_jules_collection(collection, output):
             t_ob.data.update()
     shoe = models['Footwear_highstreet']
     # Give high-tops clean room around the ankle and forefoot so socks NEVER poke through!
-    adjust_basis(shoe, lambda p: Vector((math.copysign(.0042 * smooth(.03, .11, p.z), p.x),
-                                         .0068 * smooth(.065, .158, p.y),
+    adjust_basis(shoe, lambda p: Vector((math.copysign(.0062 * smooth(.03, .11, p.z), p.x),
+                                         .0072 * smooth(.065, .158, p.y),
                                          .0055 * bell(p.y - .114, .048) * smooth(.040, .082, p.z))))
-    # Keep socks cleanly outside ankle skin in walk/run/sit & recess biker forefoot cleanly inside shoes!
+    # Keep socks cleanly outside ankle skin ABOVE shoe collar (z > 0.110), and tucked -7mm INSIDE shoes (z < 0.105)!
     socks = models.get('Fashion_Lounge_Socks')
     if socks is not None:
         def fit_socks(p):
-            w = smooth(0.18, 0.06, p.z)
             cx = math.copysign(0.105, p.x)
-            radial = Vector((p.x - cx, p.y - 0.012, 0.0))
+            radial = Vector((p.x - cx, p.y - 0.015, 0.0))
             if radial.length < 1e-4:
                 return Vector()
-            return radial.normalized() * (0.0032 * w)
+            d = radial.normalized()
+            in_shoe = smooth(0.112, 0.082, p.z)
+            above = smooth(0.102, 0.125, p.z)
+            return d * (0.0026 * above - 0.0075 * in_shoe)
         adjust_basis(socks, fit_socks)
+    # Eliminate ankle/instep skin clipping on Footwear_pumps (and Footwear_heels):
+    # ensure the leather pump upper always clears Fashion_Legs by +4.5mm across the vamp & heel counter!
+    if legs_ob is not None:
+        legs_ft_tree = surface_tree(legs_ob.data)
+        for pump_name in ('Footwear_pumps', 'Footwear_heels'):
+            pump_ob = models.get(pump_name)
+            if pump_ob is None:
+                continue
+            def clear_pump_skin(p):
+                if p.z < 0.025 or p.z > 0.105:
+                    return Vector()
+                hit, nrm, _, dist = legs_ft_tree.find_nearest(p)
+                if hit is not None and nrm.length > 1e-4 and dist < 0.028:
+                    gap = (p - hit).dot(nrm)
+                    if gap < 0.0048:
+                        return nrm * (0.0048 - gap)
+                return Vector()
+            adjust_basis(pump_ob, clear_pump_skin)
     biker_legs = models.get('Fashion_Biker_Legs')
     if biker_legs is not None:
         def tuck_biker_foot(p):

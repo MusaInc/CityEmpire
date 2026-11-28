@@ -332,13 +332,13 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
         stubble_zone = np.clip((yy - (ey0 + 115 * sc)) / (85 * sc), 0.0, 1.0) * np.exp(-((np.abs(xx - mx) - 195 * sc) / (135 * sc)) ** 2)
         hair_zone = np.clip(moustache_zone + goatee_zone + 0.70 * stubble_zone, 0.0, 1.0)
         # Crisp follicle sharpening in albedo (strictly on facial-hair zone, never noisy on cheeks).
-        sharp_delta = np.clip((fine_hair * 0.65 + med_hair * 0.25) * hair_zone, -0.14, 0.14)[..., None]
+        sharp_delta = np.clip((fine_hair * 0.92 + med_hair * 0.34) * hair_zone, -0.18, 0.18)[..., None]
         filled = np.clip(filled + sharp_delta, 0.0, 1.0)
         # Directional hair-strand relief for normal map: individual dark hairs stand subtly proud of skin!
-        dark_hair = np.clip((skin_lum * 0.88 - flum) / max(skin_lum * 0.65, 0.05), 0.0, 1.0) * hair_zone
-        strand_pattern = (0.55 * np.sin(xx * (1.85 / sc) + np.sin(yy * (0.25 / sc)) * 1.4)
-                          + 0.45 * np.sin(xx * (3.40 / sc) - yy * (0.45 / sc)))
-        beard_hair_relief = (dark_hair * (0.65 + 0.55 * strand_pattern) - fine_hair * 2.4 * hair_zone).astype(np.float32)
+        dark_hair = np.clip((skin_lum * 0.90 - flum) / max(skin_lum * 0.62, 0.05), 0.0, 1.0) * hair_zone
+        strand_pattern = (0.55 * np.sin(xx * (1.95 / sc) + np.sin(yy * (0.28 / sc)) * 1.4)
+                          + 0.45 * np.sin(xx * (3.60 / sc) - yy * (0.48 / sc)))
+        beard_hair_relief = (dark_hair * (0.78 + 0.62 * strand_pattern) - fine_hair * 2.8 * hair_zone).astype(np.float32)
     # Preserve delicate upper-eyelid crease depth so eyes retain natural 3D orbital definition.
     lid_crease = sum(((xx - ex) / (112. * sc)) ** 2 + ((yy - ey + 28 * sc) / (20. * sc)) ** 2 < 1
                      for k, (ex, ey) in image_landmarks.items() if k.startswith('eye')).astype(bool)
@@ -416,7 +416,7 @@ def project_portrait(face, shell, identity, eyes, source_path, tint, output, ima
     height = np.zeros(used.shape, np.float32)
     skin_relief = -sample(detail) * .00105 * weight * (.4 + .6 * covered)
     if identity == 'ade':
-        beard_relief = sample(beard_hair_relief) * .00042 * weight * (.35 + .65 * covered)
+        beard_relief = sample(beard_hair_relief) * .00056 * weight * (.35 + .65 * covered)
         height[used] = skin_relief + beard_relief
     else:
         height[used] = skin_relief

@@ -169,6 +169,50 @@ def smooth_neckline_rim(obj, sk_tree):
     obj.data.update()
 
 
+def smooth_sleeve_hems(obj, sk_tree):
+    """Smooth jagged sawtooth boundary edges at sleeve cuffs on cut knit tops."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    rim = {}
+    for e in bm.edges:
+        if e.is_boundary and all(abs(v.co.x) > 0.215 and v.co.z > 0.92 for v in e.verts):
+            a, b = e.verts[0].index, e.verts[1].index
+            rim.setdefault(a, []).append(b)
+            rim.setdefault(b, []).append(a)
+    bm.free()
+    chain = {i: nbs for i, nbs in rim.items() if len(nbs) == 2}
+    if not chain:
+        return
+    pos = {i: obj.data.vertices[i].co.copy() for i in rim}
+    for _ in range(12):
+        nxt = dict(pos)
+        for i, (a, b) in chain.items():
+            p_new = pos[i].lerp((pos[a] + pos[b]) * 0.5, 0.50)
+            hit, nrm, _, dist = sk_tree.find_nearest(p_new)
+            if hit is not None and nrm.length > 1e-4 and dist < 0.04:
+                gap = (p_new - hit).dot(nrm)
+                if gap < 0.0055:
+                    p_new = hit + nrm * 0.0058
+            nxt[i] = p_new
+        pos = nxt
+    keys = obj.data.shape_keys.key_blocks if obj.data.shape_keys else []
+    neigh = vertex_neighbours(obj.data)
+    deltas = {i: pos[i] - obj.data.vertices[i].co for i in chain}
+    ring1 = {}
+    for i, d in deltas.items():
+        for j in neigh[i]:
+            if j not in deltas:
+                ring1.setdefault(j, []).append(d)
+    for j, ds in ring1.items():
+        deltas[j] = (sum(ds, Vector()) / len(ds)) * 0.50
+    for i, d in deltas.items():
+        obj.data.vertices[i].co += d
+        for key in keys:
+            key.data[i].co += d
+    obj.data.update()
+
+
 def chest_fit(p, strength, ripple, ease):
     x, y, z = p
     front = smooth(.052, .112, y)
@@ -401,12 +445,12 @@ def replace_straps(collection, clothing, torso):
             bpy.data.objects.remove(obsolete, do_unlink=True)
 
     for sign, suffix in ((-1, 'Left'), (1, 'Right')):
-        rings = []
+        raw_outer, raw_inner = [], []
         for step in range(46):
             t = step / 45
-            points = []
+            row_out, row_in = [], []
             for edge in (-1, 1):
-                width = .0070 - .0010 * smooth(.20, .50, t)
+                width = .0068 - .0010 * smooth(.20, .50, t)
                 x = sign * (.076 + .014 * bell(t - .34, .20) - .145 * smooth(.48, 1, t)) + edge * width
                 theta = math.pi * min(1.0, t / .54)
                 elevation = 1.330 + .044 * smooth(.24, .50, t) - .108 * smooth(.54, 1, t)
@@ -420,13 +464,28 @@ def replace_straps(collection, clothing, torso):
                 if hit is None:
                     raise RuntimeError(f'Jules shoulder strap left the body surface at sample {step} sign {sign} at {tuple(pivot)}')
                 hem, hem_normal, _, _ = shell.ray_cast(origin, -direction, .25)
-                overlap = smooth(.18, .020, t) + smooth(.85, .99, t)
+                overlap = smooth(.16, .025, t) + smooth(.85, .98, t)
                 if hem is not None and (hem-hit).dot(direction) > 0 and overlap:
                     hit = hit.lerp(hem, overlap)
                     normal = normal.lerp(hem_normal, overlap).normalized()
-                gap = .0026 + (0.0014 * bell(t - .77, .12) if sign > 0 else 0)
-                points.append((hit + normal * gap, hit + normal * .0004))
-            rings.append((points[0][0], points[1][0], points[1][1], points[0][1]))
+                # Taper strap lift cleanly at front/back bra anchor points so straps emerge seamlessly (no knots!).
+                end_taper = smooth(0.0, 0.14, t) * smooth(1.0, 0.86, t)
+                gap = 0.0008 + (0.0018 + (0.0014 * bell(t - .77, .12) if sign > 0 else 0)) * end_taper
+                row_out.append(hit + normal * gap)
+                row_in.append(hit + normal * (0.0002 * end_taper))
+            raw_outer.append(row_out)
+            raw_inner.append(row_in)
+        # Smooth strap edges 3x along t to eliminate any step/knot where strap leaves bra hem!
+        for _ in range(3):
+            raw_outer = [raw_outer[0]] + [
+                [raw_outer[i - 1][e] * 0.25 + raw_outer[i][e] * 0.50 + raw_outer[i + 1][e] * 0.25 for e in (0, 1)]
+                for i in range(1, len(raw_outer) - 1)
+            ] + [raw_outer[-1]]
+            raw_inner = [raw_inner[0]] + [
+                [raw_inner[i - 1][e] * 0.25 + raw_inner[i][e] * 0.50 + raw_inner[i + 1][e] * 0.25 for e in (0, 1)]
+                for i in range(1, len(raw_inner) - 1)
+            ] + [raw_inner[-1]]
+        rings = [(raw_outer[i][0], raw_outer[i][1], raw_inner[i][1], raw_inner[i][0]) for i in range(len(raw_outer))]
         vertices = [point for row in rings for point in row]
         faces = [(3, 2, 1, 0)]
         for ring in range(len(rings) - 1):
@@ -769,6 +828,7 @@ def fit_upper_collection(collection):
                             key.data[i].co += d
                 top_ob.data.update()
             smooth_neckline_rim(top_ob, sk_tree)
+            smooth_sleeve_hems(top_ob, sk_tree)
 
             def verify_knit_clear(p):
                 if p.z < 1.13 or p.z > 1.48:
@@ -807,6 +867,55 @@ def fit_upper_collection(collection):
                     gap = (p - hit).dot(nrm)
                     return nrm * (lift - gap) * 0.94
                 adjust_basis(tr_ob, snap_top_trim)
+
+    # Polish unlocked Jules wardrobe silhouettes (dresses, blouses, tanks, jackets) with
+    # smooth bust contours, clean skin clearance & matched shoulder weights so every look is AAA!
+    for extra_name, min_g in (
+        ('Top_Fashion_Blouse', 0.0052),
+        ('Top_Fashion_Tank', 0.0042),
+        ('Top_Fashion_Squareneck', 0.0042),
+        ('Top_Fashion_Vest', 0.0048),
+        ('Top_Fashion_Fitteddress', 0.0042),
+        ('Top_Fashion_Loosedress', 0.0058),
+        ('Top_Fashion_Onedress', 0.0042),
+        ('Top_Fashion_Moto', 0.0068),
+        ('Top_Fashion_Racer', 0.0065),
+        ('Top_Fashion_Jacket', 0.0068),
+        ('Top_Fashion_Pullover', 0.0072),
+    ):
+        ex_ob = models.get(extra_name)
+        if ex_ob is None:
+            continue
+        # Soften any sharp bust apex on fitted tops/dresses.
+        e_neigh = vertex_neighbours(ex_ob.data)
+        e_pos = [v.co.copy() for v in ex_ob.data.vertices]
+        e_inf = {
+            i: 0.85 * smooth(1.18, 1.23, p.z) * smooth(1.36, 1.30, p.z) * smooth(0.03, 0.085, p.y)
+            for i, p in enumerate(e_pos) if e_neigh[i]
+        }
+        e_inf = {i: w for i, w in e_inf.items() if w > 0.02}
+        if e_inf:
+            e_rel = relax_patch(e_pos, e_neigh, e_inf, (.48,) * 10)
+            for i in e_inf:
+                d = e_rel[i] - e_pos[i]
+                ex_ob.data.vertices[i].co = e_rel[i]
+                if ex_ob.data.shape_keys:
+                    for key in ex_ob.data.shape_keys.key_blocks:
+                        key.data[i].co += d
+            ex_ob.data.update()
+        def clear_extra_skin(p, mg=min_g):
+            if p.z < 1.04 or p.z > 1.48:
+                return Vector()
+            hit, nrm, _, dist = torso_tree.find_nearest(p)
+            if hit is not None and nrm.length > 1e-4 and dist < 0.035:
+                gap = (p - hit).dot(nrm)
+                need = mg + 0.0045 * smooth(0.145, 0.205, abs(p.x))
+                if gap < need:
+                    return nrm * (need - gap)
+            return Vector()
+        adjust_basis(ex_ob, clear_extra_skin)
+        balance_arm_weights(ex_ob, collection.rig)
+        follow_correctives(ex_ob, torso_skin)
 
     # Also smooth bust apex on Top_Fashion_Crossbra so the sports bra has a clean supportive athletic profile!
     crossbra = models.get('Top_Fashion_Crossbra')

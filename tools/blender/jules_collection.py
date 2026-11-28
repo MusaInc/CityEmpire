@@ -177,7 +177,8 @@ class Collection:
             t = ring / 5
             for vertex in range(columns):
                 angle = math.tau * vertex / (columns - 1)
-                z = 1.018 + .034 * t - .006 * math.sin(angle)
+                # Generous vertical waist sash (1.000..1.056) so bodice-to-skirt join never shows a gap!
+                z = 1.000 + .056 * t - .005 * math.sin(angle)
                 centre = Vector((0, .019, z))
                 direction = Vector((math.sin(angle), math.cos(angle), 0))
                 hits = [tree.ray_cast(centre + direction * .27, -direction)[0] for tree in trees]

@@ -37,7 +37,7 @@ def wmat(name, color, rough, tex=None, normal=None):
     return material(name, color, rough, tex, normal)
 
 
-lapel_mat = wmat('hero_lapel', (.14, .15, .17), .55, knit)
+lapel_mat = wmat('hero_lapel', (.20, .21, .24), .58, knit)
 white_mat = wmat('hero_shirt_white', (.80, .81, .82), .72, knit)   # (.86 glared flat white under the blazer)
 tie_mat = wmat('hero_tie', (.05, .07, .16), .55)
 button_mat = wmat('hero_button', (.82, .8, .76), .35)
@@ -1813,6 +1813,76 @@ if True:   # both heroes (Jules's coat and track pieces sit on her own neck/hull
     knit_rib.data.materials.append(knit_mat)
     add(knit_rib, False)
 
+# ---------------------------------------------------------------- Ade modern collection (2026-11-28)
+# Leather café-racer jacket, linen camp-collar resort shirt, and ribbed quarter-zip knit.
+if BODY == 'a':
+    # 1. Leather Moto / Café Racer Jacket: structured stand collar, metallic front zip, slanted welt pockets.
+    leather_j, _lR, _lZ = everyday_top('Top_Leather', 'hero_leather', 'jacket', 9.0, .955, (1.594, 1.564), .007,
+                                       hem=PANTS_TOP - .014, tail=.030, sleeve_ease=(.020, .018),
+                                       cuff=(.85, .955, lambda sd, a: cuff_radius(sd, a) + .004),
+                                       rough=.42, textile='leather', texture_name='top_leather')
+    leather_col = rib_band('Topx_Leather_Collar', _lR, _lZ, .028, leather_j, lean=.0012)
+    leather_col.data.materials.clear()
+    leather_col.data.materials.append(leather_j.data.materials[0])
+    add(leather_col, False)
+    leather_trims = []
+    for _sign in (-1, 1):
+        _rows = [(.086, .122, .0014, 1.072), (.098, .134, .0020, 1.088), (.120, .152, .0014, 1.158)]
+        _pnl = stitch_panel('Leather welt', leather_j,
+                            [(a, b, d, z) if _sign > 0 else (-b, -a, d, z) for a, b, d, z in _rows],
+                            leather_j.data.materials[0])
+        if _pnl is not None:
+            leather_trims.append(_pnl)
+    if leather_trims:
+        add(join_as('Topx_Leather_Trims', leather_trims), False)
+    zipper_trim(leather_j, 'Leather', 1.560, PANTS_TOP - .036, .0085)
+
+    # 2. Contemporary Linen Camp-Collar Short-Sleeve Shirt: breezy untucked resort drape & open collar.
+    linen_s, _nR, _nZ = everyday_top('Top_Linen', 'hero_linen', 'oversize', .58, SHORT_T, (1.565, 1.515), .006,
+                                     hem=PANTS_TOP - .065, tail=.042, sleeve_ease=(.020, .018),
+                                     rough=.86, textile='shorts', texture_name='top_linen')
+    # Cut a clean shallow open camp-collar V notch right at the throat (stays over neck skin, never hollow chest!).
+    _bm_l = bmesh.new()
+    _bm_l.from_mesh(linen_s.data)
+    def _camp_v(co):
+        dz = max(co.z - 1.472, 0.0)
+        return max(abs(co.x) - (.008 + .52 * dz), 1.472 - co.z, .020 - (co.y - NECK_CY) * FRONT)
+    iso_cut(_bm_l, _camp_v)
+    _bm_l.to_mesh(linen_s.data)
+    _bm_l.free()
+    linen_s.data.update()
+    _lst, _llf, _, _, _ = shirt_collar('Top_Linen', gap=.24, leaf_w=(.030, .042), spread=.14,
+                                       mat=linen_s.data.materials[0], garment=linen_s, R=_nR, Z0=_nZ,
+                                       H=_periodic([.014 for a in _NK_A]), closed=False, button=False)
+    reweight(_lst)
+    weights_from(_lst, linen_s, lambda co: .82)
+    weights_from(_llf, linen_s)
+    _lt = tree_of(linen_s)
+    _lbtns = []
+    for _bz in (1.420, 1.335, 1.250, 1.165, 1.080):
+        _bh = _lt.ray_cast(Vector((0, NECK_CY + FRONT * .4, _bz)), Vector((0, -FRONT, 0)))[0]
+        if _bh is not None:
+            _b = button_mesh('lbtn', _bh + Vector((0, FRONT * .003, 0)), Vector((0, FRONT, 0)),
+                             r=.0060, h=.0022, mat=button_mat)
+            weights_from(_b, linen_s)
+            _lbtns.append(_b)
+    add(join_as('Topx_Linen_Collar', [_lst, _llf] + _lbtns), False)
+
+    # 3. Ribbed Quarter-Zip Knit: structured funnel neck + metallic quarter-zip + ribbed cuffs.
+    qzip, _qR, _qZ = everyday_top('Top_Qzip', 'hero_qzip', 'knit', 9.0, .932, (1.592, 1.560), .008,
+                                  hem=PANTS_TOP - .030, tail=.038, sleeve_ease=(.018, .016),
+                                  cuff=(.82, .932, lambda sd, a: cuff_radius(sd, a) + .001),
+                                  rough=.84, textile='joggers', texture_name='top_qzip')
+    qzip_parts = [rib_band('Qzip funnel', _qR, _qZ, .044, qzip, lean=-.0005, ease_top=.0015)]
+    for _side in ('l', 'r'):
+        _cf, _ = shirt_cuff(_side, .922, 1.002, mat=rib_trim,
+                            radius=lambda sd, a: cuff_radius(sd, a) + .001, trim_row='rib', btn=False,
+                            name='QzipCuff_')
+        weights_from(_cf, qzip)
+        qzip_parts.append(_cf)
+    add(join_as('Topx_Qzip_Trims', qzip_parts), False)
+    zipper_trim(qzip, 'Qzip', 1.578, 1.345, .0075)
+
 # ---------------------------------------------------------------- trouser waistband
 # A finished 3.6 cm band round the trousers' cut top (it was a raw edge),
 # topstitched, with seven belt loops and the fly button. Follows the trousers.
@@ -1908,6 +1978,8 @@ for top in tops + loose_tops:
 
 chinos = chinos_from_block(pants)
 add(chinos, False)
+if BODY == 'a':
+    add(tailored_from_block(pants), False)
 for style in ('jeans','joggers','shorts'):
     for piece in lower_cut(pants, style):
         add(piece, False)
@@ -1971,7 +2043,7 @@ if lace_mesh is not None:
 shells = [(tee, .59), (polo, .59), (shirt, .58), (jumper, .57), (bomber, .62)]
 shells.extend([(over, .59), (track, .60), (coat, .60), (knit_front, .66)])
 if BODY == 'a':
-    shells.extend([(blazer, .60), (sfront, .66)])
+    shells.extend([(blazer, .60), (sfront, .66), (leather_j, .62), (linen_s, .60), (qzip, .59)])
 for garment_, ratio in shells:
     simplify_surface(garment_, ratio)
 print('WARDROBE', [o.name for o in wardrobe], flush=True)

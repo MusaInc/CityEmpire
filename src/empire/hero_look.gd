@@ -4,19 +4,27 @@ extends RefCounted
 ## and wardrobe keys so older saves can be read without a version bump.
 const CHARACTERS := [["a", "Ade"], ["b", "Jules"]]
 const IDENTITIES := {"a": "hero_ade", "b": "hero_jules"}
-const TOPS := [["top_tee", "T-Shirt"], ["top_polo", "Polo"], ["top_shirt", "Shirt"], ["top_jumper", "Jumper"],
-	["top_hoodie", "Hoodie"], ["top_long", "Base Layer"], ["top_bomber", "Bomber Jacket"],
-	["top_oversize", "Oversized Tee"], ["top_track", "Track Jacket"], ["top_blazer", "Suit Jacket"], ["top_coat", "Overcoat"]]
-const LOWER_CUTS := [["auto", "Match top"], ["cargo", "Cargo"], ["chinos", "Chinos"],
+const TOPS := [["top_tee", "T-Shirt"], ["top_polo", "Polo"], ["top_shirt", "Shirt"], ["top_linen", "Linen Camp Shirt"],
+	["top_jumper", "Jumper"], ["top_qzip", "Quarter-Zip Knit"], ["top_hoodie", "Hoodie"], ["top_long", "Base Layer"],
+	["top_bomber", "Bomber Jacket"], ["top_leather", "Leather Moto"], ["top_oversize", "Oversized Tee"],
+	["top_track", "Track Jacket"], ["top_blazer", "Suit Jacket"], ["top_coat", "Overcoat"]]
+const LOWER_CUTS := [["auto", "Match top"], ["cargo", "Cargo"], ["chinos", "Chinos"], ["tailored", "Tailored Trousers"],
 	["jeans", "Jeans"], ["joggers", "Joggers"], ["track", "Track Pants"], ["shorts", "Shorts"]]
 const FASHION_TOPS := [["top_fashion_ribcrop", "Cropped Rib Cardigan"], ["top_fashion_zipcrop", "Cropped Zip Hoodie"],
 	["top_fashion_tailoredknit", "Tailored V-Neck"], ["top_fashion_crossbra", "Crossback Sports Top"],
+	["top_fashion_blouse", "Linen Blouse"], ["top_fashion_tank", "Fitted Rib Tank"],
+	["top_fashion_squareneck", "Square-Neck Top"], ["top_fashion_vest", "Tailored Vest"],
+	["top_fashion_moto", "Leather Moto Jacket"], ["top_fashion_racer", "Cropped Leather Jacket"],
+	["top_fashion_jacket", "Denim Jacket"], ["top_fashion_pullover", "Fleece Pullover"],
 	["top_oversize", "Oversized Tee"], ["top_track", "Track Jacket"], ["top_coat", "Overcoat"]]
-const DRESSES := [["top_fashion_cowldress", "Satin Slit Gown"]]
-const FASHION_BOTTOMS := [["relaxeddenim", "Relaxed Denim"], ["utilitymini", "Utility Mini"],
-	["beltedmini", "Belted Mini"], ["sprintshorts", "Training Shorts"], ["track", "Track Pants"]]
+const DRESSES := [["top_fashion_cowldress", "Satin Slit Gown"], ["top_fashion_fitteddress", "Fitted Cocktail Dress"],
+	["top_fashion_loosedress", "Draped Midi Dress"], ["top_fashion_onedress", "One-Shoulder Dress"]]
+const FASHION_BOTTOMS := [["relaxeddenim", "Relaxed Denim"], ["fitjeans", "High-Waisted Jeans"],
+	["widejeans", "Wide-Leg Jeans"], ["chinos", "Tailored Trousers"], ["utilitymini", "Utility Mini"],
+	["beltedmini", "Belted Mini"], ["midiskirt", "Midi Skirt"], ["tailoredshorts", "Tailored Shorts"],
+	["leggings", "Active Leggings"], ["sprintshorts", "Training Shorts"], ["track", "Track Pants"]]
 const FOOTWEAR := [["streettrainers", "Low Trainers"], ["highstreet", "High Tops"],
-	["pumps", "Pumps"], ["eveningstraps", "Evening Heels"]]
+	["pumps", "Pumps"], ["boots", "Ankle Boots"], ["sandals", "Strappy Sandals"], ["eveningstraps", "Evening Heels"]]
 const ACCESSORIES := [["none", "None"], ["day", "Gold Pendant"], ["street", "Silver Chain"],
 	["office", "Brass Pendant"], ["evening", "Evening Pendant"]]
 
@@ -127,13 +135,24 @@ static func current(flags: Dictionary) -> Dictionary:
 			"top_fashion_zipcrop": ["utilitymini", "highstreet"],
 			"top_fashion_tailoredknit": ["beltedmini", "pumps"],
 			"top_fashion_crossbra": ["sprintshorts", "streettrainers"],
+			"top_fashion_blouse": ["chinos", "pumps"],
+			"top_fashion_tank": ["fitjeans", "streettrainers"],
+			"top_fashion_squareneck": ["midiskirt", "pumps"],
+			"top_fashion_vest": ["chinos", "pumps"],
+			"top_fashion_moto": ["fitjeans", "boots"],
+			"top_fashion_racer": ["widejeans", "highstreet"],
+			"top_fashion_jacket": ["leggings", "streettrainers"],
+			"top_fashion_pullover": ["leggings", "streettrainers"],
 			"top_fashion_cowldress": ["relaxeddenim", "eveningstraps"],
+			"top_fashion_fitteddress": ["relaxeddenim", "pumps"],
+			"top_fashion_loosedress": ["relaxeddenim", "sandals"],
+			"top_fashion_onedress": ["relaxeddenim", "eveningstraps"],
 			"top_oversize": ["relaxeddenim", "streettrainers"],
 			"top_track": ["track", "streettrainers"],
 			"top_coat": ["relaxeddenim", "pumps"],
 		}
 		d["head"] = "head_bare"
-		var pairing: Array = defaults[d["top"]]
+		var pairing: Array = defaults.get(d["top"], ["relaxeddenim", "streettrainers"])
 		if not bottoms_for(body).any(func(piece): return piece[0] == d["trousers"]):
 			d["trousers"] = pairing[0]
 		if not footwear_for(body).any(func(piece): return piece[0] == d["footwear"]):
@@ -190,7 +209,7 @@ static func build(selection: Dictionary) -> Dictionary:
 	look["bare_hands"] = true
 	var lower: String = l["trousers"]
 	if lower == "auto":
-		lower = "chinos" if top in ["top_shirt", "top_blazer", "top_coat"] else ("track" if top == "top_track" else "cargo")
+		lower = "tailored" if top == "top_blazer" else ("chinos" if top in ["top_shirt", "top_coat", "top_qzip", "top_linen"] else ("track" if top == "top_track" else ("jeans" if top == "top_leather" else "cargo")))
 		if top == "top_fashion_bodysuit":
 			lower = "leggings"
 	look["trousers"] = "dress" if is_dress(top) else lower

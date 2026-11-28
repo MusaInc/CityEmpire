@@ -161,8 +161,8 @@ def _shape_jules_hairline_and_bun(face, shell, eyes, output):
         freedom = bm.loops.layers.uv.get('ClothFreedom')
         bmesh.ops.delete(bm, geom=list(old_verts), context='VERTS')
 
-        # Position the bun gracefully at the upper-back crown (natural chic updo, not a vertical cone).
-        bun_center = Vector((0.002, eye.y - 0.148, eye.z + 0.095))
+        # Position the bun gracefully at the upper-back crown (natural chic fuller chignon seated closer to skull).
+        bun_center = Vector((0.002, eye.y - 0.138, eye.z + 0.088))
         rings_n, segs_n = 18, 28
         grid = []
         for i in range(rings_n + 1):
@@ -175,15 +175,15 @@ def _shape_jules_hairline_and_bun(face, shell, eyes, output):
                 th = u_t * math.tau
                 # Soft wider organic oval pillow bun with subtle braided/gathered hair waves.
                 twist = 2.0 * th + 3.8 * v_t
-                wave = 1.0 + 0.075 * math.cos(3.0 * twist) + 0.045 * math.sin(5.0 * th - 4.0 * v_t)
-                rx = 0.056 * wave * (1.0 + 0.06 * math.sin(th + 0.4))
-                ry = 0.044 * wave
-                rz = 0.036 * wave
+                wave = 1.0 + 0.085 * math.cos(3.0 * twist) + 0.055 * math.sin(5.0 * th - 4.0 * v_t)
+                rx = 0.060 * wave * (1.0 + 0.06 * math.sin(th + 0.4))
+                ry = 0.046 * wave
+                rz = 0.039 * wave
                 local = Vector((rx * sin_p * math.cos(th),
                                 ry * sin_p * math.sin(th),
                                 -rz * cos_p))
                 # Tilt naturally to follow the back-crown skull slope.
-                tilt = math.radians(-32.0)
+                tilt = math.radians(-30.0)
                 ly = local.y * math.cos(tilt) - local.z * math.sin(tilt)
                 lz = local.y * math.sin(tilt) + local.z * math.cos(tilt)
                 pt = bun_center + Vector((local.x, ly, lz))
@@ -204,7 +204,8 @@ def _shape_jules_hairline_and_bun(face, shell, eyes, output):
                     if uv_layer:
                         loop[uv_layer].uv = (jj / segs_n * 2.0, ii / rings_n)
                     if freedom:
-                        loop[freedom].uv = (0.012, 1.0)
+                        # Subtle springy bun-outer motion during walking & running (pinned near scalp base).
+                        loop[freedom].uv = (0.024 * math.sin(ii / rings_n * math.pi), 1.0)
                 new_faces.append(f)
         bmesh.ops.recalc_face_normals(bm, faces=new_faces)
 
@@ -279,23 +280,24 @@ def _shape_jules_hairline_and_bun(face, shell, eyes, output):
         ray = (p - skull).normalized()
         hit, _, _, _ = skin.ray_cast(p + ray * 0.025, -ray, 0.055)
 
-        # Softly arched natural feminine hairline (gentle center-forehead curve + wispy micro-strands
-        # instead of a ruler-straight horizontal fringe line!).
+        # Softly arched natural feminine hairline with generous wispy feathering at temples & nape
+        # (eliminates harsh scalloped edge above temples and dark solid nape step!).
         forehead = smooth(eye.y - 0.035, eye.y + 0.015, p.y)
-        temple = _bell(abs(p.x) - 0.050, 0.024) * smooth(eye.y - 0.085, eye.y - 0.008, p.y)
-        nape = smooth(eye.y - 0.088, eye.y - 0.145, p.y) * smooth(eye.z + 0.025, eye.z - 0.045, p.z)
-        feather_w = 0.0105 + 0.0045 * forehead + 0.0040 * temple + 0.0040 * nape
-        # Gentle oval arch: slightly higher/softer in center forehead, sweeping gracefully into temples.
-        arch_bias = (-0.0038 * math.exp(-(p.x / 0.030) ** 2) + 0.0018 * temple) * forehead
-        wisp = 0.0014 * math.sin(p.x * 340.0 + p.z * 150.0) + 0.0008 * math.cos(p.x * 690.0 - p.y * 240.0)
-        cov = smooth(0.0015, feather_w, dist + wisp + arch_bias) ** 1.12
+        temple = _bell(abs(p.x) - 0.052, 0.028) * smooth(eye.y - 0.090, eye.y - 0.005, p.y)
+        nape = smooth(eye.y - 0.085, eye.y - 0.145, p.y) * smooth(eye.z + 0.030, eye.z - 0.048, p.z)
+        feather_w = 0.0135 + 0.0055 * forehead + 0.0065 * temple + 0.0065 * nape
+        arch_bias = (-0.0038 * math.exp(-(p.x / 0.030) ** 2) + 0.0020 * temple) * forehead
+        wisp = (0.0018 * math.sin(p.x * 380.0 + p.z * 160.0)
+                + 0.0011 * math.cos(p.x * 760.0 - p.y * 280.0)
+                + 0.0006 * math.sin(p.y * 540.0 + p.z * 490.0))
+        cov = smooth(0.0020, feather_w, dist + wisp + arch_bias) ** 1.18
         coverage[i] = cov
 
         if hit is not None:
-            crown_vol = smooth(eye.z + 0.018, eye.z + 0.105, p.z)
+            crown_vol = smooth(eye.z + 0.014, eye.z + 0.105, p.z)
             angle = math.atan2(p.x, p.y - (eye.y - 0.06))
-            ridge = 0.00045 * math.sin(angle * 42.0 + p.z * 48.0)
-            target_gap = 0.00015 + (0.0016 + 0.0026 * crown_vol + ridge) * (cov ** 0.95)
+            ridge = 0.00065 * math.sin(angle * 48.0 + p.z * 52.0)
+            target_gap = 0.00015 + (0.0022 + 0.0034 * crown_vol + ridge) * (cov ** 0.95)
             data.vertices[i].co = hit + ray * target_gap
     data.update()
 
@@ -322,36 +324,42 @@ def _shape_jules_hairline_and_bun(face, shell, eyes, output):
     dist_b = np.hypot(x, y - bun_y)
     part_x = -0.010 + 0.036 * (eye.y - y)
     part_line = np.exp(-((x - part_x) / 0.0018) ** 2) * falloff(eye.y - 0.055, eye.y + 0.005, y)
-    s1 = ang * 340.0 + 3.4 * np.sin(dist_b * 90.0 + z * 46.0)
-    s2 = ang * 680.0 - 2.2 * np.cos(z * 130.0 - x * 75.0)
-    s3 = ang * 1120.0 + 1.4 * np.sin(dist_b * 180.0 - z * 95.0)
-    clump = np.sin(ang * 44.0 + 0.9 * np.sin(dist_b * 42.0))
-    fibres = 0.44 * np.sin(s1) + 0.28 * np.sin(s2) + 0.14 * np.sin(s3) + 0.14 * clump
-    shade = np.clip(0.68 + 0.20 * fibres - 0.06 * part_line, 0.38, 0.96)
-    albedo = np.full((size, size, 3), 0.68, np.float32)
-    albedo[used] = shade[:, None] * np.array([1.03, 0.96, 0.90], np.float32)
+    s1 = ang * 360.0 + 3.6 * np.sin(dist_b * 92.0 + z * 48.0)
+    s2 = ang * 720.0 - 2.4 * np.cos(z * 135.0 - x * 78.0)
+    s3 = ang * 1180.0 + 1.5 * np.sin(dist_b * 185.0 - z * 98.0)
+    clump = np.sin(ang * 48.0 + 0.9 * np.sin(dist_b * 44.0))
+    fibres = 0.42 * np.sin(s1) + 0.28 * np.sin(s2) + 0.14 * np.sin(s3) + 0.16 * clump
+    # Richer chestnut-espresso tonal range so swept strands stay readable on shaded side & night!
+    shade = np.clip(0.74 + 0.24 * fibres - 0.07 * part_line, 0.44, 0.99)
+    warm_var = 0.055 * np.sin(ang * 19.0 + dist_b * 35.0)
+    albedo = np.full((size, size, 3), 0.72, np.float32)
+    albedo[used] = np.stack((
+        np.clip(shade * (1.04 + warm_var), 0.0, 1.0),
+        np.clip(shade * (0.96 + warm_var * 0.4), 0.0, 1.0),
+        np.clip(shade * (0.89 - warm_var * 0.3), 0.0, 1.0),
+    ), axis=-1)
 
     colour_node = bsdf.inputs['Base Color'].links[0].from_node
     colour_node.image = packed_image(output / 'hair_bun_albedo.png', _dilate(albedo, used, 8))
 
     height = np.zeros(used.shape, np.float32)
-    height[used] = 0.00024 * fibres + 0.00014 * clump
+    height[used] = 0.00030 * fibres + 0.00018 * clump
     h = _dilate(height[..., None], used, 5)[..., 0]
     p_d = _dilate(pos, used, 4)
     du = np.maximum(np.linalg.norm(np.roll(p_d, 1, 1) - np.roll(p_d, -1, 1), axis=-1), 0.00035)
     dv = np.maximum(np.linalg.norm(np.roll(p_d, 1, 0) - np.roll(p_d, -1, 0), axis=-1), 0.00035)
     gx = (np.roll(h, 1, 1) - np.roll(h, -1, 1)) / du
     gy = (np.roll(h, 1, 0) - np.roll(h, -1, 0)) / dv
-    nrm = np.stack((np.clip(gx, -0.82, 0.82), np.clip(gy, -0.82, 0.82), np.ones_like(h)), axis=-1)
+    nrm = np.stack((np.clip(gx, -0.86, 0.86), np.clip(gy, -0.86, 0.86), np.ones_like(h)), axis=-1)
     nrm /= np.maximum(np.linalg.norm(nrm, axis=-1, keepdims=True), 1e-6)
     if bsdf.inputs['Normal'].links:
         nmap_node = bsdf.inputs['Normal'].links[0].from_node
-        nmap_node.inputs['Strength'].default_value = 0.86
+        nmap_node.inputs['Strength'].default_value = 0.90
         if nmap_node.inputs['Color'].links:
             nmap_node.inputs['Color'].links[0].from_node.image = packed_image(
                 output / 'hair_bun_normal.png', _dilate(nrm * 0.5 + 0.5, used, 8), normal=True)
 
-    return Vector((0.002, eye.y - 0.148, eye.z + 0.095)), skull
+    return Vector((0.002, eye.y - 0.138, eye.z + 0.088)), skull
 
 
 def rebuild_jules_hair(face, shell, groom, eyes, output):
@@ -498,18 +506,18 @@ def rebuild_jules_hair(face, shell, groom, eyes, output):
             strip_id = 3 + (idx % 4)
             add_ribbon_with_motion(centres, normals, width, strip_id, freedom_base=0.0, opacity=0.90)
 
-    # --- LAYER 3: Lush layered bun wrap ribbons & wispy silhouette loops (105 cards) ---
-    for idx in range(105):
+    # --- LAYER 3: Lush layered bun wrap ribbons & wispy silhouette loops (135 cards) ---
+    for idx in range(135):
         phi0 = idx * 2.39996323
         elev0 = rng.uniform(-0.45, 0.72)
         sweep_dir = 1.0 if idx % 5 != 0 else -1.0
         arc_len = rng.uniform(1.1, 2.3) * sweep_dir
         width = rng.uniform(0.0080, 0.0160)
-        loft = rng.uniform(0.0014, 0.0046)
-        if idx >= 82:
-            # Outer wispy silhouette-breaking loops around the tousled bun.
-            loft = rng.uniform(0.0038, 0.0078)
-            width = rng.uniform(0.0065, 0.0120)
+        loft = rng.uniform(0.0014, 0.0048)
+        if idx >= 102:
+            # Outer wispy silhouette-breaking loops around the tousled bun with subtle walk/run sway.
+            loft = rng.uniform(0.0040, 0.0084)
+            width = rng.uniform(0.0065, 0.0125)
         steps = 9
         centres, normals = [], []
         for step in range(steps):
@@ -526,8 +534,8 @@ def rebuild_jules_hair(face, shell, groom, eyes, output):
             centres.append(hit + nrm * lift)
             normals.append(nrm)
         if len(centres) >= 5:
-            strip = (idx % 6) if idx < 82 else (5 + (idx % 3))
-            add_ribbon_with_motion(centres, normals, width, strip, freedom_base=0.018, opacity=0.96)
+            strip = (idx % 6) if idx < 102 else (5 + (idx % 3))
+            add_ribbon_with_motion(centres, normals, width, strip, freedom_base=0.034 if idx >= 102 else 0.020, opacity=0.96)
 
     # --- LAYER 4: Soft tucked temple-sweep locks (strictly behind the hairline, ZERO blotches on face!) ---
     for sign in (-1, 1):
@@ -698,33 +706,34 @@ def rebuild_ade_hair_realism(face, shell, groom, eyes, output):
             crown_weight[v.index] = 0.0
             continue
 
-        # Seamless 85mm velvety barber taper fade around temples, above ears & occipital nape
-        # (reaches lower down the back of the head into crisp stippled skin-fade — zero abrupt bald shelf!).
-        front = smooth(eye.y - 0.082, eye.y - 0.012, p.y)
+        # Seamless 95mm velvety barber taper fade around temples, above ears & occipital nape.
+        front = smooth(eye.y - 0.082, eye.y - 0.010, p.y)
         side = smooth(0.032, 0.068, abs(p.x))
         back = smooth(eye.y - 0.064, eye.y - 0.148, p.y)
-        fade_lo = eye.z - 0.044 + 0.052 * front - 0.028 * back
-        fade_hi = eye.z + 0.062 + 0.008 * front - 0.016 * back
+        fade_lo = eye.z - 0.048 + 0.050 * front - 0.030 * back
+        fade_hi = eye.z + 0.072 + 0.008 * front - 0.016 * back
 
-        fade = smooth(fade_lo, fade_hi, p.z) ** 1.18
-        # Razor-clean straight athletic barber lineup across the forehead (blends cleanly into temple taper, zero wavy dip!).
-        lineup_z = eye.z + 0.0495 + 0.0014 * ((abs(p.x) / 0.048) ** 2)
-        forehead_cut = smooth(lineup_z - 0.0030, lineup_z + 0.0036, p.z)
-        in_front = smooth(0.058, 0.040, abs(p.x)) * smooth(eye.y - 0.032, eye.y + 0.004, p.y)
+        fade = smooth(fade_lo, fade_hi, p.z) ** 1.12
+        # Natural barber lineup across the forehead with subtle micro-follicle edge breakup (never a hard ruler stamp!).
+        lineup_wisp = 0.0007 * math.sin(p.x * 420.0) + 0.0004 * math.cos(p.x * 890.0)
+        lineup_z = eye.z + 0.0495 + 0.0014 * ((abs(p.x) / 0.048) ** 2) + lineup_wisp
+        forehead_cut = smooth(lineup_z - 0.0042, lineup_z + 0.0046, p.z)
+        in_front = smooth(0.058, 0.038, abs(p.x)) * smooth(eye.y - 0.032, eye.y + 0.004, p.y)
         cov = fade * (1.0 - in_front) + forehead_cut * in_front
-        cov *= smooth(eye.z - 0.072, eye.z - 0.026, p.z)
+        cov *= smooth(eye.z - 0.075, eye.z - 0.024, p.z)
         coverage[v.index] = cov
 
-        # Softly rounded tapered athletic curly dome; keep hairline edge tight to forehead so zero bar shadow!
-        top_dome = smooth(eye.z + 0.052, eye.z + 0.098, p.z)
+        # Softly rounded tapered athletic curly dome with multi-scale individual curl clump variation!
+        top_dome = smooth(eye.z + 0.050, eye.z + 0.098, p.z)
         corner_round = 1.0 - 0.44 * side * smooth(eye.z + 0.050, eye.z + 0.096, p.z) * (1.0 - smooth(eye.z + 0.098, eye.z + 0.128, p.z))
         clump = 0.0
-        if anchors and cov > 0.55:
+        if anchors and cov > 0.50:
             _, ci, cd = kd.find(p)
-            clump = max(0.0, 1.0 - cd / 0.0085) ** 1.35 * (0.38 + 0.62 * math.sin(ci * 2.17) ** 2)
-        # Hairline lip stays flush (0.3mm) rising smoothly over 14mm into natural 7.6mm curly crown!
+            micro = 0.5 + 0.5 * math.sin(p.x * 520.0 + p.y * 470.0 + p.z * 390.0)
+            clump = max(0.0, 1.0 - cd / 0.0092) ** 1.30 * (0.30 + 0.70 * math.sin(ci * 2.17) ** 2) + 0.25 * micro
+        # Hairline lip stays flush (0.3mm) rising smoothly over 14mm into natural 8.6mm curly crown!
         front_flush = 1.0 - 0.65 * in_front * (1.0 - smooth(lineup_z, lineup_z + 0.016, p.z))
-        crown_h = (0.0009 + 0.0074 * top_dome * corner_round + 0.0020 * clump) * (cov ** 1.38) * front_flush
+        crown_h = (0.0010 + 0.0080 * top_dome * corner_round + 0.0028 * clump) * (cov ** 1.35) * front_flush
         lift = 0.00025 + crown_h
         v.co = hit + ray * lift
         crown_weight[v.index] = top_dome * cov
@@ -761,17 +770,17 @@ def rebuild_ade_hair_realism(face, shell, groom, eyes, output):
     in_fr_r = falloff(0.058, 0.040, np.abs(x)) * falloff(eye.y - 0.032, eye.y + 0.004, y)
     t_curl = t_fade * (1.0 - in_fr_r) + falloff(lineup_zr - 0.0025, lineup_zr + 0.0040, z) * in_fr_r
 
-    # Rich warm espresso-black curls on top transitioning through crisp stippled barber stubble into skin!
-    curl_val = 0.092 + 0.072 * (0.5 + 0.5 * c1) + 0.044 * (0.5 + 0.5 * c2)
-    fade_val = 0.25 - 0.14 * t_curl - 0.095 * stubble_dots * (1.0 - 0.55 * t_curl)
+    # Rich warm espresso-black curls on top with stronger curl-ridge contrast (readable in shade & night!)
+    curl_val = 0.115 + 0.092 * (0.5 + 0.5 * c1) + 0.058 * (0.5 + 0.5 * c2)
+    fade_val = 0.28 - 0.14 * t_curl - 0.115 * stubble_dots * (1.0 - 0.55 * t_curl)
     val = fade_val * (1.0 - t_curl) + curl_val * t_curl
-    col = np.full((size, size, 3), 0.115, np.float32)
-    col[used] = np.stack((val * 1.15, val * 0.89, val * 0.72), axis=-1)
+    col = np.full((size, size, 3), 0.13, np.float32)
+    col[used] = np.stack((val * 1.15, val * 0.90, val * 0.74), axis=-1)
     colour_node = bsdf.inputs['Base Color'].links[0].from_node
     colour_node.image = packed_image(output / 'hair_ade_crop_albedo.png', _dilate(col, used, 8))
 
     height = np.zeros(used.shape, np.float32)
-    height[used] = (0.00046 * c1 + 0.00024 * c2) * t_curl + 0.00016 * stubble_dots * (1.0 - t_curl)
+    height[used] = (0.00058 * c1 + 0.00032 * c2) * t_curl + 0.00020 * stubble_dots * (1.0 - t_curl)
     h = _dilate(height[..., None], used, 5)[..., 0]
     p_d = _dilate(pos, used, 4)
     du = np.maximum(np.linalg.norm(np.roll(p_d, 1, 1) - np.roll(p_d, -1, 1), axis=-1), 0.00035)
@@ -807,9 +816,9 @@ def rebuild_ade_hair_realism(face, shell, groom, eyes, output):
 
     placed = []
     for root in candidates:
-        if len(placed) >= 340:
+        if len(placed) >= 520:
             break
-        if any((root - q).length < 0.0064 for q in placed[-32:]):
+        if any((root - q).length < 0.0052 for q in placed[-36:]):
             continue
         loc, n, _, _ = cap_tree.find_nearest(root)
         if loc is None:
@@ -823,11 +832,11 @@ def rebuild_ade_hair_realism(face, shell, groom, eyes, output):
         if loc.y > eye.y - 0.032 and tang.y > 0.0:
             tang = -tang
         side = n.cross(tang).normalized()
-        is_top = smooth(eye.z + 0.066, eye.z + 0.100, loc.z)
-        length = rng.uniform(0.0068, 0.0108) * (0.72 + 0.28 * is_top)
-        width = rng.uniform(0.0056, 0.0086) * (0.76 + 0.24 * is_top)
-        # Keep curl loops closely seated against the sculpted curl dome (never sticking out like dark chips!).
-        arch = rng.uniform(0.0005, 0.0012) * (0.60 + 0.40 * is_top)
+        is_top = smooth(eye.z + 0.064, eye.z + 0.100, loc.z)
+        length = rng.uniform(0.0072, 0.0118) * (0.72 + 0.28 * is_top)
+        width = rng.uniform(0.0058, 0.0092) * (0.76 + 0.24 * is_top)
+        # Sculpted interlocking curl loops that break the crown silhouette naturally without confetti spikes.
+        arch = rng.uniform(0.0009, 0.0020) * (0.60 + 0.40 * is_top)
 
         p0 = loc - n * 0.0008
         p1 = loc + tang * (length * 0.50) + n * arch

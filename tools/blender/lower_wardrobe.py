@@ -86,6 +86,63 @@ def chinos_from_block(block):
     return cut
 
 
+def tailored_from_block(block):
+    """Contemporary tailored pleated dress trousers: straight-tapered leg, crisp pressed front crease."""
+    cut = block.copy()
+    cut.data = block.data.copy()
+    cut.name = 'Lower_tailored'
+    bpy.context.collection.objects.link(cut)
+    for v in cut.data.vertices:
+        p = v.co
+        side = 'l' if p.x < 0 else 'r'
+        z = p.z
+        knee = J['shin_' + side]
+        hip = J['thigh_' + side]
+        foot = J['foot_' + side]
+        axis = knee.lerp(foot, (knee.z - z) / (knee.z - foot.z)) if z < knee.z else hip.lerp(knee, (hip.z - z) / (hip.z - knee.z))
+        ease = max(0.0, min(1.0, (.90 - z) / .20))
+        # Straight-tailored leg with clean ankle taper and subtle pressed front crease.
+        ankle = max(0.0, min(1.0, (.42 - z) / .30))
+        p.x = axis.x + (p.x - axis.x) * (1.0 - .09 * ease - .08 * ankle)
+        p.y *= 1.0 - .05 * ease - .05 * ankle
+        # Crisp front pleat / pressed centre crease along each leg front.
+        if p.y > .02 and .12 < z < .96:
+            dx = abs(p.x) - abs(axis.x)
+            crease = math.exp(-(dx / .014) ** 2) * max(0.0, min(1.0, (p.y - .02) / .06))
+            p.y += .0038 * crease * (1.0 - .4 * max(0.0, (z - .88) / .08))
+    pack_uvs(cut)
+
+    def height(P, N):
+        x, y, z = P.T
+        axis = np.interp(z, [J['foot_r'].z, J['shin_r'].z, J['thigh_r'].z],
+                         [J['foot_r'].x, J['shin_r'].x, J['thigh_r'].x])
+        dx = np.abs(x) - axis
+        length = np.clip((.96 - z) / .07, 0, 1) * np.clip((z - .084) / .05, 0, 1)
+        side_m = np.clip((np.abs(dx) - .038) / .035, 0, 1)
+        h = length * side_m * seam_height(y, z, stitch_off=.0024)
+        # Pressed front centre crease + twin upper waist pleats.
+        h += np.clip(N[:, 1], 0, 1) * length * .00095 * np.exp(-(dx / .010) ** 2)
+        pleat = (z > .82) & (z < .99) & (y > .035)
+        h[pleat] += .00065 * np.exp(-((dx[pleat] - .018) / .008) ** 2)
+        pockets = (z > .81) & (z < 1.001) & (y > .035)
+        h[pockets] += seam_height((z + np.abs(x) * .85 - 1.05)[pockets], x[pockets], stitch_len=.0028)
+        fly = (z > .88) & (z < PANTS_TOP) & (y > .038)
+        h[fly] += seam_height((x - .017)[fly], z[fly], stitch_off=.0032)
+        h += seam_height(z - .095, dx, stitch_off=0, groove=.0001)
+        return h.astype(np.float32)
+
+    def albedo(P, N, H):
+        n = np.clip(.91 + H * 48 + .008 * np.sin(P[:, 0] * 92 + P[:, 2] * 145), .78, .97)
+        return np.stack([n, n * .995, n * .985], 1)
+
+    normal, colour = bake_detail(cut, 'tailored_wool', 768, height, albedo)
+    mat = material('hero_tailored', (.22, .23, .26), .78, colour, normal)
+    mat.node_tree.nodes['Normal Map'].inputs['Strength'].default_value = .74
+    cut.data.materials.clear()
+    finish(cut, [mat], rim=.0025)
+    return cut
+
+
 def finish_trainer(shoes):
     """Bake unbranded mono-mesh, toe overlay, counter and the stitched welt."""
     def coordinates(P):

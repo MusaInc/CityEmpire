@@ -50,11 +50,45 @@
       "name": "Suit",
       "look": {
         "top": "top_blazer",
-        "trousers": "chinos",
+        "trousers": "tailored",
         "top_col": "#1f2533",
         "pants_col": "#1f2533",
         "shoes": "shoes_blackout",
         "footwear": "derbies"
+      }
+    },
+    {
+      "id": "ade_leather",
+      "name": "Leather Moto",
+      "look": {
+        "top": "top_leather",
+        "trousers": "jeans",
+        "top_col": "#241d1a",
+        "pants_col": "#263242",
+        "shoes": "shoes_blackout",
+        "footwear": "derbies"
+      }
+    },
+    {
+      "id": "ade_linen",
+      "name": "Linen Resort",
+      "look": {
+        "top": "top_linen",
+        "trousers": "chinos",
+        "top_col": "#ebe5d8",
+        "pants_col": "#7f725d",
+        "shoes": "shoes_gum"
+      }
+    },
+    {
+      "id": "ade_qzip",
+      "name": "Quarter-Zip",
+      "look": {
+        "top": "top_qzip",
+        "trousers": "tailored",
+        "top_col": "#2d3b4e",
+        "pants_col": "#34373c",
+        "shoes": "shoes_classic"
       }
     },
     {
@@ -195,6 +229,71 @@
         "pants_col": "#7a8fa6",
         "shoes": "shoes_blackout",
         "accessory": "street"
+      }
+    },
+    {
+      "id": "jules_leather",
+      "name": "Leather Moto",
+      "look": {
+        "top": "top_fashion_moto",
+        "trousers": "fitjeans",
+        "footwear": "boots",
+        "top_col": "#2b201c",
+        "pants_col": "#242c38",
+        "shoes": "shoes_blackout",
+        "accessory": "street"
+      }
+    },
+    {
+      "id": "jules_cocktail",
+      "name": "Cocktail",
+      "look": {
+        "top": "top_fashion_fitteddress",
+        "trousers": "relaxeddenim",
+        "footwear": "pumps",
+        "top_col": "#1d293a",
+        "pants_col": "#1d293a",
+        "shoes": "shoes_blackout",
+        "accessory": "evening"
+      }
+    },
+    {
+      "id": "jules_blouse",
+      "name": "Tailored Blouse",
+      "look": {
+        "top": "top_fashion_blouse",
+        "trousers": "chinos",
+        "footwear": "pumps",
+        "top_col": "#efe7da",
+        "pants_col": "#363c44",
+        "shoes": "shoes_blackout",
+        "accessory": "office"
+      }
+    },
+    {
+      "id": "jules_active_leggings",
+      "name": "Active Leggings",
+      "look": {
+        "top": "top_fashion_tank",
+        "trousers": "leggings",
+        "footwear": "streettrainers",
+        "top_col": "#6d7d68",
+        "pants_col": "#23252b",
+        "shoes": "shoes_classic",
+        "accessory": "none"
+      }
+    },
+    {
+      "id": "jules_summer",
+      "name": "Summer Midi",
+      "look": {
+        "top": "top_fashion_loosedress",
+        "trousers": "relaxeddenim",
+        "footwear": "sandals",
+        "top_col": "#c47d69",
+        "pants_col": "#c47d69",
+        "shoes": "shoes_gum",
+        "accessory": "day"
       }
     }
   ]

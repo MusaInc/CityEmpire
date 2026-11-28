@@ -441,8 +441,8 @@ def finish_complexion(face, identity, eyes, output):
     rms = .018 * np.sin(x * 2912 + y * 927) * np.sin(z * 2123 - x * 1763)
     f_fac = np.maximum(0, normals[valid, 1])
     # Realistic human skin roughness: subtle natural T-zone & moist lips, satin-matte cheeks & jaw, matte brows/beard.
-    base_rough = .61 - (.10 * nose + .05 * forehead + .035 * cheek_hl + .14 * lips_hl) * f_fac + .16 * brow_zone + .19 * beard_rough + rms
-    orm[valid, 1] = np.clip(base_rough, .42, .84)
+    base_rough = .61 - (.10 * nose + .05 * forehead + .035 * cheek_hl + .14 * lips_hl) * f_fac + .16 * brow_zone + .24 * beard_rough + rms
+    orm[valid, 1] = np.clip(base_rough, .42, .88)
     if identity == 'jules':
         # Seamless clavicle match: blend lower-neck ORM AO -> 1.0 and roughness -> 0.56 (exact hero_skin_body values!).
         zmin_j = z.min()

@@ -35,6 +35,13 @@ global uniform float night;
 // camera. Edges only – the hero never glows.
 uniform float rim_strength = 0.12;   // (0.3 read as a plastic edge on every garment – 2026-11-26)
 uniform float night_edge = 0.07;
+// Fabric-specific PBR response (cotton/linen matte, denim twill, knitwear velvet fuzz,
+// sportswear technical semi-matte, leather grain sheen + clearcoat, satin lustre).
+uniform float fabric_spec = 0.13;
+uniform float fabric_sheen = 0.10;
+uniform float fabric_clearcoat = 0.0;
+uniform float fabric_clearcoat_roughness = 0.42;
+uniform float roughness_floor = 0.72;
 void vertex() {
     float freedom = UV2.x;
     if (freedom > 0.0) {
@@ -131,31 +138,35 @@ void fragment() {
     EMISSION += vec3(1.0, 0.98, 0.95) * (catch_primary * 0.72 + catch_soft * 0.22) * catch_mask;
 #elif defined(HAIR_CARDS)
     float hair_ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
-    float hair_fres = pow(max(1.0 - hair_ndv, 0.0001), 3.2);
-    SPECULAR = mix(0.12, 0.19, hair_fibres);
-    ROUGHNESS = mix(0.68, clamp(mix(0.60, 0.50, UV.y), 0.48, 0.66), hair_fibres);
-    // Warm subtle backlit strand glow (no flat plastic glare on top of crown!).
-    BACKLIGHT = ALBEDO * vec3(0.28, 0.20, 0.14);
-    EMISSION += ALBEDO * (0.014 + 0.024 * hair_fres) * (1.0 - night * 0.5);
-    ANISOTROPY = max(0.32, hair_fibres * 0.55);
+    float hair_fres = pow(max(1.0 - hair_ndv, 0.0001), 3.0);
+    // Natural non-plastic hair card sheen: warm tinted anisotropic highlight + readable shadow-side strands.
+    SPECULAR = mix(0.11, 0.17, hair_fibres);
+    ROUGHNESS = mix(0.70, clamp(mix(0.64, 0.54, UV.y), 0.52, 0.68), hair_fibres);
+    BACKLIGHT = ALBEDO * vec3(0.34, 0.24, 0.16);
+    EMISSION += ALBEDO * (0.022 + 0.032 * hair_fres) * mix(1.0, 0.68, night);
+    ANISOTROPY = max(0.36, hair_fibres * 0.58);
     ANISOTROPY_FLOW = vec2(0.0, 1.0);
 #elif defined(HAIR_SCALP)
     float scalp_ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
-    float scalp_fres = pow(max(1.0 - scalp_ndv, 0.0001), 3.4);
-    SPECULAR = 0.12;
-    ROUGHNESS = max(ROUGHNESS, 0.62);
-    BACKLIGHT = ALBEDO * vec3(0.20, 0.14, 0.10);
-    EMISSION += ALBEDO * (0.012 + 0.020 * scalp_fres) * (1.0 - night * 0.5);
+    float scalp_fres = pow(max(1.0 - scalp_ndv, 0.0001), 3.2);
+    // Soft matte-satin scalp strands: no plastic white glare, warm shadow-side readability day/indoor/night.
+    SPECULAR = 0.095;
+    ROUGHNESS = max(ROUGHNESS, 0.66);
+    BACKLIGHT = ALBEDO * vec3(0.28, 0.20, 0.14);
+    EMISSION += ALBEDO * (0.022 + 0.028 * scalp_fres) * mix(1.0, 0.68, night);
 #else
-    // Realistic woven cloth micro-velvet sheen or silk satin lustre.
+    // Fabric-specific cloth PBR: matte cotton/linen/denim, plush knitwear grazing fuzz,
+    // technical sportswear semi-matte sheen, supple leather grain highlight, or satin lustre.
     float ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
-    float cloth_sheen = pow(max(1.0 - ndv, 0.0001), 3.8) * (1.0 - wetness * 0.55) * (1.0 - metallic);
-    float is_silk = (1.0 - smoothstep(0.46, 0.60, surface_roughness)) * (1.0 - metallic);
-    // Fibre sheen tinted by the cloth itself (a flat grey lift read as
-    // plastic); woven cotton/wool stays matte, silk a soft lustre.
-    ALBEDO += ALBEDO * 0.10 * cloth_sheen + vec3(0.010) * cloth_sheen + ALBEDO * 0.06 * cloth_sheen * is_silk;
-    SPECULAR = mix(mix(0.13, 0.30, is_silk), 0.72, metallic);
-    ROUGHNESS = mix(max(ROUGHNESS, 0.74), ROUGHNESS, max(is_silk, metallic)) ;
+    float cloth_sheen = pow(max(1.0 - ndv, 0.0001), 3.6) * (1.0 - wetness * 0.55) * (1.0 - metallic);
+    float is_silk = (1.0 - smoothstep(0.44, 0.58, surface_roughness)) * (1.0 - metallic);
+    ALBEDO += ALBEDO * fabric_sheen * cloth_sheen + vec3(0.008) * cloth_sheen + ALBEDO * 0.05 * cloth_sheen * is_silk;
+    SPECULAR = mix(max(fabric_spec, mix(0.13, 0.30, is_silk)), 0.72, metallic);
+    ROUGHNESS = mix(max(ROUGHNESS, roughness_floor), ROUGHNESS, max(is_silk, metallic));
+    if (fabric_clearcoat > 0.01 && metallic < 0.15) {
+        CLEARCOAT = fabric_clearcoat;
+        CLEARCOAT_ROUGHNESS = mix(fabric_clearcoat_roughness, 0.18, wet_k);
+    }
     if (is_silk > 0.05) {
         ANISOTROPY = 0.25 * is_silk;
         ANISOTROPY_FLOW = vec2(0.0, 1.0);

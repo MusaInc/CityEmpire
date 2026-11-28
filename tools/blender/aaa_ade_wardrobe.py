@@ -13,7 +13,7 @@ import bmesh
 import numpy as np
 from mathutils import Vector
 
-from garment_kit import _dilate, raster_uv
+from garment_kit import _dilate, raster_uv, weights_from
 from wardrobe_quality import adjust_basis, smooth, surface_tree
 
 
@@ -250,14 +250,15 @@ def _rebuild_clean_tie(b_knot, b_tie, b_shirt, neck_c):
             last_y = sy
             sl = shirt_y(-hw * 0.8, z)
             sr = shirt_y(hw * 0.8, z)
-            yl = max(sy - 0.002, sl) + 0.0038
-            yr = max(sy - 0.002, sr) + 0.0038
-            ym = max(sy, 0.5 * (sl + sr)) + 0.0068
+            y_base = max(sy, sl, sr)
+            yl = y_base + 0.0115
+            yr = y_base + 0.0115
+            ym = y_base + 0.0155
             ring = [
                 bm.verts.new(Vector((-hw, yl, z))),
                 bm.verts.new(Vector((0.0, ym, z))),
                 bm.verts.new(Vector((hw, yr, z))),
-                bm.verts.new(Vector((0.0, sy + 0.0020, z))),
+                bm.verts.new(Vector((0.0, y_base + 0.0075, z))),
             ]
             w_ch = smooth(1.12, 1.34, z)
             for v in ring:
@@ -280,6 +281,11 @@ def _rebuild_clean_tie(b_knot, b_tie, b_shirt, neck_c):
         bm.free()
         b_tie.data.uv_layers.active_index = 0
         b_tie.data.update()
+        # Lock tie & knot skinning weights directly to the underlying dress shirt so they never
+        # separate or z-fight during chest twist, breathing, walking or running!
+        weights_from(b_tie, b_shirt)
+    if b_knot is not None:
+        weights_from(b_knot, b_shirt)
 
 
 def _refine_ade_formal(by_name, neck_tree, neck_c):
@@ -849,34 +855,80 @@ def refine_ade_wardrobe(rig, meshes):
             return Vector()
         adjust_basis(h_under, tuck_hoodie_under)
 
+    # 2d. Natural contemporary drape & chest/torso ease on Tee, Shirt & Hoodie so garments
+    #     hang like real mid-weight cotton and heavyweight fleece rather than vacuum-formed skin!
+    for name, chest_bridge, mid_ease, side_ease, fold_amp in (
+        ('Top_Tee', 0.0055, 0.0055, 0.0035, 0.0014),
+        ('Top_Shirt', 0.0065, 0.0045, 0.0030, 0.0012),
+        ('Top_Hoodie', 0.0110, 0.0125, 0.0090, 0.0026),
+        ('Top_Leather', 0.0070, 0.0060, 0.0050, 0.0014),
+        ('Top_Linen', 0.0085, 0.0095, 0.0065, 0.0024),
+        ('Top_Qzip', 0.0075, 0.0070, 0.0050, 0.0018),
+    ):
+        ob = by_name.get(name)
+        if ob is None:
+            continue
+
+        def drape_ease(p):
+            x, y, z = p
+            ax = abs(x)
+            if ax > 0.22 or z > 1.50 or z < 0.90:
+                return Vector()
+            torso_w = 1.0 - smooth(0.16, 0.22, ax)
+            front_w = smooth(0.01, 0.08, y)
+            back_w = smooth(-0.01, -0.08, y)
+            # Bridge sternum hollow & lower-pec/navel contour so cloth hangs naturally off the chest.
+            sternum = _bell(ax, 0.055) * _bell(z - 1.34, 0.085) * front_w
+            midriff = smooth(1.36, 1.24, z) * smooth(0.95, 1.08, z) * torso_w
+            # Gentle organic vertical drape waves (non-periodic so no artificial ribbing).
+            wave = (0.65 * math.sin(x * 31.0 + z * 4.5) + 0.35 * math.cos(x * 53.0 - z * 7.0)) * fold_amp * midriff
+            dx = math.copysign(side_ease * midriff * smooth(0.08, 0.16, ax), x)
+            dy = (chest_bridge * sternum + mid_ease * midriff * (front_w - 0.55 * back_w) + wave * (front_w - 0.5 * back_w))
+            return Vector((dx, dy, 0.0))
+
+        adjust_basis(ob, drape_ease)
+        _recalc_normals(ob)
+
     # 3. Formal Outfit: precision collar, shirt, tie, knot & lapels!
     _refine_ade_formal(by_name, neck_tree, neck_c)
 
-    # 4. Smart Shirt tucked cleanly into Chinos (eliminate jagged waistband clipping!).
+    # 4. Smart Shirt tucked cleanly into Chinos & Waistband (eliminate jagged waistband clipping!).
     shirt = by_name.get('Top_Shirt')
     chinos = by_name.get('Courier_Chinos')
+    waistband_ob = by_name.get('Courier_Waistband')
     if shirt is not None and chinos is not None:
         chino_tree = surface_tree(chinos.data)
+        wb_tree = surface_tree(waistband_ob.data) if waistband_ob is not None else None
 
         def tuck_shirt(p):
-            if p.z > 1.075 or abs(p.x) > 0.23:
+            if p.z > 1.085 or abs(p.x) > 0.23:
                 return Vector()
-            w = smooth(1.068, 1.015, p.z)
+            w = smooth(1.082, 1.028, p.z)
             centre = Vector((0.0, 0.018, p.z))
             radial = p - centre
             if radial.length < 0.02:
                 return Vector()
             d = radial.normalized()
+            r_limits = []
             hit = chino_tree.ray_cast(centre + d * 0.32, -d, 0.32)[0]
-            if hit is None:
+            if hit is not None:
+                r_limits.append((hit - centre).dot(d) - 0.014)
+            if wb_tree is not None:
+                whit = wb_tree.ray_cast(centre + d * 0.32, -d, 0.32)[0]
+                if whit is not None:
+                    r_limits.append((whit - centre).dot(d) - 0.013)
+            if not r_limits:
                 return Vector()
             cur_r = (p - centre).dot(d)
-            max_r = (hit - centre).dot(d) - 0.009
+            max_r = min(r_limits)
             if cur_r > max_r:
                 return -d * ((cur_r - max_r) * w)
             return Vector()
 
         adjust_basis(shirt, tuck_shirt)
+        # Lock lower tucked shirt weights cleanly to chinos so hip flex/walk never pushes shirt out of waistband!
+        weights_from(shirt, chinos, lambda p: smooth(1.065, 1.015, p.z) * (1.0 - smooth(0.18, 0.23, abs(p.x))))
+        _recalc_normals(shirt)
 
     # 5. Streetwear Cargo pockets (Cargo_gusset_l/r): seat flush against the cargo thigh!
     cargo = by_name.get('Courier_Cargo')

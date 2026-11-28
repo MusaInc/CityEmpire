@@ -40,10 +40,10 @@ const GEAR_PATH := "res://assets/models/gear.glb"
 const WEAVE_PATH := "res://assets/models/fabric_weave_normal.png"
 ## Materials that take the shared weave: [repeats per UV unit, strength].
 const FABRIC_DETAIL := {"hero_shirt": [30.0, 0.35], "hero_shirt_trim": [6.0, 0.25], "hero_tee": [30.0, 0.3],
-	"hero_polo": [27.0, 0.32], "hero_knit": [26.0, 0.38], "hero_rib": [9.0, 0.17], "hero_blazer": [54.0, 0.29],
-	"hero_fleece": [38.0, 0.24], "hero_bomber": [48.0, 0.21],
+	"hero_polo": [27.0, 0.32], "hero_knit": [26.0, 0.38], "hero_qzip": [22.0, 0.40], "hero_rib": [9.0, 0.17], "hero_blazer": [54.0, 0.29],
+	"hero_fleece": [38.0, 0.24], "hero_bomber": [48.0, 0.21], "hero_leather": [62.0, 0.16], "hero_linen": [20.0, 0.42],
 	"hero_oversize": [28.0, 0.34], "hero_track": [46.0, 0.17], "hero_coat": [52.0, 0.34], "hero_coat_knit": [26.0, 0.36], "hero_shirt_white": [30.0, 0.35],
-	"hero_jeans": [41.0, 0.32], "hero_joggers": [37.0, 0.24], "hero_shorts": [43.0, 0.21], "hero_chino": [36.0, 0.27], "hero_cargo": [42.0, 0.22],
+	"hero_jeans": [41.0, 0.36], "hero_joggers": [37.0, 0.24], "hero_shorts": [43.0, 0.21], "hero_chino": [36.0, 0.27], "hero_tailored": [56.0, 0.26], "hero_cargo": [42.0, 0.22],
 	"hero_cap": [27.0, 0.3], "hero_beanie": [14.0, 0.28], "hero_trainer_panels": [40.0, 0.15],
 	"hero_skin": [26.0, 0.18, PORE_PATH], "hero_skin_body": [32.0, 0.14, PORE_PATH]}
 const PORE_PATH := "res://assets/models/skin_pore_normal.png"
@@ -432,6 +432,38 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 		if build_b and name_key.begins_with("hero_fashion_top_satin_"):
 			material.set_shader_parameter("roughness", 0.50)
 			material.set_shader_parameter("rim_strength", 0.08)
+		# Fabric-specific PBR material response (leather, satin, denim, linen, knitwear, sportswear).
+		if not is_skin and not is_hair and name_key != "hero_eye":
+			var nk := name_key.to_lower()
+			if nk.contains("leather") or nk in ["hero_fashion_shoe_boots", "hero_fashion_shoe_heels"]:
+				material.set_shader_parameter("fabric_spec", 0.30)
+				material.set_shader_parameter("fabric_sheen", 0.06)
+				material.set_shader_parameter("fabric_clearcoat", 0.10)
+				material.set_shader_parameter("fabric_clearcoat_roughness", 0.48)
+				material.set_shader_parameter("roughness_floor", 0.48)
+				material.set_shader_parameter("roughness", maxf(source.roughness, 0.50))
+			elif nk.contains("satin") or nk == "hero_tie":
+				material.set_shader_parameter("fabric_spec", 0.34)
+				material.set_shader_parameter("fabric_sheen", 0.18)
+				material.set_shader_parameter("fabric_clearcoat", 0.12)
+				material.set_shader_parameter("fabric_clearcoat_roughness", 0.34)
+				material.set_shader_parameter("roughness_floor", 0.44)
+			elif nk.contains("denim") or nk.contains("jeans"):
+				material.set_shader_parameter("fabric_spec", 0.12)
+				material.set_shader_parameter("fabric_sheen", 0.09)
+				material.set_shader_parameter("roughness_floor", 0.78)
+			elif nk.contains("linen"):
+				material.set_shader_parameter("fabric_spec", 0.10)
+				material.set_shader_parameter("fabric_sheen", 0.08)
+				material.set_shader_parameter("roughness_floor", 0.84)
+			elif nk.contains("knit") or nk.contains("rib") or nk.contains("fleece") or nk.contains("qzip") or nk.contains("coat"):
+				material.set_shader_parameter("fabric_spec", 0.10)
+				material.set_shader_parameter("fabric_sheen", 0.22)
+				material.set_shader_parameter("roughness_floor", 0.80)
+			elif nk.contains("track") or nk.contains("stretch") or nk.contains("bra") or nk.contains("sprint") or nk.contains("leggings") or nk.contains("bomber") or nk.contains("shell"):
+				material.set_shader_parameter("fabric_spec", 0.24)
+				material.set_shader_parameter("fabric_sheen", 0.14)
+				material.set_shader_parameter("roughness_floor", 0.54)
 		if source.roughness_texture:
 			material.set_shader_parameter("has_roughness_map", true)
 			material.set_shader_parameter("roughness_map", source.roughness_texture)
@@ -509,7 +541,7 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 				reference = Color(0.22, 0.24, 0.26)
 			# Skin-tight tops, the face and its parts: tints are relative to
 			# the authored colour (the shop colour replaces it exactly).
-			"hero_top", "hero_top_collar", "hero_bandana", "hero_tee", "hero_knit", "hero_shirt", "hero_shirt_trim", "hero_polo", "hero_blazer", "hero_fleece", "hero_bomber", "hero_oversize", "hero_track", "hero_coat":
+			"hero_top", "hero_top_collar", "hero_bandana", "hero_tee", "hero_knit", "hero_qzip", "hero_shirt", "hero_shirt_trim", "hero_polo", "hero_blazer", "hero_fleece", "hero_bomber", "hero_leather", "hero_linen", "hero_oversize", "hero_track", "hero_coat":
 				region = "suit"
 				reference = source.albedo_color
 			# Ribbing and satin lapels: the same colour, a shade deeper.
@@ -562,7 +594,7 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			"hero_cargo_pocket":
 				region = "pants"
 				reference = source.albedo_color
-			"hero_chino", "hero_jeans", "hero_joggers", "hero_shorts":
+			"hero_chino", "hero_tailored", "hero_jeans", "hero_joggers", "hero_shorts":
 				region = "pants"
 				reference = source.albedo_color
 			"hero_denim_trim":
@@ -755,7 +787,7 @@ func _show_variants() -> void:
 			mi.visible = look_state.get("bare_hands", false)
 		elif n == "Courier_Waistband":
 			# Belt loops have no visible surface under a top worn over the waist.
-			mi.visible = not fitted_denim and not bare_legs and not cut.begins_with("fashion_") and cut not in ["tee", "polo", "jumper", "hoodie", "blazer", "bomber", "oversize", "track", "coat"]
+			mi.visible = not fitted_denim and not bare_legs and not cut.begins_with("fashion_") and cut not in ["tee", "polo", "jumper", "qzip", "hoodie", "blazer", "bomber", "leather", "linen", "oversize", "track", "coat"]
 		elif n == "Courier_Cargo" or n.begins_with("Cargo_gusset"):
 			mi.visible = lower == "cargo"
 		elif n == "Courier_Chinos":
@@ -801,7 +833,7 @@ func _show_variants() -> void:
 		elif n == "Fashion_Slip":
 			mi.visible = bare_legs and lower != "tailoredshorts"
 		elif n.begins_with("Skin_Arms_"):
-			mi.visible = n.to_lower() == "skin_arms_" + cut and (cut in ["tee", "polo", "tq", "short", "vest", "oversize"] or look_state.get("bare_hands", false))
+			mi.visible = n.to_lower() == "skin_arms_" + cut and (cut in ["tee", "polo", "linen", "tq", "short", "vest", "oversize"] or look_state.get("bare_hands", false))
 		elif n.begins_with("Face_"):
 			mi.visible = n == "Face_" + face and mask != "courier"
 			if mi.visible:
@@ -844,7 +876,7 @@ func _show_variants() -> void:
 				if index >= 0:
 					_garment_bends.append({"mesh": mi, "index": index, "bone": GARMENT_BENDS[shape],
 						"driver": shape.get_slice("_", 0)})
-		if mi.visible and (n.begins_with("Top") or n.begins_with("Hair_") or n.begins_with("Groom_")):
+		if mi.visible and (n.begins_with("Top") or n.begins_with("Hair_") or n.begins_with("Groom_") or n.ends_with("skirt") or n.ends_with("mini")):
 			for entry: Dictionary in mi.get_meta(&"hero_surfaces", []):
 				var material: ShaderMaterial = entry.material
 				if not _cloth_materials.has(material):
